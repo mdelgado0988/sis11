@@ -1,0 +1,101 @@
+custom:
+  Riesgo:
+    TipoObjeto: "EDIFICIO"
+    SA: "50000"
+    Finca: "1"
+    Rollo: "1"
+    Doc: "1"
+    NumeroPrestamo: "1"
+    NumeroGarantia: "1"
+    CategoriaActividad: "0-LOCALES"
+    UsoBien: "1"
+    TipoMaterial: "CONCRETO_REF_MYM"
+    Area: 1
+    CantidadPisos: 1
+    Descripcion: "1"
+    CodigoPais: "591"
+    NombrePais: "PANAMA"
+    CodigoProvincia: "8"
+    NombreProvincia: "PANAMA"
+    CodigoDistrito: "808"
+    NombreDistrito: "PANAMA"
+    CodigoCorregimiento: "120155"
+    NombreCorregimiento: "PANAMA"
+    CodigoBarriada: "40"
+    NombreBarriada: "RESIDENCIAL VILLA BLANCA"
+    CodigoEdificio: "0"
+    NombreEdificio: ""
+    Manzana: "1"
+    Casa: "1"
+    Calle: "1"
+    CodigoZonaCresta: "1"
+    NombreZonaCresta: ""
+    Direccion: "11"
+  
+  Address:
+    CodigoPais: "591"
+    CodigoProvincia: "8"
+    CodigoMunicipio: "808"
+    Linea1: ""
+    Linea2: ""
+  
+  NumeroOferta: 519
+  TipoOperacion: "Nueva"
+  Estado: "Vigente"
+  FechaInicioVigencia: "23/01/2026"
+  code: "IN-IL-003052"
+  FechaFinVigencia: "23/01/2027"
+  HoraVigencia: "12:00 AM"
+  PrimaNetaTotal: 75
+  Impuesto: 3.75
+  TotalACobrar: 80.25
+  Descripcion: ""
+  FechaActual: "29/01/2026"
+  
+  Tomador:
+    ContactId: 29
+    NombreCompleto: "MAX BATRES "
+  
+  Asegurado:
+    ContactId: 29
+    NombreCompleto: "MAX BATRES "
+    Identificacion: "21-1179-00080"
+    DireccionCompleta: ""
+    TelefonoContacto: "456-4656"
+    TelefonoFax: ""
+    Email: "mbatres@axxis-systems.com"
+    Correo: "mbatres@axxis-systems.com"
+  
+  Acreedor:
+    ContactId: 0
+    NombreCompleto: "No Tiene"
+    Identificacion: ""
+  
+  Aseguradora:
+    ContactId: 1
+    NombreSocial: "ASEGURADORA GLOBAL"
+    Ruc: "130273822"
+    LogoRuta: "C:\\imagesLOGOcontext.GLOBALcontext.BANK.PNG"
+  
+  AcuerdoPago:
+    paymentMethod: "PRO"
+    Forma: "PROVISIÓN"
+    periodicity: "m"
+    Frecuencia: "Mensual"
+    NumPagos: 16
+  
+  Cobertura:
+    - lifePolicyId: 519
+      code: "1"
+      name: "Incendio/Rayo/Explosión"
+      Descripcion: "Incendio/Rayo/Explosión"
+      SumaAsegurada: 50000
+      DeducibleValor: 0
+      PrimaNeta: 52.5
+    - lifePolicyId: 519
+      code: "3"
+      name: "Terremoto, Temblor y/o Erupción Volcánica"
+      Descripcion: "Terremoto, Temblor y/o Erupción Volcánica"
+      SumaAsegurada: 50000
+      DeducibleValor: 1000
+      PrimaNeta: 22.5

@@ -1,0 +1,199 @@
+Rules:
+  - condition: _pol.periodicity=="m"
+    name: "12 Installments / Monthly"
+    dueDaysFirstInstallment: 0
+    maxInstallments: 12
+    defaultInstallments: 12
+    defaultPremiumPeriodicity: "m"
+    defaultPaymentMethod: "PRO"
+    Detail:
+      - condition: _installment.numberInYear < 12
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '"}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+      #- condition: _installment.numberInYear < 12
+      #  amount: 0
+      #  concept: "'Detalle de cuota #'+_installment.numberInYear"
+      #  detail: "'Fees'"
+      #  order: _lineNumber
+      - condition: _installment.numberInYear < 12
+        amount: Math.round(_pol.tax/12*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+      - condition: _installment.numberInYear==12
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '",isPremiumFactor:true}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+     #- condition: _installment.numberInYear==12
+     #   amount: 0
+     #   concept: "'Detalle de cuota #'+_installment.numberInYear"
+     #   detail: "'Fees'"
+     #   order: _lineNumber
+      - condition: _installment.numberInYear==12
+        amount: Math.round(((Math.round(_pol.tax/12*100)/100)+(_pol.tax-((Math.round(_pol.tax/12*100)/100)*12)))*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+  - condition: _pol.periodicity=="q"
+    name: 4 Installments / Quarterly
+    dueDaysFirstInstallment: 15
+    maxInstallments: 4
+    defaultInstallments: 4
+    defaultPremiumPeriodicity: q
+    defaultPaymentMethod: PRO
+    Detail:
+      - condition: _installment.numberInYear < 4
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '"}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+   #   - condition: _installment.numberInYear < 4
+   #     amount: 0
+   #     concept: "'Detalle de cuota #'+_installment.numberInYear"
+   #     detail: "'Fees'"
+   #     order: _lineNumber
+      - condition: _installment.numberInYear < 4
+        amount: Math.round(_pol.tax/4*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+      - condition: _installment.numberInYear == 4
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '", isPremiumFactor:true}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+    #  - condition: _installment.numberInYear == 4
+    #    amount: 0
+    #    concept: "'Detalle de cuota #'+_installment.numberInYear"
+    #    detail: "'Fees'"
+    #    order: _lineNumber
+      - condition: _installment.numberInYear == 4
+        amount: Math.round(((Math.round(_pol.tax/4*100)/100)+(_pol.tax-((Math.round(_pol.tax/4*100)/100)*4)))*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+  - condition: _pol.periodicity=="s"
+    name: 2 Installments / SemiAnnual
+    dueDaysFirstInstallment: 15
+    maxInstallments: 2
+    defaultInstallments: 2
+    defaultPremiumPeriodicity: s
+    defaultPaymentMethod: PRO
+    Detail:
+      - condition: _installment.numberInYear < 2
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '"}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+    #  - condition: _installment.numberInYear < 2
+    #    amount: 0
+    #    concept: "'Detalle de cuota #'+_installment.numberInYear"
+    #    detail: "'Fees'"
+    #    order: _lineNumber
+      - condition: _installment.numberInYear < 2
+        amount: Math.round(_pol.tax/2*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+      - condition: _installment.numberInYear == 2
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '", isPremiumFactor:true}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+   #   - condition: _installment.numberInYear == 2
+   #     amount: 0
+   #     concept: "'Detalle de cuota #'+_installment.numberInYear"
+   #     detail: "'Fees'"
+   #     order: _lineNumber
+      - condition: _installment.numberInYear == 2
+        amount: Math.round(((Math.round(_pol.tax/2*100)/100)+(_pol.tax-((Math.round(_pol.tax/2*100)/100)*2)))*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+  - condition: _pol.periodicity=="y"
+    name: 1 Installments / Annual
+    dueDaysFirstInstallment: 15
+    maxInstallments: 1
+    defaultInstallments: 1
+    defaultPremiumPeriodicity: y
+    defaultPaymentMethod: PRO
+    Detail:
+      - condition: 1==1
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '"}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+    #  - condition: 1==1
+    #    amount: 0
+    #    concept: "'Detalle de cuota #'+_installment.numberInYear"
+    #    detail: "'Fees'"
+    #    order: _lineNumber
+      - condition: 1==1
+        amount: Math.round(_pol.tax/1*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+  - condition: _pol.periodicity=="m2"
+    name: 6 Installments / Bimonthly
+    dueDaysFirstInstallment: 15
+    maxInstallments: 6
+    defaultInstallments: 6
+    defaultPremiumPeriodicity: m2
+    defaultPaymentMethod: PRO
+    Detail:
+      - condition: _installment.numberInYear < 6
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '"}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+     # - condition: _installment.numberInYear < 6
+     #   amount: 0
+     #   concept: "'Detalle de cuota #'+_installment.numberInYear"
+     #   detail: "'Fees'"
+     #   order: _lineNumber
+      - condition: _installment.numberInYear < 6
+        amount: Math.round(_pol.tax/6*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+      - condition: _installment.numberInYear == 6
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '", isPremiumFactor:true}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+    #  - condition: _installment.numberInYear == 6
+    #    amount: 0
+    #    concept: "'Detalle de cuota #'+_installment.numberInYear"
+    #    detail: "'Fees'"
+    #    order: _lineNumber
+      - condition: _installment.numberInYear == 6
+        amount: Math.round(((Math.round(_pol.tax/6*100)/100)+(_pol.tax-((Math.round(_pol.tax/6*100)/100)*6)))*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+  - condition: _pol.periodicity=="m12"
+    name: 1 Installments / Counted
+    dueDaysFirstInstallment: 15
+    maxInstallments: 1
+    defaultInstallments: 1
+    defaultPremiumPeriodicity: m12
+    defaultPaymentMethod: PRO
+    Detail:
+      - condition: 1==1
+        amount: /*block*/ doCmd({cmd:'ExeChain', data:{chain:'cmdGetModalPremiumCoverageInstallment', context:'{policyId:'+ _pol.id +',anualPremium:'+ _pol.anualPremium +',frequency:"' + _pol.periodicity + '"}'}}); Math.round(ExeChain.outData*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+   #   - condition: 1==1
+   #     amount: 0
+   #     concept: "'Detalle de cuota #'+_installment.numberInYear"
+   #     detail: "'Fees'"
+   #     order: _lineNumber
+      - condition: 1==1
+        amount: Math.round(_pol.tax/1*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
