@@ -1,3 +1,12 @@
+/*
+Name: DT_RAMO_TECNICO
+Author: Michael Delgado
+Description: Formulario generico
+Categpry: FORM
+Version: 1.0
+CreateDate: 01-05-2025
+*/
+
 var me = this;
 let configCobtar;
 let policy;
@@ -677,8 +686,8 @@ function formatearFecha(fecha) {
 function inyectarEstilosAntdCobtar() {
   const STYLE_ID = "antd-cobtar-styles";
 
-  // evita duplicados
-  if ($("#" + STYLE_ID).length) return;
+  // elimina estilos anteriores si existen
+  $("#" + STYLE_ID).remove();
 
   const css = `
   /* ===== CONTENEDOR ===== */

@@ -23,13 +23,13 @@ let tipoContratoSelected = "";
 
 const cfgCoberturaReaseguro = [
   { lob: 96, name: "cfgCoberturaProductoReaTecnicos" },
+  { lob: 20, name: "cfgCoberturaProductoReaVidaColectivo" },
   { lob: 31, name: "cfgCoberturaProductoReaVida" },
   { lob: 1, name: "cfgCoberturaProductoRea" },
   { lob: 81, name: "cfgCoberturaProductoRea" },
   { lob: 82, name: "cfgCoberturaProductoRea" },
   { lob: 83, name: "cfgCoberturaProductoRea" }
 ]
-
 
 // ===== Datos de prueba =====
 let aceptantes = [

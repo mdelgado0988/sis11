@@ -1,5 +1,5 @@
 /*
-Name: frmDTIncendio
+Name: DTINCENDIO_SUMA
 Author: Ernesto Garcia
 Description: Formulario generico
 Categpry: FORM
@@ -9,7 +9,7 @@ LastModificate: 22-12-2025 - Mike Ortiz
 */
 
 const me = this;    
-const policyId = window.location.href.split('/')[5] || 3340;
+const policyId = window.location.href.split('/')[5] || 871;
 const isEndorsment = window.location.href.includes('tab12');
 let configCobtar;
 let isNew = false;
@@ -78,6 +78,7 @@ function setConfigView(){
 }
 
 const loadPolicy = async () => {
+
     const result = await me.exe('RepoLifePolicy', {
         operation: 'GET',
         include: ["Insureds","Coverages"],
@@ -86,17 +87,10 @@ const loadPolicy = async () => {
     });
     policy = result.outData?.[0] || {};
 
-    const formatoN2 = v =>
-    (isNaN(v = Number((v || '').toString().replace(/[,\s]/g, ''))) ? 0 : v)
-      .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  
     $("#txtSA").prop("readonly", true);
-    if(!isEndorsment)
-      $("#txtSADisplay").prop("readonly", true);
-
-    $("#txtSA").val(policy?.insuredSum || '0');
-    $("#txtSADisplay").val(formatoN2(policy?.insuredSum || 0));  
+    //$("#txtSA").val(policy?.insuredSum || '');
 };
+
 
 /********************************************/
 /* EVENTOS */
@@ -119,6 +113,7 @@ const changeProvincia = async () => {
     await loadTableQuery({reference:'#cmbMunicipio',tableCommand:'RepoCityCatalog',filter:`[stateCode]='${stateCode}'`});
     
     //valido selección de la zona cresta
+    debugger;
     const riskZone = $("#cmbProvincia").find(':selected').data('risk-zone');
     if(riskZone){
       $('#cmbZonaCresta').val(riskZone);
@@ -170,8 +165,7 @@ const changeSector = async () => {
     const edificios = $('#txtEdificios').data('source') || [];
   
      if(barriadas.length === 0 && edificios.length === 0){
-        limpiarYBloquear(["#txtEdificios"], true);
-        me.message.error('No se encontro barriada o edificios en la direccion ingresada')
+        me.message.error('No se encontró barriada o edificios en la direccion ingresada')
     }
 };
 
@@ -197,6 +191,8 @@ const loadEventField = async () => {
 
 const onDocumentReady = async() => {
 
+    //debugger;
+  
     btnSave = $("button.ant-btn.ant-btn-link:contains('Guardar')"); 
     await setConfigView();
     if(isEndorsment){
@@ -205,7 +201,7 @@ const onDocumentReady = async() => {
         ],true);
 
     }
-
+     
     await loadPolicy();
 
     //Renderización de tab y campos dinámicos
@@ -215,11 +211,10 @@ const onDocumentReady = async() => {
     await setProductCoverages();
     renderToolbarCoberturas();
     await bindEventosCoberturas();
+    await cargarCobtarDinamico();    
 
-    await cargarCobtarDinamico();
-    
     validaInputs();
-    await cargarCatalogos();    
+    await cargarCatalogos();
 
 }
 
@@ -257,19 +252,7 @@ async function cargarCatalogos(){
       }
     });
 
-    //Agregamos evento al input de suma asegurada txtSADisplay para actualizar automáticamente el campo oculto txtSA con el valor numérico sin formato
-    $('#txtSADisplay').on('input', function () {
-        const value = $(this).val();
-        const numericValue = value.replace(/[^0-9.-]+/g, '');
-        //Validamos que numericValue sea un número válido antes de asignarlo a txtSA
-        if (!isNaN(numericValue) && numericValue.trim() !== '') {
-            $('#txtSA').val(numericValue);
-            } else {
-            $('#txtSA').val('0'); // O puedes dejarlo vacío o con un valor predeterminado
-        }
-    });
-
-    //await loadDataTable({reference:'#txtSA',tableName:'SumasPorRango',indexCode:1,indexDisplay:1,filterFunction: (item) => item[0] === policy.productCode});
+    await loadDataTable({reference:'#txtSA',tableName:'SumasPorRango',indexCode:1,indexDisplay:1,filterFunction: (item) => item[0] === policy.productCode});
     const TablaTipoObjeto = await loadDataTable({reference:'#cmbTipoObjeto',tableName:'TablaTipoObjeto',indexCode:0,indexDisplay:1});
     await loadDataTable({reference:'#cmbCategoriaActividad',tableName:'TablaCategoriaActividad',indexCode:0,indexDisplay:1});
     await loadDataTable({reference:'#cmbUsoBien',tableName:'TablaUsoBien',indexCode:0,indexDisplay:1});
@@ -314,6 +297,7 @@ async function cargarCatalogos(){
     $('#txtSA').on('change', async function(event){
       try {
 
+        //debugger;
         if(!isEndorsment)
         return;
 
@@ -385,6 +369,7 @@ function habilitarSelectFiltrable(config) {
         $hidden.val(item[valueField] || '0');
         $list.hide();      
 
+        //debugger;
         const id = $input.attr('id');
         if(id == 'txtBarriadas')
           await changeBarriada();
@@ -395,6 +380,7 @@ function habilitarSelectFiltrable(config) {
 
     // Limpieza si el texto no coincide
     $input.on('blur', function () {
+        //debugger;
         const source = $input.data('source') || [];
         const match = source.find(x =>
             x[textField] === $input.val()
@@ -480,7 +466,7 @@ function inyectarCSS() {
       .select-wrapper {
           position: relative;
       }
-            
+      
   `;
 
   $('<style>', {
@@ -507,6 +493,7 @@ const loadDataTable = async ({
         $(reference).append(`<option value='${item[indexCode].trim()}'>${item[indexDisplay].trim()}</option>`);
     });
   
+    //debugger;
     const dataValue = $(reference).attr('user-data');
     if(!!dataValue){
         $(reference).val(dataValue.trim());
@@ -649,6 +636,7 @@ const cargaEdificio = async(limpiar) => {
 const cargaBarriada = async(limpiar) => {
   try {   
 
+    //debugger;
     const $input = $('#txtBarriadas');
     if(limpiar)
       $input.val('');
@@ -691,7 +679,7 @@ const cargaBarriada = async(limpiar) => {
 
 const changeEdifMsg = async () => {
   try {
-
+    //debugger;
     me.message.destroy()
     btnSave.prop("disabled", true);
     const countryCode = $("#cmbPais").val(); 
@@ -731,6 +719,7 @@ const changeEdifMsg = async () => {
 
       btnSave.prop("disabled", false);
       me.message.warning(msg,30);
+      //debugger;
       
       //console.log({resp})
     })
@@ -1133,7 +1122,6 @@ function vEqual(value){
 }
 
 function inyectarEstilosAntdCobtar() {
-  
   const STYLE_ID = "antd-cobtar-styles";
 
   // elimina estilos anteriores si existen
@@ -1445,6 +1433,7 @@ let productCoverages = [];
 
 const cfgCoberturaReaseguro = [
   { lob: 96, name: "cfgCoberturaProductoReaTecnicos" },
+  { lob: 20, name: "cfgCoberturaProductoReaVidaColectivo" },
   { lob: 31, name: "cfgCoberturaProductoReaVida" },
   { lob: 1, name: "cfgCoberturaProductoRea" },
   { lob: 81, name: "cfgCoberturaProductoRea" },
@@ -1952,7 +1941,7 @@ async function bindEventosCoberturas() {
           if(!resultado.ok){
             me.message.error(`Error guardando coberturas: ${resultado.msg}`);
             return;
-          }     
+          }   
 
           me.message.success(`Coberturas guardadas correctamente (${coberturasSeleccionadas.length})`,5);
 
@@ -1960,7 +1949,7 @@ async function bindEventosCoberturas() {
 
           //Cargo el cobtar por si hay nuevas coberturas.          
           await loadPolicy();
-          await cargarCobtarDinamico();
+          await cargarCobtarDinamico();          
           await setProductCoverages();
           renderModalCoberturas();
 
@@ -2225,6 +2214,7 @@ function renderFormPrincipal(){
 $(document)
     .promise()
     .then(setTimeout(onDocumentReady, 1000));
+
 
 //Validando inputs
 function validaInputs() {

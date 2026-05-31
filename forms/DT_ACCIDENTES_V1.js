@@ -1,3 +1,12 @@
+/*
+Name: DT_ACCIDENTES_V1
+Author: Ernesto Garcia
+Description: Formulario generico
+Categpry: FORM
+Version: 1.01
+CreateDate: 19-11-2025
+*/
+
 var me = this;
 let configCobtar;
 let policy;
@@ -10,7 +19,11 @@ const requiredData = [
     { productCode: "P50", fields: ["cmbOcupacion"] }
 ]
 
-const cobtarVida = [{ lob: 31, cobtar: "cfgCobtarVida"  }, { lob: 71, cobtar: "cfgCobtarVidaIndividual"  }]
+const cobtarVida = [
+    { lob: 31, cobtar: "cfgCobtarVida"  }, 
+    { lob: 20, cobtar: "cfgCobtarVidaColectivo"  },
+    { lob: 71, cobtar: "cfgCobtarVidaIndividual"  }
+]
 
 $(function () {
   initForm();
@@ -348,10 +361,8 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
 
                 // ===== tipo =====
                 if (type === "number") {
-                    $input = $("<input>", { 
-                      type: "number",
-                      step: "0.01"
-                    }).addClass("ant-input-custom");
+                $input = $("<input>", { type: "number" })
+                    .addClass("ant-input-custom");
 
                 } else if (type === "select") {
 
@@ -556,8 +567,8 @@ function formatearFecha(fecha) {
 function inyectarEstilosAntdCobtar() {
   const STYLE_ID = "antd-cobtar-styles";
 
-  // evita duplicados
-  if ($("#" + STYLE_ID).length) return;
+  // elimina estilos anteriores si existen
+  $("#" + STYLE_ID).remove();
 
   const css = `
   /* ===== CONTENEDOR ===== */

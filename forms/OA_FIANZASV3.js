@@ -1,3 +1,12 @@
+/*
+Name: OA_FIANZASV3
+Author: Ernesto Garcia
+Description: Formulario generico
+Categpry: FORM
+Version: 1.01
+CreateDate: 19-11-2025
+*/
+
 var me = this;
 var vDetails = [];
 const modulo = window.location.href.split('/')[4].toLowerCase();
@@ -953,8 +962,8 @@ function setDefaultCobtar(){
 function inyectarEstilosAntdCobtar() {
   const STYLE_ID = "antd-cobtar-styles";
 
-  // evita duplicados
-  if ($("#" + STYLE_ID).length) return;
+  // elimina estilos anteriores si existen
+  $("#" + STYLE_ID).remove();
 
   const css = `
   /* ===== CONTENEDOR ===== */
