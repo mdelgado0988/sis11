@@ -20,6 +20,7 @@ let gridDataSelected = null;
 let gridSelectedIndex = null;
 let contractId = 0;
 let tipoContratoSelected = "";
+const policyId = window.location.href.split('/')[5] || 3371;
 
 const cfgCoberturaReaseguro = [
   { lob: 96, name: "cfgCoberturaProductoReaTecnicos" },
@@ -39,7 +40,7 @@ let aceptantes = [
 let reaseguradoresData = [
   { name: "GLOBAL", contactId: 1, lineId: "Cuota Parte", cessionId: 101, split: 30, sumInsured: 10000, premium: 500, commission: 50, tax: 25 }
 ];
-const distribuciones = ["CUOTA PARTE", "FAC", "FRO"];
+const distribuciones = ["CUOTA PARTE", "EXCEDENTE 1", "FAC", "FRO"];
 
 const filasControles = [
   [
@@ -83,6 +84,16 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "micp", valor: 0 }
   ],
   [
+    { tipo: "label", nombre: "Excedente 1", id: "lblExcedente1", tieneAceptante: true, contrato: "Excedente 1" },
+    { tipo: "percent8", nombre: "", id: "pex1", valor: 0 },
+    { tipo: "number2", nombre: "", id: "msex1", valor: 0 },
+    { tipo: "number2", nombre: "", id: "mpex1", valor: 0 },
+    { tipo: "percent8", nombre: "", id: "pcex1", valor: 0 },
+    { tipo: "number2", nombre: "", id: "mcex1", valor: 0 },
+    { tipo: "percent8", nombre: "", id: "piex1", valor: 0 },
+    { tipo: "number2", nombre: "", id: "miex1", valor: 0 }
+  ],
+  [
     { tipo: "label", nombre: "Facultativo", id: "lblFacultativo", tieneAceptante: true, contrato: "FAC" },
     { tipo: "percent8", nombre: "", id: "pfp", valor: 0 },
     { tipo: "number2", nombre: "", id: "msfp", valor: 0 },
@@ -117,10 +128,13 @@ const filasControles = [
 const relaciones = [
   { porcentajeId: "pret", montoId: "mpret", sumaId: "msret" }, 
   { porcentajeId: "pcp", montoId: "mpcp", sumaId: "mscp", comisionId: "mccp", pcomisionId: "pccp", montoCalculoId: "mpcp", pimpuestoId: "picp", montoImpuestoId: "micp" },  
+  { porcentajeId: "pex1", montoId: "mpex1", sumaId: "msex1", comisionId: "mcex1", pcomisionId: "pcex1", montoCalculoId: "mpex1", pimpuestoId: "piex1", montoImpuestoId: "miex1" },  
   { porcentajeId: "pfp", montoId: "mpfp", sumaId: "msfp", comisionId: "mcfp", pcomisionId: "pcfp", montoCalculoId: "mpfp", pimpuestoId: "pifp", montoImpuestoId: "mifp" },
   { porcentajeId: "pfo", montoId: "mpfo", sumaId: "msfo", comisionId: "mcfo", pcomisionId: "pcfo", montoCalculoId: "mpfo", pimpuestoId: "pifo", montoImpuestoId: "mifo" },  
   { porcentajeId: "pccp", montoId: "mccp", sumaId: "", montoCalculoId: "mpcp" },
+  { porcentajeId: "pcex1", montoId: "mcex1", sumaId: "", montoCalculoId: "mpex1" },
   { porcentajeId: "picp", montoId: "micp", sumaId: "", montoCalculoId: "mpcp" },
+  { porcentajeId: "piex1", montoId: "miex1", sumaId: "", montoCalculoId: "mpex1" },
   { porcentajeId: "pcfp", montoId: "mcfp", sumaId: "", montoCalculoId: "mpfp" },
   { porcentajeId: "pifp", montoId: "mifp", sumaId: "", montoCalculoId: "mpfp" },
   { porcentajeId: "pcfo", montoId: "mcfo", sumaId: "", montoCalculoId: "mpfo" },
@@ -137,8 +151,6 @@ relaciones.forEach(r => {
        pimpuestoId: r.pimpuestoId, montoImpuestoId: r.montoImpuestoId 
       };
 });
-
-const policyId = window.location.href.split('/')[5] || 3321;
 
 ///////////////////////////////////////////////////////////
 /// Principales
@@ -185,7 +197,9 @@ function distribuyeContrato() {
       pfp, msfp, mpfp,
       pcfp, mcfp, pifp, mifp,
       pfo, msfo, mpfo,
-      pcfo, mcfo, pifo, mifo, mpnot
+      pcfo, mcfo, pifo, mifo, mpnot,
+      pex1, msex1, mpex1,
+      pcex1, mcex1, piex1, miex1
     };
   
     const resultado = {
@@ -195,7 +209,9 @@ function distribuyeContrato() {
       pfp, msfp, mpfp,
       pcfp, mcfp, pifp, mifp,
       pfo, msfo, mpfo,
-      pcfo, mcfo, pifo, mifo, mpnot
+      pcfo, mcfo, pifo, mifo, mpnot,
+      pex1, msex1, mpex1,
+      pcex1, mcex1, piex1, miex1
     };
     
     // Recorrer y asignar valor al elemento con id igual al nombre de la variable
@@ -214,6 +230,7 @@ function distribuyeContrato() {
     const tieneCP = (resultado["pcp"] + resultado["mscp"] + resultado["mpcp"] + resultado["mccp"] + resultado["micp"]) > 0;
     const tieneFAC = (resultado["pfp"] + resultado["msfp"] + resultado["mpfp"] + resultado["mcfp"] + resultado["mifp"]) > 0;
     const tieneFRO = (resultado["pfo"] + resultado["msfo"] + resultado["mpfo"] + resultado["mcfo"] + resultado["mifo"]) > 0;
+    const tieneEX1 = (resultado["pex1"] + resultado["msex1"] + resultado["mpex1"] + resultado["mcex1"] + resultado["miex1"]) > 0;
   
     let newCessions = JSON.parse(JSON.stringify(cessions));
   
@@ -235,6 +252,24 @@ function distribuyeContrato() {
           totalSumaRe: "mscp",
           totalPrimaCed: "mpret",
           totalPrimaRe: "mpcp"
+        }
+      });
+
+    //Se borran las líneas donde no se haya distribuido el contrato
+    if(!tieneEX1)
+      newCessions = newCessions.filter(item => item.contractId == contractId && item.lineId.trim().toUpperCase() !== "EXCEDENTE 1");
+    else
+      distribuyeSegunContrato(newCessions, resultado, {
+        tipoContrato: "Excedente 1",
+        usaCedant: true,
+        getPorContrato: (r) => r["pex1"] / 100,
+        keys: {
+          porcentajeRe: "pex1",
+          montoComision: "mcex1",
+          montoImpuesto: "miex1",
+          porcentajeComision: "pcex1",
+          totalSumaRe: "msex1",
+          totalPrimaRe: "mpex1"
         }
       });
   
@@ -561,7 +596,10 @@ function onRowSelected(row) {
   pfp = 0, msfp = 0, mpfp = 0, 
   pcfp = 0, mcfp = 0, pifp = 0, mifp = 0, 
   pfo = 0, msfo = 0, mpfo = 0, 
-  pcfo = 0, mcfo = 0, pifo = 0, mifo = 0, premium = 0, mpnot = 0;
+  pcfo = 0, mcfo = 0, pifo = 0, mifo = 0,
+  pex1 = 0, msex1 = 0, mpex1 = 0, 
+  pcex1 = 0, mcex1 = 0, piex1 = 0, miex1 = 0,
+  premium = 0, mpnot = 0;
 
   //convierto distribuciones a un arreglo de objetos mapeando el valor
   const distribucionesCalculo = distribuciones.map(x => ({ name: x, porcentajesCalculados: null }));
@@ -589,6 +627,7 @@ function onRowSelected(row) {
 
           const map = {
             "CUOTA PARTE": v => pcp = v,
+            "EXCEDENTE 1": v => pex1 = v,
             "FAC": v => pfp = v,
             "FRO": v => pfo = v
           };
@@ -607,6 +646,12 @@ function onRowSelected(row) {
             mpcp += distribucion.premiumRe;
             mccp += distribucion.comissionCedant;
             micp += distribucion.tax;
+            break;
+          case "EXCEDENTE 1":
+            msex1 += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
+            mpex1 += distribucion.premiumRe;
+            mcex1 += distribucion.comissionCedant;
+            miex1 += distribucion.tax;
             break;
           case "FAC":
             msfp += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
@@ -632,14 +677,14 @@ function onRowSelected(row) {
 
   //redondeamos para ser mas precisos:
   //ret
-  pret = redondear(pret * 100,8);
+  pret = redondear(pret * 100,8, true);
   msret = redondear(msret,2);
   mpret = redondear(mpret,2);
   premium = redondear(premium,2);
   mpnot = redondear(mpnot,2);  
 
   //cp
-  pcp = redondear(pcp * 100,8);
+  pcp = redondear(pcp * 100,8, true);
   mscp = redondear(mscp,2);
   mpcp = redondear(mpcp,2);
   mccp = redondear(mccp,2);
@@ -647,8 +692,17 @@ function onRowSelected(row) {
   pccp = calcularPorcentaje(mpcp, mccp);
   picp = calcularPorcentaje(mpcp, micp);
 
+  //ex1
+  pex1 = redondear(pex1 * 100,8, true);
+  msex1 = redondear(msex1,2);
+  mpex1 = redondear(mpex1,2);
+  mcex1 = redondear(mcex1,2);
+  miex1 = redondear(miex1,2);
+  pcex1 = calcularPorcentaje(mpex1, mcex1);
+  piex1 = calcularPorcentaje(mpex1, miex1);
+
   //fac
-  pfp = redondear(pfp * 100,8);
+  pfp = redondear(pfp * 100,8, true);
   msfp = redondear(msfp,2);
   mpfp = redondear(mpfp,2);
   mcfp = redondear(mcfp,2);
@@ -657,7 +711,7 @@ function onRowSelected(row) {
   pifp = calcularPorcentaje(mpfp, mifp);  
 
   //fro
-  pfo = redondear(pfo * 100,8);
+  pfo = redondear(pfo * 100,8, true);
   msfo = redondear(msfo,2);
   mpfo = redondear(mpfo,2);
   mcfo = redondear(mcfo,2);
@@ -668,12 +722,10 @@ function onRowSelected(row) {
   // Creamos un arreglo con los nombres de todas las variables
   const valores = {
     pret, msret, mpret, pcret, mcret,
-    piret, miret, pcp,
-    mscp, mpcp, pccp, mccp, picp, micp,
-    pfp, msfp, mpfp,
-    pcfp, mcfp, pifp, mifp,
-    pfo, msfo, mpfo,
-    pcfo, mcfo, pifo, mifo, mpnot
+    piret, miret, pcp, mscp, mpcp, pccp, mccp, picp, micp,
+    pfp, msfp, mpfp, pcfp, mcfp, pifp, mifp,
+    pfo, msfo, mpfo, pcfo, mcfo, pifo, mifo, mpnot,
+    pex1, msex1, mpex1, pcex1, mcex1, piex1, miex1
   };
   
   // Recorrer y asignar valor al elemento con id igual al nombre de la variable
@@ -769,13 +821,13 @@ function calculaTotales() {
     // Creamos un arreglo con los nombres de todas las variables
     const totales = { tp, tms, tmp, tpc, tmc, tpi, tmi};
   
-    totales.tp = redondear($("#pret").val(),8) + redondear($("#pcp").val(),8) + redondear($("#pfp").val(),8) + redondear($("#pfo").val(),8) + redondear($("#pnot").val(),8);
-    totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val());
-    totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val());
-    totales.tpc = redondear($("#pcret").val(),8) + redondear($("#pccp").val(),8) + redondear($("#pcfp").val(),8) + redondear($("#pcfo").val(),8) + redondear($("#pcnot").val(),8);
-    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear($("#mcfp").val()) + redondear($("#mcfo").val()) + redondear($("#mcnot").val());
-    totales.tpi = redondear($("#piret").val(),8) + redondear($("#picp").val(),8) + redondear($("#pifp").val(),8) + redondear($("#pifo").val(),8) + redondear($("#pinot").val(),8);
-    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
+    totales.tp = redondear($("#pret").val(),8) + redondear($("#pcp").val(),8) + redondear($("#pex1").val(),8) + redondear($("#pfp").val(),8) + redondear($("#pfo").val(),8) + redondear($("#pnot").val(),8);
+    totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msex1").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val());
+    totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpex1").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val());
+    totales.tpc = redondear($("#pcret").val(),8) + redondear($("#pccp").val(),8) + redondear($("#pcex1").val(),8) + redondear($("#pcfp").val(),8) + redondear($("#pcfo").val(),8) + redondear($("#pcnot").val(),8);
+    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear ($("#mcex1").val()) + redondear ($("#mcfp").val()) + redondear ($("#mcfo").val()) + redondear ($("#mcnot").val());
+    totales.tpi = redondear ($("#piret").val(),8) + redondear ($("#picp").val(),8) + redondear($("#piex1").val(),8) + redondear($("#pifp").val(),8) + redondear($("#pifo").val(),8) + redondear($("#pinot").val(),8);
+    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
   
     totales.tp = redondear(totales.tp, 8);
     totales.tms = redondear(totales.tms);
@@ -1638,7 +1690,6 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     // Disparar cálculo automático si el input es un % registrado
     const id = input.id;
     if (relacionesMap[id]) {
-      debugger;
       const { montoId, sumaId, comisionId, pcomisionId, montoCalculoId, pimpuestoId, montoImpuestoId } = relacionesMap[id];
       const montoBase = (gridDataSelected?.Prima ?? 0) - (gridDataSelected?.PrimaNoTecnica ?? 0);
       const sumaBase = gridDataSelected?.Suma ?? 0;
@@ -1983,9 +2034,15 @@ function eventosGrid() {
     gridDataSelected = rowData;
     contractId = rowData.Contrato;
 
-    // aquí puedes disparar tu lógica real
-    onRowSelected(rowData);
-    
+    validaDistribucion(contractId, "Cuota Parte")
+      .then(res => validaDistribucion(contractId, "Excedente 1"))
+      .then(res2 => {
+          onRowSelected(rowData);
+      })
+      .catch(error => {
+          console.error(error);
+      }); 
+        
   });
 
   $(document).off("click", "#btnSeleccionar")
@@ -2008,6 +2065,42 @@ function eventosGrid() {
       }        
   }); 
       
+}
+
+function marcarDistribucionReadonly(distribucion, readOnly) {
+    const fila = filasControles.find(f =>
+        f.some(c => c.nombre === distribucion)
+    );
+
+    if (!fila) return filasControles;
+
+    fila.forEach(control => {
+        if (control.tipo !== "label") {
+            control.readonly = readOnly;
+            $(`#${control.id}`).prop("readonly", readOnly);
+        }
+    });
+
+}
+
+function vEqual(value){
+    const normalizado = value.trim().toUpperCase();
+    return normalizado;
+}
+
+function validaDistribucion(contractId, name) {
+  return me.exe("GetContracts", { filter: `id = ${contractId}` })
+    .then(GetContracts => {
+      const resultado = GetContracts.outData?.[0];
+      const config = resultado ? JSON.parse(resultado.configJson) : {};
+      const existe = (config?.Lines || []).find(
+        x => vEqual(x.id) == vEqual(name)
+      );
+
+      marcarDistribucionReadonly(name, !existe);
+
+      return existe; // opcional
+    });
 }
 
 function isOferta(){

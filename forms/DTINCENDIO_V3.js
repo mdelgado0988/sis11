@@ -1583,7 +1583,7 @@ function renderToolbarCoberturas() {
 
         </button>
 
-        <button
+        <!--<button
           type="button"
           id="btnCotizarCoberturas"
           class="ant-btn ant-btn-primary btn-cotizar-cob"
@@ -1598,7 +1598,7 @@ function renderToolbarCoberturas() {
             Cotizar
           </span>
 
-        </button>
+        </button>-->
 
       </div>
     `;
@@ -1606,43 +1606,43 @@ function renderToolbarCoberturas() {
     // insertar siempre arriba
     $tab.prepend(toolbarHtml);
 
-    polizaConfirmada = policy.active;
-    if(polizaConfirmada){      
-      $("#btnCotizarCoberturas").prop("disabled", true);
-    }
+    // polizaConfirmada = policy.active;
+    // if(polizaConfirmada){      
+    //   $("#btnCotizarCoberturas").prop("disabled", true);
+    // }
 
-    //Evento de cotización
-    $(document)
-    .off("click", "#btnCotizarCoberturas")
-    .on("click", "#btnCotizarCoberturas", async function () {
+    // //Evento de cotización
+    // $(document)
+    // .off("click", "#btnCotizarCoberturas")
+    // .on("click", "#btnCotizarCoberturas", async function () {
 
-      try{
+    //   try{
 
-        $("#btnCotizarCoberturas").prop("disabled", true);
+    //     $("#btnCotizarCoberturas").prop("disabled", true);
 
-        const resultado = await me.exe("QuotePolicy", { policyId: policy.id, policy: null, dbMode: true, save: true, action: "PREQUOTE" });
-        if(!resultado.ok){
-          me.message.error(`Error cotizando coberturas: ${resultado.msg}`);
-          return;
-        }
+    //     const resultado = await me.exe("QuotePolicy", { policyId: policy.id, policy: null, dbMode: true, save: true, action: "PREQUOTE" });
+    //     if(!resultado.ok){
+    //       me.message.error(`Error cotizando coberturas: ${resultado.msg}`);
+    //       return;
+    //     }
 
-        policy = resultado.outData[0];
-        me.message.success(`Cálculos finalizados, verifique el resumen de suma y prima`,5);
-        actualizarResumenTarifas();
-        await setProductCoverages();
-        renderModalCoberturas();
+    //     policy = resultado.outData[0];
+    //     me.message.success(`Cálculos finalizados, verifique el resumen de suma y prima`,5);
+    //     actualizarResumenTarifas();
+    //     await setProductCoverages();
+    //     renderModalCoberturas();
 
-        //Actualizo el formulario principal en caso de existir
-        renderFormPrincipal();
+    //     //Actualizo el formulario principal en caso de existir
+    //     renderFormPrincipal();
 
-      }catch(ex){
-        me.message.error(`Error cotizando coberturas: ${ex.toString()}`);
-      }
-      finally{
-        $("#btnCotizarCoberturas").prop("disabled", false);
-      }      
+    //   }catch(ex){
+    //     me.message.error(`Error cotizando coberturas: ${ex.toString()}`);
+    //   }
+    //   finally{
+    //     $("#btnCotizarCoberturas").prop("disabled", false);
+    //   }      
 
-    });
+    // });
         
     // render modal una sola vez
     renderModalCoberturas();

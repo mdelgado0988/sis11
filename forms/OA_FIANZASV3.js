@@ -744,8 +744,10 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
 
                 // ===== tipo =====
                 if (type === "number") {
-                $input = $("<input>", { type: "number" })
-                    .addClass("ant-input-custom");
+                    $input = $("<input>", {
+                        type: "number",
+                        step: "0.01"
+                    }).addClass("ant-input-custom");
 
                 } else if (type === "select") {
 
