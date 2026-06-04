@@ -24,12 +24,12 @@ const change = loadOne("Change", `id=${changeId}`);
 const billDiff = loadOne("BillDiff", `changeId=${changeId}`) ?? {};
 if (!change) throw `El endoso [${changeId}] no existe.`;
 
-if (change.Discriminator == "CancellationChange" && ExeOrgin == 'WF'){
+const changeName = change.Discriminator || "";
+if (changeName == "CancellationChange" && ExeOrgin == 'WF'){
   return;
 } 
 
-const template = 'FormatoEndosos.docx';
-const changeName = change.Discriminator || "";
+const template = changeName == "LoadingChange" ? 'FormatoEndososSinCobertura.docx' : 'FormatoEndosos.docx';
 const { eventName, nombreEndoso } = mapChangeName(changeName);
 // return change
 // -----------------------------
@@ -122,14 +122,17 @@ if (Number(row.details.coveragesDif || 0) < 0) row.esaumento = false;
 const detCovs = Array.isArray(details.Coverages) ? details.Coverages : [];
 row.numcoverages = detCovs.length;
 
-//test mad:
+//Michael Delgado. 2026-05-22. GLOB-689. Generamos número de endoso.
+generateChangeCode(change);
+
+/*//test mad:
 //return billDiff;
 const arrayResult = [{ outdata: row }];
 const custom = buildCustomForTemplate({ row, policy, change, arrayResult, billDiff });
 //return custom
 calculateEndorsmentNote(change, changeName, custom, policy);
 return custom;
-//fin test mad
+//fin test mad*/
 
 // -----------------------------
 // 6) Generar documento con custom (lo que el template pide)
@@ -343,7 +346,8 @@ function getEndorsmentTitle(discriminator) {
     PayPlanChange: "Cambio de Plan de Pago",
     CoverageChangeTechData: "Cambio de Cobertura Técnica",
     ClauseChange: "Cambio de Cláusulas",
-    ExclusionChange: "Cambio de Exclusiones"
+    ExclusionChange: "Cambio de Exclusiones",
+    LoadingChange: "Cambio de Recargos/Descuentos"
   };
 
   return map[discriminator] || discriminator;
@@ -509,7 +513,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     TotalACobrar: n(policy?.anualTotal),
 
     Endoso: {
-      Id: row.Changeid,
+      Id: change?.code ?? "0",
       Nombre: row.nombreEndoso,
       DetalleEndoso: change?.note || "Sin Detalles"
     },
@@ -580,18 +584,21 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
 
       const oldLimit = oldChangeCov?.limit ?? (polCov?.limit ?? 0);
       const newLimit = changeCov?.limit ?? oldLimit;
-            
+
+      //Michael Delgado. GLOBUAT-66. Los endosos que no generan prima no deben mostrar nada, ni lo de la póliza      
       return {
         ...polCov,
-        premiumDif: endosoSinPrima ? n(polCov.premium) : (changeCovDetail ? n(changeCovDetail.premiumDif) : 0),
-        limitDif: endosoSinPrima ? n(polCov.limit) : n(newLimit - oldLimit)
+        premiumDif: endosoSinPrima ? n(0) : (changeCovDetail ? n(changeCovDetail.premiumDif) : 0),
+        limitDif: endosoSinPrima ? n(0) : n(newLimit - oldLimit)
       };
+      
     });
 
     //Primas del cambio billDiff
-    custom.PrimaNetaTotal = endosoSinPrima ? n(policy.anualPremium) : n(billDiff?.annualPremium ?? 0);
-    custom.Impuesto = endosoSinPrima ? n(policy.tax) : n(billDiff?.tax ?? 0);
-    custom.TotalACobrar = endosoSinPrima ? n(policy.anualTotal) : n(billDiff?.annualTotal ?? 0);
+    //Michael Delgado. GLOBUAT-66. Los endosos que no generan prima no deben mostrar nada, ni lo de la póliza
+    custom.PrimaNetaTotal = endosoSinPrima ? n(0) : n(billDiff?.annualPremium ?? 0);
+    custom.Impuesto = endosoSinPrima ? n(0) : n(billDiff?.tax ?? 0);
+    custom.TotalACobrar = endosoSinPrima ? n(0) : n(billDiff?.annualTotal ?? 0);
 
     if(changeName == 'CancellationChange' && details){
       custom.PrimaNetaTotal = n(details.coveragesDif ?? 0);
@@ -603,7 +610,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       custom.Endoso.Coberturas.forEach(x => {
         x.limit = n(x.limit);
         x.premiumDif = n(x.premiumDif);
-        x.deductible = n(x.deductible);
+        x.deductible = endosoSinPrima ? n(0) : n(x.deductible);
       })
     };
 
@@ -672,6 +679,20 @@ function endosoNoGeneraPrima(change) {
         return true;
 
   return false;
+}
+
+function generateChangeCode(change) {
+
+  const hasValue = value => value !== null && value !== undefined && String(value).trim() !== '';
+
+  //Si no tiene código y el endoso está confirmado le generamos uno.
+  // && change?.status == "1"
+  if(!hasValue(change?.code)){
+    const contextChain = JSON.stringify({ changeId: change.id });    
+    doCmd({cmd: "ExeChain", data: { chain: "cmdGeneraConsecutivoEndoso", context: contextChain }});
+    change.code = ExeChain.outData?.code ?? "0";    
+  }
+  
 }
 
 function sanitizePolicy(policy) {

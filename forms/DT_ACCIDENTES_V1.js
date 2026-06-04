@@ -975,7 +975,6 @@ function inyectarEstilosAntdCobtar() {
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 let coberturasSeleccionadas = [];
-
 let productCoverages = [];
 
 const cfgCoberturaReaseguro = [
@@ -1004,7 +1003,7 @@ async function setConfigCoverages(){
   const tableName = cfgCoberturaReaseguro.find(x => x.lob == policy.lob)?.name ?? "cfgCoberturaProductoRea";
   const tableConfig = await me.exe("GetFullTable", { table: tableName });
   configCoverages = mapearTablaConfig(tableConfig.outData ?? []);
-  configCoverages = configCoverages.filter(x => x.productCode == policy.productCode);
+  configCoverages = configCoverages.filter(x => vEqual(x.productCode) == vEqual(policy.productCode));
 }
 
 async function setProductCoverages() {
@@ -1014,22 +1013,22 @@ async function setProductCoverages() {
   await setConfigCoverages();
 
   if(!product){
-    me.mensage.error("No se pudo recuperar la configuración del producto");
+    console.error("No se pudo recuperar la configuración del producto");
     return;
   }
 
   if(!configCoverages){
-    me.mensage.error("No se pudo recuperar la configuración de las coberturas del producto");
+    console.error("No se pudo recuperar la configuración de las coberturas del producto");
     return;
   }
 
   if(product.Coverages.length == 0){
-    me.mensage.error("El producto no tiene coberturas asignadas");
+    console.error("El producto no tiene coberturas asignadas");
     return;
   }
 
   if(configCoverages.length == 0){
-    me.mensage.error("No se encontró configuración de coberturas para saber si suman o no.");
+    console.error("No se encontró configuración de coberturas para saber si suman o no.");
     return;
   }
 
@@ -1142,7 +1141,7 @@ function renderToolbarCoberturas() {
     // insertar siempre arriba
     $tab.prepend(toolbarHtml);
 
-    // polizaConfirmada = policy.active;
+    polizaConfirmada = policy.active;
     // if(polizaConfirmada){      
     //   $("#btnCotizarCoberturas").prop("disabled", true);
     // }
@@ -1734,7 +1733,7 @@ function actualizarResumenTarifas() {
 
     const cfgCob = configCoverages.find(c => c.coverageCode.trim().toUpperCase() == pc.code.trim().toUpperCase());
 
-    if (vEqual(cfgCob?.isCoverage) == vEqual("si"))
+    if (vEqual((cfgCob?.isCoverage || "")) == vEqual("si"))
       sumaTotal += Number(pc.limit || 0);
     
     primaTotal += Number(pc.premium || 0);
@@ -1843,9 +1842,6 @@ async function initForm() {
         await cargarCobtarDinamico();
         validaInputs();
     
-        //Voy a validar si no hay nada en el hidden de cobtar lo voy a cargar con los datos por default
-        setDefaultCobtar(); 
-        
         await cargarCatalogos();
         return;
     }

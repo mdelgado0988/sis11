@@ -1,6 +1,6 @@
 () => {
     const { Form, Select, DatePicker, Input, Row, Col, Card, Collapse, Button, Space, Table, Tabs,  Layout , InputNumber, Radio, Divider,Empty,Tag, Tooltip, 
-           notification, Popover, Modal, Spin, Skeleton, Progress } = A;
+           notification, Popover, Modal, Spin, Skeleton, Progress, Badge } = A;
     const { Panel} = Collapse;
     const { Option } = Select;
     const { TabPane } = Tabs;
@@ -18,6 +18,13 @@
     const EyeOutlined = () => <span role="img" aria-label="eye" className="anticon anticon-eye"><svg viewBox="64 64 896 896" focusable="false" data-icon="eye" width="1em" height="1em" fill="currentColor" aria-hidden="true"><path d="M942.2 486.2C847.4 286.5 704.1 186 512 186S176.6 286.5 81.8 486.2a60.7 60.7 0 000 51.6C176.6 737.5 319.9 838 512 838s335.4-100.5 430.2-300.2a60.7 60.7 0 000-51.6zM512 726c-119.4 0-227.2-65.6-305.3-177C284.8 437.6 392.6 372 512 372s227.2 65.6 305.3 177C739.2 660.4 631.4 726 512 726z"></path><path d="M512 422c-69 0-125 56-125 125s56 125 125 125 125-56 125-125-56-125-125-125z"></path></svg></span>;
     const DeleteOutlined = () => <span role="img" aria-label="delete" className="anticon anticon-delete"><svg viewBox="64 64 896 896" focusable="false" data-icon="delete" width="1em" height="1em" fill="currentColor" aria-hidden="true"><path d="M360 184h304v64H360z"></path><path d="M880 184H144c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h72l32 640c0 35.3 28.7 64 64 64h320c35.3 0 64-28.7 64-64l32-640h72c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM400 816h-64V384h64v432zm144 0h-64V384h64v432zm144 0h-64V384h64v432z"></path></svg></span>;
     const PlusOutlined = () => <span role="img" aria-label="plus" className="anticon anticon-plus"><svg viewBox="64 64 896 896" focusable="false" data-icon="plus" width="1em" height="1em" fill="currentColor" aria-hidden="true"><path d="M482 152h60c4.4 0 8 3.6 8 8v312h312c4.4 0 8 3.6 8 8v60c0 4.4-3.6 8-8 8H550v312c0 4.4-3.6 8-8 8h-60c-4.4 0-8-3.6-8-8V550H160c-4.4 0-8-3.6-8-8v-60c0-4.4 3.6-8 8-8h312V160c0-4.4 3.6-8 8-8z"></path></svg></span>;
+    const MoreOutlined = () => (
+      <span role="img" aria-label="more" className="anticon anticon-more">
+        <svg viewBox="64 64 896 896" focusable="false" width="1em" height="1em" fill="currentColor">
+          <path d="M456 512a56 56 0 10112 0 56 56 0 10-112 0zm0-224a56 56 0 10112 0 56 56 0 10-112 0zm0 448a56 56 0 10112 0 56 56 0 10-112 0z"></path>
+        </svg>
+      </span>
+    );
     const BackIcon = () => (
       <span role="img" aria-label="arrow-left" className="anticon anticon-arrow-left">
         <svg viewBox="64 64 896 896" focusable="false" data-icon="arrow-left" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -303,7 +310,7 @@
                         Buscar
                         </Button>
                         <Button icon={<FileAddOutlined />} onClick={onGenerate}>
-                        Generar Ofertas de Renovación
+                        Generar Lote
                         </Button>
                         <Button icon={<ClearOutlined />} onClick={onClear}>
                         Limpiar Selección
@@ -392,12 +399,51 @@
             { title: 'Id', dataIndex: 'id', width: 60 },
             { title: 'Nombre', dataIndex: 'name', width: 150, ellipsis: true },
             { title: 'Creacion', dataIndex: 'created', width: 80,render: renderDate },
-            { title: 'Registros', dataIndex: 'records', width: 70, align: 'center' },
-            { title: 'Procesados', dataIndex: 'processed', width: 80, ellipsis: true, align: 'center' },
-            { title: 'Ejecutado', dataIndex: 'launched', width: 100, render: renderDate, ellipsis: true, align: 'center' },
-            { title: 'Correcto', dataIndex: 'success', width: 80, align: 'center', render: ( value,record ) => Math.max(Number(value) - Number(record.skipped, 0), 0) },
-            { title: 'Errores', dataIndex: 'error', width: 80, align: 'center' },
-            { title: 'No Renovados', dataIndex: 'skipped', width: 100, ellipsis: true, align: 'center' },
+            {
+              title: 'Resultado',
+              width: 130,
+              align: 'left',
+              render: (_, record) => {
+                const correctos = Math.max(
+                  Number(record.success || 0) - Number(record.skipped || 0),
+                  0
+                );
+
+                return (
+                  <div style={{ lineHeight: '18px', fontSize: 12 }}>
+                    <div>
+                      <strong>Total:</strong> {record.records}
+                    </div>
+                    <div>
+                      <strong>Procesados:</strong> {record.processed}
+                    </div>
+                    <div>
+                      <Tooltip title="Registros Correctos">
+                        <span style={{ color: '#52c41a', cursor: 'help' }}>
+                          ✅ {correctos}
+                        </span>
+                      </Tooltip>
+
+                      {' | '}
+
+                      <Tooltip title="Registros con Error">
+                        <span style={{ color: '#ff4d4f', cursor: 'help' }}>
+                          ❌ {record.error}
+                        </span>
+                      </Tooltip>
+
+                      {' | '}
+
+                      <Tooltip title="No Renovados">
+                        <span style={{ color: '#faad14', cursor: 'help' }}>
+                          🚫 {record.skipped}
+                        </span>
+                      </Tooltip>
+                    </div>
+                  </div>
+                );
+              }
+            },
             { title: 'Progreso', dataIndex: 'processed', width: 80, ellipsis: true, align: 'center', 
              render: (_, record) => (
                 <Progress
@@ -409,99 +455,176 @@
             },
             { title: 'Usuario', dataIndex: 'user', width: 200 },
             {
-              title: 'Acción',
-              width: 100,
+              title: t('Action'),
+              width: 130,
+              fixed: 'right',
               align: 'center',
               render: (_, record) => {
+
                 const { Process = {}, wfId, id } = record || {};
-                const { formId = 0, iniciando, entityState, estado, userActions } = Process;
+                const {
+                  formId = 0,
+                  iniciando,
+                  entityState,
+                  estado,
+                  userActions
+                } = Process;
+
                 const actions = JSON.parse(userActions || '[]');
 
-                let nextDisabled = false;
-                if(record.estadoWf == 'Ejecutado') nextDisabled = true;
-                
+                const nextDisabled = record.estadoWf === 'Ejecutado';
+
+                const workflowColor = nextDisabled
+                  ? '#ff4d4f'   // rojo
+                  : '#52c41a';  // verde
+
                 const gotoStep = (direction) => {
-                  
+
                   if (wfId <= 0) return;
-                  if (record.estadoWf == 'Ejecutado') {
-                    notification.warn({ message: "Lote cerrado", description: "Lote ejecutado, no puede ser modificado", duration: 3 });
+
+                  if (record.estadoWf === 'Ejecutado') {
+                    notification.warn({
+                      message: t('Closed Batch'),
+                      description: t('Executed batch cannot be modified'),
+                      duration: 3
+                    });
                     return;
                   }
 
-                  // avanza el estado del wf                  
-                  exe("GotoStep",{procesoId: wfId, estado: direction, userValues: "{}", isNonInterruptingEvent: false, process: null}).
-                    then(x => {
-                      reloadData();
-                    });
-                  
+                  exe("GotoStep", {
+                    procesoId: wfId,
+                    estado: direction,
+                    userValues: "{}",
+                    isNonInterruptingEvent: false,
+                    process: null
+                  }).then(() => {
+                    reloadData();
+                  });
                 };
-            
+
                 return (
-                  <Space size="small">
-            
+                  <Space size={4}>
+
+                    {/* WORKFLOW */}
                     <Popover
+                      trigger="click"
                       placement="bottom"
-                      title={t('Workflow Status')}
                       content={
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-            
-                          <Space>
-                            <Button size="small" style={{ width: 100 }} disabled={iniciando} onClick={() => gotoStep('_previous')}>
+                        <div style={{ minWidth: 220 }}>
+
+                          <Space
+                            direction="vertical"
+                            style={{ width: '100%' }}
+                          >
+
+                            <Tag
+                              color={
+                                entityState === 'DRAFT'
+                                  ? 'blue'
+                                  : entityState === 'ACTIVE'
+                                  ? 'green'
+                                  : 'red'
+                              }
+                            >
+                              {estado}
+                            </Tag>
+
+                            <Button
+                              block
+                              size="small"
+                              disabled={iniciando}
+                              onClick={() => gotoStep('_previous')}
+                            >
                               <BackIcon /> {t('Previous')}
                             </Button>
 
+                            {!nextDisabled && formId <= 0 && (
+                              <Button
+                                block
+                                type="primary"
+                                size="small"
+                                onClick={() => gotoStep('_next')}
+                              >
+                                {t('Next')} <NextIcon />
+                              </Button>
+                            )}
+
                             {formId > 0 && (
-                              <Button type="link" size="small" onClick={() => onOpenModal(record)}>
+                              <Button
+                                block
+                                size="small"
+                                onClick={() => onOpenModal(record)}
+                              >
                                 <WarningIcon /> {t('Required Form')}
                               </Button>
                             )}
-                            
-                            {!nextDisabled && formId <= 0 && (
-                              <Button size="small" style={{ width: 100 }} disabled={nextDisabled} onClick={() => gotoStep('_next')}>
-                                {t('Next')} {formId ? <WarningIcon /> : <NextIcon />}
-                              </Button>
-                            )}
-                            
+
                           </Space>
-            
+
                         </div>
                       }
                     >
-                      <Button type="link">{t('Workflow')} <ArrowDown /></Button>
-                    </Popover>
-            
-                    <Tag color={entityState === 'DRAFT' ? 'blue' : entityState === 'ACTIVE' ? 'green' : 'red'}>
-                      {estado}
-                    </Tag>
-            
-                    {actions.length > 0 && (
-                      <Tooltip title="Next step must be triggered by a user action">
-                        <WorkflowIcon /> {actions.map((a, i) => <Tag key={i}>{a}</Tag>)}
+                      <Tooltip
+                        title={`${t('Workflow')} - ${estado || t('Unknown')}`}
+                      >
+                        <Button
+                          shape="circle"
+                          size="small"
+                          icon={<CaretRightOutlined />}
+                          style={{
+                            color: workflowColor,
+                            borderColor: workflowColor
+                          }}
+                        />
                       </Tooltip>
-                    )}
-            
-                    {formId > 0 && (
-                      <Button onClick={() => onOpenModal(record)}>
-                        <WarningIcon /> {t('Next')}
-                      </Button>
-                    )}
-            
-                    {!nextDisabled && formId <= 0 && (
-                      <Button type="link" onClick={() => gotoStep('_next')}>
-                        {t('Next')} <NextIcon />
-                      </Button>
-                    )}
-            
-                    <Tooltip title="Ir al flujo de trabajo">
-                      <a href={`#/activity/${wfId}`}>
-                        <Button type="primary" icon={<CaretRightOutlined />} size="small" />
-                      </a>
+                    </Popover>
+
+                    {/* DETALLE */}
+                    <Tooltip title={t('View batch detail')}>
+                      <Button
+                        size="small"
+                        icon={<EyeOutlined />}
+                        onClick={() => handleViewDetail(id, wfId)}
+                      />
                     </Tooltip>
-            
-                    <Tooltip title="Ver detalle del lote">
-                      <Button icon={<EyeOutlined />} size="small" onClick={() => handleViewDetail(id, wfId)} />
-                    </Tooltip>
-            
+
+                    {/* MÁS OPCIONES */}
+                    <Popover
+                      trigger="click"
+                      placement="left"
+                      content={
+                        <Space direction="vertical">
+
+                          <a href={`#/activity/${wfId}`}>
+                            <Button
+                              block
+                              size="small"
+                            >
+                              {t('Open workflow')}
+                            </Button>
+                          </a>
+
+                          {actions.length > 0 && (
+                            <div>
+                              {actions.map((a, i) => (
+                                <Tag key={i}>
+                                  {a}
+                                </Tag>
+                              ))}
+                            </div>
+                          )}
+
+                        </Space>
+                      }
+                    >
+                      <Tooltip title={t('More options')}>
+                        <Button
+                          size="small"
+                          icon={<MoreOutlined />}
+                        />
+                      </Tooltip>
+                    </Popover>
+
                   </Space>
                 );
               }
@@ -767,7 +890,7 @@
     //Tab 3 de detalle del lote
     /********************************************/
 
-    const ActionToolbarDetail = ({ loading, onCalculate, onRefresh, onExclude, onGenerateExcluded, percent}) => {      
+    const ActionToolbarDetail = ({ loading, onCalculate, onRefresh, onExclude, onGenerateExcluded, percent, loteId}) => {      
         return (
           <Row
             style={{ marginBottom: 16, background: '#f0f2f5', padding: '8px', borderRadius: '4px' }}
@@ -816,10 +939,22 @@
 
               <Divider type="vertical" />       
         
-              <Space size="large">
-                <Button type="text" onClick={() => onRefresh()} icon={<ReloadOutlined />} style={{ color: '#1890ff' }}>
+              <Space size="middle" align="center">
+                <Button
+                  type="text"
+                  onClick={() => onRefresh()}
+                  icon={<ReloadOutlined />}
+                  style={{ color: '#1890ff' }}
+                >
                   Actualizar
                 </Button>
+
+                {loteId > 0 && (
+                  <Badge
+                    color="blue"
+                    text={<strong>Lote #{loteId}</strong>}
+                  />
+                )}
               </Space>
             </Col>
         
@@ -931,6 +1066,7 @@
                   onExclude={handleExclude}
                   onGenerateExcluded={handleGenerateExcludedBatch}
                   percent={percent}
+                  loteId={loteId}
                 />
               <div style={{ marginTop: '20px' }}>
                
@@ -1360,26 +1496,16 @@
                   duration: 8
                 });
 
-                handleSearchBatch();
-
-                setLoteId(id);
-
-                const nuevaPaginacion = {
-                  current: 1,
-                  pageSize: paginationDetail.pageSize || 15,
-                  total: 0
-                };
-
-                setPaginationDetail(nuevaPaginacion);
-
-                const params = {
-                  pagination: nuevaPaginacion,
-                  loading: true,
-                  data: [],
-                  loteId: loteId,
-                };
-
-                loadDataLoteDetalle(params);
+                excluyeRegistrosNoRenovados(loteId).then(res => {
+                  if(!res.ok){
+                    notification.error({
+                      message: 'Error',
+                      description: 'Error moviendo los registros no renovados del lote anterior.',
+                      duration: 5
+                    });
+                  }
+                  refrescarLoteDeExcluidos(id, loteId);
+                });                
 
               });
               
@@ -1400,6 +1526,54 @@
           setLoadingBatch(false);
         }
       };
+
+      function excluyeRegistrosNoRenovados(loteId){
+
+        const query = `
+        UPDATE B
+        SET
+            jData = X.NewJson,
+            records = X.Total
+        FROM Batch B
+        CROSS APPLY (
+            SELECT
+                COALESCE(
+                    '[' + STRING_AGG(J.[value], ',') + ']',
+                    '[]'
+                ) AS NewJson,
+                COUNT(*) AS Total
+            FROM OPENJSON(B.jData) J
+            WHERE JSON_VALUE(J.[value], '$[3]') <> 'No'
+        ) X
+        WHERE B.id = ${loteId};
+        `;
+
+        return exe("DoQuery", { sql: query });
+
+      }
+
+      function refrescarLoteDeExcluidos(id, loteId){
+          handleSearchBatch();
+
+          setLoteId(id);
+
+          const nuevaPaginacion = {
+            current: 1,
+            pageSize: paginationDetail.pageSize || 15,
+            total: 0
+          };
+
+          setPaginationDetail(nuevaPaginacion);
+
+          const params = {
+            pagination: nuevaPaginacion,
+            loading: true,
+            data: [],
+            loteId: id,
+          };
+
+          loadDataLoteDetalle(params);
+      }      
 
       function dameEstadoLote() {
         return exe("LoadEntity", {

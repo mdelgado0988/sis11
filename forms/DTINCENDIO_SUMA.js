@@ -9,7 +9,7 @@ LastModificate: 22-12-2025 - Mike Ortiz
 */
 
 const me = this;    
-const policyId = window.location.href.split('/')[5] || 871;
+const policyId = window.location.href.split('/')[5] || 892;
 const isEndorsment = window.location.href.includes('tab12');
 let configCobtar;
 let isNew = false;
@@ -189,12 +189,19 @@ const loadEventField = async () => {
     //$("#cmbBarriadas").on("change", changeBarriada);   
 };
 
+function setNoAutocompleteFields(){
+  //función que marca los campos para que no aparezca el autocomplete
+  $('#txtBarriadas').attr('autocomplete', 'off');
+  $('#txtEdificios').attr('autocomplete', 'off');
+}
+
 const onDocumentReady = async() => {
 
     //debugger;
   
     btnSave = $("button.ant-btn.ant-btn-link:contains('Guardar')"); 
     await setConfigView();
+    setNoAutocompleteFields();
     if(isEndorsment){
         soloBloquea(["#cmbTipoObjeto","#cmbUsoBien","#cmbPais","#cmbProvincia","#cmbMunicipio",
             "#txtBarriadas","#cmbSector","#txtEdificios","#manzana","#aptoocasa","#calleoavenida","#cmbZonaCresta","#direccionexacta"
@@ -252,6 +259,7 @@ async function cargarCatalogos(){
       }
     });
 
+    debugger;
     await loadDataTable({reference:'#txtSA',tableName:'SumasPorRango',indexCode:1,indexDisplay:1,filterFunction: (item) => item[0] === policy.productCode});
     const TablaTipoObjeto = await loadDataTable({reference:'#cmbTipoObjeto',tableName:'TablaTipoObjeto',indexCode:0,indexDisplay:1});
     await loadDataTable({reference:'#cmbCategoriaActividad',tableName:'TablaCategoriaActividad',indexCode:0,indexDisplay:1});
@@ -385,7 +393,7 @@ function habilitarSelectFiltrable(config) {
         const match = source.find(x =>
             x[textField] === $input.val()
         );
-        if (!match && config.inputId != 'txtBarriadas') {
+        if (!match) {
             $input.val('')
             $hidden.val('0');
         }
@@ -679,7 +687,7 @@ const cargaBarriada = async(limpiar) => {
 
 const changeEdifMsg = async () => {
   try {
-    //debugger;
+    debugger;
     me.message.destroy()
     btnSave.prop("disabled", true);
     const countryCode = $("#cmbPais").val(); 

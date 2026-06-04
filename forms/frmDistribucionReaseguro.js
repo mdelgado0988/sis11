@@ -26,6 +26,7 @@ const cfgCoberturaReaseguro = [
   { lob: 96, name: "cfgCoberturaProductoReaTecnicos" },
   { lob: 20, name: "cfgCoberturaProductoReaVidaColectivo" },
   { lob: 31, name: "cfgCoberturaProductoReaVida" },
+  { lob: 52, name: "cfgCoberturaProductoReaRiesgosVarios" },
   { lob: 1, name: "cfgCoberturaProductoRea" },
   { lob: 81, name: "cfgCoberturaProductoRea" },
   { lob: 82, name: "cfgCoberturaProductoRea" },
@@ -219,7 +220,7 @@ function distribuyeContrato() {
         const $elem = $(`#${name}`);
         if ($elem.length) {
           if (name.startsWith("p")) {
-            resultado[name] = redondear($elem.val() , 8);
+            resultado[name] = redondear($elem.val() , 8, true);
           } else {
             resultado[name] = redondear($elem.val());
           }
