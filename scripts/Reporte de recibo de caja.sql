@@ -2,7 +2,7 @@ use sis11
 
 go
 
-declare @transferId varchar(50) = '455';
+declare @transferId varchar(50) = '988';
 
 SELECT 
     t.id TransferId,
@@ -22,11 +22,11 @@ SELECT
     pol.code AS nro_póliza,
     IsNULL(pp.numberInYear,0) AS nro_cuota,
     '' AS o_pagos,
-    montos.primas + (tt.total - at.moneyInAmount) primas,
+    CASE WHEN tt.total = 0 THEN at.moneyInAmount ELSE montos.primas + (tt.total - at.moneyInAmount) END primas,
 	montos.gastos_de,
 	montos.impuesto,
     montos.interes,
-    tt.total + (tt.total - at.moneyInAmount) AS total
+    CASE WHEN tt.total = 0 THEN at.moneyInAmount ELSE tt.total + (tt.total - at.moneyInAmount) END AS total
 	,at.moneyInAmount montoPagadoCuota
 	,pt.*
 	,ad.supplementaryAmount [Transito]
@@ -45,10 +45,10 @@ FROM transfer AS t
 				 FROM PayPlanDetail pd 
 				 WHERE pd.payPlanId = pp.id) dd
 
-	OUTER APPLY (SELECT dd.Prima / pp.minimum pPrima
-						, dd.Impuesto / pp.minimum pImpuesto
-						, dd.Gasto / pp.minimum pGasto
-						, dd.Interes / pp.minimum pInteres) pt
+	OUTER APPLY (SELECT CASE WHEN pp.minimum  = 0 THEN 0 ELSE ISNULL(dd.Prima,0) / pp.minimum END pPrima
+						, CASE WHEN pp.minimum  = 0 THEN 0 ELSE ISNULL(dd.Impuesto,0) / pp.minimum END pImpuesto
+						, CASE WHEN pp.minimum  = 0 THEN 0 ELSE ISNULL(dd.Gasto,0) / pp.minimum END pGasto
+						, CASE WHEN pp.minimum  = 0 THEN 0 ELSE ISNULL(dd.Interes,0) / pp.minimum END pInteres) pt
 
 	OUTER APPLY (SELECT CAST(pt.pPrima * at.moneyInAmount AS DECIMAL(18,2)) AS primas,
 						CAST(pt.pImpuesto * at.moneyInAmount AS DECIMAL(18,2)) AS impuesto,
@@ -56,4 +56,3 @@ FROM transfer AS t
 						CAST(pt.pInteres * at.moneyInAmount AS DECIMAL(18,2)) AS interes) AS montos
 	OUTER APPLY (SELECT (montos.primas + montos.impuesto + montos.interes + montos.gastos_de) total) tt
 WHERE t.id = (select top 1 value from STRING_SPLIT(@transferId,','))
-

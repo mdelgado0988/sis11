@@ -21,26 +21,7 @@ let gridSelectedIndex = null;
 let contractId = 0;
 let tipoContratoSelected = "";
 let tipoPrimaSelected = "";
-const policyId = window.location.href.split('/')[5] || 3396;
 
-const TIPO_MOVIMIENTO_ES = {
-  ANNIVERSARY: "Renovación",
-  CANCELLATION: "Cancelación",
-  CHANGE: "Endoso",
-  NEW: "Nuevo",
-  REVERT: "Reversión"
-};
-
-const cfgCoberturaReaseguro = [
-  { lob: 96, name: "cfgCoberturaProductoReaTecnicos" },
-  { lob: 20, name: "cfgCoberturaProductoReaVidaColectivo" },
-  { lob: 31, name: "cfgCoberturaProductoReaVida" },
-  { lob: 52, name: "cfgCoberturaProductoReaRiesgosVarios" },
-  { lob: 1, name: "cfgCoberturaProductoRea" },
-  { lob: 81, name: "cfgCoberturaProductoRea" },
-  { lob: 82, name: "cfgCoberturaProductoRea" },
-  { lob: 83, name: "cfgCoberturaProductoRea" }
-]
 
 // ===== Datos de prueba =====
 let aceptantes = [
@@ -50,7 +31,7 @@ let aceptantes = [
 let reaseguradoresData = [
   { name: "GLOBAL", contactId: 1, lineId: "Cuota Parte", cessionId: 101, split: 30, sumInsured: 10000, premium: 500, commission: 50, tax: 25 }
 ];
-const distribuciones = ["RET", "CUOTA PARTE", "EXCEDENTE 1", "FAC", "FRO"];
+const distribuciones = ["RET", "CUOTA PARTE", "FAC", "FRO"];
 
 const filasControles = [
   [
@@ -70,7 +51,7 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "msnot", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "mpnot", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcnot", valor: 0, readonly: true },
-    { tipo: "number2", nombre: "", id: "mcnot", valor: 0, readonly: true },    
+    { tipo: "number2", nombre: "", id: "mcnot", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "srnot", valor: 0, readonly: true },
     { tipo: "percent8", nombre: "", id: "pinot", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "minot", valor: 0, readonly: true }
@@ -82,7 +63,7 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "mpret", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcret", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "mcret", valor: 0, readonly: true },    
-    { tipo: "number2", nombre: "", id: "srret", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "srret", valor: 0, readonly: true },    
     { tipo: "percent8", nombre: "", id: "piret", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "miret", valor: 0, readonly: true }
   ],
@@ -96,17 +77,6 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "srcp", valor: 0, readonly: true },
     { tipo: "percent8", nombre: "", id: "picp", valor: 0 },
     { tipo: "number2", nombre: "", id: "micp", valor: 0 }
-  ],
-  [
-    { tipo: "label", nombre: "Excedente 1", id: "lblExcedente1", tieneAceptante: true, contrato: "Excedente 1" },
-    { tipo: "percent8", nombre: "", id: "pex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "msex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mpex1", valor: 0 },
-    { tipo: "percent8", nombre: "", id: "pcex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mcex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "srex1", valor: 0, readonly: true },
-    { tipo: "percent8", nombre: "", id: "piex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "miex1", valor: 0 }
   ],
   [
     { tipo: "label", nombre: "Facultativo", id: "lblFacultativo", tieneAceptante: true, contrato: "FAC" },
@@ -146,16 +116,13 @@ const filasControles = [
 const relaciones = [
   { porcentajeId: "pret", montoId: "mpret", sumaId: "msret" }, 
   { porcentajeId: "pcp", montoId: "mpcp", sumaId: "mscp", comisionId: "mccp", pcomisionId: "pccp", montoCalculoId: "mpcp", pimpuestoId: "picp", montoImpuestoId: "micp", saldoRea: "srcp" },  
-  { porcentajeId: "pex1", montoId: "mpex1", sumaId: "msex1", comisionId: "mcex1", pcomisionId: "pcex1", montoCalculoId: "mpex1", pimpuestoId: "piex1", montoImpuestoId: "miex1", saldoRea: "srex1" },  
   { porcentajeId: "pfp", montoId: "mpfp", sumaId: "msfp", comisionId: "mcfp", pcomisionId: "pcfp", montoCalculoId: "mpfp", pimpuestoId: "pifp", montoImpuestoId: "mifp", saldoRea: "srfp" },
   { porcentajeId: "pfo", montoId: "mpfo", sumaId: "msfo", comisionId: "mcfo", pcomisionId: "pcfo", montoCalculoId: "mpfo", pimpuestoId: "pifo", montoImpuestoId: "mifo", saldoRea: "srfo" },  
   { porcentajeId: "pccp", montoId: "mccp", sumaId: "", montoCalculoId: "mpcp", saldoRea: "srcp" },
-  { porcentajeId: "pcex1", montoId: "mcex1", sumaId: "", montoCalculoId: "mpex1", saldoRea: "srex1" },    
-  { porcentajeId: "pcfp", montoId: "mcfp", sumaId: "", montoCalculoId: "mpfp", saldoRea: "srfp" },  
-  { porcentajeId: "pcfo", montoId: "mcfo", sumaId: "", montoCalculoId: "mpfo", saldoRea: "srfo" },
-  { porcentajeId: "picp", montoId: "micp", sumaId: "", montoCalculoId: "mpcp" },
-  { porcentajeId: "piex1", montoId: "miex1", sumaId: "", montoCalculoId: "mpex1" },
+  { porcentajeId: "picp", montoId: "micp", sumaId: "", montoCalculoId: "mpcp", saldoRea: "srfp" },
+  { porcentajeId: "pcfp", montoId: "mcfp", sumaId: "", montoCalculoId: "mpfp", saldoRea: "srfo" },
   { porcentajeId: "pifp", montoId: "mifp", sumaId: "", montoCalculoId: "mpfp" },
+  { porcentajeId: "pcfo", montoId: "mcfo", sumaId: "", montoCalculoId: "mpfo" },
   { porcentajeId: "pifo", montoId: "mifo", sumaId: "", montoCalculoId: "mpfo" }
 ];
 
@@ -170,47 +137,48 @@ relaciones.forEach(r => {
       };
 });
 
+const policyId = window.location.href.split('/')[5] || 3253;
+
+const TIPO_MOVIMIENTO_ES = {
+  ANNIVERSARY: "Renovación",
+  CANCELLATION: "Cancelación",
+  CHANGE: "Endoso",
+  NEW: "Nuevo",
+  REVERT: "Reversión"
+};
+
 ///////////////////////////////////////////////////////////
 /// Principales
 ///////////////////////////////////////////////////////////
 
 async function saveChanges() {
 
-  try{
+  //Validar totales distribuidos
+  const valida = validaTotales();
+  if(!valida) return;
   
-    showLoading("Actualizando...");
-    //Validar totales distribuidos
-    const valida = validaTotales();
-    if(!valida) return;
-    
-    //Actualizar montos al contrato existente en caso que exista 
-    let newCessions = distribuyeContrato();
-    if(newCessions.length == 0)
-      return;
+  //Actualizar montos al contrato existente en caso que exista 
+  let newCessions = distribuyeContrato();
+  if(newCessions.length == 0)
+    return;
 
-    let resultado = await cleanCessions();  
-    if(!resultado.ok){
-      mostrarNotificacion(`Error en la creación del reaseguro, contacte a sistemas : ${resultado.msg}` , "warning");
-      return;
-    }    
+  let resultado = await cleanCessions();  
+  if(!resultado.ok){
+    mostrarNotificacion(`Error en la creación del reaseguro, contacte a sistemas : ${resultado.msg}` , "warning");
+    return;
+  }    
 
-    resultado = await addCessions(newCessions);
-    if(resultado.isOk){        
-      newCessions = resultado.newSaveCessions;
-      mostrarNotificacion(`Distribución de reaseguro guardada satisfactoriamente` , "success");
-      cessions = newCessions;
-      preserveDistribution();
-      gridData = mapCessionsToGrid(cessions); //Actualizamos gridData con los nuevos valores calculados
-      cargarDataGrid();
-      $(`#gridDistribucionBody tr[data-index="${gridSelectedIndex}"]`).trigger("click");
-    }
-              
-  }catch (error){
-    mostrarNotificacion(`Error guardando cambios : ${error.msg}` , "error");
+  resultado = await addCessions(newCessions);
+  if(resultado.isOk){        
+    newCessions = resultado.newSaveCessions;
+    mostrarNotificacion(`Distribución de reaseguro guardada satisfactoriamente` , "success");
+    cessions = newCessions;
+    preserveDistribution();
+    gridData = mapCessionsToGrid(cessions); //Actualizamos gridData con los nuevos valores calculados
+    cargarDataGrid();
+    $(`#gridDistribucionBody tr[data-index="${gridSelectedIndex}"]`).trigger("click");
   }
-  finally{
-    hideLoading();
-  }
+            
 }
 
 function distribuyeContrato() {
@@ -224,9 +192,7 @@ function distribuyeContrato() {
       pfp, msfp, mpfp,
       pcfp, mcfp, pifp, mifp,
       pfo, msfo, mpfo,
-      pcfo, mcfo, pifo, mifo, mpnot,
-      pex1, msex1, mpex1,
-      pcex1, mcex1, piex1, miex1
+      pcfo, mcfo, pifo, mifo, mpnot
     };
   
     const resultado = {
@@ -236,9 +202,7 @@ function distribuyeContrato() {
       pfp, msfp, mpfp,
       pcfp, mcfp, pifp, mifp,
       pfo, msfo, mpfo,
-      pcfo, mcfo, pifo, mifo, mpnot,
-      pex1, msex1, mpex1,
-      pcex1, mcex1, piex1, miex1
+      pcfo, mcfo, pifo, mifo, mpnot
     };
     
     // Recorrer y asignar valor al elemento con id igual al nombre de la variable
@@ -246,7 +210,7 @@ function distribuyeContrato() {
         const $elem = $(`#${name}`);
         if ($elem.length) {
           if (name.startsWith("p")) {
-            resultado[name] = redondear($elem.val() , 8, true);
+            resultado[name] = redondear($elem.val() , 8);
           } else {
             resultado[name] = redondear($elem.val());
           }
@@ -257,7 +221,6 @@ function distribuyeContrato() {
     const tieneCP = (resultado["pcp"] + resultado["mscp"] + resultado["mpcp"] + resultado["mccp"] + resultado["micp"]) > 0;
     const tieneFAC = (resultado["pfp"] + resultado["msfp"] + resultado["mpfp"] + resultado["mcfp"] + resultado["mifp"]) > 0;
     const tieneFRO = (resultado["pfo"] + resultado["msfo"] + resultado["mpfo"] + resultado["mcfo"] + resultado["mifo"]) > 0;
-    const tieneEX1 = (resultado["pex1"] + resultado["msex1"] + resultado["mpex1"] + resultado["mcex1"] + resultado["miex1"]) > 0;
   
     let newCessions = JSON.parse(JSON.stringify(cessions));
   
@@ -279,25 +242,6 @@ function distribuyeContrato() {
           totalSumaRe: "mscp",
           totalPrimaCed: "mpret",
           totalPrimaRe: "mpcp",
-          totalPrimaNT: "mpnot"
-        }
-      });
-
-    //Se borran las líneas donde no se haya distribuido el contrato
-    if(!tieneEX1)
-      newCessions = newCessions.filter(item => filterConditionNotIn("EXCEDENTE 1", item));
-    else
-      distribuyeSegunContrato(newCessions, resultado, {
-        tipoContrato: "Excedente 1",
-        usaCedant: true,
-        getPorContrato: (r) => r["pex1"] / 100,
-        keys: {
-          porcentajeRe: "pex1",
-          montoComision: "mcex1",
-          montoImpuesto: "miex1",
-          porcentajeComision: "pcex1",
-          totalSumaRe: "msex1",
-          totalPrimaRe: "mpex1",
           totalPrimaNT: "mpnot"
         }
       });
@@ -338,8 +282,6 @@ function distribuyeContrato() {
         }
       });
 
-    ajustaTotales(newCessions, resultado);
-  
     return newCessions ?? [];
     
   } catch (error) {
@@ -439,6 +381,7 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
 
   });
 
+  debugger;
   // =========================
   // Ajustes a nivel contrato
   // =========================
@@ -549,22 +492,6 @@ async function addCessions(newCessions){
   return { isOk: isOk, newSaveCessions: newSaveCessions};
 }  
 
-function ajustaTotales(newCessions, resultado) {
-  const noTecnicatotal = resultado["mpnot"];
-
-  const totalSuma = newCessions.reduce((acc, item) => {
-    if (item.contractId == contractId) {
-      return acc + (Number(item.nonTechnicalPremium) || 0);
-    }
-    return acc;
-  }, 0);
-
-  const primerCobertura = newCessions.find(item => item.contractId == contractId);
-  
-  primerCobertura.nonTechnicalPremium += redondear(noTecnicatotal - totalSuma);
-  
-}
-
 function dameTotal(newCessions, contrato, field, validaCobertura = false) {
   const totalSuma = newCessions.reduce((acc, item) => {
     if (filterCondition(contrato, item)) {
@@ -640,7 +567,6 @@ function filterConditionTotal(c) {
   );
 }
 
-
 function onRowSelected(row) {
 
   let pret = 0, msret = 0, mpret = 0, pcret = 0, mcret = 0, 
@@ -649,11 +575,8 @@ function onRowSelected(row) {
   pfp = 0, msfp = 0, mpfp = 0, 
   pcfp = 0, mcfp = 0, pifp = 0, mifp = 0, 
   pfo = 0, msfo = 0, mpfo = 0, 
-  pcfo = 0, mcfo = 0, pifo = 0, mifo = 0,
-  pex1 = 0, msex1 = 0, mpex1 = 0, 
-  pcex1 = 0, mcex1 = 0, piex1 = 0, miex1 = 0,
-  premium = 0, mpnot = 0,
-  srcp = 0, srex1 = 0, srfp = 0, srfo = 0;
+  pcfo = 0, mcfo = 0, pifo = 0, mifo = 0, premium = 0, mpnot = 0,
+  srcp = 0, srfp = 0, srfo = 0;
 
   //convierto distribuciones a un arreglo de objetos mapeando el valor
   const distribucionesCalculo = distribuciones.map(x => ({ name: x, porcentajesCalculados: null }));
@@ -666,10 +589,11 @@ function onRowSelected(row) {
       const dist = calc.name;
 
       const distReas = cessions.filter(b => filterCondition(dist, b));
+
       if(distReas.length <= 0){          
         return;
       }
-
+      
       distReas.forEach(distribucion => {
 
         //Calcuando los porcentajes solo una única vez por contrato, ya que el porcentaje es igual para todas las filas del mismo contrato
@@ -682,7 +606,6 @@ function onRowSelected(row) {
 
           const map = {
             "CUOTA PARTE": v => pcp = v,
-            "EXCEDENTE 1": v => pex1 = v,
             "FAC": v => pfp = v,
             "FRO": v => pfo = v
           };
@@ -700,19 +623,13 @@ function onRowSelected(row) {
         msret += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredCedant);
         mpret += distribucion.premiumCedant;
         premium += distribucion.premium;
-  
+          
         switch(dist){
           case "CUOTA PARTE":
             mscp += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
             mpcp += distribucion.premiumRe;
             mccp += distribucion.comissionCedant;
             micp += distribucion.tax;
-            break;
-          case "EXCEDENTE 1":
-            msex1 += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
-            mpex1 += distribucion.premiumRe;
-            mcex1 += distribucion.comissionCedant;
-            miex1 += distribucion.tax;
             break;
           case "FAC":
             msfp += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
@@ -738,16 +655,14 @@ function onRowSelected(row) {
 
   //redondeamos para ser mas precisos:
   //ret
-  pret = normalizarPorcentaje(pret);
-  pret = redondear(pret * 100,8, true);
+  pret = redondear(pret * 100,8);
   msret = redondear(msret,2);
   mpret = redondear(mpret,2);
   premium = redondear(premium,2);
   mpnot = redondear(mpnot,2);  
 
   //cp
-  pcp = normalizarPorcentaje(pcp);
-  pcp = redondear(pcp * 100,8, true);
+  pcp = redondear(pcp * 100,8);
   mscp = redondear(mscp,2);
   mpcp = redondear(mpcp,2);
   mccp = redondear(mccp,2);
@@ -756,20 +671,8 @@ function onRowSelected(row) {
   pccp = calcularPorcentaje(mpcp, mccp);
   picp = calcularPorcentaje(mpcp, micp);
 
-  //ex1
-  pex1 = normalizarPorcentaje(pex1);
-  pex1 = redondear(pex1 * 100,8, true);
-  msex1 = redondear(msex1,2);
-  mpex1 = redondear(mpex1,2);
-  mcex1 = redondear(mcex1,2);
-  srex1 = redondear(mpex1 - mcex1,2);
-  miex1 = redondear(miex1,2);
-  pcex1 = calcularPorcentaje(mpex1, mcex1);
-  piex1 = calcularPorcentaje(mpex1, miex1);
-
   //fac
-  pfp = normalizarPorcentaje(pfp);
-  pfp = redondear(pfp * 100,8, true);
+  pfp = redondear(pfp * 100,8);
   msfp = redondear(msfp,2);
   mpfp = redondear(mpfp,2);
   mcfp = redondear(mcfp,2);
@@ -779,8 +682,7 @@ function onRowSelected(row) {
   pifp = calcularPorcentaje(mpfp, mifp);  
 
   //fro
-  pfo = normalizarPorcentaje(pfo);
-  pfo = redondear(pfo * 100,8, true);
+  pfo = redondear(pfo * 100,8);
   msfo = redondear(msfo,2);
   mpfo = redondear(mpfo,2);
   mcfo = redondear(mcfo,2);
@@ -789,23 +691,16 @@ function onRowSelected(row) {
   pcfo = calcularPorcentaje(mpfo, mcfo);
   pifo = calcularPorcentaje(mpfo, mifo);
 
-  const diff = 100 -(pret + pcp + pex1 + pfp + pfo);
-  if(diff > 0 && diff < 0.01){
-    if(pret > 0) pret = pret + diff;
-    else if(pcp > 0) pcp = pcp + diff;
-    else if(pex1 > 0) pex1 = pex1 + diff;
-    else if(pfp > 0) pfp = pfp + diff;
-    else if(pfo > 0) pfo = pfo + diff;
-  }
 
   // Creamos un arreglo con los nombres de todas las variables
   const valores = {
     pret, msret, mpret, pcret, mcret,
-    piret, miret, pcp, mscp, mpcp, pccp, mccp, picp, micp,
-    pfp, msfp, mpfp, pcfp, mcfp, pifp, mifp,
-    pfo, msfo, mpfo, pcfo, mcfo, pifo, mifo, mpnot,
-    pex1, msex1, mpex1, pcex1, mcex1, piex1, miex1,
-    srcp, srex1, srfp, srfo
+    piret, miret, pcp,
+    mscp, mpcp, pccp, mccp, picp, micp,
+    pfp, msfp, mpfp,
+    pcfp, mcfp, pifp, mifp,
+    pfo, msfo, mpfo,
+    pcfo, mcfo, pifo, mifo, mpnot, srcp, srfp, srfo
   };
   
   // Recorrer y asignar valor al elemento con id igual al nombre de la variable
@@ -820,16 +715,8 @@ function onRowSelected(row) {
 
 }
 
-function normalizarPorcentaje(valor, tolerancia = 0.0001) {
-    const redondeado = Number(valor.toFixed(2));
-
-    return Math.abs(valor - redondeado) <= tolerancia
-        ? redondeado
-        : valor;
-}
-
 async function loadCessions(){
-  const RepoCession = await me.exe("RepoCession", { operation: "GET", filter: `lifePolicyId = ${policyId} AND overwritten = 0` });  
+  const RepoCession = await me.exe("RepoCession", { operation: "GET", filter: `lifePolicyId = ${policyId}` });  
   cessions = RepoCession.outData ?? [];
 
   cessions = filterCurrentCessions(cessions, policyId);
@@ -925,10 +812,9 @@ async function listarAceptantes(){
 }
 
 async function loadConfigCoverages(){
-  const tableName = cfgCoberturaReaseguro.find(x => x.lob == policy.lob)?.name ?? "cfgCoberturaProductoRea";
-  const tableConfig = await me.exe("GetFullTable", { table: tableName });
+  const tableConfig = await me.exe("GetFullTable", { table: "cfgCoberturaProductoRea" });
   config = mapearTablaConfig(tableConfig.outData ?? []);
-  config = config.filter(x => x.productCode == policy.productCode);
+  config = config.filter(x => x.lobCode == policy.lob && x.productCode == policy.productCode);
 }
 
 async function loadDataEntities(){
@@ -960,24 +846,23 @@ function calculaTotales() {
   try {  
   
     // Creamos un arreglo con los nombres de todas las variables
-    const totales = { tp, tms, tmp, tpc, tmc, tpi, tmi};
-    const forzar = true;
+    const totales = { tp, tms, tmp, tpc, tmc, tpi, tmi, tsr};
   
-    totales.tp = redondear($("#pret").val(),8, forzar) + redondear($("#pcp").val(),8, forzar) + redondear($("#pex1").val(),8, forzar) + redondear($("#pfp").val(),8, forzar) + redondear($("#pfo").val(),8, forzar) + redondear($("#pnot").val(),8, forzar);
-    totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msex1").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val());
-    totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpex1").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val());
-    totales.tpc = redondear($("#pcret").val(),8, forzar) + redondear($("#pccp").val(),8, forzar) + redondear($("#pcex1").val(),8, forzar) + redondear($("#pcfp").val(),8, forzar) + redondear($("#pcfo").val(),8, forzar) + redondear($("#pcnot").val(),8, forzar);
-    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear ($("#mcex1").val()) + redondear ($("#mcfp").val()) + redondear ($("#mcfo").val()) + redondear ($("#mcnot").val());
-    totales.tpi = redondear ($("#piret").val(),8, forzar) + redondear ($("#picp").val(),8, forzar) + redondear($("#piex1").val(),8, forzar) + redondear($("#pifp").val(),8, forzar) + redondear($("#pifo").val(),8, forzar) + redondear($("#pinot").val(),8, forzar);
-    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
-    totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srex1").val()) + redondear($("#srfo").val());
+    totales.tp = redondear($("#pret").val(),8) + redondear($("#pcp").val(),8) + redondear($("#pfp").val(),8) + redondear($("#pfo").val(),8) + redondear($("#pnot").val(),8);
+    totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val());
+    totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val());
+    totales.tpc = redondear($("#pcret").val(),8) + redondear($("#pccp").val(),8) + redondear($("#pcfp").val(),8) + redondear($("#pcfo").val(),8) + redondear($("#pcnot").val(),8);
+    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear($("#mcfp").val()) + redondear($("#mcfo").val()) + redondear($("#mcnot").val());
+    totales.tpi = redondear($("#piret").val(),8) + redondear($("#picp").val(),8) + redondear($("#pifp").val(),8) + redondear($("#pifo").val(),8) + redondear($("#pinot").val(),8);
+    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
+    totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srfo").val());
   
-    totales.tp = redondear(totales.tp, 8, forzar);
+    totales.tp = redondear(totales.tp, 8);
     totales.tms = redondear(totales.tms);
     totales.tmp = redondear(totales.tmp);
-    totales.tpc = redondear(totales.tpc, 8, forzar); 
+    totales.tpc = redondear(totales.tpc, 8); 
     totales.tmc = redondear(totales.tmc);
-    totales.tpi = redondear(totales.tpi, 8, forzar); 
+    totales.tpi = redondear(totales.tpi, 8); 
     totales.tmi = redondear(totales.tmi);
     totales.tsr = redondear(totales.tsr);
       
@@ -1313,16 +1198,7 @@ function renderReaseguradores() {
   // ===== GUARDAR =====
   $(document).off("click", "#btnGuardarDistribucion")
     .on("click", "#btnGuardarDistribucion", async () => {
-      try{
-        showLoading("Guardando aceptantes...");
-        await guardarAceptantes();
-      }
-      catch(error){
-        console.error(error);
-      }
-      finally {
-        hideLoading();
-      }
+    await guardarAceptantes();
   });
     
   // ===== AGREGAR =====
@@ -1524,12 +1400,7 @@ function agruparParticipantsCuotaParte(cessions, contrato) {
 
   cessions
     .filter(c => filterCondition(contrato, c))
-    .flatMap(c =>
-      (c.Participants || []).map(p => ({
-        ...p,
-        coverageCode: c.coverageCode
-      }))
-    )
+    .flatMap(c => c.Participants || [])
     .forEach(p => {
 
       const key = p.contactId;
@@ -1565,12 +1436,12 @@ function agruparParticipantsCuotaParte(cessions, contrato) {
 
       // ===== SOLO PRIMER REGISTRO =====
       if (!acc._primerProcesado) {
-        acc.split += p.split || 0;        
+        acc.split += p.split || 0;
+        acc.sumInsured += p.sumInsured || 0;
         acc._primerProcesado = true;
       }
 
       // ===== RESTO SIEMPRE SUMA =====
-      acc.sumInsured += montoSiEsCobertura(p.coverageCode, p.sumInsured || 0);
       acc.premium += p.premium || 0;
       acc.commission += p.commission || 0;
       acc.tax += p.tax || 0;
@@ -1828,8 +1699,8 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     const isNumber = $(input).hasClass("number");
 
     //Redondemos a dos decimales, según tarea GLOB-633
-    const maxDecimals = isNumber ? 2 : 8;
-    //const maxDecimals = 2;
+    //const maxDecimals = isNumber ? 2 : 8;
+    const maxDecimals = 2;
 
     // Guardar la posición actual del cursor
     let cursorPos = input.selectionStart;
@@ -1920,7 +1791,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
       let montoImpuesto = formatearRedondeado((montoCalculoImpuesto * porcentajeImpuesto) / 100);
       $impuesto.val(montoImpuesto);
     }
-
+    
     if($suma.length > 0)
       $suma.val(formatearRedondeado(suma));
   }
@@ -1943,16 +1814,7 @@ function agruparCessionsPorLinea(cessions) {
   const grouped = new Map();
 
   cessions.forEach(item => {
-
-    const TIPO_MOVIMIENTO_ES = {
-      ANNIVERSARY: "Renovación",
-      CANCELLATION: "Cancelación",
-      CHANGE: "Endoso",
-      NEW: "Nuevo",
-      REVERT: "Reversión"
-    };
-
-    //const key = `${lineId}-${item.changeId ?? 0}-${item.contractId}`;
+    
     const type = limpiarTexto(item.premiumType);
 
     const key = `${type}-${item.changeId ?? 0}-${item.contractId}`;
@@ -1999,7 +1861,7 @@ function agruparCessionsPorLinea(cessions) {
     g.sumInsuredRe += Number(montoSiEsCobertura(item.coverageCode, item.sumInsuredRe || 0));    
     g.premiumCedant += Number(item.premiumCedant || 0);
     g.premiumRe += Number(item.premiumRe || 0);    
-    g.comissionCedant += Number(item.comissionCedant || 0);
+    g.comissionCedant += Number(item.comissionCedant || 0);    
     g.tax += Number(item.tax || 0);
     g.count++;
   });
@@ -2220,21 +2082,15 @@ function eventosGrid() {
     // obtener índice
     gridSelectedIndex = $(this).data("index");
 
-    // obtener objeto
+    // obtener objeto    
     const rowData = gridData[gridSelectedIndex];
     gridDataSelected = rowData;
     contractId = rowData.Contrato;
     tipoPrimaSelected = rowData.Tipo;
 
-    validaDistribucion(contractId, "Cuota Parte")
-      .then(res => validaDistribucion(contractId, "Excedente 1"))
-      .then(res2 => {
-          onRowSelected(rowData);
-      })
-      .catch(error => {
-          console.error(error);
-      }); 
-        
+    // aquí puedes disparar tu lógica real
+    onRowSelected(rowData);
+    
   });
 
   $(document).off("click", "#btnSeleccionar")
@@ -2245,63 +2101,18 @@ function eventosGrid() {
 
   $(document).off("click", "#btnRecalcular")
     .on("click", "#btnRecalcular", async () => {
-      try {
-        showLoading("Recalculando distribución...");
-        const resultado = await me.exe("ReComputeRe", { policyId: policyId });
-        if(!resultado.ok)
-          mostrarNotificacion(`Error aplicando contrato del reaseguro, contacte a sistemas : ${resultado.msg}` , "warning");
-        else{
-          mostrarNotificacion(`Contrato aplicado satisfactoriamente` , "success"); 
-          await loadCessions();
-          cargarDataGrid();
-          preserveDistribution();
-          $(`#gridDistribucionBody tr[data-index="${gridSelectedIndex}"]`).trigger("click");
-        }     
-      } catch (error) {
-
-      }
-      finally{
-        hideLoading();
-      }
-         
+      const resultado = await me.exe("ReComputeRe", { policyId: policyId });
+      if(!resultado.ok)
+        mostrarNotificacion(`Error aplicando contrato del reaseguro, contacte a sistemas : ${resultado.msg}` , "warning");
+      else{
+        mostrarNotificacion(`Contrato aplicado satisfactoriamente` , "success"); 
+        await loadCessions();
+        cargarDataGrid();
+        preserveDistribution();
+        $(`#gridDistribucionBody tr[data-index="${gridSelectedIndex}"]`).trigger("click");
+      }        
   }); 
       
-}
-
-function marcarDistribucionReadonly(distribucion, readOnly) {
-    const fila = filasControles.find(f =>
-        f.some(c => c.nombre === distribucion)
-    );
-
-    if (!fila) return filasControles;
-
-    fila.forEach(control => {
-        if (control.tipo !== "label") {
-            control.readonly = readOnly;
-            $(`#${control.id}`).prop("readonly", readOnly);
-        }
-    });
-
-}
-
-function vEqual(value){
-    const normalizado = value.trim().toUpperCase();
-    return normalizado;
-}
-
-function validaDistribucion(contractId, name) {
-  return me.exe("GetContracts", { filter: `id = ${contractId}` })
-    .then(GetContracts => {
-      const resultado = GetContracts.outData?.[0];
-      const config = resultado ? JSON.parse(resultado.configJson) : {};
-      const existe = (config?.Lines || []).find(
-        x => vEqual(x.id) == vEqual(name)
-      );
-
-      marcarDistribucionReadonly(name, !existe);
-
-      return existe; // opcional
-    });
 }
 
 function isOferta(){
@@ -2381,7 +2192,7 @@ function resumenPorLinea(cessions) {
     //Cesión
     g.sumInsuredRe += Number(montoSiEsCobertura(item.coverageCode, item.sumInsuredRe || 0));
     g.premiumRe += Number(item.premiumRe || 0);        
-    g.comissionCedant += Number(item.comissionCedant || 0);    
+    g.comissionCedant += Number(item.comissionCedant || 0);        
     g.tax += Number(item.tax || 0);
     g.count++;
 
@@ -3109,64 +2920,4 @@ async function initGridDistribucion() {
   }
 
   console.warn("No se encontró #hiddenDistribucionReaseguro");
-}
-
-function showLoading(text = "Procesando...") {
-
-    if (document.getElementById("global-loading-mask")) {
-        return;
-    }
-
-    const div = document.createElement("div");
-    div.id = "global-loading-mask";
-
-    div.style.cssText = `
-        position: fixed;
-        inset: 0;
-        background: rgba(255,255,255,0.15);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 999999;
-    `;
-
-    div.innerHTML = `
-        <div
-            style="
-                background: #f0f2f5;
-                border: 1px solid #d9d9d9;
-                border-radius: 12px;
-                padding: 28px 36px;
-                box-shadow: 0 8px 24px rgba(0,0,0,.12);
-                text-align: center;
-                min-width: 260px;
-            "
-        >
-            <div class="ant-spin ant-spin-spinning">
-                <span class="ant-spin-dot ant-spin-dot-spin">
-                    <i class="ant-spin-dot-item"></i>
-                    <i class="ant-spin-dot-item"></i>
-                    <i class="ant-spin-dot-item"></i>
-                    <i class="ant-spin-dot-item"></i>
-                </span>
-            </div>
-
-            <div
-                style="
-                    margin-top: 16px;
-                    font-size: 14px;
-                    font-weight: 500;
-                    color: rgba(0,0,0,.85);
-                "
-            >
-                ${text}
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(div);
-}
-
-function hideLoading() {
-    document.getElementById("global-loading-mask")?.remove();
 }
