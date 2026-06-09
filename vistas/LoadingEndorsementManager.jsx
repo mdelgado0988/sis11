@@ -13,13 +13,14 @@
     const BackIcon  =()=><span role='img' aria-label='left'   class='anticon anticon-left'><svg viewBox='64 64 896 896' focusable='false' data-icon='left' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M724 218.3V141c0-6.7-7.7-10.4-12.9-6.3L260.3 486.8a31.86 31.86 0 000 50.3l450.8 352.1c5.3 4.1 12.9.4 12.9-6.3v-77.3c0-4.9-2.3-9.6-6.1-12.6l-360-281 360-281.1c3.8-3 6.1-7.7 6.1-12.6z'></path></svg></span>
     const SaveIcon  =()=><span role='img' aria-label='save'   class='anticon anticon-save'><svg viewBox='64 64 896 896' focusable='false' data-icon='save' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M893.3 293.3L730.7 130.7c-7.5-7.5-16.7-13-26.7-16V112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V338.5c0-17-6.7-33.2-18.7-45.2zM384 184h256v104H384V184zm456 656H184V184h136v136c0 17.7 14.3 32 32 32h320c17.7 0 32-14.3 32-32V205.8l136 136V840zM512 442c-79.5 0-144 64.5-144 144s64.5 144 144 144 144-64.5 144-144-64.5-144-144-144zm0 224c-44.2 0-80-35.8-80-80s35.8-80 80-80 80 35.8 80 80-35.8 80-80 80z'></path></svg></span>
     const DeleteIcon=()=><span role='img' aria-label='delete'class='anticon anticon-delete'><svg viewBox='64 64 896 896' focusable='false' data-icon='delete' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z'></path></svg></span>
-    const { Table, Button, Modal, Empty, Form, Select, Switch, Input, InputNumber, Row, Col, Space, message, notification, Checkbox, Typography } = A;
+    const { Table, Button, Modal, Empty, Form, Select, Switch, Input, InputNumber, Row, Col, Space, message, notification, Checkbox, Typography, DatePicker } = A;
     const { Text } = Typography;
     const { Column } = Table;
     const { confirm } = Modal;
     const { useState, useEffect, useContext, createContext } = React;
     const AppContext = createContext({});
     const useAppContext = ()=> useContext(AppContext);
+    let effectiveDate = new Date().toISOString().slice(0,10);
     /**
      * @function AppProvider
      * @version 1.0.0
@@ -271,8 +272,34 @@
                 setLoadingCov(false)
             }
         }
+        async function ensureMoment(){
+            if(typeof moment !== 'undefined'){
+                return;
+            }
+
+            const response = await exe('ExeChain',{
+                chain:'cmdLoadLibrariesGroupedBordereau',
+                context:'{}'
+            });
+
+            if(!response.ok){
+                throw new Error(response.msg);
+            }
+
+            const {
+                outData:{ momentJs }
+            } = response;
+
+            eval(momentJs);
+
+            if(typeof moment === 'undefined'){
+                throw new Error('No fue posible cargar Moment.js');
+            }
+        }
         async function onSaveLoading(){
             try {
+
+                await ensureMoment();
 
                 if(isPolicyActive){
                     let reason = '';
@@ -283,15 +310,35 @@
                         content: React.createElement(
                             'div',
                             { style: { marginTop: 15 } },
+
+                            React.createElement(
+                                'div',
+                                { style: { marginBottom: 8 } },
+                                'Fecha efectiva:'
+                            ),
+
+                            React.createElement(DatePicker, {
+                                style: {
+                                    width: '100%',
+                                    marginBottom: 15
+                                },
+                                defaultValue: moment(),
+                                format: 'YYYY-MM-DD',
+                                onChange: function(date, dateString){
+                                    effectiveDate = dateString;
+                                }
+                            }),
+
                             React.createElement(
                                 'div',
                                 { style: { marginBottom: 8 } },
                                 'Ingrese la justificación del endoso:'
                             ),
+
                             React.createElement(Input.TextArea, {
                                 rows: 4,
                                 placeholder: 'Escriba el motivo...',
-                                onChange: e => {
+                                onChange: function(e){
                                     reason = e.target.value;
                                 }
                             })
@@ -304,10 +351,15 @@
                                 return Promise.reject();
                             }
 
+                            if (!effectiveDate) {
+                                message.error('Debe seleccionar una fecha efectiva');
+                                return Promise.reject();
+                            }
+
                             setLoadingCov(true);
 
                             try {
-                                await createEndorsement(reason);
+                                await createEndorsement(reason, effectiveDate);
                             } finally {
                                 setLoadingCov(false);
                             }
@@ -386,7 +438,7 @@
             const id = loadings.map( item => item.id).filter( id => !isNaN(id) && id > 0).filter((id, index, self) => self.indexOf(id) === index);
             await exe('DoQuery',{ sql:`DELETE FROM LifeCoverageLoading WHERE id IN (${ id.join(',') })`});
         }
-        async function createEndorsement(reason){
+        async function createEndorsement(reason, effectiveDate){
             try {
                 const covId = coverages.map( item => item.id);
                 const tempNewCoverages = JSON.parse(JSON.stringify(coverages));
@@ -401,6 +453,8 @@
 
                 let newCoverages = [...Coverages.filter( item => !covId.includes(item.id)), ...tempNewCoverages];
 
+                const effectiveDateTime = `${effectiveDate}T12:00:00`;
+
                 const jOldCoverges = JSON.stringify(Coverages),
                     jNewCoverages = JSON.stringify(newCoverages);
                 const dto = {
@@ -408,7 +462,7 @@
                     jNewCoverages,
                     policyId,
                     lifePolicyId: policyId,
-                    effectiveDate: new Date().toISOString().slice(0,10),
+                    effectiveDate: effectiveDate + ' 12:00:00',
                     note: reason
                 }
                 const validation = await exe('ChangeLoading', dto);
@@ -425,7 +479,7 @@
                                 const change = await exe('ChangeLoading', {...dto, operation: 'ADD' });
                                 if(!change.ok) throw change.msg;
                                 debugger
-                                const executeResult = await exe('ExeChangeLoading', {changeId: change.outData.id });
+                                const executeResult = await exe('ExeChangeLoading', {changeId: change.outData.id, exeNow: true });
                                 if(!executeResult.ok) throw executeResult.msg;
                                 showSuccess('Endoso aplicado');
                                 resolve(true);

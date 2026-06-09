@@ -21,7 +21,7 @@ let gridSelectedIndex = null;
 let contractId = 0;
 let tipoContratoSelected = "";
 let tipoPrimaSelected = "";
-const policyId = window.location.href.split('/')[5] || 3396;
+const policyId = window.location.href.split('/')[5] || 3403;
 
 const TIPO_MOVIMIENTO_ES = {
   ANNIVERSARY: "Renovación",
@@ -789,13 +789,15 @@ function onRowSelected(row) {
   pcfo = calcularPorcentaje(mpfo, mcfo);
   pifo = calcularPorcentaje(mpfo, mifo);
 
-  const diff = 100 -(pret + pcp + pex1 + pfp + pfo);
-  if(diff > 0 && diff < 0.01){
-    if(pret > 0) pret = pret + diff;
-    else if(pcp > 0) pcp = pcp + diff;
-    else if(pex1 > 0) pex1 = pex1 + diff;
-    else if(pfp > 0) pfp = pfp + diff;
-    else if(pfo > 0) pfo = pfo + diff;
+  const total = pret + pcp + pex1 + pfp + pfo;
+  const diff = 100 - total;
+
+  if (Math.abs(diff) < 1e-8) {
+      if (pret > 0) pret = redondear(pret + diff, 8, true);
+      else if (pcp > 0) pcp = redondear(pcp + diff, 8, true);
+      else if (pex1 > 0) pex1 = redondear(pex1 + diff, 8, true);
+      else if (pfp > 0) pfp = redondear(pfp + diff, 8, true);
+      else if (pfo > 0) pfo = redondear(pfo + diff, 8, true);
   }
 
   // Creamos un arreglo con los nombres de todas las variables
@@ -928,7 +930,7 @@ async function loadConfigCoverages(){
   const tableName = cfgCoberturaReaseguro.find(x => x.lob == policy.lob)?.name ?? "cfgCoberturaProductoRea";
   const tableConfig = await me.exe("GetFullTable", { table: tableName });
   config = mapearTablaConfig(tableConfig.outData ?? []);
-  config = config.filter(x => x.productCode == policy.productCode);
+  config = config.filter(x => vEqual(x.productCode) == vEqual(policy.productCode));
 }
 
 async function loadDataEntities(){
