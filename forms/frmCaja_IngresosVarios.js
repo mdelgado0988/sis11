@@ -8,7 +8,6 @@
  * Version: 2
  * Task: 114763
  * Description: Implementación de funcionalidad de autocompletado por Nombre e identificación.
- * Cambio: GLOB-638, Mejoras en autocomplete, se muestra mas información del contacto y se permiten búsquedas mixtas por texto e identificación.
  * -----------------------------------------
  */
 var me = this;
@@ -20,19 +19,15 @@ $("#identificacionPagador").attr('readOnly',true);
 /********Inicio de funciones para autocompletar*******************/
 setTimeout(setAutoComplete, 500)
 
-async function setAutoComplete() {
+function setAutoComplete() {
     const campoPagador = document.getElementById('pagador');
     //para evitar sugerencias
-    campoPagador.setAttribute('name', 'no-autocomplete');
     campoPagador.setAttribute('autocomplete', 'off');
-    await autocomplete(campoPagador);
+    agregarAutocomplete(10);
 }
 
-async function getContacts(search = "") {
-    debugger;
-
-    try
-    {           
+  async function obtenerContactos(pagina, cantidad, search) {
+    try {
 
         //reemplazamos cualquier caracter especial para evitar inyección de código o errores en la consulta
         search = search.replace(/[%_]/g, '\\$&');
@@ -56,14 +51,15 @@ async function getContacts(search = "") {
                 filters += `AND TRIM(CONCAT_WS(' ', name, middlename, surname1, surname2)) LIKE '${search}%'`;
             }
         }
-
-        const response = await me.exe('GetContacts', { 
-            size: 200,  //solo los primeros 200 resultados para evitar saturar el sistema
-            filter: filters 
+        
+        const result = await me.exe("GetContacts", {
+            size: cantidad,
+            page: pagina,
+            filter: filters
         });
 
-        return response.outData.map(con => ({
-            nombreContacto: [
+        const data = result.outData.map(con => ({
+            nombreCompleto: [
                 con.name,
                 con.middlename,
                 con.surname1,
@@ -81,166 +77,224 @@ async function getContacts(search = "") {
             codigo: con.id ?? ''
         }));
 
-    }catch(error)
-    {
-        console.error("Error en SetAutoComplete:", error);
-        return [];
+        const total = result.total;
+
+        // Retornamos el objeto con items y total
+        return { items: data, total: total };
+
+    } catch (error) {
+        console.error("Error al obtener contactos:", error);
+        return { items: [], total: 0 }; // fallback si falla
     }
-}
+  }
 
-function autocomplete(input) {
-    let currentFocus;
-    let debounceTimer;
+  function agregarAutocomplete(cantidadPorPagina = 5) {
+    const $input = $('#pagador');
+    const $inputCodigo = $("#hiddenPagadorId");    
+    let $dropdown;
+    let paginaActual = 0;
+    let totalResultados = 0;
+    let filtroActual = "";
 
-    input.addEventListener("input", async function () {
-        debugger;
-        let val = this.value;
-        closeAllLists();
+    async function cargarPagina(pagina, filtro) {
+      try {         
+    
+        const data = await obtenerContactos(pagina, cantidadPorPagina, filtro);
+        totalResultados = data.total; // si tu API devuelve total de registros
+        return data.items; // array [{nombre, codigo}]
+      } catch (error) {
+        return [];
+      }
+    }
+  
+    async function mostrarDropdown(filtro) {
+      try {         
+    
+        filtroActual = filtro;
+        paginaActual = 0;
+        //debugger;
+        const items = await cargarPagina(paginaActual, filtro);
+  
+        if ($dropdown) $dropdown.remove();
+  
+        if (!items.length) return;
+  
+        $dropdown = $("<div></div>").addClass("autocomplete-dropdown").css({
+            position: "absolute",
+            top: $input.position().bottom + $input.outerHeight(),
+            left: $input.position().left,
+            width: $input.outerWidth(),
+            border: "1px solid #d9d9d9",
+            background: "#fff",
+            "z-index": 10001,
+            "max-height": "200px",
+            overflow: "auto",
+            "box-shadow": "0 2px 8px rgba(0,0,0,0.15)"
+        });
+  
+        function renderItems(items) {
+          try {
+                      
+            $dropdown.empty();
+            items.forEach(item => {
 
-        //si val es numérico busco aunque tenga un caracter, si es texto, respeto los dos caracteres para evitar consultas innecesarias
-        const isNumeric = /^\d+$/.test(val);
-        if (!val || (isNumeric && val.length < 1) || (!isNumeric && val.length < 2)) return; // evita consultas innecesarias
-
-        currentFocus = -1;
-
-        // debounce (evita saturar backend)
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
-
-            const arrayOfValues = await getContacts(val);
-
-            let a = document.createElement("DIV");
-            a.setAttribute("id", this.id + "autocomplete-list");
-            a.setAttribute("class", "autocomplete-items");
-            this.parentNode.appendChild(a);
-
-            arrayOfValues.forEach(item => {
-                let b = document.createElement('div');
-
-                b.innerHTML = `
-                    <div style="display:flex; flex-direction:column; padding:8px 12px;">
-                        <div>
-                            <b>${item.codigo || ''}</b> - ${item.nombreContacto || ''}
-                        </div>
-                        <div style="font-size: 12px; color: #666;">
-                            Identificación: ${item.identificacion || ''}
-                        </div>
-                        <div style="font-size: 12px; color: #666;">
-                            Cobis: ${item.noCobis || ''}
-                        </div>
-                    </div>
-                `;
-
-                b.addEventListener("click", function () {
-                    $("#pagador").val(item.nombreContacto || '');
-                    $("#identificacionPagador").val(item.identificacion || '');
-                    closeAllLists();
+                const $item = $("<div></div>").css({
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column"
                 });
 
-                a.appendChild(b);
+                // Línea principal: Código + Nombre
+                const $line1 = $("<div></div>").html(
+                    `<b>${item.codigo || ''}</b> - ${item.nombreCompleto || ''}`
+                );
+
+                // Identificación
+                const $line2 = $("<div></div>").text(
+                    `Identificación: ${item.identificacion || ''}`
+                ).css({
+                    fontSize: "12px",
+                    color: "#666"
+                });
+
+                // Cobis
+                const $line3 = $("<div></div>").text(
+                    `Cobis: ${item.noCobis || ''}`
+                ).css({
+                    fontSize: "12px",
+                    color: "#666"
+                });
+
+                // Armar item
+                $item.append($line1, $line2, $line3);
+
+                // Hover
+                $item.hover(
+                    function(){ $(this).css("background","#bae7ff") },
+                    function(){ $(this).css("background","white") }
+                );
+
+                // Click
+                $item.off('click').click(function(){
+
+                    $input.val(item.nombreCompleto || '');
+                    $inputCodigo.val(item.codigo || '');
+                    $("#identificacionPagador").val(item.identificacion || '');
+
+                    // Guardo la selección válida
+                    $input.data("selectedItem", item);
+
+                    $dropdown.remove();
+                });
+
+                $dropdown.append($item);
             });
-
-        }, 300); // delay 300ms
-    });
-
-    input.addEventListener("keydown", function (e) {
-        let x = document.getElementById(this.id + "autocomplete-list");
-        if (x) x = x.getElementsByTagName("div");
-
-        if (e.keyCode == 40) {
-            currentFocus++;
-            addActive(x);
-        } else if (e.keyCode == 38) {
-            currentFocus--;
-            addActive(x);
-        } else if (e.keyCode == 13) {
-            e.preventDefault();
-            if (currentFocus > -1 && x) x[currentFocus].click();
-        }
-    });
-
-    function addActive(x) {
-        if (!x) return false;
-        removeActive(x);
-        if (currentFocus >= x.length) currentFocus = 0;
-        if (currentFocus < 0) currentFocus = x.length - 1;
-        x[currentFocus].classList.add("autocomplete-active");
-    }
-
-    function removeActive(x) {
-        for (let i = 0; i < x.length; i++) {
-            x[i].classList.remove("autocomplete-active");
-        }
-    }
-
-    function closeAllLists(elmnt) {
-        let x = document.getElementsByClassName("autocomplete-items");
-        for (let i = 0; i < x.length; i++) {
-            if (elmnt != x[i] && elmnt != input) {
-                x[i].parentNode.removeChild(x[i]);
+  
+            // Paginación si hay más de cantidadPorPagina
+            const totalPaginas = (Math.ceil(totalResultados / cantidadPorPagina) - 1);
+            if (totalPaginas > 0) {
+                const $paginacion = $("<div></div>").css({
+                    display: "flex", justifyContent: "space-between", padding: "4px 8px", borderTop: "1px solid #d9d9d9"
+                });
+  
+                const $prev = $("<button>«</button>").css({ cursor: "pointer" }).prop("disabled", paginaActual === 0);
+                const $next = $("<button>»</button>").css({ cursor: "pointer" }).prop("disabled", paginaActual === totalPaginas);
+  
+                $prev.click(async () => {
+                    if (paginaActual > 0) {
+                        paginaActual--;
+                        const items = await cargarPagina(paginaActual, filtroActual);
+                        renderItems(items);
+                    }
+                });
+                $next.click(async () => {
+                    if (paginaActual < totalPaginas) {
+                        paginaActual++;
+                        const items = await cargarPagina(paginaActual, filtroActual);
+                        renderItems(items);
+                    }
+                });
+  
+                $paginacion.append($prev, $next);
+                $dropdown.append($paginacion);
             }
+          
+          } catch (error) {
+            console.error(error);
+          }
         }
-    }
+  
+        renderItems(items);
 
-    document.addEventListener("click", function (e) {
-        closeAllLists(e.target);
+        const $form = $input.closest('form');
+        $form.append($dropdown);
+        activarCerrarDropdown($input, $dropdown);
+        
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  
+    $input.off('input').on("input", function() {
+
+        // Invalida selección previa
+        $input.data("selectedItem", null);
+        $inputCodigo.val('');
+        $("#identificacionPagador").val('');
+
+        const valor = $(this).val().trim();
+
+        if (!valor) {
+            if ($dropdown) $dropdown.remove();
+            return;
+        }
+
+        mostrarDropdown(valor);
     });
 
-    addStyles();
-}
+    $input.off('blur').on("blur", function () {
 
-function addStyles(){
-    let cssTemplate = `
-    /*when hovering an item:*/
-    .autocomplete-items div:hover {
-    background-color: DodgerBlue !important; 
-    color: #ffffff; 
-    }
+        const texto = $(this).val().trim();
+        const selectedItem = $input.data("selectedItem");
 
-    /*when navigating through the items using the arrow keys:*/
-    .autocomplete-active {
-    background-color: DodgerBlue !important; 
-    color: #ffffff; 
-    }
-    `;
+        if (!texto) {
+            $inputCodigo.val('');
+            $("#identificacionPagador").val('');
+            return;
+        }
 
-    let link = document.createElement('style');
-    link.innerHTML = cssTemplate;
-    $('head').append(link)
-    
-}
+        if (!selectedItem) {
+
+            $(this).val('');
+            $inputCodigo.val('');
+            $("#identificacionPagador").val('');
+
+        }
+    });
+          
+  }
+
+  function activarCerrarDropdown($input, $dropdown) {
+  
+      $input.on("mousedown", e => e.stopPropagation());
+      $dropdown.on("mousedown", e => e.stopPropagation());
+  
+      $(document).on("mousedown.dropdown", function (e) {
+          if (
+              !$input.is(e.target) &&
+              !$dropdown.is(e.target) &&
+              $dropdown.has(e.target).length === 0
+          ) {
+              $dropdown.remove();
+              $(document).off("mousedown.dropdown");
+          }
+      });
+  }
+
 /********Fin de funciones para autocompletar*********************/
 
 async function establecePagador() {
   //debugger;
-  /*
-  let sqlStr = "SELECT jIncomeTypeForm FROM Transfer WHERE processId="+me.processId;
-  let datRegistro = await me.exe("DoQuery", { sql: sqlStr });
-  if (!(datRegistro.outData == null || datRegistro.outData.length == 0)) {
-    const datosForm = JSON.parse(datRegistro.outData[0].jIncomeTypeForm);
-    const pagadorId = datosForm.filter(x=> x.name.toLowerCase() == 'pagador')[0].userData;
-    $("#pagadorId").val(pagadorId);
-  }*/
-  
+ 
  };
-
-/*async function cargaPagadores() {
-  //debugger;
-  $("#pagadorId").empty().append('<option>' + "Seleccione el pagador" + '</option>');
-  var sqlStr = "SELECT con.id FROM Contact con INNER JOIN ContactRole conRole ON con.id = conRole.contactId INNER JOIN RoleCatalog catRole ON conRole.role = catRole.code WHERE catRole.name='Pagador'";
-  let pagadores = await me.exe("DoQuery", { sql: sqlStr });
-  for (var i = 0; i < pagadores.outData.length; i++) {
-    let contacto = await me.exe("GetContacts", { filter: 'id =' + pagadores.outData[i].id});
-    $("#pagadorId").append('<option value="' + pagadores.outData[i].id + '">' + contacto.outData[0].FullName + '</option>')
-    //formInstance1.userData.filter(x => x.name == 'pagadorId')[0].values.push({label: contacto.outData[0].FullName, value: pagadores.outData[i].id, selected: false});
-  }
-  if($("#pagadorId").attr('user-data'))
-   $("#pagadorId").val($("#pagadorId").attr('user-data'));
-};
-
-setTimeout(() => {  
-  me = this;
-  cargaPagadores();
-  //establecePagador();
-  
-}, 1500);*/

@@ -27,6 +27,11 @@ setPolicy();
 setProduct();
 setSettlementDocs();
 
+//Remove hotel settlement if the policy doesn't have the corresponding coverage
+if(policy.coverages.length === 0) {
+    docs = docs.filter(x => x?.template !== "finiquito gastos de hoteleria.docx");
+}
+
 // Start generating documents
 for (const doc of docs) {
 
@@ -97,6 +102,18 @@ function setPolicy() {
     if (!policy?.productCode) {
         throw new Error(`La póliza ${policy.code || policy.id} no tiene producto asociado`);
     }
+
+    doCmd({
+        cmd: "LoadEntities",
+        data: {
+            entity: "LifeCoverage",
+            fields: "code",
+            filter: `lifePolicyId = ${policy.id} AND code IN (251, 954)`
+        }
+    });
+
+    policy.coverages = LoadEntities.outData || [];
+
 }
 
 function setProduct() {

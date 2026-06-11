@@ -4,21 +4,19 @@
   2025.12.29
   Nuevo formulario para búsqueda de contactos
   Ref: Pago anticipado caja
-  * Cambio: GLOB-638, Mejoras en autocomplete, se muestra mas información del contacto y se permiten búsquedas mixtas por texto e identificación.
   */
 
-  var mi = this;
+  var me = this;
 
   function logica() {
     try {
 
-      // Agregar autocomplete a Empresa
-      //debugger;
-      const campoPagador = document.getElementById('clientePA');
+        // Agregar autocomplete a Empresa
+        //debugger;
+        const campoPagador = document.getElementById('clientePA');
         //para evitar sugerencias
-        campoPagador.setAttribute('name', 'no-autocomplete');
         campoPagador.setAttribute('autocomplete', 'off');
-      agregarAutocomplete(10);
+        agregarAutocomplete(10);
       
     } catch (error) {
       
@@ -51,7 +49,7 @@
             }
         }
         
-        const result = await mi.exe("GetContacts", {
+        const result = await me.exe("GetContacts", {
             size: cantidad,
             page: pagina,
             filter: filters
@@ -82,7 +80,7 @@
         return { items: data, total: total };
 
     } catch (error) {
-        console.error("Error al obtener consorciados:", error);
+        console.error("Error al obtener contactos:", error);
         return { items: [], total: 0 }; // fallback si falla
     }
   }
@@ -175,10 +173,15 @@
                 );
 
                 // Click
-                $item.click(function(){
+                $item.off('click').click(function(){
+
                     $input.val(item.nombreCompleto || '');
                     $inputCodigo.val(item.codigo || '');
                     $("#identificacionPagador").val(item.identificacion || '');
+
+                    // Guardo la selección válida
+                    $input.data("selectedItem", item);
+
                     $dropdown.remove();
                 });
 
@@ -230,18 +233,40 @@
       }
     }
   
-    $input.on("input", function() {
-        //debugger;
+    $input.off('input').on("input", function() {
+
+        // Invalida selección previa
+        $input.data("selectedItem", null);
+        $inputCodigo.val('');
+        $("#identificacionPagador").val('');
+
         const valor = $(this).val().trim();
-        if (!valor) { if ($dropdown) $dropdown.remove(); return; }
+
+        if (!valor) {
+            if ($dropdown) $dropdown.remove();
+            return;
+        }
+
         mostrarDropdown(valor);
     });
 
-    $input.on("click", function () {
-        const valor = $(this).val().trim();
-    
-        if (valor.length > 0) {
-            $(this).trigger("input"); // dispara la búsqueda
+    $input.off('blur').on("blur", function () {
+
+        const texto = $(this).val().trim();
+        const selectedItem = $input.data("selectedItem");
+
+        if (!texto) {
+            $inputCodigo.val('');
+            $("#identificacionPagador").val('');
+            return;
+        }
+
+        if (!selectedItem) {
+
+            $(this).val('');
+            $inputCodigo.val('');
+            $("#identificacionPagador").val('');
+
         }
     });
           

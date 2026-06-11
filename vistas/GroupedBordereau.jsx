@@ -207,7 +207,7 @@
                 pol.cessions.push(cession);
 
                 // Max values
-                pol.premium = Math.max(pol.premium, cession.premium);
+                pol.premium += cession.premium;
                 pol.sumInsured = Math.max(pol.sumInsured, cession.sumInsured);
                 pol.sumInsuredComputed = Math.max(pol.sumInsuredComputed, cession.sumInsuredComputed);
 
