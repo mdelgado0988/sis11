@@ -8,6 +8,15 @@
   const ReloadIcon   =()=><span role='img' aria-label='reload' class='anticon anticon-reload'><svg viewBox='64 64 896 896' focusable='false' data-icon='reload' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M909.1 209.3l-56.4 44.1C775.8 155.1 656.2 92 521.9 92 290 92 102.3 279.5 102 511.5 101.7 743.7 289.8 932 521.9 932c181.3 0 335.8-115 394.6-276.1 1.5-4.2-.7-8.9-4.9-10.3l-56.7-19.5a8 8 0 00-10.1 4.8c-1.8 5-3.8 10-5.9 14.9-17.3 41-42.1 77.8-73.7 109.4A344.77 344.77 0 01655.9 829c-42.3 17.9-87.4 27-133.8 27-46.5 0-91.5-9.1-133.8-27A341.5 341.5 0 01279 755.2a342.16 342.16 0 01-73.7-109.4c-17.9-42.4-27-87.4-27-133.9s9.1-91.5 27-133.9c17.3-41 42.1-77.8 73.7-109.4 31.6-31.6 68.4-56.4 109.3-73.8 42.3-17.9 87.4-27 133.8-27 46.5 0 91.5 9.1 133.8 27a341.5 341.5 0 01109.3 73.8c9.9 9.9 19.2 20.4 27.8 31.4l-60.2 47a8 8 0 003 14.1l175.6 43c5 1.2 9.9-2.6 9.9-7.7l.8-180.9c-.1-6.6-7.8-10.3-13-6.2z'></path></svg></span>;
   const FilterIcon   =()=><span role='img' aria-label='filter' class='anticon anticon-filter'><svg viewBox='64 64 896 896' focusable='false' data-icon='filter' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M880.1 154H143.9c-24.5 0-39.8 26.7-27.5 48L349 597.4V838c0 17.7 14.2 32 31.8 32h262.4c17.6 0 31.8-14.3 31.8-32V597.4L907.7 202c12.2-21.3-3.1-48-27.6-48zM603.4 798H420.6V642h182.9v156zm9.6-236.6l-9.5 16.6h-183l-9.5-16.6L212.7 226h598.6L613 561.4z'></path></svg></span>;
   const AppContext = createContext({});
+
+  const cfgCoberturaReaseguro = [
+    { name: "cfgCoberturaProductoReaTecnicos" },
+    { name: "cfgCoberturaProductoReaVidaColectivo" },
+    { name: "cfgCoberturaProductoReaVida" },
+    { name: "cfgCoberturaProductoReaRiesgosVarios" },
+    { name: "cfgCoberturaProductoRea" }
+  ];
+  
   const useAppContext =()=> useContext(AppContext);
   const AppProvider=({children})=>{
     const [ showFilter, setShowFilter]= useState(false);
@@ -23,6 +32,7 @@
     const [ filterForm ] = Form.useForm();
     const [ quickFilterForm ] = Form.useForm();
     const [ cmdOption, setcmdOption] = useState('RepoCession');
+    const [config, setConfig] = useState([]); 
     const contractId = Form.useWatch('contractId', filterForm);
     const CessionOpt=[
       {value:'RepoCession', label:'Suscripción'},
@@ -157,7 +167,7 @@
     }
     async function fetchCession( quickFilter = null  ){
 		setCessions([]);
-        //debugger;
+        
         const filter = quickFilter || await getCessionsFilter();
 
         if(!filter){
@@ -199,6 +209,9 @@
                 pol.movementKey === movementKey
             );
 
+            const product = products.find(p => p.parent === cession.LoB && normalizarTexto(p.label) === normalizarTexto(cession.product))
+            cession.productCode = product ? product.value : "";
+
             if (groupIndex >= 0) {
 
                 const pol = group[groupIndex];
@@ -207,13 +220,13 @@
                 pol.cessions.push(cession);
 
                 // Max values
-                pol.premium += cession.premium;
-                pol.sumInsured = Math.max(pol.sumInsured, cession.sumInsured);
-                pol.sumInsuredComputed = Math.max(pol.sumInsuredComputed, cession.sumInsuredComputed);
+                pol.premium +=  cession.premium;
+                pol.sumInsured += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsured);
+                pol.sumInsuredComputed += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredComputed);
 
                 // Totals
-                pol.sumInsuredCedant += cession.sumInsuredCedant;
-                pol.sumInsuredRe += cession.sumInsuredRe;
+                pol.sumInsuredCedant += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant);
+                pol.sumInsuredRe += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe);
                 pol.tax += cession.tax;
                 pol.premiumCedant += cession.premiumCedant;
                 pol.premiumRe += cession.premiumRe;
@@ -241,11 +254,11 @@
                     changeId: cession.changeId,
 
                     premium: cession.premium,
-                    sumInsured: cession.sumInsured,
-                    sumInsuredComputed: cession.sumInsuredComputed,
+                    sumInsured: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsured),
+                    sumInsuredComputed: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredComputed),
 
-                    sumInsuredCedant: cession.sumInsuredCedant,
-                    sumInsuredRe: cession.sumInsuredRe,
+                    sumInsuredCedant: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant),
+                    sumInsuredRe: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe),
 
                     tax: cession.tax,
 
@@ -358,6 +371,90 @@
         },[]);
         setSalvages(grouped)
     }
+    async function loadConfigCoverages() {
+
+        const configData = [];
+
+        for (const table of cfgCoberturaReaseguro) {
+
+            const response = await exe(
+                'GetFullTable',
+                { table: table.name }
+            );
+
+            if (!response.ok)
+                continue;
+
+            configData.push(
+                ...(mapearTablaConfig(response.outData) || [])
+            );
+        }
+
+        setConfig(configData);
+
+        return configData;
+    }
+
+    function montoSiEsCobertura(lobCode, productCode, coverageCode, amount) {
+
+        const coverageConfig = config.find(
+            c => normalizarTexto(c.lobCode) == normalizarTexto(lobCode) &&
+                  normalizarTexto(c.productCode) == normalizarTexto(productCode) &&
+                  normalizarTexto(c.coverageCode) == normalizarTexto(coverageCode)
+        );
+
+        if (!coverageConfig)
+            return amount;
+
+        const suma =
+            String(coverageConfig.isCoverage || '')
+                .trim()
+                .toUpperCase() === 'SI';
+
+        return suma ? amount : 0;
+    }
+
+    function normalizarTexto(valor) {
+        return String(valor || '')
+            .trim()
+            .toUpperCase();
+    }
+    
+    function mapearTablaConfig(data) {
+
+      if (!data || !data.length) return [];
+
+      const headersOriginal = data[0];
+
+      // Resolver nombres duplicados
+      const headers = [];
+      const contador = {};
+
+      headersOriginal.forEach(h => {
+        const key = h.trim();
+
+        if (contador[key]) {
+          contador[key]++;
+          headers.push(`${key}_${contador[key]}`);
+        } else {
+          contador[key] = 1;
+          headers.push(key);
+        }
+      });
+
+      // Mapear filas
+      const result = data.slice(1).map(row => {
+        const obj = {};
+
+        headers.forEach((col, i) => {
+          obj[col] = row[i];
+        });
+
+        return obj;
+      });
+
+      return result;
+    }
 
     const isInvalid = value => {
         // null o undefined
@@ -384,7 +481,7 @@
     }; 
     
     async function getCessionsFilter() {
-        //debugger;
+        
       const values = await filterForm.validateFields();
 
       const allInvalid = isInvalid(values);
@@ -678,10 +775,11 @@
       showFilter, openFilter, closeFilter,
       fetchPol, onApplyFilter, fetchContact,
       cessions, products, lobs,currencies,
-      compareOptions, quickFilterForm, onApplyQuickFilter,
+      compareOptions, quickFilterForm, onApplyQuickFilter, config,
 	  losses, salvages, onDownloadClick
     }
     useEffect(()=>{
+      
       if( typeof moment === 'undefined'){
         exe('ExeChain',{ chain:'cmdLoadLibrariesGroupedBordereau', context:'{}'}).then( response => {
           if(!response.ok) throw new Error(response.msg)
@@ -693,20 +791,7 @@
       }else {
         setLoadingM(false);
       }
-      // if(typeof moment === 'undefined'){
-      //   $.get('https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.30.1/moment-with-locales.min.js').done(function(m){
-      //     eval(m);
-      //     moment.locale('es')
-      //     setLoadingM(false);
-      //   })
-      // }else{
-      //   moment.locale('es');
-      //   setLoadingM(false);
-      // }
-      // if(typeof XLSX === 'undefined'){
-      //   $.get('https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js')
-      //    .done( response => eval(response))
-      // }
+      
       // Load Contract.
       exe('LoadEntities',{ entity:'Contract', fields:'id,code,name,endDate'})
       .then( response => setContracts(response.outData));
@@ -719,6 +804,9 @@
         setProducts(opt);
       })
       exe('RepoCurrency',{ operation:'GET', filter:`enabled=1`}).then( response => setCurrencies(response.outData || []))
+
+      loadConfigCoverages();
+      
     },[]);
     return <AppContext.Provider value={ value }>
     { children }
