@@ -956,7 +956,7 @@
                     });
                   }}
                 >
-                  Generar Lote Excluidos
+                  Re-Ejecutar
                 </Button>
               </Space>       
 
