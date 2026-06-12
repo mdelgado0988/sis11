@@ -11,7 +11,6 @@
   async function logica() {
     try {
 
-      //debugger;
       showProcessingMask();
       setTimeout(hideProcessingMask, 3000);
       
@@ -22,7 +21,6 @@
         idProceso = 4985;
             
       //Cargo las chequeras como evento async.
-      //debugger;
       await generarCheque(idProceso);
 
       hideProcessingMask();
@@ -54,8 +52,6 @@
   async function generarCheque(idProceso) {
     try {
 
-      //debugger;
-      
       var proceso = await mi.exe("LoadEntity", { 
         entity: "proceso",
         filter: "id = " + idProceso
@@ -80,18 +76,20 @@
         return;
       }
 
-      const numeroCheque = await dameChequeExistente(solicitud, tablaChequeId);
+      let numeroCheque = await dameChequeExistente(solicitud, tablaChequeId);
       
       if(numeroCheque != "0" && numeroCheque != ''){
         $("#numeroCheque").val(numeroCheque);
       }
       else{
         //debo generar un nuevo número para que se guarde.
-        await RegistrarChequeNuevo(tablaChequeId, solicitud, idProceso);
+        numeroCheque = await RegistrarChequeNuevo(tablaChequeId, solicitud, idProceso);
       }
 
       //Update cheknum on payment tables
-      await updateChkNumOnPayment(solicitud, numeroCheque);
+      if(numeroCheque && numeroCheque !== "0"){
+        await updateChkNumOnPayment(solicitud, numeroCheque);
+      }      
                  
     } catch (error) {
       console.error(error);
@@ -114,7 +112,6 @@
   async function RegistrarChequeNuevo(tableId, solicitud, procesoId) {
    try {
 
-     debugger;
      var user = await mi.exe("GetCurrentUser");
      const username = user?.outData?.email;
      var contador = await dameContadorChequera(procesoId, solicitud);       
@@ -125,8 +122,9 @@
      });
 
      var numeroCheque = cheque?.outData ?? "0";
-     if (numeroCheque === '0')
-       return;
+     if (numeroCheque === '0'){
+      return '0';
+     }       
          
      const query = `
      UPDATE [table]
@@ -145,9 +143,12 @@
 
      if (resultado.ok)
        $("#numeroCheque").val(numeroCheque);
+
+     return numeroCheque;
      
    } catch (error) {
      console.error(error);
+     return '0';
    } 
   }
 
@@ -183,7 +184,6 @@
      if (checkbookCode === '0')
        return "NA";
 
-     //debugger;
      var checkbook = await mi.exe("LoadEntity",{
           entity: "CheckBook",
           filter: `code='${checkbookCode}'`

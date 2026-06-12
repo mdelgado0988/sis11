@@ -12,7 +12,6 @@ $('label[for="description"]').text('Descripción del siniestro');
 
  async function logica() {
     try { 
-      //debugger;
       await cargarInspectores(false);
       await cargarAjustadores(false);
       $("#inspectorEmail").prop('readonly', true);
@@ -30,7 +29,6 @@ $('label[for="description"]').text('Descripción del siniestro');
       const $input = $("#inspectorName");
       $input.attr('placeholder', 'Procesando...');
 
-      //debugger;
       const fields = "id, CASE WHEN isPerson = 0 THEN surname2 ELSE name + ' ' + surname1 END name";      
       const filtroRol = "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'INS')";
 
@@ -40,7 +38,6 @@ $('label[for="description"]').text('Descripción del siniestro');
           filter: filtroRol
       });
 
-      //debugger;
       const data = result.outData;
       
       actualizarListaSelectFiltrable('inspectorName', 'hiddenInspector', data, limpiar);
@@ -68,7 +65,6 @@ $('label[for="description"]').text('Descripción del siniestro');
       const $input = $("#ajustadorName");
       $input.attr('placeholder', 'Procesando...');
 
-      //debugger;
       const fields = "id, CASE WHEN isPerson = 0 THEN surname2 ELSE name + ' ' + surname1 END name";      
       const filtroRol = "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'ADJ')";
 
@@ -78,7 +74,6 @@ $('label[for="description"]').text('Descripción del siniestro');
           filter: filtroRol
       });
 
-      //debugger;
       const data = result.outData;
       
       actualizarListaSelectFiltrable('ajustadorName', 'hiddenAjustador', data, limpiar);
@@ -118,6 +113,10 @@ $('label[for="description"]').text('Descripción del siniestro');
   
       const textField  = config.textField  || 'text';
       const valueField = config.valueField || 'value';
+      const relatedEmailByInput = {
+        inspectorName: 'inspectorEmail',
+        ajustadorName: 'ajustadorEmail'
+      };
       $input.data('source', config.data || []);
   
       const $wrapper = $('<div>').css('position', 'relative');
@@ -181,6 +180,7 @@ $('label[for="description"]').text('Descripción del siniestro');
           if (!match) {
               $input.val('')
               $hidden.val('0');
+              limpiarPorId(relatedEmailByInput[config.inputId]);
           }
         
       });
@@ -199,8 +199,7 @@ $('label[for="description"]').text('Descripción del siniestro');
   async function cargarEmail(value, field){
     try {
 
-      debugger;
-      if(!value && value <= 0)
+      if(!Number(value))
         return;
       
       const $input = $('#' + field); 
@@ -291,6 +290,15 @@ $('label[for="description"]').text('Descripción del siniestro');
     }).appendTo('head');
   }
 
+  function limpiarPorId(id) {
+    if (!id) return;
+
+    const $el = $("#" + id);
+    if ($el.length) {
+      $el.val("").trigger("input").trigger("change");
+    }
+  }
+
   //inyectarBotonLimpiar
   function inyectarBotonLimpiar(selector) {
     try {
@@ -298,13 +306,6 @@ $('label[for="description"]').text('Descripción del siniestro');
       const relaciones = {
         inspectorName: ["inspectorEmail"],
         ajustadorName: ["ajustadorEmail"]
-      };
-  
-      const limpiarPorId = (id) => {
-        const $el = $("#" + id);
-        if ($el.length) {
-          $el.val("").trigger("input").trigger("change");
-        }
       };
   
       const $input = $(selector);
@@ -365,30 +366,32 @@ $('label[for="description"]').text('Descripción del siniestro');
       }
   
       $input.on("input change", actualizar);
+      $(window).on("resize scroll", actualizar);
       actualizar();
   
       // Observador visibilidad
       const observer = new MutationObserver(() => {
         if (!$input.length || !$input.is(":visible")) {
           $btn.hide();
+          return;
         }
+        actualizar();
       });
   
       observer.observe(document.body, { childList: true, subtree: true });
   
       // Limpieza si se elimina
       const removerObserver = new MutationObserver(() => {
-        if (!$input.length) {
+        if (!document.body.contains($input[0])) {
           $btn.remove();
+          $input.off("input change", actualizar);
+          $(window).off("resize scroll", actualizar);
           observer.disconnect();
           removerObserver.disconnect();
         }
       });
   
       removerObserver.observe(document.body, { childList: true, subtree: true });
-  
-      // Reposicionamiento
-      const intervalId = setInterval(actualizar, 200);
   
     } catch (error) {
       console.log(error);

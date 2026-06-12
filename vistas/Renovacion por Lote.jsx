@@ -69,12 +69,35 @@
         /* Fuerza que el scrollbar horizontal siempre esté reservado */
         .renovacion-view .ant-table-body {
           overflow-x: scroll !important;
+          overflow-y: scroll !important;
           scrollbar-gutter: stable both-edges;
         }
     
         /* Evita que el header se desalineé cuando aparece el scroll */
-        .renovacion-view .ant-table-header {
+        .renovacion-view .ant-table-header,
+        .renovacion-view .ant-table-content {
           scrollbar-gutter: stable both-edges;
+        }
+
+        .renovacion-view .ant-table-body::-webkit-scrollbar {
+          width: 12px;
+          height: 12px;
+        }
+
+        .renovacion-warning-button {
+          background-color: #fa8c16 !important;
+          border-color: #fa8c16 !important;
+        }
+
+        .renovacion-warning-button:hover,
+        .renovacion-warning-button:focus {
+          background-color: #ffa940 !important;
+          border-color: #ffa940 !important;
+        }
+
+        .renovacion-warning-button:active {
+          background-color: #d46b08 !important;
+          border-color: #d46b08 !important;
         }
         
         .fila-no-renovar td {
@@ -890,7 +913,7 @@
     //Tab 3 de detalle del lote
     /********************************************/
 
-    const ActionToolbarDetail = ({ loading, onCalculate, onRefresh, onExclude, onGenerateExcluded, percent, loteId}) => {      
+    const ActionToolbarDetail = ({ loading, onCalculate, onRefresh, onExclude, onGenerateExcluded, onViewResults, percent, loteId}) => {
         return (
           <Row
             style={{ marginBottom: 16, background: '#f0f2f5', padding: '8px', borderRadius: '4px' }}
@@ -937,6 +960,19 @@
                 </Button>
               </Space>       
 
+              <Divider type="vertical" />
+
+              <Space wrap>
+                <Button
+                  type="primary"
+                  className="renovacion-warning-button"
+                  onClick={() => onViewResults()}
+                  icon={<EyeOutlined />}
+                >
+                  Ver resultados
+                </Button>
+              </Space>
+
               <Divider type="vertical" />       
         
               <Space size="middle" align="center">
@@ -967,6 +1003,59 @@
                 status={percent === 100 ? 'success' : 'active'}  />
             </Col>
           </Row>
+        );
+    };
+
+    const ResultRenewQuoteBatchTable = ({ data, loading, total, pagination, handleTableChange }) => {
+
+        const columns = [
+          { title: 'Id Proceso', dataIndex: 'idProceso', width: 120, align: 'center', render: (_, record) => record.idProceso || record.IdProceso || record.processId || record.ProcessId },
+          { title: 'Poliza', dataIndex: 'poliza', width: 160, ellipsis: true, render: (_, record) => record.poliza || record.Poliza || record.policy || record.Policy },
+          { title: 'Mensaje', dataIndex: 'mensaje', ellipsis: true, render: (_, record) => record.mensaje || record.Mensaje || record.message || record.Message }
+        ];
+
+        return (
+          <Table
+            columns={columns}
+            dataSource={data}
+            loading={loading}
+            onChange={handleTableChange}
+            size="small"
+            pagination={{
+                current: pagination.current,
+                pageSize: pagination.pageSize,
+                total: total,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total, range) => `Mostrando ${range[0]}-${range[1]} de ${total}`,
+                pageSizeOptions: ['10','25','50', '100' , '200']
+            }}
+            scroll={{ x: 'max-content', y: 500 }}
+            bordered
+            rowKey={(record, index) => `${record.idProceso || record.IdProceso || record.processId || 'proceso'}-${record.poliza || record.Poliza || record.policy || 'poliza'}-${index}`}
+          />
+        );
+    };
+
+    const ResultRenewQuoteBatchModal = ({ visible, data, loading, total, pagination, handleTableChange, onCancel }) => {
+        return (
+          <Modal
+            title="Resultados"
+            className="renovacion-view"
+            open={visible}
+            onCancel={onCancel}
+            footer={null}
+            width={900}
+            destroyOnClose
+          >
+            <ResultRenewQuoteBatchTable
+              data={data}
+              loading={loading}
+              total={total}
+              pagination={pagination}
+              handleTableChange={handleTableChange}
+            />
+          </Modal>
         );
     };
 
@@ -1045,7 +1134,7 @@
 
     const TabContent3 = ({loteId, wfId,tableData, loadDataLoteDetalle, searchTotal, handleTableChange, 
                           loading, handleRefresh, percent, handleCalculate, handleExclude, selectedRowDetailKeys, onSelectChange,
-                          handleGenerateExcludedBatch}) => {       
+                          handleGenerateExcludedBatch, handleViewResults}) => {
 
          const onRowSelection = {
           selectedRowDetailKeys,
@@ -1065,6 +1154,7 @@
                   onRefresh={handleRefresh}
                   onExclude={handleExclude}
                   onGenerateExcluded={handleGenerateExcludedBatch}
+                  onViewResults={handleViewResults}
                   percent={percent}
                   loteId={loteId}
                 />
@@ -1170,14 +1260,19 @@
       const [loadingBatch, setLoadingBatch] = useState(false);
       const [paginationBatch, setPaginationBatch] = useState({ current: 1, pageSize: 25, total: 0 }); 
       const [paginationDetail, setPaginationDetail] = useState({ current: 1, pageSize: 15, total: 0 }); 
+      const [paginationResults, setPaginationResults] = useState({ current: 1, pageSize: 25, total: 0 });
       const [searchTotalBatch, setSearchTotalBatch] = useState(0);
       const [searchTotalDetail, setSearchTotalDetail] = useState(0);
+      const [searchTotalResults, setSearchTotalResults] = useState(0);
       const [activeTab, setActiveTab] = useState("1");      
       const [loteId, setLoteId] = useState(0);
       const [percent, setPercent] = useState(0);
       const [intervalId, setIntervalId] = useState(null);
       const intervaloTiempo= 2;
       const [selectedRowDetailKeys, setSelectedRowDetailKeys] = useState([]);
+      const [tableDataResults, setTableDataResults] = useState([]);
+      const [loadingResults, setLoadingResults] = useState(false);
+      const [resultsModalVisible, setResultsModalVisible] = useState(false);
           
       const [modalState, setModalState] = useState({
         modalFormVisible: false,
@@ -1267,6 +1362,84 @@
               loteId: loteId,
           };
           loadDataLoteDetalle(params);
+      }
+
+      const handleViewResults = () => {
+
+          if (!loteId) {
+            notification.warning({
+              message: 'Advertencia',
+              description: 'Debe seleccionar un lote primero.',
+              duration: 5
+            });
+            return;
+          }
+
+          const newPagination = { current: 1, pageSize: paginationResults.pageSize || 25, total: 0 };
+          setPaginationResults(newPagination);
+          setResultsModalVisible(true);
+          loadResultRenewQuoteBatchList({
+              pagination: newPagination,
+              loading: true,
+              loteId: loteId
+          });
+      }
+
+      const handleCloseResults = () => {
+          setResultsModalVisible(false);
+      }
+
+      const handleTableChangeResults = (newPagination) => {
+
+          setPaginationResults(newPagination);
+
+          loadResultRenewQuoteBatchList({
+              pagination: newPagination,
+              loading: true,
+              loteId: loteId
+          });
+      }
+
+      const loadResultRenewQuoteBatchList = (params = {}) => {
+
+        if (!params.loteId) {
+          return;
+        }
+
+        setLoadingResults(params.loading);
+
+        const context = `{ loteId: ${params.loteId}, currentPage:${params.pagination.current}, pageSize:${params.pagination.pageSize}}`;
+
+        exe("ExeChain",{
+            chain: "cmdResultRenewQuoteBatchList",
+            context: context
+        })
+        .then(r => {
+          const response = Array.isArray(r) ? (r[0] || {}) : r;
+
+          if (response.ok) {
+
+              const outData = response.outData || {};
+              const resultData = Array.isArray(outData.data)
+                ? outData.data
+                : (Array.isArray(outData) ? outData : []);
+              const resultTotal = Number(outData.total || response.total || resultData.length || 0);
+
+              setSearchTotalResults(resultTotal);
+              setTableDataResults(resultData);
+              setPaginationResults({ ...params.pagination, total: resultTotal });
+
+          } else {
+              notification.error({ message: 'Error', description: response.msg, duration: 10 });
+          }
+        })
+        .catch(error => {
+          notification.error({ message: 'Error', description: error.toString(), duration: 10 });
+        })
+        .finally(() => {
+          setLoadingResults(false);
+        });
+
       }
 
       const loadDataLoteDetalle =(params = {}) => {
@@ -1807,6 +1980,7 @@
                                 selectedRowDetailKeys={selectedRowDetailKeys}
                                 onSelectChange={onSelectChange}
                                 handleGenerateExcludedBatch={handleGenerateExcludedBatch}
+                                handleViewResults={handleViewResults}
                               />
                           </TabPane>
                       </Tabs>
@@ -1817,6 +1991,15 @@
                     modalFormVisible={modalState.modalFormVisible}
                     onReload={reload}
                     onCancel={onClose}
+                    />
+                  <ResultRenewQuoteBatchModal
+                    visible={resultsModalVisible}
+                    data={tableDataResults}
+                    loading={loadingResults}
+                    total={searchTotalResults}
+                    pagination={paginationResults}
+                    handleTableChange={handleTableChangeResults}
+                    onCancel={handleCloseResults}
                     />
               </Content>
           </Layout>

@@ -10,11 +10,9 @@
  * Output: { ok, msg, outData? }
  */
 
-const contexto = context.anniversary;
-const anniversary = contexto?.anniversary || {};
-const newAnniversary = contexto?.newAnniversary || {};
-
-//return anniversary
+const anniversaryContext = context.anniversary;
+const anniversary = anniversaryContext?.anniversary || {};
+const newAnniversary = anniversaryContext?.newAnniversary || {};
 
 if (!anniversary) {
   return {
@@ -27,6 +25,13 @@ if (!anniversary.lifePolicyId) {
   return {
     ok: false,
     msg: 'Missing lifePolicyId in anniversary.'
+  };
+}
+
+if (!newAnniversary.id) {
+  return {
+    ok: false,
+    msg: 'Missing id in newAnniversary.'
   };
 }
 
@@ -84,7 +89,7 @@ function updateAnniversaryInsuredSum(anniversaryId, insuredSum) {
   if (!SetField.ok) {
     return {
       ok: false,
-      msg: SetPolicyField.msg
+      msg: SetField.msg
     };
   }
 
