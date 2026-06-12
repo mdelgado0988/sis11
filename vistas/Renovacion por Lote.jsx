@@ -364,7 +364,7 @@
             //{ title: 'Oferta', dataIndex: 'oferta', width: 90 },
             { title: 'Pendiente', dataIndex: 'pendiente', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
             { title: 'Fecha Creación', dataIndex: 'fechaCreacion', width: 80, render: renderDate, align: 'center' },
-            { title: 'WF', dataIndex: 'batchId', width: 80, align: 'center'}
+            { title: 'Lote', dataIndex: 'batchId', width: 80, align: 'center'}
             //{ title: 'Aniversario Id', dataIndex: 'aniversarioId', hidden: true, width: 150 }
         ];
 
@@ -1328,30 +1328,36 @@
               return;
             }
 
-          exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
+            dameEstadoLote().then(status => {
+              if(status != "FINISHED"){
+                exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
           
-          exe("ExeChain",{
-              chain: "cmdGeneraLoteCotizacionAniversario",
-              context: `{ loteId: ${loteId}, anniversaries: '${JSON.stringify(selectedRowDetailKeys)}' }`
-          }).then(x => {
-
-            const resultado = x.outData;
-            const idLoteQuote = resultado.idLoteQuote
-            setPercent(0);
-            startProgress();
-            notification.info({ message: "Lote de tarificación", description: resultado.msg, duration: 3 });
-            
-            if (resultado.ok){
-               exe("DoBatch", {
-                  "batchId":idLoteQuote
+                exe("ExeChain",{
+                    chain: "cmdGeneraLoteCotizacionAniversario",
+                    context: `{ loteId: ${loteId}, anniversaries: '${JSON.stringify(selectedRowDetailKeys)}' }`
                 }).then(x => {
-                  if(x.ok)
-                    notification.info({ message: "Lote de tarificación", description: `Lote ${idLoteQuote} puesto en proceso`, duration: 3 });
-                }); 
-            }       
-            
-          });
 
+                  const resultado = x.outData;
+                  const idLoteQuote = resultado.idLoteQuote
+                  setPercent(0);
+                  startProgress();
+                  notification.info({ message: "Lote de tarificación", description: resultado.msg, duration: 3 });
+                  
+                  if (resultado.ok){
+                    exe("DoBatch", {
+                        "batchId":idLoteQuote
+                      }).then(x => {
+                        if(!x.ok)
+                          notification.warning({ message: "Lote de tarificación fallido", description: `Lote de cotización ${idLoteQuote} no pudo ser programado, contacte a sistemas`, duration: 3 });
+                      }); 
+                  }       
+                  
+                });
+              }
+              else
+                notification.error({ message: 'Lote renovado', description: 'El lote ya ha sido renovado, no puede cotizar pólizas', duration: 5 });
+            });
+          
         } catch (error) {
           notification.error({ message: 'Error', description: error.toString(), duration: 10 });
         }        

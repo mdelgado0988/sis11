@@ -33,7 +33,7 @@ const regexMap = {
 
 try{
   
-  doCmd({cmd: "GetPing", data: { filter: filter }});
+  //doCmd({cmd: "GetPing", data: { filter: filter }});
   if(!filter)
     return { ok: true, msg: "Nada que filtrar", filter: filter }
   
