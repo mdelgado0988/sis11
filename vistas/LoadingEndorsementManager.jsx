@@ -409,7 +409,6 @@
         }
         async function createLoadings(loadings){
             if(loadings.length === 0) return;
-            debugger
             const values = loadings.map( 
                 load => `(${ load.lifeCoverageId }, ${ load.loading }, '${load.riskType}', '${ load.start.slice(0,10) }', '${ load.end.slice(0,10)}', 1, 0, 0, 1)`
             );
@@ -437,6 +436,23 @@
             if(loadings.length === 0) return;
             const id = loadings.map( item => item.id).filter( id => !isNaN(id) && id > 0).filter((id, index, self) => self.indexOf(id) === index);
             await exe('DoQuery',{ sql:`DELETE FROM LifeCoverageLoading WHERE id IN (${ id.join(',') })`});
+        }
+        async function approveEndorsementWorkflow(processId){
+            const procesoId = Number(processId || 0);
+
+            if(!procesoId){
+                throw 'No se pudo determinar el proceso del endoso para aprobar el flujo.';
+            }
+
+            const result = await exe('GotoStep', {
+                procesoId,
+                estado: 'APROVED'
+            });
+            const response = Array.isArray(result) ? (result[0] || {}) : result;
+
+            if(!response.ok) throw response.msg;
+
+            return response;
         }
         async function createEndorsement(reason, effectiveDate){
             try {
@@ -478,9 +494,9 @@
                             try {
                                 const change = await exe('ChangeLoading', {...dto, operation: 'ADD' });
                                 if(!change.ok) throw change.msg;
-                                debugger
+                                await approveEndorsementWorkflow(change.outData.processId);
                                 const executeResult = await exe('ExeChangeLoading', {changeId: change.outData.id, exeNow: true });
-                                if(!executeResult.ok) throw executeResult.msg;
+                                if(!executeResult.ok) throw executeResult.msg;                                
                                 showSuccess('Endoso aplicado');
                                 resolve(true);
                                 window.location.replace('#/lifePolicy/' + policyId);

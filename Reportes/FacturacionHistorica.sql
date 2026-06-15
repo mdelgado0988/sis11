@@ -2,16 +2,17 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20250317'
-        ,@fend DATE =  '20260317'
+DECLARE  @fstart DATE = '20260601'
+        ,@fend DATE =  '20260617'
 		,@ramo varchar(50) = null
 		,@producto varchar(50) = null
+
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
     lp.code AS Poliza,
     lp.lob AS [Ramo],
-    ISNULL(lob.name, lp.lob) AS [Ramo Descripción],
+
     prod.name AS [Plan],
     CONVERT(VARCHAR, c.birth, 103) AS FechaNacimiento,
     CONCAT_WS(' ',
@@ -24,7 +25,7 @@ SELECT
     CONVERT(VARCHAR, an.created, 103) AS FechaIngreso,
     CONVERT(VARCHAR, an.created, 103) AS FechaEmision,
     ISNULL(refe.ReferidoName, '') AS [Referido por],
-    ISNULL(prc.usuario, '') AS Usuario,
+    ISNULL(prc.usuario, prcp.usuario) AS Usuario,
     CONVERT(VARCHAR, an.[start], 103) AS Desde,
     CONVERT(VARCHAR, an.[anniversary], 103) AS Hasta,
     CASE WHEN an.contractYear = 1 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
@@ -39,13 +40,14 @@ SELECT
         ELSE lp.periodicity 
     END AS [Forma pago],
 
-    ISNULL(snap.insuredSum,0) AS [Suma Aseg],
+    ISNULL(sumaAseg.sumaAseg,0) AS [Suma Aseg],
     ISNULL(snap.surcharges,0) AS Recargos,
     ISNULL(snap.discounts,0) AS Descuentos,
     ISNULL(snap.anualPremium,0) AS [Prima Neta],
     ISNULL(snap.tax,0) AS Impuesto,
     ISNULL(snap.fee,0) AS [Otros Gastos],
     ISNULL(snap.anualTotal,0) AS Monto,
+
     ISNULL(c.nationalId, '0') AS Cobis,
     re.selectReferido_valor,
     ISNULL(gar.txtNoGarantia_valor, '') AS [Nro Garantia],
@@ -57,23 +59,26 @@ SELECT
         WHEN '2' THEN 'Bajo'
         ELSE 'No ha seleccionado'
     END AS [Clase de Riesgo],
-    ISNULL(CONCAT_WS(' ',
-        NULLIF(LTRIM(RTRIM(br.name)), ''),
-        NULLIF(LTRIM(RTRIM(br.middleName)), ''),
-        NULLIF(LTRIM(RTRIM(br.surname1)), ''),
-        NULLIF(LTRIM(RTRIM(br.surname2)), '')
-    ), 'No Tiene') AS [Corredor de Seguros],
+    CASE
+        WHEN NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
+            NULLIF(LTRIM(RTRIM(br.name)), ''),
+            NULLIF(LTRIM(RTRIM(br.middleName)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname1)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname2)), '')
+        ))), '') IS NULL THEN 'No Tiene'
+        ELSE LTRIM(RTRIM(CONCAT_WS(' ',
+            NULLIF(LTRIM(RTRIM(br.name)), ''),
+            NULLIF(LTRIM(RTRIM(br.middleName)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname1)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname2)), ''))
+        ))
+    END AS [Corredor de Seguros],
     benf.name AS Beneficiario,
     NULL AS [Descrip Objeto Afianzado],
-    ISNULL(CONCAT_WS(' ',
-        NULLIF(LTRIM(RTRIM(acre.name)), ''),
-        NULLIF(LTRIM(RTRIM(acre.middleName)), ''),
-        NULLIF(LTRIM(RTRIM(acre.surname1)), ''),
-        NULLIF(LTRIM(RTRIM(acre.surname2)), '')
-    ), 'No Tiene') AS Acreedor,
+    CASE WHEN ISNULL(acref.Acreedor, '') = '' THEN 'No Tiene' ELSE acref.Acreedor END Acreedor,
     ISNULL(c.nationalId, '0') AS [Cuenta Cobis],
     CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro,
-    NULL AS [Es lider],
+    CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS [Es lider],
     ISNULL(cc.name, '') AS Canal
 
 FROM lifePolicy lp
@@ -109,11 +114,53 @@ OUTER APPLY (SELECT
 				cessionBeneficiary NUMERIC(11,0) '$.cessionBeneficiary'
 			) js) snap
 
+OUTER APPLY (
+    SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN ISNULL(cov.insuredSum,0) ELSE 0 END) AS sumaAseg
+    FROM OPENJSON(an.jSnapshot)
+    WITH (
+        Coverages NVARCHAR(MAX) '$.Coverages' AS JSON
+    ) snapCoverages
+
+    OUTER APPLY OPENJSON(snapCoverages.Coverages)
+    WITH (
+        coverageCode INT '$.code',
+        insuredSum DECIMAL(18,2) '$.limit'
+    ) cov
+
+    OUTER APPLY (
+        SELECT TOP 1
+            JSON_VALUE(RowData,'$[0]') AS lobCode,
+            JSON_VALUE(RowData,'$[1]') AS productCode,
+            JSON_VALUE(RowData,'$[3]') AS coverageCode,
+            JSON_VALUE(RowData,'$[5]') AS isCoverage
+        FROM (
+            SELECT [key] AS RowNumber, value AS RowData
+            FROM [Table]
+            CROSS APPLY OPENJSON(
+                SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
+            )
+            WHERE name = 'cfgCoberturaProductoRea'
+        ) x
+        WHERE RowNumber > 0
+          AND JSON_VALUE(RowData,'$[0]') = lp.lob
+          AND JSON_VALUE(RowData,'$[1]') = lp.productCode
+          AND JSON_VALUE(RowData,'$[3]') = CAST(cov.coverageCode AS VARCHAR(50))
+    ) cfg
+) sumaAseg
+/* FIN - información de la póliza según snapshot  */
+
 LEFT JOIN Contact c ON c.id = lp.holderId        
 LEFT JOIN Contact br ON br.id = snap.sellerId
 LEFT JOIN Contact acre ON acre.id = snap.cessionBeneficiary
+OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
+				NULLIF(LTRIM(RTRIM(acre.name)), ''),
+				NULLIF(LTRIM(RTRIM(acre.middleName)), ''),
+				NULLIF(LTRIM(RTRIM(acre.surname1)), ''),
+				NULLIF(LTRIM(RTRIM(acre.surname2)), '')
+			), 'No Tiene') AS Acreedor) acref
 LEFT JOIN Product prod ON prod.code = lp.productCode
 LEFT JOIN Proceso prc ON prc.id = an.processId
+LEFT JOIN Proceso prcp ON prcp.id = lp.processId
 LEFT JOIN ChannelCatalog cc ON cc.code = snap.channel
 LEFT JOIN Insured benf ON benf.LifePolicyId = lp.id
 LEFT JOIN lob lob ON lob.code = lp.lob
@@ -282,14 +329,13 @@ WHERE CAST(an.created AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS D
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
 
-
 UNION ALL
 
 /* INFORMACIÓN DE ENDOSOS SEGÚN SU DETALLE */
 SELECT 
     lp.code AS Poliza,
     lp.lob AS [Ramo],
-    ISNULL(lob.name, lp.lob) AS [Ramo Descripción],
+
     prod.name AS [Plan],
     CONVERT(VARCHAR, c.birth, 103) AS FechaNacimiento,
     CONCAT_WS(' ',
@@ -341,7 +387,9 @@ SELECT
         WHEN 'q' THEN 'Trimestral'
         ELSE TRIM(ISNULL(bed.periodicity, lp.periodicity))
     END AS [Forma pago]
-    ,ISNULL(mo.Suma,(ISNULL(ed.newCapital,0) - ISNULL(ed.oldCapital,0))) AS [Suma Aseg]
+    ,CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNULL(sumaAsegCancela.sumaAseg,0) 
+		ELSE ISNULL(sumaAsegNew.sumaAseg,0) - ISNULL(sumaAsegOld.sumaAseg,0) END 
+		AS [Suma Aseg]
 	,mo.Recargos
 	,mo.Descuentos
 	,mo.[Prima Neta]
@@ -359,22 +407,31 @@ SELECT
         WHEN '2' THEN 'Bajo'
         ELSE 'No ha seleccionado'
     END AS [Clase de Riesgo]
-    ,ISNULL(CONCAT_WS(' ',
-        NULLIF(LTRIM(RTRIM(br.name)), ''),
-        NULLIF(LTRIM(RTRIM(br.middleName)), ''),
-        NULLIF(LTRIM(RTRIM(br.surname1)), ''),
-        NULLIF(LTRIM(RTRIM(br.surname2)), '')
-    ), 'No Tiene') AS [Corredor de Seguros]
+    ,CASE
+        WHEN NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
+            NULLIF(LTRIM(RTRIM(br.name)), ''),
+            NULLIF(LTRIM(RTRIM(br.middleName)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname1)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname2)), '')
+        ))), '') IS NULL THEN 'No Tiene'
+        ELSE LTRIM(RTRIM(CONCAT_WS(' ',
+            NULLIF(LTRIM(RTRIM(br.name)), ''),
+            NULLIF(LTRIM(RTRIM(br.middleName)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname1)), ''),
+            NULLIF(LTRIM(RTRIM(br.surname2)), ''))
+        ))
+    END AS [Corredor de Seguros]
     ,benf.name AS Beneficiario
     ,NULL AS [Descrip Objeto Afianzado]
-    ,bf.name AS Acreedor
+    ,CASE WHEN ISNULL(bf.name,'') = '' THEN 'No Tiene' ELSE bf.name END AS Acreedor
     ,ISNULL(c.nationalId, '0') AS [Cuenta Cobis]
     ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro
-    ,NULL AS [Es lider]
+    ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS [Es lider]
     ,ISNULL(cc.name, '') AS Canal
 
 FROM lifePolicy lp
 INNER JOIN Change ed ON ed.lifePolicyId = lp.id AND ed.status = '1'
+LEFT JOIN Proceso pr ON pr.id = ed.processId
 INNER JOIN Bill bed ON bed.changeId = ed.id
 LEFT JOIN BillDiff bfed ON bfed.changeId = ed.id
 LEFT JOIN Contact c ON c.id = ISNULL(ed.newPolicyholder, lp.holderId)
@@ -388,7 +445,6 @@ LEFT JOIN lob lob ON lob.code = lp.lob
 
 /* Valores monetarios => si no hay billDiff, que tome lo que genera Bill, (Cancelaciones por ejem)  */
 OUTER APPLY (SELECT 
-				js.insuredSum,
 				js.surcharges,
 				js.discounts,
 				js.anualPremium,
@@ -397,7 +453,6 @@ OUTER APPLY (SELECT
 				js.anualTotal
 			FROM OPENJSON(ed.jSnapshot)
 			WITH (
-				insuredSum    DECIMAL(18,2) '$.insuredSum',
 				surcharges    DECIMAL(18,2) '$.surcharges',
 				discounts     DECIMAL(18,2) '$.discounts',
 				anualPremium  DECIMAL(18,2) '$.anualPremium',
@@ -412,8 +467,88 @@ CROSS APPLY (SELECT CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNUL
 				,CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNULL(bed.tax,0) - ISNULL(snap.tax,0) ELSE ISNULL(bfed.tax,0) END AS Impuesto
 				,CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNULL(bed.fee,0) - ISNULL(snap.fee,0) ELSE ISNULL(bfed.fee,0) END AS [Otros Gastos]
 				,CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNULL(bed.anualTotal,0) - ISNULL(snap.anualTotal,0) ELSE ISNULL(bfed.annualTotal,0) END AS Monto
-				,CASE WHEN ed.Discriminator = 'CancellationChange' THEN 0 - ISNULL(snap.insuredSum,0) ELSE null END AS Suma
 				) mo
+
+OUTER APPLY (
+    SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN ISNULL(cov.insuredSum,0) ELSE 0 END) AS sumaAseg
+    FROM OPENJSON(ed.jNewCoverages)
+    WITH (
+        coverageCode INT '$.code',
+        insuredSum DECIMAL(18,2) '$.limit'
+    ) cov
+		
+    OUTER APPLY (
+        SELECT TOP 1
+            JSON_VALUE(RowData,'$[0]') AS lobCode,
+            JSON_VALUE(RowData,'$[1]') AS productCode,
+            JSON_VALUE(RowData,'$[3]') AS coverageCode,
+            JSON_VALUE(RowData,'$[5]') AS isCoverage
+        FROM (
+            SELECT [key] AS RowNumber, value AS RowData
+            FROM [Table]
+            CROSS APPLY OPENJSON(
+                SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
+            )
+            WHERE name = 'cfgCoberturaProductoRea'
+        ) x
+        WHERE RowNumber > 0
+          AND JSON_VALUE(RowData,'$[0]') = lp.lob
+          AND JSON_VALUE(RowData,'$[1]') = lp.productCode
+          AND JSON_VALUE(RowData,'$[3]') = CAST(cov.coverageCode AS VARCHAR(50))
+    ) cfg
+) sumaAsegNew
+
+OUTER APPLY (
+    SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN ISNULL(cov.insuredSum,0) ELSE 0 END) AS sumaAseg
+    FROM OPENJSON(ed.jOldCoverages)
+    WITH (
+        coverageCode INT '$.code',
+        insuredSum DECIMAL(18,2) '$.limit'
+    ) cov
+		
+    OUTER APPLY (
+        SELECT TOP 1
+            JSON_VALUE(RowData,'$[0]') AS lobCode,
+            JSON_VALUE(RowData,'$[1]') AS productCode,
+            JSON_VALUE(RowData,'$[3]') AS coverageCode,
+            JSON_VALUE(RowData,'$[5]') AS isCoverage
+        FROM (
+            SELECT [key] AS RowNumber, value AS RowData
+            FROM [Table]
+            CROSS APPLY OPENJSON(
+                SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
+            )
+            WHERE name like 'cfgCoberturaProductoRea%'
+        ) x
+        WHERE RowNumber > 0
+          AND JSON_VALUE(RowData,'$[0]') = lp.lob
+          AND JSON_VALUE(RowData,'$[1]') = lp.productCode
+          AND JSON_VALUE(RowData,'$[3]') = CAST(cov.coverageCode AS VARCHAR(50))
+    ) cfg
+) sumaAsegOld
+
+OUTER APPLY (SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN -ISNULL(cov.limit,0) ELSE 0 END) AS sumaAseg
+			 FROM LifeCoverage cov
+			 OUTER APPLY (
+				SELECT TOP 1
+					JSON_VALUE(RowData,'$[0]') AS lobCode,
+					JSON_VALUE(RowData,'$[1]') AS productCode,
+					JSON_VALUE(RowData,'$[3]') AS coverageCode,
+					JSON_VALUE(RowData,'$[5]') AS isCoverage
+				FROM (
+					SELECT [key] AS RowNumber, value AS RowData
+					FROM [Table]
+					CROSS APPLY OPENJSON(
+						SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
+					)
+					WHERE name like 'cfgCoberturaProductoRea%'
+				) x
+				WHERE RowNumber > 0
+				  AND JSON_VALUE(RowData,'$[0]') = lp.lob
+				  AND JSON_VALUE(RowData,'$[1]') = lp.productCode
+				  AND JSON_VALUE(RowData,'$[3]') = CAST(cov.code AS VARCHAR(50))
+			) cfg
+			WHERE cov.lifePolicyId = lp.id) sumaAsegCancela
 
 /* Valores del OA */
 OUTER APPLY (SELECT datos.*
