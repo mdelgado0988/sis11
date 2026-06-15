@@ -471,10 +471,10 @@
 
                 const effectiveDateTime = `${effectiveDate}T12:00:00`;
 
-                const jOldCoverges = JSON.stringify(Coverages),
+                const jOldCoverages = JSON.stringify(Coverages),
                     jNewCoverages = JSON.stringify(newCoverages);
                 const dto = {
-                    jOldCoverges,
+                    jOldCoverages,
                     jNewCoverages,
                     policyId,
                     lifePolicyId: policyId,

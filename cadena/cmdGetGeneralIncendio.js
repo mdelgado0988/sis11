@@ -6,6 +6,8 @@
  * @version 1
  * @Autor : Ernesto Garcia
  * @purpose: Rate all fire plans
+ * @Input { poliza, action, extra, esEndoso }
+ * @Output [ { code, limit, premium, dedutible, description } ]
 */
 
 let errorPuntero = '';
