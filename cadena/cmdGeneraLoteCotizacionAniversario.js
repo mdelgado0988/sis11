@@ -1,10 +1,12 @@
 //block
 //noreplace
-/*
-Michael Delgado. 
-2026.01.09
-Permite crear de manera masiva un lote de cálculo de tarificación según otro lote de aniversario.
-test { loteId: 196, anniversaries":"[\"106\",\"107\"]" }
+
+/**
+ * @name cmdGeneraLoteCotizacionAniversario
+ * @version 1
+ * @Autor Michael Delgado
+ * @Created 2026.01.09
+ * @purpose Allows the creation of a pricing calculation batch in bulk based on another anniversary batch.
 */
 
 try {
@@ -74,7 +76,7 @@ try {
     
   //return polizas
   
-  log("Recuperando lote en caso de existir")
+  //log("Recuperando lote en caso de existir")
   
   sqlCommand = `SELECT Id FROM importConfig WHERE name = 'Cotiza Aniversario Poliza';`;
   
@@ -91,7 +93,7 @@ try {
   
   markAsRenovation();
   
-  log("Generando lote de cotización");
+  //log("Generando lote de cotización");
   const idLoteQuote = createLote();
 
   if (RepoBatch.ok)
@@ -160,6 +162,6 @@ function markAsRenovation() {
 }
 
 } catch (error) {
-  log(error);
+  //log(error);
   return { ok: false, msg: error.toString(), idLoteQuote: 0 }
 }

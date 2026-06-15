@@ -737,7 +737,6 @@
         }
 
         const loadDataPolizas =(params = {}) => {
-            //debugger;
             setLoading(params.loading);
             const form = params.formulario || {};
             let extraParametros = "";
@@ -969,7 +968,7 @@
                   onClick={() => onViewResults()}
                   icon={<EyeOutlined />}
                 >
-                  Ver resultados
+                  Ver Errores
                 </Button>
               </Space>
 
@@ -1442,6 +1441,36 @@
 
       }
 
+      //Default data to review only first element
+      const showErrors = (params = {}) => {
+        const context = `{ loteId: ${params.loteId}, currentPage:1, pageSize:1}`;
+
+        exe("ExeChain",{
+            chain: "cmdResultRenewQuoteBatchList",
+            context: context
+        })
+        .then(r => {
+          const response = Array.isArray(r) ? (r[0] || {}) : r;
+
+          const outData = response.outData || {};
+          const resultData = Array.isArray(outData.data)
+            ? outData.data
+            : (Array.isArray(outData) ? outData : []);
+          const resultTotal = Number(outData.total || response.total || resultData.length || 0);
+
+          if (response.ok && resultTotal > 0) {
+            notification.warning({ message: "Errores en el proceso de cotización", description: `Se registraron errores relacionado al proceso de cotización, haga clic en Ver Errores para verificar mas detalles.`, duration: 7 });
+          }
+
+        })
+        .catch(error => {
+          notification.error({ message: 'Error', description: error.toString(), duration: 10 });
+        })
+        .finally(() => {
+          setLoadingResults(false);
+        });
+      }      
+
       const loadDataLoteDetalle =(params = {}) => {
 
         setLoadingBatch(params.loading);
@@ -1503,7 +1532,7 @@
 
             dameEstadoLote().then(status => {
               if(status != "FINISHED"){
-                exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
+                //exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
           
                 exe("ExeChain",{
                     chain: "cmdGeneraLoteCotizacionAniversario",
@@ -1891,6 +1920,7 @@
                 clearInterval(id);
                 notification.info({ message: "Lote de tarificación", description: `Proceso de cotización finalizado, verifique los resultados`, duration: 3 });
                 handleRefreshDetail();
+                showErrors({ loteId: loteId });
                 return;
               }
       
@@ -1933,7 +1963,7 @@
       }, [intervalId]);
 
       async function reload(){
-        //debugger;
+        //reload
       }
       useEffect(()=>{
           reload();

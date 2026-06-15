@@ -5,27 +5,7 @@
  * @name cmdGetGeneralIncendio
  * @version 1
  * @Autor : Ernesto Garcia
- * @description: Tarifica todos los planes de incendio 
- *///block
-//noreplace
-
-/*emision: QUOTE,
-renovacion: ANNIVERSARY
-action: 'ChangeCapital'
-{ poliza: { id: 218 }, action: 'ChangePolicyCapital', esEndoso: null }
-
-//ejemplo con cobs
-{ poliza: { id: 393, coverages: [
-  { "code": 1,   "name": "Incendio/Rayo/Explosión Básico" },
-  { "code": 3,   "name": "Terremoto, Temblor y/o Erupción Volcánica" },
-  { "code": 250, "name": "Rotura de Cristales" },
-  { "code": 251, "name": "Gasto de Hoteleria" },
-  { "code": 252, "name": "Incendio/Explosión" },
-  { "code": 253, "name": "Terremoto/Daños por Agua/Vendaval" },
-  { "code": 254, "name": "Robo con Forzamiento" },
-  { "code": 255, "name": "Daño por humo" }
-]
- }, action: 'ChangePolicyCapital', esEndoso: null }
+ * @purpose: Rate all fire plans
 */
 
 let errorPuntero = '';
@@ -33,22 +13,10 @@ try {
     
     let { poliza, action, extra, esEndoso } = context;
 
-    /*const textContext = JSON.stringify({ poliza: poliza, action: action, extra: extra, esEndoso: esEndoso });
-    doCmd({ 
-      cmd: "GetPing",
-      data: {
-        contexto: poliza,
-        action: action,
-        extra: extra,
-        esEndoso: esEndoso,
-        contexto: textContext
-      }
-    });*/
-
      /*doCmd({
        cmd:'GetPing',
-       data: {pol:poliza, action:action, ex: extra, esEndoso: esEndoso}
-     })*/
+       data: { datos: JSON.stringify(context)}
+     });*/
     
     var endoso = esEndoso ?? false;
 
@@ -65,7 +33,7 @@ try {
         accionActual = 'QUOTE'
     }
 
-    log("Comando Calculation")
+    //log("Comando Calculation")
     let cramo = null;
     let cplan = 'null';
     cramo = policyGet.ramo;
@@ -117,8 +85,7 @@ try {
     let cgrupo1 = "-1";
     let cgrupo2 = "-1";
     let stringAConvertir;
-
-
+          
     const planes256 = ['1_17'];
 
     if (planes256.includes(cplan)) {
@@ -137,30 +104,21 @@ try {
             sa6 =
             sumInsured;
 
-        //Calculo la prorrata para cambio de capital.
-        if (extra.data.jDetail) {
-            detail = JSON.parse(extra.data.jDetail);
-            if (detail?.prorate > 0)
-                prorate = detail.prorate;
-        }
-
     }
+
+    //Para endosos calculamos la prorrata.
+    if(endoso && extra?.data?.jDetail && !["CancellationChange","ChangeCancellation", "ChangeLoading"].includes(action)){
+      detail = JSON.parse(extra.data.jDetail);
+      if (detail?.prorate > 0){
+        prorate = detail.prorate; 
+      }          
+    }
+    //log(`Prorrata calculada: ${prorate}`);
 
     let varG = "";
 
     const TarifasCatalog = getTarifasCatalog();
-    log("Before coverage calculation: " + (Coverages == null ? "Sin cobs" : "Con Cobs"));
-  
-    /*doCmd({ 
-      cmd: "GetPing",
-      data: {
-        linea: "Antes",
-        ramo: cramo,
-        plan: cplan,
-        tarifas: TarifasCatalog,
-        cobs: Coverages
-      }
-    });*/
+    //log("Before coverage calculation: " + (Coverages == null ? "Sin cobs" : "Con Cobs"));
     
     const result = Coverages.map(covItem => {
         premiumReturn = 0;
@@ -169,16 +127,19 @@ try {
         let limitCob = 0;
         if (!userData) return { code: covItem.code, limit: 0, premium: 0 };
 
-        log(`Iniciando cálculo de cobertura: ${covItem.code}`);
+        //log(`Iniciando cálculo de cobertura: ${covItem.code}`);
         errorPuntero = `cob-${covItem.code}-state-ini`;
+
+        //MAD: GLOB-744. Voy a leer la opción seleccionada de la cobertura en caso de existir
+        const insumo = getInsumo(policyGet, covItem, userData);
       
         //varG = " sa=" + sa + ";";
-        varG = " cgrupo=" + cgrupo + ";";
-        varG = varG + " cgrupo1=" + cgrupo1 + ";";
-        varG = varG + " cgrupo2=" + cgrupo2 + ";";
+        varG = " cgrupo='" + (insumo?.cgrupo || "-1") + "';";
+        varG = varG + (" cgrupo1='" + insumo?.cgrupo1 || "-1") + "';";
+        varG = varG + (" cgrupo2='" + insumo?.cgrupo2 || "-1") + "';";
         varG = varG + " Uso_inc=" + Uso_inc + ";";
         varG = varG + " sumInsured=" + sumInsured + ";";
-        varG = varG + " SA=" + SA + ";";
+        varG = varG + " SA=" + (insumo?.SA != "-1" ? insumo?.SA : SA) + ";";
         varG = varG + " sa6=" + sa6 + ";";
         varG = varG + " SA_INC=" + SA_INC + ";";
         varG = varG + " sumaasegurada256=" + sumaasegurada256 + ";";
@@ -186,6 +147,7 @@ try {
         varG = varG + " limitCob=" + limitCob + ";";
 
         errorPuntero = `cob-${covItem.code}-state-dedu`;
+        //log(`variables: ${varG}`)
       
         // VARIABLES GLOBALES CONFIGURACION DE INCENDIO POR COBERTURA
         // EN FOR DE COBERTURAS
@@ -217,16 +179,22 @@ try {
 
         // FIN VARIABLES GLOBALES CONFIGURACION DE INCENDIO POR COBERTURA
         let rowtarifas = TarifasCatalog.filter(x => String(x.cramo).trim() === String(cramo).trim() && String(x.codigoplan).trim() === String(cplan).trim() && parseInt(x.ccobertura, 10) === parseInt(covItem.code, 10) && String(x.cendoso).trim().toUpperCase() === accionActual.toUpperCase());
-        log(`Variables: ${varG}`);  
-        log(`Tarifas: ${JSON.stringify(rowtarifas)}`);
+
+        //Michael Delgado. GLOB-821. If it does not exist for the current action, I check whether it exists for the QUOTE action (quotation). This ensures that, if it was configured only for quotation, that same configuration is also used for renewals and changes.
+        if (rowtarifas.length === 0) {
+          rowtarifas = TarifasCatalog.filter(x => String(x.cramo).trim() === String(cramo).trim() && String(x.codigoplan).trim() === String(cplan).trim() && parseInt(x.ccobertura, 10) === parseInt(covItem.code, 10) && String(x.cendoso).trim().toUpperCase() === 'QUOTE');
+        }
+
+        //log(`Variables: ${varG}`);  
+        //log(`Tarifas: ${JSON.stringify(rowtarifas)}`);
         
         if (rowtarifas && rowtarifas.length > 0) {
             if (rowtarifas.length > 1) {
                 rowtarifas = rowtarifas.find(item => {
                     try {
-                      log(`Evaluando condición múltiples tarifas: ${item.condicion}`)
+                      //log(`Evaluando condición múltiples tarifas: ${item.condicion}`)
                       const resultadoEval = eval(item.condicion);
-                      log(`Resultado: ${resultadoEval}`)
+                      //log(`Resultado: ${resultadoEval}`)
                       return resultadoEval;
                     } catch (e) {
                         return false;
@@ -237,14 +205,14 @@ try {
             }
         }
 
-        log(`Tarifas V1: ${JSON.stringify(rowtarifas)}`);
+        //log(`Tarifas V1: ${JSON.stringify(rowtarifas)}`);
 
         if (!rowtarifas && accionActual != 'QUOTE') {
             //throw `Entro  no deberia'${CCOBER}'`;        
             rowtarifas = TarifasCatalog.find(x => String(x.cramo).trim() === String(cramo).trim() && String(x.codigoplan).trim() === String(cplan).trim() && parseInt(x.ccobertura, 10) === parseInt(covItem.code, 10) && String(x.cendoso).trim().toUpperCase() === 'QUOTE');
         }
 
-        log(`Tarifas V2: ${JSON.stringify(rowtarifas)}`);
+        //log(`Tarifas V2: ${JSON.stringify(rowtarifas)}`);
 
         /*doCmd({ 
           cmd: "GetPing",
@@ -269,17 +237,17 @@ try {
               sentenciacondicion = sentenciacondicion + " if(" + rowtarifas.condicion + ") ";
           }  
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna condición: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna condición: ${error}`);
           throw new Error(error);
         }
 
         try {
           if (!isNullOrEmpty(rowtarifas?.prima)) {
             sentenciaprima = sentenciacondicion + " " + rowtarifas.prima;
-            log(`Prima => ${sentenciaprima}`);
+            //log(`Prima => ${sentenciaprima}`);
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna prima: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna prima: ${error}`);
           throw new Error(error);
         }
 
@@ -288,17 +256,17 @@ try {
             sentenciadeducible = sentenciacondicion + " " + rowtarifas.deducible;
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna deducible: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna deducible: ${error}`);
           throw new Error(error);
         }
         
         try {
           if (!isNullOrEmpty(rowtarifas?.sumaasegurada)) {
             sentencialimit = sentenciacondicion + " " + rowtarifas.sumaasegurada;
-            log(`Suma => ${sentencialimit}`);
+            //log(`Suma => ${sentencialimit}`);
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna suma: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna suma: ${error}`);
           throw new Error(error);
         }
 
@@ -307,7 +275,7 @@ try {
             sentenciadescription = sentenciacondicion + " " + rowtarifas.etiqueta;
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna etiqueta: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna etiqueta: ${error}`);
           throw new Error(error);
         }      
 
@@ -320,7 +288,7 @@ try {
             //   throw sentenciaprima;
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna prima: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna prima: ${error}`);
           throw new Error(error);
         }                
 
@@ -329,7 +297,7 @@ try {
             deductibleReturn = eval(sentenciadeducible);
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna deducible: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna deducible: ${error}`);
           throw new Error(error);
         }
         
@@ -338,7 +306,7 @@ try {
             limitReturn = eval(sentencialimit);
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna suma: ${error}`);
+          //log(`Error calculando cob ${covItem.code}, columna suma: ${error}`);
           throw new Error(error);
         }
         
@@ -349,17 +317,19 @@ try {
               descriptionReturn = deductibleReturn;
           }
         } catch (error) {
-          log(`Error calculando cob ${covItem.code}, columna etiqueta: ${error}, ver detalles en siguiente log`);
-          log(`Sentencia etiqueta error: ${sentenciadescription}`);
+          //log(`Error calculando cob ${covItem.code}, columna etiqueta: ${error}, ver detalles en siguiente log`);
+          //log(`Sentencia etiqueta error: ${sentenciadescription}`);
           throw new Error(error);
         }
         
         //Aquí aplicamos prorrata según configuración de la tabla.
         const primaSinProrrata = premiumReturn;
-        if (premiumReturn > 0 && prorate > 0 && rowtarifas.usaProrrata === true) {
+        //log(`Prima sin prorrata: ${primaSinProrrata}`);
+        if (premiumReturn > 0 && prorate > 0 && rowtarifas.usaProrrata === true) {            
             premiumReturn = (premiumReturn * prorate);
-            //redondeamos
+            //redondeamos            
             premiumReturn = Math.round((premiumReturn + Number.EPSILON) * 100) / 100;
+            //log(`Calculando prima porrateada: ${premiumReturn}`);
         }
 
         /*doCmd({ 
@@ -382,7 +352,7 @@ try {
             }
           });*/
 
-        log(`Cobertura: ${covItem.code} calculada sin errores`);
+        //log(`Cobertura: ${covItem.code} calculada sin errores`);
 
         return {
             code: covItem.code,
@@ -399,11 +369,30 @@ try {
     return result;
 
 } catch (error) {
-    throw `@Error: ${error.toString()} ${errorPuntero}`;
+    throw `@${errorPuntero} => ${error.toString()}`;
+}
+
+function getInsumo(policyGet, covItem, userData) {
+
+  const cobtars = userData?.hiddenCobtar ? JSON.parse(userData.hiddenCobtar) : [];
+
+  const cobtarCov = cobtars.find(x => x.coverageCode == covItem.code);
+  
+  if(cobtarCov){
+
+    if(policyGet.plan == "MULTI")    
+      return { cgrupo: cobtarCov?.Suma, cgrupo1: "-1", cgrupo2: "-1", SA: "-1" };
+
+    if(policyGet.plan == "INC_EDIF")    
+      return { SA: cobtarCov?.Suma, cgrupo: cobtarCov?.Deducible, cgrupo1: "-1", cgrupo2: "-1" };
+        
+  }
+
+  return { cgrupo: cobtarCov?.Suma, cgrupo1: "-1", cgrupo2: "-1", SA: "-1" };
+    
 }
 
 function GetPolicy(poliza) {
-
 
     doCmd({
         cmd: "RepoInsuredObject",
@@ -444,7 +433,10 @@ function GetPolicyEndoso(poliza) {
     const definitions = [45, 46, 47];
     const localPoliza = RepoLifePolicy.outData[0];
     const insuredObject = localPoliza.InsuredObjects.find(x => definitions.includes(x.objectDefinitionId));
-    const userData = insuredObject.userData;
+    const userData = insuredObject?.userData ?? [];
+
+    if(userData.length == 0)
+      throw new Error("No se encontró el objeto asegurado requerido.");
 
     return {
         ramo: localPoliza.lob,
@@ -529,3 +521,24 @@ function isNullOrEmpty(value) {
   // cualquier otro tipo (number, boolean, etc.)
   return false;
 };
+
+/*
+Test:
+QUOTE,
+renovacion: ANNIVERSARY
+action: 'ChangeCapital'
+{ poliza: { id: 218 }, action: 'ChangePolicyCapital', esEndoso: null }
+
+//ejemplo con cobs
+{ poliza: { id: 393, coverages: [
+  { "code": 1,   "name": "Incendio/Rayo/Explosión Básico" },
+  { "code": 3,   "name": "Terremoto, Temblor y/o Erupción Volcánica" },
+  { "code": 250, "name": "Rotura de Cristales" },
+  { "code": 251, "name": "Gasto de Hoteleria" },
+  { "code": 252, "name": "Incendio/Explosión" },
+  { "code": 253, "name": "Terremoto/Daños por Agua/Vendaval" },
+  { "code": 254, "name": "Robo con Forzamiento" },
+  { "code": 255, "name": "Daño por humo" }
+]
+ }, action: 'ChangePolicyCapital', esEndoso: null }
+*/
