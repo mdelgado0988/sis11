@@ -3,7 +3,7 @@
 
 /*
   *@name: cmdValidateInsuredObjectInstallment
-  *@Purpose: Valida y ajusta cuotas del endoso de cambio de objeto asegurado
+  *@Purpose: Validate and adjust the endorsement installments for the insured object change, as well as the billing details.
   *@Autor: Michael Delgado
   *@Email: michael.delgado@axxis-systems.com
   *@Created: 25/05/2026
