@@ -495,7 +495,7 @@
                                 const change = await exe('ChangeLoading', {...dto, operation: 'ADD' });
                                 if(!change.ok) throw change.msg;
                                 await approveEndorsementWorkflow(change.outData.processId);
-                                const executeResult = await exe('ExeChangeLoading', {changeId: change.outData.id, exeNow: true });
+                                const executeResult = await exe('ExeChangeLoading', {changeId: change.outData.id, operation: "EXECUTE", exeNow: true });
                                 if(!executeResult.ok) throw executeResult.msg;                                
                                 showSuccess('Endoso aplicado');
                                 resolve(true);

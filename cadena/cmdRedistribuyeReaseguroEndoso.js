@@ -2,12 +2,81 @@
 //noreplace
 
 /*
+  *Name cmdRedistribuyeReaseguroEndoso
   *Author: Michael Delgado
   *Creation date: 2024-06-17
   *Description: Este comando se encarga de redistribuir el reaseguro de una póliza cuando se realiza un endoso. Se utiliza para mantener la distribución de reaseguro actualizada y consistente con los cambios realizados en la póliza.
   *Email: michael.delgado@axxis-systems.com
   *Version: 1.0
 */
+
+const CESSION_COLUMNS = [
+  "contractId",
+  "lifePolicyId",
+  "coverageId",
+  "lineId",
+  "cover",
+  "LoB",
+  "product",
+  "policyCode",
+  "start",
+  "end",
+  "msg",
+  "sumInsured",
+  "premium",
+  "premiumType",
+  "sumInsuredCedant",
+  "premiumCedant",
+  "comissionCedant",
+  "sumInsuredRe",
+  "premiumRe",
+  "err",
+  "holderName",
+  "proportionCed",
+  "proportionRe",
+  "currency",
+  "distributionMode",
+  "contactId",
+  "coverageCode",
+  "coCommission",
+  "coPercentage",
+  "coPremium",
+  "coSumInsured",
+  "np",
+  "overwritten",
+  "changeId",
+  "anniversaryId",
+  "reserve",
+  "oldContractId",
+  "edited",
+  "loading",
+  "loadingCedant",
+  "loadingRe",
+  "sumInsuredComputed",
+  "fee",
+  "tax",
+  "nonTechnicalPremium",
+  "credit",
+  "jAmounts",
+  "comissionCedantExtra"
+];
+
+const CESSION_PART_COLUMNS = [
+  "cessionId",
+  "contactId",
+  "lineId",
+  "split",
+  "sumInsured",
+  "premium",
+  "name",
+  "liquidationId",
+  "currency",
+  "commission",
+  "tax",
+  "brokerId",
+  "reserve",
+  "fee"
+];
 
 //////////////////////////////////////////////////////////////////
 // Cuerpo principal del comando
@@ -41,9 +110,7 @@ if(!deboRedistribuir.debo)
 const newDistribution = distribuyeContrato(policyRea, distribucion);
 
 //return newDistribution;
-//Limpio el reaseguro antes de guardar.
-cleanCessions(policyId);
-addCessions(newDistribution);
+syncCessions(policyId, newDistribution);
 
 return endStatment(true, `Reaseguro distribuido correctamente`);
 
@@ -118,7 +185,7 @@ function distribuyeContrato(policyRea, distribucion) {
         
         const proporcionComision = ces.premiumRe == 0 ? 0 : (ces.comissionCedant / ces.premiumRe);
         polCes.comissionCedant = redondear(proporcionComision * polCes.premiumRe);
-        polCes.participantCommission = polCes.comissionCedant
+        polCes.comissionCedantExtra = polCes.comissionCedant
 
         const proporcionImp = ces.premiumRe == 0 ? 0 : (ces.tax / ces.premiumRe);
         polCes.tax = redondear(proporcionImp * polCes.tax);                
@@ -212,22 +279,7 @@ function construyeNuevaDistribucion(policyRea, contrato, coverageCode) {
   
 }
 
-function cleanCessions(policyId) {
-
-  const query = `DELETE p FROM CessionPart p WHERE cessionId in (SELECT c.id FROM Cession c WHERE c.lifePolicyId = ${policyId} AND c.overwritten = 0);
-  DELETE c FROM Cession c WHERE c.lifePolicyId = ${policyId} AND c.overwritten = 0;`
-  
-  doCmd({ cmd: "DoQuery", data: { sql: query }}); 
-  if(!DoQuery.ok)
-    throw new Error(DoQuery.msg);
-
-}
-
-function addCessions(newCessions){
-  let isOk = true;
-
-  const newSaveCessions = [];
-  
+function syncCessions(policyId, newCessions) {
   const ordenadas = [...newCessions].sort((a, b) => {
 
     const getPrioridad = (lineId) => {
@@ -239,22 +291,14 @@ function addCessions(newCessions){
 
     return getPrioridad(a.lineId) - getPrioridad(b.lineId);
   });
-  
-  for (let cession of ordenadas) {
 
-    doCmd({cmd: "RepoCession", data: {
-      operation: "ADD",
-      entity: cession
-    }});
-      
-    if (!RepoCession.ok) {
-      throw new Error(RepoCession.msg);
-    }
-    //newSaveCessions.push(resultado.outData[0]);
-  } 
-  
-  //return { isOk: isOk, newSaveCessions: newSaveCessions};
-}  
+  const sql = buildCessionSyncSql(policyId, ordenadas);
+
+  doCmd({ cmd: "DoQuery", data: { sql } });
+  if (!DoQuery.ok) {
+    throw new Error(DoQuery.msg);
+  }
+}
 
 //Valida si debo redistribuir, en caso de no, no hago nada mas
 function validateRedistribution(policyRea, distribucion) {
@@ -310,7 +354,7 @@ function getOARea() {
   if(objectDefinitionId == 0)
     return endStatment(false, `No existe definición de objeto para la distribución de reaseguro`);
   
-  doCmd({cmd:"LoadEntity", data:{ entity: "InsuredObject", filter: `lifePolicyId = ${policyId} AND objectDefinitionId = ${objectDefinitionId}` }});
+  doCmd({cmd:"LoadEntity", data:{ entity: "InsuredObject", filter: `lifePolicyId = ${policyId} AND objectDefinitionId = ${objectDefinitionId}`, noTracking: true }});
   const distReaConfig = LoadEntity.outData?.jValues ? JSON.parse(LoadEntity.outData?.jValues) : [];
   
   if(distReaConfig.length == 0)
@@ -323,14 +367,47 @@ function getOARea() {
 
 //Obtiene reaseguro actual de la póliza, según el endoso
 function getPolicyRea() {
-  doCmd({ cmd: "RepoCession", data: { operation: "GET", filter: `lifePolicyId = ${policyId} AND overwritten = 0` } });
-  const policyRea = RepoCession.outData ?? [];
-  return policyRea;
+  doCmd({ cmd: "LoadEntities", data: { entity: "Cession", filter: `lifePolicyId = ${policyId} AND overwritten = 0`, noTracking: true } });
+  const policyRea = LoadEntities.outData ?? [];
+  const cessionIds = [...new Set(policyRea.map(x => x?.id).filter(isValidNumber))];
+
+  if (!cessionIds.length) {
+    return policyRea;
+  }
+
+  doCmd({
+    cmd: "LoadEntities",
+    data: {
+      entity: "CessionPart",
+      filter: `cessionId IN (${cessionIds.join(",")})`,
+      noTracking: true
+    }
+  });
+
+  const participants = LoadEntities.outData ?? [];
+  const participantsByCessionId = participants.reduce((acc, item) => {
+    const cessionId = Number(item?.cessionId);
+    if (!Number.isFinite(cessionId)) {
+      return acc;
+    }
+
+    if (!acc[cessionId]) {
+      acc[cessionId] = [];
+    }
+
+    acc[cessionId].push(item);
+    return acc;
+  }, {});
+
+  return policyRea.map(cession => ({
+    ...cession,
+    Participants: participantsByCessionId[cession.id] ?? []
+  }));
 }
 
 //Obtengo el id de la póliza
 function getPolicyId(changeId) {
-  doCmd({cmd: "LoadEntity", data: { entity: "Change", fields: "lifePolicyId", filter: `id = ${changeId}` }});
+  doCmd({cmd: "LoadEntity", data: { entity: "Change", fields: "lifePolicyId", filter: `id = ${changeId}`, noTracking: true }});
   return LoadEntity.outData?.lifePolicyId ?? 0;
 }
 
@@ -353,4 +430,160 @@ function redondear(valor, decimales = 2) {
     // Redondeo a los decimales indicados
     const factor = Math.pow(10, decimales);
     return Math.round((num + Number.EPSILON) * factor) / factor;
+}
+
+function isValidNumber(value) {
+  return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value));
+}
+
+function buildInsertSql(tableName, entity, excludeKeys = []) {
+  const excluded = new Set([...(Array.isArray(excludeKeys) ? excludeKeys : []), "Participants"]);
+  const formatValue = (value) => {
+    if (value === null || value === undefined) return "NULL";
+    if (value instanceof Date) return `'${value.toISOString().replace("T", " ").substring(0, 19)}'`;
+    if (Array.isArray(value)) return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+    if (typeof value === "boolean") return value ? 1 : 0;
+    if (typeof value === "string") return `'${value.replace(/'/g, "''")}'`;
+    if (typeof value === "number") return Number.isFinite(value) ? value : "NULL";
+    if (typeof value === "object") return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+    return `'${String(value).replace(/'/g, "''")}'`;
+  };
+
+  const entries = Object.entries(entity || {})
+    .filter(([key, value]) => !excluded.has(key) && value !== undefined && typeof value !== "function")
+
+  const fields = entries.map(([key]) => `[${key}]`);
+  const values = entries.map(([_, value]) => formatValue(value));
+
+  return `
+    INSERT INTO [${tableName}] (${fields.join(", ")})
+    VALUES (${values.join(", ")});
+  `;
+}
+
+function sqlLiteral(value) {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "string" && value.startsWith("@")) return value;
+  if (value instanceof Date) return `'${value.toISOString().replace("T", " ").substring(0, 19)}'`;
+  if (Array.isArray(value)) return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : "NULL";
+  if (typeof value === "object") return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function buildCessionSyncSql(policyId, cessions) {
+  const statements = [];
+
+  statements.push(`
+    DELETE p
+    FROM CessionPart p
+    WHERE p.cessionId IN (
+      SELECT c.id
+      FROM Cession c
+      WHERE c.lifePolicyId = ${policyId}
+        AND c.overwritten = 0
+    );
+
+    DELETE c
+    FROM Cession c
+    WHERE c.lifePolicyId = ${policyId}
+      AND c.overwritten = 0;
+  `);
+
+  cessions.forEach((cession, index) => {
+    const participants = Array.isArray(cession.Participants) ? cession.Participants : [];
+    const cessionEntity = buildCessionEntity(cession);
+    const cessionValues = CESSION_COLUMNS.map(col => sqlLiteral(cessionEntity[col]));
+    const cessionVar = `@CessionId_${index + 1}`;
+
+    statements.push(`
+      DECLARE ${cessionVar} INT;
+      INSERT INTO Cession (${CESSION_COLUMNS.map(col => `[${col}]`).join(", ")})
+      VALUES (${cessionValues.join(", ")});
+      SET ${cessionVar} = SCOPE_IDENTITY();`);
+
+    for (const participant of participants) {
+      const participantEntity = buildCessionPartEntity(participant, cessionVar);
+      const participantValues = CESSION_PART_COLUMNS.map(col => sqlLiteral(participantEntity[col]));
+
+      statements.push(`
+      INSERT INTO CessionPart (${CESSION_PART_COLUMNS.map(col => `[${col}]`).join(", ")})
+      VALUES (${participantValues.join(", ")});`);
+    }
+  });
+
+  return statements.join("\n");
+}
+
+function buildCessionEntity(cession) {
+  return {
+    contractId: cession?.contractId ?? null,
+    lifePolicyId: cession?.lifePolicyId ?? null,
+    coverageId: cession?.coverageId ?? null,
+    lineId: cession?.lineId ?? null,
+    cover: cession?.cover ?? null,
+    LoB: cession?.LoB ?? cession?.lob ?? null,
+    product: cession?.product ?? null,
+    policyCode: cession?.policyCode ?? null,
+    start: cession?.start ?? null,
+    end: cession?.end ?? null,
+    msg: cession?.msg ?? null,
+    sumInsured: cession?.sumInsured ?? null,
+    premium: cession?.premium ?? null,
+    premiumType: cession?.premiumType ?? null,
+    sumInsuredCedant: cession?.sumInsuredCedant ?? null,
+    premiumCedant: cession?.premiumCedant ?? null,
+    comissionCedant: cession?.comissionCedant ?? null,
+    sumInsuredRe: cession?.sumInsuredRe ?? null,
+    premiumRe: cession?.premiumRe ?? null,
+    err: cession?.err ?? null,
+    holderName: cession?.holderName ?? null,
+    proportionCed: cession?.proportionCed ?? null,
+    proportionRe: cession?.proportionRe ?? null,
+    currency: cession?.currency ?? null,
+    distributionMode: cession?.distributionMode ?? null,
+    contactId: cession?.contactId ?? null,
+    coverageCode: cession?.coverageCode ?? null,
+    coCommission: cession?.coCommission ?? null,
+    coPercentage: cession?.coPercentage ?? null,
+    coPremium: cession?.coPremium ?? null,
+    coSumInsured: cession?.coSumInsured ?? null,
+    np: cession?.np ?? null,
+    overwritten: cession?.overwritten ?? null,
+    changeId: cession?.changeId ?? null,
+    anniversaryId: cession?.anniversaryId ?? null,
+    reserve: cession?.reserve ?? null,
+    oldContractId: cession?.oldContractId ?? null,
+    edited: cession?.edited ?? null,
+    loading: cession?.loading ?? null,
+    loadingCedant: cession?.loadingCedant ?? null,
+    loadingRe: cession?.loadingRe ?? null,
+    sumInsuredComputed: cession?.sumInsuredComputed ?? null,
+    fee: cession?.fee ?? null,
+    tax: cession?.tax ?? null,
+    nonTechnicalPremium: cession?.nonTechnicalPremium ?? null,
+    credit: cession?.credit ?? null,
+    jAmounts: cession?.jAmounts ?? null,
+    comissionCedantExtra: cession?.comissionCedantExtra ?? null
+  };
+}
+
+function buildCessionPartEntity(participant, cessionId) {
+  return {
+    cessionId: cessionId,
+    contactId: participant?.contactId ?? null,
+    lineId: participant?.lineId ?? null,
+    split: participant?.split ?? null,
+    sumInsured: participant?.sumInsured ?? null,
+    premium: participant?.premium ?? null,
+    name: participant?.name ?? null,
+    liquidationId: participant?.liquidationId ?? null,
+    currency: participant?.currency ?? null,
+    commission: participant?.commission ?? null,
+    tax: participant?.tax ?? null,
+    brokerId: participant?.brokerId ?? participant?.Broker?.id ?? null,
+    reserve: participant?.reserve ?? null,
+    fee: participant?.fee ?? null
+  };
 }
