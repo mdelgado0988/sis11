@@ -15,10 +15,7 @@ try {
     
     let { poliza, action, extra, esEndoso } = context;
 
-     /*doCmd({
-       cmd:'GetPing',
-       data: { datos: JSON.stringify(context)}
-     });*/
+     /*doCmd({ cmd:'GetPing', data: { datos: JSON.stringify(context)} });*/
     
     var endoso = esEndoso ?? false;
 
@@ -109,11 +106,15 @@ try {
     }
 
     //Para endosos calculamos la prorrata.
-    if(endoso && extra?.data?.jDetail && !["CancellationChange","ChangeCancellation", "ChangeLoading"].includes(action)){
-      detail = JSON.parse(extra.data.jDetail);
-      if (detail?.prorate > 0){
-        prorate = detail.prorate; 
-      }          
+    if (endoso && !["CancellationChange","ChangeCancellation", "ChangeLoading"].includes(action)) {
+      detail = safeJson(extra?.data?.jDetail ?? extra?.jDetail, {});
+
+      if (detail?.prorate > 0) {
+        prorate = detail.prorate;
+      } else {
+        const effectiveDate = extra?.data?.effectiveDate ?? extra?.effectiveDate;
+        prorate = calculateProrateFromDates(policyGet?.poliza?.start, policyGet?.poliza?.end, effectiveDate);
+      }
     }
     //log(`Prorrata calculada: ${prorate}`);
 
@@ -482,6 +483,52 @@ function getChangeInsuredObjectChangeUserData(extra) {
 
   return result;
   
+}
+
+function safeJson(value, fallback) {
+  try {
+    if (value === null || value === undefined || String(value).trim() === "") {
+      return fallback;
+    }
+
+    return typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function calculateProrateFromDates(start, end, effectiveDate) {
+  const startDate = parseDateSafe(start);
+  const endDate = parseDateSafe(end);
+  const changeDate = parseDateSafe(effectiveDate);
+
+  if (!startDate || !endDate || !changeDate) {
+    return 1;
+  }
+
+  const totalDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+  if (totalDays <= 0) {
+    return 0;
+  }
+
+  let remainingDays = Math.floor((endDate - changeDate) / (1000 * 60 * 60 * 24));
+  if (remainingDays < 0) remainingDays = 0;
+  if (remainingDays > totalDays) remainingDays = totalDays;
+
+  if (remainingDays === 0 && changeDate <= startDate) {
+    return 1;
+  }
+
+  const prorate = remainingDays / totalDays;
+  return Number.isFinite(prorate) && prorate > 0 ? prorate : 1;
+}
+
+function parseDateSafe(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
 }
 
 function getTarifasCatalog() {

@@ -328,6 +328,7 @@ OUTER APPLY (
 WHERE CAST(an.created AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
+AND lp.id = 807
 
 UNION ALL
 
@@ -651,3 +652,4 @@ WHERE CAST(ed.effectiveDate AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fen
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
 AND ISNULL(mo.Monto,0) <> 0
+AND lp.id = 807
