@@ -17,7 +17,7 @@
     const { Text } = Typography;
     const { Column } = Table;
     const { confirm } = Modal;
-    const { useState, useEffect, useContext, createContext } = React;
+    const { useState, useEffect, useContext, createContext, useRef } = React;
     const AppContext = createContext({});
     const useAppContext = ()=> useContext(AppContext);
     let effectiveDate = new Date().toISOString().slice(0,10);
@@ -43,6 +43,7 @@
     const AppProvider=({ children })=>{
         const policyId = getPolicyId();
         const [ isPolicyActive, setisActive ] = useState(false);
+        const [ policyStart, setPolicyStart ] = useState(null);
         const [ riskTypes, setRiskTypes ] = useState([]);
         const [ Coverages, setCover ] = useState([]);
         const [ coverages, setCoverages ] = useState([]);
@@ -53,6 +54,7 @@
         const [ selected, setSelected ] = useState(null);
         const [ form ] = Form.useForm()
         const [endorsementReason, setEndorsementReason] = useState('');
+        const initializedRef = useRef(false);
 
         const closeModal=()=> {
             setIsModalOpen(false);
@@ -261,10 +263,11 @@
                 if(!policyId) return;
                 setLoadingCov(true)
                 const response = await exe('RepoLifePolicy',{ operation:'GET', filter:`id=${ policyId }`, include:['Coverages.Loadings.RiskType']})
-                const [{ Coverages, active }] = response.outData;
+                const [{ Coverages, active, start }] = response.outData;
                 setCover(Coverages);
                 setCoverages(Coverages.filter( cov => cov.basePremium > 0))
                 setisActive(active);
+                setPolicyStart(start || null);
                 showSuccess('Poliza Cargada');
             } catch (error) {
                 showError(error);
@@ -469,7 +472,7 @@
 
                 let newCoverages = [...Coverages.filter( item => !covId.includes(item.id)), ...tempNewCoverages];
 
-                const effectiveDateTime = `${effectiveDate}T12:00:00`;
+                const effectiveDateTime = buildEffectiveDateTime(effectiveDate, policyStart);
 
                 const jOldCoverages = JSON.stringify(Coverages),
                     jNewCoverages = JSON.stringify(newCoverages);
@@ -478,7 +481,7 @@
                     jNewCoverages,
                     policyId,
                     lifePolicyId: policyId,
-                    effectiveDate: effectiveDate + ' 12:00:00',
+                    effectiveDate: effectiveDateTime,
                     note: reason
                 }
                 
@@ -514,6 +517,8 @@
 
         }
         useEffect(()=>{
+            if(initializedRef.current) return;
+            initializedRef.current = true;
             fetchData();
             exe('RepoRiskTypeCatalog',{ operation:'GET' })
             .then( response => setRiskTypes( response.outData.map(({ code, name}) => ({value: code, label: name.trim() }))  ))
@@ -566,6 +571,30 @@
      */
     function getPolicyId(){
         return new URL(window.location.href.replace('#/')).searchParams.get('policyId') || 0;
+    }
+
+    function buildEffectiveDateTime(dateString) {
+        const baseDate = String(dateString || '').trim();
+        if (!baseDate) return dateString;
+
+        const parts = baseDate.split('-').map(part => Number(part));
+        if (parts.length !== 3 || parts.some(part => Number.isNaN(part))) {
+            return `${baseDate}T23:59:59`;
+        }
+
+        const [ year, month, day ] = parts;
+        const localEndOfDay = new Date(year, month - 1, day, 23, 59, 59, 0);
+
+        if (Number.isNaN(localEndOfDay.getTime())) {
+            return `${baseDate}T23:59:59`;
+        }
+
+        const offsetMinutes = -localEndOfDay.getTimezoneOffset();
+        const offsetSign = offsetMinutes >= 0 ? '+' : '-';
+        const offsetHours = String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, '0');
+        const offsetMins = String(Math.abs(offsetMinutes) % 60).padStart(2, '0');
+
+        return `${baseDate}T23:59:59${offsetSign}${offsetHours}:${offsetMins}`;
     }
     /**
      * @function CoveragesTable
@@ -838,11 +867,11 @@
         return <Text delete>{ value }</Text>
     }
     function showSuccess(msg){
-        notification.success({message:'Ok', description: msg, placement: 'top', duration: 2 })
+        notification.success({description: msg, placement: 'top', duration: 2 })
     }
     function showError(error){
         const msg = error instanceof Error ? error.message : String(error);
-        notification.error({message:'Ok', description: msg, placement: 'top', duration: 2 })
+        notification.error({description: msg, placement: 'top', duration: 2 })
     }
 
 }
