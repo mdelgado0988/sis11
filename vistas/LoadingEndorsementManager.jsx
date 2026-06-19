@@ -481,6 +481,7 @@
                     effectiveDate: effectiveDate + ' 12:00:00',
                     note: reason
                 }
+                
                 const validation = await exe('ChangeLoading', dto);
                 if(!validation.ok) throw validation.msg;
                 return confirm({

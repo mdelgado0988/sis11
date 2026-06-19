@@ -585,12 +585,18 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       const changeCovDetail = changeCoveragesDetails.find(c => c.code == polCov.code);
 
       const oldLimit = oldChangeCov?.limit ?? (polCov?.limit ?? 0);
-      const newLimit = changeCov?.limit ?? oldLimit;
+      let newLimit = changeCov?.limit ?? oldLimit;
+
+      let primaDiff = (changeCovDetail ? n(changeCovDetail.premiumDif) : 0);
+      if(changeName == 'CancellationChange'){
+        primaDiff = (changeCovDetail ? n(changeCovDetail.premiumCost) : 0);
+        newLimit = 0;
+      }
 
       //Michael Delgado. GLOBUAT-66. Los endosos que no generan prima no deben mostrar nada, ni lo de la póliza      
       return {
         ...polCov,
-        premiumDif: endosoSinPrima ? n(0) : (changeCovDetail ? n(changeCovDetail.premiumDif) : 0),
+        premiumDif: endosoSinPrima ? n(0) : primaDiff,
         limitDif: endosoSinPrima ? n(0) : n(newLimit - oldLimit)
       };
       
@@ -603,9 +609,11 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     custom.TotalACobrar = endosoSinPrima ? n(0) : n(billDiff?.annualTotal ?? 0);
 
     if(changeName == 'CancellationChange' && details){
-      custom.PrimaNetaTotal = n(details.coveragesDif ?? 0);
-      custom.TotalACobrar = n(details.annualPremiumDif ?? 0);
-      custom.Impuesto = n(custom.TotalACobrar - custom.PrimaNetaTotal);
+      const primaNetaTotal = details.coveragesCost ?? 0;
+      const totalCobro = details.annualPremiumDif ?? 0;
+      custom.PrimaNetaTotal = n(primaNetaTotal); //n(details.coveragesDif ?? 0);
+      custom.TotalACobrar = n(totalCobro);
+      custom.Impuesto = n(totalCobro - primaNetaTotal);
     }
 
     if(custom.Endoso.Coberturas){
@@ -786,16 +794,7 @@ function formatN2(value, options = {}) {
 
     if (value === null || value === undefined) return fallback;
 
-    let normalized = value;
-
-    if (typeof normalized === 'string') {
-        normalized = normalized
-            .trim()
-            .replace(/\s/g, '')
-            .replace(/,/g, '.'); // tolera decimal con coma
-    }
-
-    let number = Number(normalized);
+    let number = parseNumericLike(value);
 
     if (!Number.isFinite(number)) return fallback;
     if (!allowNegative && number < 0) return fallback;
@@ -812,4 +811,29 @@ function formatN2(value, options = {}) {
     integerPart = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, thousandSeparator);
 
     return (isNegative ? '-' : '') + integerPart + decimalSeparator + decimalPart;
+}
+
+function parseNumericLike(value) {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return Number(value);
+
+  let normalized = value.trim().replace(/\s/g, "");
+  if (!normalized) return NaN;
+
+  const lastComma = normalized.lastIndexOf(",");
+  const lastDot = normalized.lastIndexOf(".");
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (lastComma >= 0) {
+    normalized = normalized.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot >= 0) {
+    normalized = normalized.replace(/,/g, "");
+  }
+
+  return Number(normalized);
 }
