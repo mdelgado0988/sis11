@@ -59,10 +59,10 @@ const filasControles = [
     { tipo: "label", nombre: "Suma", id: "lblSuma" },
     { tipo: "label", nombre: "Prima", id: "lblPrima" },
     { tipo: "label", nombre: "% Comisión", id: "lblPorcentajeComision" },
-    { tipo: "label", nombre: "Comisión", id: "lblComision" },
-    { tipo: "label", nombre: "Saldo Rea.", id: "lblSaldoRea" },
+    { tipo: "label", nombre: "Comisión", id: "lblComision" },    
     { tipo: "label", nombre: "% Impuesto", id: "lblPorcentajeImpuesto" },
-    { tipo: "label", nombre: "Impuesto", id: "lblImpuesto" }
+    { tipo: "label", nombre: "Impuesto", id: "lblImpuesto" },
+    { tipo: "label", nombre: "Saldo Rea.", id: "lblSaldoRea" }
   ],
   [
     { tipo: "label", nombre: "No Técnica", id: "lblNoTecnica" },
@@ -70,10 +70,10 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "msnot", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "mpnot", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcnot", valor: 0, readonly: true },
-    { tipo: "number2", nombre: "", id: "mcnot", valor: 0, readonly: true },    
-    { tipo: "number2", nombre: "", id: "srnot", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mcnot", valor: 0, readonly: true },        
     { tipo: "percent8", nombre: "", id: "pinot", valor: 0, readonly: true },
-    { tipo: "number2", nombre: "", id: "minot", valor: 0, readonly: true }
+    { tipo: "number2", nombre: "", id: "minot", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "srnot", valor: 0, readonly: true }
   ],
   [
     { tipo: "label", nombre: "Retención", id: "lblRetencion" },
@@ -81,10 +81,10 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "msret", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpret", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcret", valor: 0, readonly: true },
-    { tipo: "number2", nombre: "", id: "mcret", valor: 0, readonly: true },    
-    { tipo: "number2", nombre: "", id: "srret", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mcret", valor: 0, readonly: true },        
     { tipo: "percent8", nombre: "", id: "piret", valor: 0, readonly: true },
-    { tipo: "number2", nombre: "", id: "miret", valor: 0, readonly: true }
+    { tipo: "number2", nombre: "", id: "miret", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "srret", valor: 0, readonly: true }
   ],
   [
     { tipo: "label", nombre: "Cuota Parte", id: "lblCuotaParte", tieneAceptante: true, contrato: "Cuota Parte" },
@@ -92,10 +92,10 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "mscp", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpcp", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pccp", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mccp", valor: 0 },
-    { tipo: "number2", nombre: "", id: "srcp", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mccp", valor: 0 },    
     { tipo: "percent8", nombre: "", id: "picp", valor: 0 },
-    { tipo: "number2", nombre: "", id: "micp", valor: 0 }
+    { tipo: "number2", nombre: "", id: "micp", valor: 0 },
+    { tipo: "number2", nombre: "", id: "srcp", valor: 0, readonly: true }
   ],
   [
     { tipo: "label", nombre: "Excedente 1", id: "lblExcedente1", tieneAceptante: true, contrato: "Excedente 1" },
@@ -103,10 +103,10 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "msex1", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpex1", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mcex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "srex1", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mcex1", valor: 0 },    
     { tipo: "percent8", nombre: "", id: "piex1", valor: 0 },
-    { tipo: "number2", nombre: "", id: "miex1", valor: 0 }
+    { tipo: "number2", nombre: "", id: "miex1", valor: 0 },
+    { tipo: "number2", nombre: "", id: "srex1", valor: 0, readonly: true }
   ],
   [
     { tipo: "label", nombre: "Facultativo", id: "lblFacultativo", tieneAceptante: true, contrato: "FAC" },
@@ -114,10 +114,10 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "msfp", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpfp", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcfp", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mcfp", valor: 0 },
-    { tipo: "number2", nombre: "", id: "srfp", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mcfp", valor: 0 },    
     { tipo: "percent8", nombre: "", id: "pifp", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mifp", valor: 0 }
+    { tipo: "number2", nombre: "", id: "mifp", valor: 0 },
+    { tipo: "number2", nombre: "", id: "srfp", valor: 0, readonly: true }
   ],
   [
     { tipo: "label", nombre: "Fronting", id: "lblFronting", tieneAceptante: true, contrato: "FRO" },
@@ -125,10 +125,10 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "msfo", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpfo", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcfo", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mcfo", valor: 0 },
-    { tipo: "number2", nombre: "", id: "srfo", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mcfo", valor: 0 },    
     { tipo: "percent8", nombre: "", id: "pifo", valor: 0 },
-    { tipo: "number2", nombre: "", id: "mifo", valor: 0 }
+    { tipo: "number2", nombre: "", id: "mifo", valor: 0 },
+    { tipo: "number2", nombre: "", id: "srfo", valor: 0, readonly: true }
   ],
   [
     { tipo: "label", nombre: "Totales", id: "lblTotal" },
@@ -136,35 +136,37 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "tms", valor: 0, readonly: true, clase: "input-verde-negrita" },
     { tipo: "number2", nombre: "", id: "tmp", valor: 0, readonly: true, clase: "input-verde-negrita" },
     { tipo: "percent8", nombre: "", id: "tpc", valor: 0, readonly: true, clase: "input-verde-negrita" },
-    { tipo: "number2", nombre: "", id: "tmc", valor: 0, readonly: true, clase: "input-verde-negrita" },
-    { tipo: "number2", nombre: "", id: "tsr", valor: 0, readonly: true, clase: "input-verde-negrita" },
+    { tipo: "number2", nombre: "", id: "tmc", valor: 0, readonly: true, clase: "input-verde-negrita" },    
     { tipo: "percent8", nombre: "", id: "tpi", valor: 0, readonly: true, clase: "input-verde-negrita" },
-    { tipo: "number2", nombre: "", id: "tmi", valor: 0, readonly: true, clase: "input-verde-negrita" }
+    { tipo: "number2", nombre: "", id: "tmi", valor: 0, readonly: true, clase: "input-verde-negrita" },
+    { tipo: "number2", nombre: "", id: "tsr", valor: 0, readonly: true, clase: "input-verde-negrita" }
   ]
 ];
 
 const relaciones = [
-  { porcentajeId: "pret", montoId: "mpret", sumaId: "msret" }, 
-  { porcentajeId: "pcp", montoId: "mpcp", sumaId: "mscp", comisionId: "mccp", pcomisionId: "pccp", montoCalculoId: "mpcp", pimpuestoId: "picp", montoImpuestoId: "micp", saldoRea: "srcp" },  
-  { porcentajeId: "pex1", montoId: "mpex1", sumaId: "msex1", comisionId: "mcex1", pcomisionId: "pcex1", montoCalculoId: "mpex1", pimpuestoId: "piex1", montoImpuestoId: "miex1", saldoRea: "srex1" },  
-  { porcentajeId: "pfp", montoId: "mpfp", sumaId: "msfp", comisionId: "mcfp", pcomisionId: "pcfp", montoCalculoId: "mpfp", pimpuestoId: "pifp", montoImpuestoId: "mifp", saldoRea: "srfp" },
-  { porcentajeId: "pfo", montoId: "mpfo", sumaId: "msfo", comisionId: "mcfo", pcomisionId: "pcfo", montoCalculoId: "mpfo", pimpuestoId: "pifo", montoImpuestoId: "mifo", saldoRea: "srfo" },  
-  { porcentajeId: "pccp", montoId: "mccp", sumaId: "", montoCalculoId: "mpcp", saldoRea: "srcp" },
-  { porcentajeId: "pcex1", montoId: "mcex1", sumaId: "", montoCalculoId: "mpex1", saldoRea: "srex1" },    
-  { porcentajeId: "pcfp", montoId: "mcfp", sumaId: "", montoCalculoId: "mpfp", saldoRea: "srfp" },  
-  { porcentajeId: "pcfo", montoId: "mcfo", sumaId: "", montoCalculoId: "mpfo", saldoRea: "srfo" },
-  { porcentajeId: "picp", montoId: "micp", sumaId: "", montoCalculoId: "mpcp" },
-  { porcentajeId: "piex1", montoId: "miex1", sumaId: "", montoCalculoId: "mpex1" },
-  { porcentajeId: "pifp", montoId: "mifp", sumaId: "", montoCalculoId: "mpfp" },
-  { porcentajeId: "pifo", montoId: "mifo", sumaId: "", montoCalculoId: "mpfo" }
+  { tipo: "prima", porcentajeId: "pret", montoId: "mpret", sumaId: "msret" },   
+  { tipo: "prima", porcentajeId: "pcp", montoId: "mpcp", sumaId: "mscp", comisionId: "mccp", pcomisionId: "pccp", montoCalculoId: "mpcp", pimpuestoId: "picp", montoImpuestoId: "micp", saldoRea: "srcp" },  
+  { tipo: "prima", porcentajeId: "pex1", montoId: "mpex1", sumaId: "msex1", comisionId: "mcex1", pcomisionId: "pcex1", montoCalculoId: "mpex1", pimpuestoId: "piex1", montoImpuestoId: "miex1", saldoRea: "srex1" },  
+  { tipo: "prima", porcentajeId: "pfp", montoId: "mpfp", sumaId: "msfp", comisionId: "mcfp", pcomisionId: "pcfp", montoCalculoId: "mpfp", pimpuestoId: "pifp", montoImpuestoId: "mifp", saldoRea: "srfp" },
+  { tipo: "prima", porcentajeId: "pfo", montoId: "mpfo", sumaId: "msfo", comisionId: "mcfo", pcomisionId: "pcfo", montoCalculoId: "mpfo", pimpuestoId: "pifo", montoImpuestoId: "mifo", saldoRea: "srfo" },  
+
+  { tipo: "comi", porcentajeId: "pccp", montoId: "mccp", sumaId: "", montoCalculoId: "mpcp", pimpuestoId: "picp", montoImpuestoId: "micp", saldoRea: "srcp" },
+  { tipo: "comi", porcentajeId: "pcex1", montoId: "mcex1", sumaId: "", montoCalculoId: "mpex1", pimpuestoId: "piex1", montoImpuestoId: "miex1", saldoRea: "srex1" },    
+  { tipo: "comi", porcentajeId: "pcfp", montoId: "mcfp", sumaId: "", montoCalculoId: "mpfp", pimpuestoId: "pifp", montoImpuestoId: "mifp", saldoRea: "srfp" },  
+  { tipo: "comi", porcentajeId: "pcfo", montoId: "mcfo", sumaId: "", montoCalculoId: "mpfo", pimpuestoId: "pifo", montoImpuestoId: "mifo", saldoRea: "srfo" },
+
+  { tipo: "imp", porcentajeId: "picp", montoId: "micp", sumaId: "", montoCalculoId: "mpcp", comisionId: "mccp", pcomisionId: "pccp", saldoRea: "srcp" },
+  { tipo: "imp", porcentajeId: "piex1", montoId: "miex1", sumaId: "", montoCalculoId: "mpex1", comisionId: "mcex1", pcomisionId: "pcex1", saldoRea: "srex1" },
+  { tipo: "imp", porcentajeId: "pifp", montoId: "mifp", sumaId: "", montoCalculoId: "mpfp", comisionId: "mcfp", pcomisionId: "pcfp", saldoRea: "srfp" },
+  { tipo: "imp", porcentajeId: "pifo", montoId: "mifo", sumaId: "", montoCalculoId: "mpfo", comisionId: "mcfo", pcomisionId: "pcfo", saldoRea: "srfo" }
 ];
 
 // Creamos un mapa para acceso rápido por id
 const relacionesMap = {};
 
 relaciones.forEach(r => {
-    relacionesMap[r.porcentajeId] = {
-       montoId: r.montoId, sumaId: r.sumaId, comisionId: r.comisionId,
+    relacionesMap[r.porcentajeId] = { 
+       tipo: r.tipo, montoId: r.montoId, sumaId: r.sumaId, comisionId: r.comisionId,
        pcomisionId: r.pcomisionId, montoCalculoId: r.montoCalculoId,
        pimpuestoId: r.pimpuestoId, montoImpuestoId: r.montoImpuestoId , saldoRea: r.saldoRea
       };
@@ -1867,17 +1869,17 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     // Disparar cálculo automático si el input es un % registrado
     const id = input.id;
     if (relacionesMap[id]) {
-      const { montoId, sumaId, comisionId, pcomisionId, montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea } = relacionesMap[id];
+      const { tipo, montoId, sumaId, comisionId, pcomisionId, montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea } = relacionesMap[id];
       const montoBase = (gridDataSelected?.Prima ?? 0) - (gridDataSelected?.PrimaNoTecnica ?? 0);
       const sumaBase = gridDataSelected?.Suma ?? 0;
-      calcularRelacion(id, montoId, sumaId, montoBase, sumaBase, comisionId, pcomisionId,
-         montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea);
+      calcularRelacion(tipo, id, montoId, sumaId, montoBase, sumaBase, comisionId, pcomisionId,
+                       montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea);
     }
     calculaTotales();
     
   });
 
-  function calcularRelacion(porcentajeId, montoId, sumaId, montoBase, sumaBase, comisionId, pcomisionId, 
+  function calcularRelacion(tipo, porcentajeId, montoId, sumaId, montoBase, sumaBase, comisionId, pcomisionId, 
     montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea) {
 
     const $porc = $(`#${porcentajeId}`);
@@ -1898,41 +1900,45 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     suma = redondear(suma);    
     $monto.val(formatearRedondeado(monto));
 
-    //Calculamos saldo de reaseguro
-    calculaSaldoReaseguro(saldoRea, montoCalculo, monto);
+    debugger;
+    const montoPrima = $montoCalculoId.length > 0 ? redondear($montoCalculoId.val()) : montoBase;
 
-    //Calculo comisión si corresponde
-    if(existeCalculoComision){      
+    //Calculo comisión si corresponde, es decir, si no viene calculado por defecto.
+    if(tipo !== "comi" && existeCalculoComision){      
       const $comision = $(`#${comisionId}`);
       const $pcomision = $(`#${pcomisionId}`);
       const porcentajeComision = redondear($pcomision.val(),8);
-      const montoCalculoComision = $montoCalculoId.length > 0 ? redondear($montoCalculoId.val()) : montoBase;
-      const montoComision = redondear((montoCalculoComision * porcentajeComision) / 100);
-      let montoComisionFormateado = formatearRedondeado(montoComision);
+      const montoComision = redondear((montoPrima * porcentajeComision) / 100);
+      const montoComisionFormateado = formatearRedondeado(montoComision);
       $comision.val(montoComisionFormateado);
-      calculaSaldoReaseguro(saldoRea, montoCalculoComision, montoComision);
+      //calculaSaldoReaseguro(saldoRea, montoCalculoComision, montoComision);
     }
 
-    //Calculo impuesto si corresponde
-    if(existeCalculoImpuesto){      
+    //Calculo impuesto si corresponde, es decir, si no viene calculado por defecto.
+    if(tipo !== "imp" && existeCalculoImpuesto){      
       const $impuesto = $(`#${montoImpuestoId}`);
       const $pimpuesto = $(`#${pimpuestoId}`);
       const porcentajeImpuesto = redondear($pimpuesto.val(),8);
-      const montoCalculoImpuesto = $montoCalculoId.length > 0 ? redondear($montoCalculoId.val()) : montoBase;
-      let montoImpuesto = formatearRedondeado((montoCalculoImpuesto * porcentajeImpuesto) / 100);
-      $impuesto.val(montoImpuesto);
+      const montoImpuestoFormateado = formatearRedondeado((montoPrima * porcentajeImpuesto) / 100);
+      $impuesto.val(montoImpuestoFormateado);
     }
+
+    //Calculamos saldo de reaseguro
+    //voy a leer los datos del impuesto y comisión luego para leer los valores
+    const mcomision = tipo === "comi" ? monto : redondear($(`#${comisionId}`).val(),2);
+    const mimpuesto = tipo === "imp" ? monto : redondear($(`#${montoImpuestoId}`).val(),2);
+    calculaSaldoReaseguro(saldoRea, montoPrima, mcomision, mimpuesto);
 
     if($suma.length > 0)
       $suma.val(formatearRedondeado(suma));
   }
 }
 
-function calculaSaldoReaseguro(saldoReaId, prima, comision){
+function calculaSaldoReaseguro(saldoReaId, prima, comision, impuesto){
   if(!saldoReaId)
     return;
 
-  $(`#${saldoReaId}`).val(formatearRedondeado(prima-comision));
+  $(`#${saldoReaId}`).val(formatearRedondeado(prima-comision-impuesto));
 
 }
 
