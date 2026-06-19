@@ -41,9 +41,10 @@ const policy = getPolicy(change.lifePolicyId);
 const InsuredObject = getInsuredObjects(change);
 //return {pol: InsuredObject, change: getChangeInsuredObjects(change) }
 
+/*
 if(!policy.productCode === "1_9"){
   return;
-}
+}*/
 
 if (!policy) throw `La póliza [${change.lifePolicyId}] no ha sido encontrada.`;
 
