@@ -1298,8 +1298,8 @@ function renderReaseguradores() {
             <th>Suma Asegurada</th>
             <th>Prima</th>
             <th>Comisión</th>
-            <th>Saldo Rea.</th>
             <th>Impuesto</th>
+            <th>Saldo Rea.</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -1430,7 +1430,7 @@ function renderReaseguradores() {
       row.premium = formatearRedondeado(mpremium);
       row.commission = formatearRedondeado(mcomi);
       row.tax = formatearRedondeado(totalBase.tax * factor);
-      row.saldoRea = formatearRedondeado(mpremium - mcomi);
+      row.saldoRea = formatearRedondeado(mpremium - mcomi - redondear(row.tax));
 
       // actualizar UI solo fila actual
       const inputs = $tr.find("input");
@@ -1438,8 +1438,8 @@ function renderReaseguradores() {
       inputs.eq(1).val(row.sumInsured);
       inputs.eq(2).val(row.premium);
       inputs.eq(3).val(row.commission);
-      inputs.eq(4).val(row.saldoRea);
-      inputs.eq(5).val(row.tax);
+      inputs.eq(4).val(row.tax);
+      inputs.eq(5).val(row.saldoRea);
     }
 
   })
@@ -1453,7 +1453,7 @@ function renderReaseguradores() {
     const index = $tr.data("index");
 
     const colIndex = $tr.find("input").index(input);
-    const keys = ["split","sumInsured","premium","commission","tax"];
+    const keys = ["split","sumInsured","premium","commission","tax","saldoRea"];
     const key = keys[colIndex];
 
     let val = reaseguradoresData[index][key] || 0;
@@ -1466,9 +1466,10 @@ function renderReaseguradores() {
 
     //Saldo de reaseguro
     const inputs = $tr.find("input");
-    if (["premium","commission"].includes(key)) {
-      const saldoRea = redondear(reaseguradoresData[index]["premium"] || 0) - redondear(reaseguradoresData[index]["commission"] || 0);
-      inputs.eq(4).val(formatearRedondeado(saldoRea));
+    if (["premium","commission","tax"].includes(key)) {
+      const saldoRea = redondear(reaseguradoresData[index]["premium"] || 0) - redondear(reaseguradoresData[index]["commission"] || 0) - redondear(reaseguradoresData[index]["tax"] || 0);
+      reaseguradoresData[index]["saldoRea"] = saldoRea;
+      inputs.eq(5).val(formatearRedondeado(saldoRea));
     }
 
   });
@@ -1559,6 +1560,7 @@ function agruparParticipantsCuotaParte(cessions, contrato) {
           premium: 0,
           commission: 0,
           tax: 0,
+          saldoRea: 0,
 
           // control interno
           _primerProcesado: false
@@ -1593,6 +1595,7 @@ function agruparParticipantsCuotaParte(cessions, contrato) {
     acc.premium = redondear(acc.premium || 0);
     acc.commission = redondear(acc.commission || 0);
     acc.tax = redondear(acc.tax || 0);
+    acc.saldoRea = redondear((acc.premium || 0) - (acc.commission || 0) - (acc.tax || 0));
 
     // limpiar propiedad interna
     delete acc._primerProcesado;
@@ -1688,11 +1691,11 @@ function renderGrid() {
         </td>
 
         <td>
-          <input type="text" value="${formatInput(r.premium - r.commission,'number')}" class="number" />
+          <input type="text" value="${formatInput(r.tax,'number')}" class="number" />
         </td>
 
         <td>
-          <input type="text" value="${formatInput(r.tax,'number')}" class="number" />
+          <input type="text" value="${formatInput(r.saldoRea,'number')}" class="number" />
         </td>
 
         <td>
@@ -1891,7 +1894,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     const existeCalculoImpuesto = (montoImpuestoId && pimpuestoId) ? true : false;
 
     let porc = parseFloat($porc.val().replace(/,/g, "")) || 0;
-    const montoCalculo = $montoCalculoId.length > 0 && !existeCalculoComision ? redondear($montoCalculoId.val()) : montoBase;
+    const montoCalculo = $montoCalculoId.length > 0 && tipo !== "prima" ? redondear($montoCalculoId.val()) : montoBase;
     let monto = (montoCalculo * porc) / 100;
     let suma = (sumaBase * porc) / 100;
     
@@ -1900,7 +1903,6 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     suma = redondear(suma);    
     $monto.val(formatearRedondeado(monto));
 
-    debugger;
     const montoPrima = $montoCalculoId.length > 0 ? redondear($montoCalculoId.val()) : montoBase;
 
     //Calculo comisión si corresponde, es decir, si no viene calculado por defecto.
@@ -1911,7 +1913,6 @@ function renderControlesDistribucion(containerId = "#tabControles") {
       const montoComision = redondear((montoPrima * porcentajeComision) / 100);
       const montoComisionFormateado = formatearRedondeado(montoComision);
       $comision.val(montoComisionFormateado);
-      //calculaSaldoReaseguro(saldoRea, montoCalculoComision, montoComision);
     }
 
     //Calculo impuesto si corresponde, es decir, si no viene calculado por defecto.
