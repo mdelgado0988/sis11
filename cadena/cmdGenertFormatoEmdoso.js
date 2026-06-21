@@ -504,9 +504,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     Identificacion: ""
   },
 
-    FechaInicioVigencia: changeName == "CancellationChange"
-      ? toDate(policy?.start)
-      : toDate(change?.effectiveDate),
+    FechaInicioVigencia: toDate(policy?.start),
     FechaFinVigencia: toDate(policy?.end),
     HoraVigencia: getHora(changeName == "CancellationChange" ? policy?.start : change?.effectiveDate),
     FechaImpresion: getFechaImpresion(),
