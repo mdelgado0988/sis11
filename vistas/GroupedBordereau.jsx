@@ -720,26 +720,33 @@
     }      
 
     async function dataToXLSX( data, docName ){
-        if(typeof XLSX === 'undefined'){
+        try {
+            await ensureExcelLibrary();
+
+            if(typeof XLSX === 'undefined'){
+                message.error('No es posible crear un archivo de excel en este momento');
+                return;
+            }
+            if(!data || data.length === 0 ){
+                message.info('No hay datos para exportar');
+                return;
+            }
+            const fileName = `${ docName }-${ new Date().getTime() }.xlsx`;
+            // Clean data.
+            const groupedData = (data || []).map( row => ({...row, cessions: null }));
+            const cessions = (data || []).reduce((summary, row) => [...summary, ...row.cessions],[]);
+            /* create worksheet */
+            const ws1 = XLSX.utils.json_to_sheet(groupedData);
+            const ws2 = XLSX.utils.json_to_sheet(cessions);
+            /* create workbook and export */
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws1, 'Grouped By Policy');
+            XLSX.utils.book_append_sheet(wb, ws2, 'Cessions');
+            XLSX.writeFile(wb, fileName);
+        } catch (error) {
+            console.error(error);
             message.error('No es posible crear un archivo de excel en este momento');
-            return;
         }
-        if(!data || data.length === 0 ){
-            message.info('No hay datos para exportar');
-            return;
-        }
-        const fileName = `${ docName }-${ new Date().getTime() }.xlsx`;
-        // Clean data.
-        const groupedData = (data || []).map( row => ({...row, cessions: null }));
-        const cessions = (data || []).reduce((summary, row) => [...summary, ...row.cessions],[]);
-        /* create worksheet */
-        const ws1 = XLSX.utils.json_to_sheet(groupedData);
-        const ws2 = XLSX.utils.json_to_sheet(cessions);
-        /* create workbook and export */
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws1, 'Grouped By Policy');
-        XLSX.utils.book_append_sheet(wb, ws2, 'Cessions');
-        XLSX.writeFile(wb, fileName);
     }
     function onDownloadClick(){
         try {
@@ -769,6 +776,30 @@
             setLoading(false);
         }
     }
+    async function ensureExcelLibrary(){
+      if(typeof XLSX !== 'undefined'){
+        return;
+      }
+
+      const response = await exe('ExeChain',{ chain:'cmdLoadLibrariesGroupedBordereau', context:'{}'});
+      if(!response.ok) throw new Error(response.msg);
+
+      const libs = response.outData || {};
+      const momentLib = libs.momentJs;
+      const xlsxLib = libs.XLSX || libs.xlsx || libs.xlsxJs;
+
+      if(typeof moment === 'undefined' && momentLib){
+        eval(momentLib);
+      }
+
+      if(typeof XLSX === 'undefined' && xlsxLib){
+        if(typeof xlsxLib === 'string'){
+          eval(xlsxLib);
+        } else {
+          window.XLSX = xlsxLib;
+        }
+      }
+    }
     const value = {
       loading, loadingM, setLoading,
       CessionOpt, filterForm, contracts,
@@ -783,9 +814,17 @@
       if( typeof moment === 'undefined'){
         exe('ExeChain',{ chain:'cmdLoadLibrariesGroupedBordereau', context:'{}'}).then( response => {
           if(!response.ok) throw new Error(response.msg)
-          const { outData:{ momentJs, XLSX }} = response;
-          eval(momentJs);
-          eval(XLSX);
+          const { outData:{ momentJs, XLSX: xlsxLib } } = response;
+          if(typeof moment === 'undefined' && momentJs){
+            eval(momentJs);
+          }
+          if(typeof XLSX === 'undefined' && xlsxLib){
+            if(typeof xlsxLib === 'string'){
+              eval(xlsxLib);
+            } else {
+              window.XLSX = xlsxLib;
+            }
+          }
           setLoadingM(false);
         })
       }else {
