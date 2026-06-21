@@ -19,6 +19,9 @@ let Edificios = [];
 let Barriadas = [];
 let btnSave = {};
 let polizaConfirmada = false;
+const notification = typeof A !== 'undefined' && A?.notification
+    ? A.notification
+    : null;
 
 function setCssStyle(){
     const estilo = document.createElement('style');
@@ -172,12 +175,13 @@ const changeSector = async () => {
 const changeBarriada = async() => {
     $('#txtEdificios').prop('required', false);
     limpiarYBloquear(["#txtEdificios"],true);
+    await validateCumuloSelection();
 }
 
 const changeEdificio = async() => {
     $('#txtBarriadas').prop('required', false);
     limpiarYBloquear(["#txtBarriadas"],true);
-    await changeEdifMsg();
+    await validateCumuloSelection();
 }
 
 const loadEventField = async () => {
@@ -309,7 +313,7 @@ async function cargarCatalogos(){
         if(!isEndorsment)
         return;
 
-        await changeEdifMsg();
+    await validateCumuloSelection();
         
       } catch (error) {
        console.error(error) ;
@@ -685,9 +689,9 @@ const cargaBarriada = async(limpiar) => {
   }
 }
 
-const changeEdifMsg = async () => {
+const validateCumuloSelection = async () => {
   try {
-    debugger;
+
     me.message.destroy()
     btnSave.prop("disabled", true);
     const countryCode = $("#cmbPais").val(); 
@@ -696,6 +700,17 @@ const changeEdifMsg = async () => {
     const corregimiento = $("#cmbSector").val();
     const edificio = $("#cmbEdificios").val();
     const edificioLocal = $("#txtEdificios").val();
+    const barriada = $("#cmbBarriadas").val();
+    const barriadaLocal = $("#txtBarriadas").val();
+
+    const tieneEdificio = edificio && String(edificio) !== '0';
+    const tieneBarriada = barriada && String(barriada) !== '0';
+
+    if(!tieneEdificio && !tieneBarriada){
+      btnSave.prop("disabled", false);
+      return;
+    }
+
     const dto = JSON.stringify({
       lob:policy.lob,
       codeCumulo:'Incendio_Cumulo_Edificio',
@@ -703,8 +718,10 @@ const changeEdifMsg = async () => {
       estado: estado,
       ciudad: ciudad,
       corregimiento: corregimiento,
-      codigoEdificio: edificio,
-      nombreEdificio: edificioLocal
+      codigoEdificio: tieneEdificio ? edificio : null,
+      nombreEdificio: tieneEdificio ? edificioLocal : null,
+      codigoBarriada: tieneBarriada ? barriada : null,
+      nombreBarriada: tieneBarriada ? barriadaLocal : null
     });
 
     await me.exe('ExeChain',{
@@ -713,21 +730,23 @@ const changeEdifMsg = async () => {
     }).then(resp => {
       if(!resp.outData){
         btnSave.prop("disabled", false);
-        me.message.error('No se pudo recuperar el cumulo',30);
+        showCumuloNotice('warning', 'No se pudo recuperar el cumulo');
         return;
       }
       
       const {accion, bloquea, msg, ok} = resp.outData;
       if(bloquea){
-        me.message.error(msg,30);
+        showCumuloNotice('warning', msg);
         return;
       }
 
-      if(accion == 'none') return;
+      if(accion == 'none'){
+        btnSave.prop("disabled", false);
+        return;
+      }
 
       btnSave.prop("disabled", false);
-      me.message.warning(msg,30);
-      //debugger;
+      showCumuloNotice('warning', msg);
       
       //console.log({resp})
     })
@@ -738,6 +757,21 @@ const changeEdifMsg = async () => {
     console.log({error});
   }
   
+}
+
+function showCumuloNotice(type, description) {
+  if (notification && typeof notification[type] === 'function') {
+    notification[type]({
+      message: 'Cúmulo',
+      description,
+      duration: 10
+    });
+    return;
+  }
+
+  if (me?.message && typeof me.message[type] === 'function') {
+    me.message[type](description, 10);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
