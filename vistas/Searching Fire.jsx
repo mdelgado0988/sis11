@@ -90,6 +90,7 @@
         if (form.municipio) extraParametros += `, municipio:'${form.municipio}'`;
         if (form.sector) extraParametros += `, sector:'${form.sector}'`;
         if (form.searchName) extraParametros += `, searchName:'${form.searchName}'`;
+        if (form.searchName) extraParametros += `, buildingType:'${form.buildingType || "1"}'`;
 
         const contextString = `{row:{currentPage:${params.pagination.current}, pageSize:${params.pagination.pageSize}${extraParametros}}}`;
 

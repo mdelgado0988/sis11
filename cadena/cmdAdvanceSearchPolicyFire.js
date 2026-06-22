@@ -11,8 +11,8 @@
 * @param {string} row.provincia Codigo del estado
 * @param {string} row.municipio Codigo del sector
 * @param {string} row.sector direccion de la calle
-* @param {number} row.edificio Número de casa
-* @param {string} row.barriada Numero de cuadra
+* @param {number} row.buildingType Tipo de propiedad. 1=edificio, 2=barriada
+* @param {string} row.searchName Nombre genérico de edificio o barriada
 */
 /*
 Name: cmdAdvanceSearchPolicyFire
@@ -32,41 +32,44 @@ let field = [];
 let values = [];
 
 const { row } =context;
+const isEdificio = Number(row.buildingType) === 1 || row.edificio === 1 || row.edificio === '1' || row.edificio === true;
+const isBarriada = Number(row.buildingType) === 2 || row.barriada === 1 || row.barriada === '1' || row.barriada === true;
+const buildingSearchText = row.searchName || row.buildingName || row.barriada || '';
 
-//doCmd({cmd:'GetPing', data: {row}});
+//doCmd({cmd:'GetPing', data: { row: JSON.stringify(row)}});
 
 if(row.country){
-  filtro +=  row.edificio ?
+  filtro +=  isEdificio ?
            `and JSON_VALUE(data.[value],'$[0]') = '${row.country}'` :
            `and p.[code] = '${row.country}'`;
 
 }
 if(row.provincia) {
-   filtro +=  row.edificio ? 
+   filtro +=  isEdificio ? 
               `and JSON_VALUE(data.[value],'$[1]') =  '${row.provincia}'`:
-              `and s.[id] = '${row.provincia}'`;
+              `and s.[code] = '${row.provincia}'`;
 
 }
 if(row.municipio) {  
-   filtro +=   row.edificio ? 
+   filtro +=   isEdificio ? 
               `and JSON_VALUE(data.[value],'$[2]') =  '${row.municipio}'`:
-              `and m.[id] = '${row.municipio}'`;
+              `and m.[code] = '${row.municipio}'`;
  
 }
 if(row.sector) {
-   filtro +=  row.edificio ? 
+   filtro +=  isEdificio ? 
               `and JSON_VALUE(data.[value],'$[3]') =  '${row.sector}'`:
-              `and c.[id] = '${row.sector}'`;
+              `and c.[code] = '${row.sector}'`;
  
 }
-if(row.buildingName){
-   filtro +=  row.edificio ? 
-              `and JSON_VALUE(data.[value],'$[5]') LIKE '%${row.buildingName}%'`:
-              `and data.descBuilding LIKE '%${row.buildingName}%'`;
+if(buildingSearchText){
+   filtro +=  isEdificio ? 
+              `and JSON_VALUE(data.[value],'$[5]') LIKE '%${buildingSearchText}%'`:
+              `and data.descBuilding LIKE '%${buildingSearchText}%'`;
  
 }
 
-if(row.edificio){
+if(isEdificio){
     extraFilterBuilding = `  
     WITH TableBuilding AS (
         SELECT  
@@ -81,7 +84,7 @@ if(row.edificio){
   filterLine = 'cmbEdificios';
 }
 
-if(row.barriada){
+if(isBarriada){
 extraFilterBuilding = `  
     WITH TableBuilding AS (
         SELECT  
@@ -128,9 +131,6 @@ ${extraFilterBuilding}
 SELECT  COUNT(1) as total 
 FROM TableBuilding
 `;
-
-//doCmd({"cmd":"DoQuery","data":{"sql": sqlCommand}});
-//let dataPaginada = DoQuery.outData;
 
 sqlCommand = `
 ${counterSQL}`;
