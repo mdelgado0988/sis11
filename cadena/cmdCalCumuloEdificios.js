@@ -17,7 +17,10 @@ const { policyId, fDesde, currency, insuredSum, contractId, lob} = context;
 
 doCmd({ cmd: "RepoInsuredObject", data: { operation: "GET", filter: `lifePolicyId = ${policyId}`, include: ["ObjectDefinition"] } });
 const definitions = ['DT_INCENDIO_V3','1_9_DT_INCENDIO','DTINCENDIO_SUMA'];
-const edificio = RepoInsuredObject.outData.find(item => definitions.includes(item.ObjectDefinition.code));
+const edificio = RepoInsuredObject.outData.find(item => definitions.includes(item.ObjectDefinition?.code));
+if (!edificio || !edificio.userData) {
+  throw '@No se encontró un objeto asegurado válido para calcular el cúmulo';
+}
 const { cmbEdificios, cmbBarriadas } = edificio.userData;
 const cumulusField = hasValue(cmbEdificios) ? 'cmbEdificios' : 'cmbBarriadas';
 let configuracionCumulo;
