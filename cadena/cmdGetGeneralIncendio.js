@@ -14,12 +14,13 @@ let errorPuntero = '';
 try {
     
     let { poliza, action, extra, esEndoso } = context;
+    const safeAction = String(action ?? '').trim();
 
      /*doCmd({ cmd:'GetPing', data: { datos: JSON.stringify(context)} });*/
     
     var endoso = esEndoso ?? false;
 
-    if (action.includes('Change')) {
+    if (safeAction.includes('Change')) {
         endoso = true;
     }
 
@@ -27,8 +28,8 @@ try {
     if (!endoso) policyGet = GetPolicyEndoso(poliza);
     if (endoso) policyGet = GetPolicyEndoso(poliza);
 
-    let accionActual = (typeof action !== 'undefined') ? action : 'QUOTE';
-    if (accionActual == 'PREQUOTE' || accionActual.includes('Change')) {
+    let accionActual = safeAction || 'QUOTE';
+    if (accionActual == 'PREQUOTE' || safeAction.includes('Change')) {
         accionActual = 'QUOTE'
     }
 
@@ -42,7 +43,7 @@ try {
     let oaCambioObjeto = [];
 
     //Michael Delgado. 2026.04.08. GLOB-180. Esto permite que el endoso de cambio de objeto asegurado lea su información correctamente en caso de calcular tarifas.
-    if(action == "ChangeInsuredObject"){
+    if(safeAction == "ChangeInsuredObject"){
       oaCambioObjeto = getChangeInsuredObjectChangeUserData(extra);
       policyGet.userData = oaCambioObjeto;
     }
@@ -106,7 +107,7 @@ try {
     }
 
     //Para endosos calculamos la prorrata.
-    if (endoso && !["CancellationChange","ChangeCancellation", "ChangeLoading"].includes(action)) {
+    if (endoso && !["CancellationChange","ChangeCancellation", "ChangeLoading"].includes(safeAction)) {
       detail = safeJson(extra?.data?.jDetail ?? extra?.jDetail, {});
 
       if (detail?.prorate > 0) {
