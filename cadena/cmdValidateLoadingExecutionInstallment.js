@@ -339,8 +339,13 @@ function syncPolicyPayPlan(change, currentCuotas, targetCuotas) {
       }
 
       sqlParts.push(buildUpdatePayPlanSql(current.id, change.id, target));
-      sqlParts.push(`DELETE FROM PayPlanDetail WHERE payPlanId = ${current.id};`);
-      appendPayPlanDetailInserts(sqlParts, current.id, target);
+      if (Number(current?.payed ?? 0) > 0.01) {
+        const currentDetails = loadPayPlanDetails(current.id);
+        syncPayPlanDetailsKeepingHistory(sqlParts, current.id, target, currentDetails);
+      } else {
+        sqlParts.push(`DELETE FROM PayPlanDetail WHERE payPlanId = ${current.id};`);
+        appendPayPlanDetailInserts(sqlParts, current.id, target);
+      }
       continue;
     }
 
@@ -355,6 +360,72 @@ function syncPolicyPayPlan(change, currentCuotas, targetCuotas) {
   }
 
   executeSql(sqlParts.join("\n"));
+}
+
+function loadPayPlanDetails(payPlanId) {
+  doCmd({
+    cmd: "LoadEntities",
+    data: {
+      entity: "PayPlanDetail",
+      filter: `payPlanId = ${payPlanId}`,
+      noTracking: true,
+      fields: "id, payPlanId, amount, concept, detail, [order], paid"
+    }
+  });
+
+  if (!LoadEntities.ok) {
+    throw new Error(LoadEntities.msg);
+  }
+
+  return (LoadEntities.outData ?? []).map(detail => ({
+    id: detail?.id,
+    payPlanId: detail?.payPlanId,
+    amount: detail?.amount,
+    concept: detail?.concept,
+    detail: detail?.detail,
+    order: detail?.order,
+    paid: detail?.paid
+  }));
+}
+
+function syncPayPlanDetailsKeepingHistory(sqlParts, payPlanId, target, currentDetails) {
+  const targetDetails = Array.isArray(target?.PayPlanDetail) ? target.PayPlanDetail : [];
+  if (!targetDetails.length) {
+    return;
+  }
+
+  const currentByOrder = new Map(
+    (currentDetails ?? [])
+      .filter(detail => Number(detail?.order ?? 0) > 0)
+      .map(detail => [Number(detail.order), detail])
+  );
+  const usedCurrentIds = new Set();
+
+  for (const detail of targetDetails) {
+    const order = Number(detail?.order ?? 0);
+    const current = currentByOrder.get(order);
+
+    if (current?.id) {
+      usedCurrentIds.add(Number(current.id));
+      sqlParts.push(
+        buildUpdatePayPlanDetailSql(current.id, detail, current.paid)
+      );
+      continue;
+    }
+
+    sqlParts.push(buildInsertPayPlanDetailSql(payPlanId, detail));
+  }
+
+  for (const current of currentDetails ?? []) {
+    const currentId = Number(current?.id ?? 0);
+    if (!currentId || usedCurrentIds.has(currentId)) {
+      continue;
+    }
+
+    if (Number(current?.paid ?? 0) <= 0.01) {
+      sqlParts.push(`DELETE FROM PayPlanDetail WHERE id = ${sqlNumber(currentId)};`);
+    }
+  }
 }
 
 function shouldTouchPayPlan(current, target) {
@@ -476,6 +547,18 @@ function buildInsertPayPlanDetailSql(payPlanRef, detail) {
   return [
     `INSERT INTO PayPlanDetail (${fields.join(", ")})`,
     `VALUES (${values.join(", ")});`
+  ].join("\n");
+}
+
+function buildUpdatePayPlanDetailSql(detailId, detail, paid) {
+  return [
+    `UPDATE PayPlanDetail`,
+    `SET amount = ${sqlMoney(detail?.amount)},`,
+    `    concept = ${sqlString(detail?.concept)},`,
+    `    detail = ${sqlString(detail?.detail)},`,
+    `    [order] = ${sqlNumber(detail?.order)},`,
+    `    paid = ${sqlMoney(paid)}`,
+    `WHERE id = ${sqlNumber(detailId)};`
   ].join("\n");
 }
 

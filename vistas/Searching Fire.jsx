@@ -250,53 +250,53 @@
 
     function details(record, index){
             return <Table dataSource={ record.polizas } pagination={ false } rowKey='id'>
-                <Column title='PolizaId' dataIndex='id' key='id' />
-                <Column title='Poliza' dataIndex='codigoPoliza' key='codigoPoliza' />
-                <Column title='Fecha Inicio' dataIndex='fInicio' key='fInicio' render={renderDate} />
-                <Column title='Fecha Fin' dataIndex='fFin' key='fFin' render={renderDate} /> 
-                <Column title='Suma Asegurada' dataIndex='insuredSum' key='insuredSum' render={(value)=> renderNumber(value)} />              
-                <Column title='Plan' dataIndex='producto' key='producto'/>
-                <Column title='Asegurado' dataIndex='asegurado' key='asegurado' />
-                <Column title="Action" key="action" render={(text, record) => (<><Link path="/#/lifePolicy/" id={record.id} text="Open" /></>)} />  
+                <Column title={t('Policy Id')} dataIndex='id' key='id' />
+                <Column title={t('Policy')} dataIndex='codigoPoliza' key='codigoPoliza' />
+                <Column title={t('Start Date')} dataIndex='fInicio' key='fInicio' render={renderDate} />
+                <Column title={t('End Date')} dataIndex='fFin' key='fFin' render={renderDate} /> 
+                <Column title={t('Insured Sum')} dataIndex='insuredSum' key='insuredSum' render={(value)=> renderNumber(value)} />              
+                <Column title={t('Plan')} dataIndex='producto' key='producto'/>
+                <Column title={t('Insured')} dataIndex='asegurado' key='asegurado' />
+                <Column title={t('Action')} key="action" render={(text, record) => (<><Link path="/#/lifePolicy/" id={record.id} text={t('Open')} /></>)} />  
             </Table>
     }
 
     const isBarriada = radioValue === 2;
-    const buildingLabel = isBarriada ? "Nombre Barriada" : "Nombre Edificio";
-    const buildingPlaceholder = isBarriada ? "Digite nombre de la barriada" : "Digite nombre del edificio";
+    const buildingLabel = isBarriada ? t('Nombre Barriada') : t('Nombre Edificio');
+    const buildingPlaceholder = isBarriada ? t('Digite nombre de la barriada') : t('Digite nombre del edificio');
 
     // --- RENDER ---
     return <DefaultPage
-            title="Policy Search Fire"
+            title={t('Policy Search Fire')}
             icon="file-search"
-            extra={<Button type="primary" onClick={() => setVisible(true)}><FilterIcon /> Filter</Button>}
+            extra={<Button type="primary" onClick={() => setVisible(true)}><FilterIcon /> {t('Filter')}</Button>}
         >
 
 
 
 
             <Table dataSource={data} loading={loading} onChange={handleTableChange} expandable={{ expandedRowRender: details }} rowKey='buildingCode'>
-                <Table.Column title="Codigo Edificio" dataIndex="buildingCode" />
-                <Table.Column title={isBarriada ? "Nombre Barriada" : "Nombre Edificio"} dataIndex="buildingName" />
-                <Table.Column title="Cantidad Poliza" dataIndex="cantidad" render={(value)=> renderNumber(value)}/>
-                <Table.Column title="Sumatoria Valor" dataIndex="sumatoria" render={(value)=> renderNumber(value)}/>
-                <Table.Column title="Promedio por Poliza" dataIndex="promedio" render={(value)=> renderNumber(value)} />
+                <Table.Column title={t('Building Code')} dataIndex="buildingCode" />
+                <Table.Column title={isBarriada ? t('Nombre Barriada') : t('Nombre Edificio')} dataIndex="buildingName" />
+                <Table.Column title={t('Cantidad Poliza')} dataIndex="cantidad" render={(value)=> renderNumber(value)}/>
+                <Table.Column title={t('Sumatoria Valor')} dataIndex="sumatoria" render={(value)=> renderNumber(value)}/>
+                <Table.Column title={t('Promedio por Poliza')} dataIndex="promedio" render={(value)=> renderNumber(value)} />
             </Table>
 
-            <Panel title="Policy Filter Search" width={520} placement="right" onClose={() => setVisible(false)} visible={visible}>
+            <Panel title={t('Policy Filter Search')} width={520} placement="right" onClose={() => setVisible(false)} visible={visible}>
                 <Form id="formFilter" name="advanced_search" layout="vertical" initialValue={{buildingType:1}}>
                     <Row gutter={16}>
                         <Col span={24} className="gutter-row">
-                            <Button size="small" onClick={onReset} style={{ marginBottom: 10 }}><ResetIcon /> Reset</Button>
+                            <Button size="small" onClick={onReset} style={{ marginBottom: 10 }}><ResetIcon /> {t('Reset')}</Button>
                         </Col>
                     </Row>
 
                     <Row gutter={16}>
                         <Col span={12} className="gutter-row">
-                            <Form.Item label="País" name="country" style={{ width: '100%' }}>
+                            <Form.Item label={t('Country')} name="country" style={{ width: '100%' }}>
                                 <Select
                                     value={countryValue}
-                                    placeholder="Select an option..."
+                                    placeholder={t('Select an option...')}
                                     onChange={handleCountryChange}
                                     optionFilterProp='label'
                                     showSearch
@@ -306,13 +306,13 @@
                             </Form.Item>
                         </Col>
                         <Col span={12} className="gutter-row">
-                            <Form.Item label="Provincia" name="provincia" style={{ width: '100%' }}>
+                            <Form.Item label={t('Province')} name="provincia" style={{ width: '100%' }}>
                                 <Select
                                     showSearch
                                     optionFilterProp='label'
                                     value={stateValue}
                                     onChange={handleStateChange}
-                                    placeholder="Select an option..."
+                                    placeholder={t('Select an option...')}
                                     allowClear
                                     disabled={!countryValue}
                                     options={states}
@@ -323,10 +323,10 @@
 
                     <Row gutter={16}>
                         <Col span={12} className="gutter-row">
-                            <Form.Item label="Distrito" name="municipio" style={{ width: '100%' }}>
+                            <Form.Item label={t('District')} name="municipio" style={{ width: '100%' }}>
                                 <Select
                                     value={municipioValue}
-                                    placeholder="Select an option..."
+                                    placeholder={t('Select an option...')}
                                     onChange={handleMunicipioChange}
                                     allowClear
                                     disabled={!stateValue}
@@ -337,10 +337,10 @@
                             </Form.Item>
                         </Col>
                         <Col span={12} className="gutter-row">
-                            <Form.Item label="Corregimiento" name="sector" style={{ width: '100%' }}>
+                            <Form.Item label={t('Corregimiento')} name="sector" style={{ width: '100%' }}>
                                 <Select
                                     value={sectorValue}
-                                    placeholder="Select an option..."
+                                    placeholder={t('Select an option...')}
                                     onChange={setSectorValue}
                                     allowClear
                                     disabled={!municipioValue}
@@ -363,18 +363,18 @@
                             </Form.Item>
                         </Col>
                         <Col span={12} className="gutter-row">
-                            <Form.Item label="Tipo de Propiedad" name="buildingType" style={{ width: '100%' }}>
+                            <Form.Item label={t('Tipo de Propiedad')} name="buildingType" style={{ width: '100%' }}>
                                 <Radio.Group onChange={(e) => setRadioValue(e.target.value)} value={radioValue} defaultValue={1}>
-                                    <Radio value={1}>Edificio</Radio>
-                                    <Radio value={2}>Barriada</Radio>
+                                    <Radio value={1}>{t('Edificio')}</Radio>
+                                    <Radio value={2}>{t('Barriada')}</Radio>
                                 </Radio.Group>
                             </Form.Item>
                         </Col>
                     </Row>
 
                     <Space direction='vertical' style={{ display: 'flex' }}>
-                        <Button type="primary" onClick={searchPolicies} block><SearchIcon /> Search</Button>
-                        <div style={{ textAlign: 'center' }}><Tag>{searchTotal}</Tag> Results</div>
+                        <Button type="primary" onClick={searchPolicies} block><SearchIcon /> {t('Search')}</Button>
+                        <div style={{ textAlign: 'center' }}><Tag>{searchTotal}</Tag> {t('Results')}</div>
                     </Space>
                 </Form>
             </Panel>

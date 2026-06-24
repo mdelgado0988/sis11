@@ -340,7 +340,7 @@ function distribuyeContrato() {
         }
       });
 
-    ajustaTotales(newCessions, resultado);
+    ajustaTotalPrimaNoTecnica(newCessions, resultado);
   
     return newCessions ?? [];
     
@@ -382,12 +382,11 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
       ? 0
       : redondear((ces.premium / gridDataSelected.Prima), 8, forzar);
 
-    ces.nonTechnicalPremium = redondear(ces.premium * proporcionNoTecnica);
-
-    const primaCob = redondear(ces.premium - ces.nonTechnicalPremium);
+    const primaNoTecnicaCobertura = redondear(ces.premium * proporcionNoTecnica);
+    const primaCob = redondear(ces.premium - primaNoTecnicaCobertura);
 
     ces.id = 0;
-
+    
     // =========================
     // Cedant (solo si aplica)
     // =========================
@@ -408,6 +407,10 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
     ces.premiumRe = redondear(resultado[keys.porcentajeRe] * primaCob / 100);
     ces.proportionRe = redondear(resultado[keys.porcentajeRe] / 100, 8, forzar);
 
+    //Calculamos la prima no técnica de cada distribución para evitar confusión
+    //const percentDistribution = (((usaCedant ? resultado[keys.porcentajeCed] : 0) + resultado[keys.porcentajeRe]) / 100);
+    ces.nonTechnicalPremium = redondear(primaNoTecnicaCobertura * (ces.proportionCed + ces.proportionRe));
+
     ces.err = false;
     ces.msg = "";
     ces.np = false;
@@ -422,7 +425,7 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
     
     ces.np = false;    
 
-    // =========================
+    /*// =========================
     // Ajustes por cobertura
     // =========================
     let diff = ces.premium - (ces.nonTechnicalPremium + ces.premiumCedant + ces.premiumRe);
@@ -437,7 +440,7 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
     if (ces.sumInsuredCedant > 0 && diff < 0)
       ces.sumInsuredCedant += diff;
     else if (ces.sumInsuredRe > 0 && diff < 0)
-      ces.sumInsuredRe += diff;
+      ces.sumInsuredRe += diff;*/
 
   });
 
@@ -460,13 +463,13 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
   const totalPrimaCED = dameTotal(newCessions, tipoUpper, "premiumRe");
   const totalComision = dameTotal(newCessions, tipoUpper, "comissionCedant");
   const totalImpuesto = dameTotal(newCessions, tipoUpper, "tax");
-  const totalNoTecnica = dameTotal(newCessions, tipoUpper, "nonTechnicalPremium");
+  //const totalNoTecnica = dameTotal(newCessions, tipoUpper, "nonTechnicalPremium");
 
   primerCobertura.sumInsuredRe += redondear(resultado[keys.totalSumaRe] - totalSumaCED);
   primerCobertura.premiumRe += redondear(resultado[keys.totalPrimaRe] - totalPrimaCED);
   primerCobertura.comissionCedant += redondear(resultado[keys.montoComision] - totalComision);
   primerCobertura.tax += redondear(resultado[keys.montoImpuesto] - totalImpuesto);
-  primerCobertura.nonTechnicalPremium += redondear(resultado[keys.totalPrimaNT] - totalNoTecnica);
+  //primerCobertura.nonTechnicalPremium += redondear(resultado[keys.totalPrimaNT] - totalNoTecnica);
 
   // =========================
   // Participantes
@@ -551,7 +554,8 @@ async function addCessions(newCessions){
   return { isOk: isOk, newSaveCessions: newSaveCessions};
 }  
 
-function ajustaTotales(newCessions, resultado) {
+function ajustaTotalPrimaNoTecnica(newCessions, resultado) {
+  
   const noTecnicatotal = resultado["mpnot"];
 
   const totalSuma = newCessions.reduce((acc, item) => {
@@ -659,7 +663,7 @@ function onRowSelected(row) {
 
   //convierto distribuciones a un arreglo de objetos mapeando el valor
   const distribucionesCalculo = distribuciones.map(x => ({ name: x, porcentajesCalculados: null }));
-  const coveragesCalulateNOT = [];
+  //const coveragesCalulateNOT = [];
   
   distribucionesCalculo.forEach(calc => {
 
@@ -692,16 +696,16 @@ function onRowSelected(row) {
           map[dist]?.(distribucion.proportionRe);
         }
 
-        //Validamos prima no técnica, una vez por cobertura
-        const ContratoYCoberturaCalculada = coveragesCalulateNOT.find(d => normalizeCondition(d) == normalizeCondition(distribucion.coverageCode));
-        if(!ContratoYCoberturaCalculada){          
-          mpnot += distribucion.nonTechnicalPremium;
-          coveragesCalulateNOT.push(distribucion.coverageCode);
-        }
+        // //Validamos prima no técnica, una vez por cobertura
+        // const ContratoYCoberturaCalculada = coveragesCalulateNOT.find(d => normalizeCondition(d) == normalizeCondition(distribucion.coverageCode));
+        // if(!ContratoYCoberturaCalculada){                    
+        //   coveragesCalulateNOT.push(distribucion.coverageCode);
+        // }
         
         msret += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredCedant);
         mpret += distribucion.premiumCedant;
         premium += distribucion.premium;
+        mpnot += distribucion.nonTechnicalPremium;
   
         switch(dist){
           case "CUOTA PARTE":
