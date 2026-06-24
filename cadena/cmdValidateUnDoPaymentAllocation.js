@@ -23,10 +23,10 @@ if (!allocationInstallmentRefs.length) {
   if (!payPlanIds.length) {
     msg = "No existen payPlanId validos";
   } else {
-    const installmentPayments = loadAllocationInstallmentsByPayPlanIds(
-      allocationInstallmentRefs
-        .filter(item => isValidNumber(item?.lifePolicyId) && isValidNumber(item?.payPlanId))
-    );
+  const installmentPayments = loadAllocationInstallmentsByPayPlanIds(
+    allocationInstallmentRefs
+      .filter(item => isValidNumber(item?.lifePolicyId) && isValidNumber(item?.payPlanId))
+  );
 
     const allocationIds = uniqueNumbers(
       installmentPayments
@@ -40,16 +40,16 @@ if (!allocationInstallmentRefs.length) {
         .map(item => item?.allocationId)
         .filter(isValidNumber)
     );
-    const appliedInstallmentPayments = installmentPayments.filter(item =>
-      isValidNumber(item?.allocationId) && transferAllocationIds.includes(Number(item.allocationId))
-    );
+  const appliedInstallmentPayments = installmentPayments.filter(item =>
+    isValidNumber(item?.allocationId) && transferAllocationIds.includes(Number(item.allocationId))
+  );
 
-    const installments = loadInstallmentsByPayPlanIds(payPlanIds).filter(item =>
-      isValidNumber(item?.id) && payPlanIds.includes(Number(item.id))
-    );
+  const installments = loadInstallmentsByPayPlanIds(payPlanIds).filter(item =>
+    isValidNumber(item?.id) && payPlanIds.includes(Number(item.id))
+  );
 
-    const updatedCount = updatePayPlanPaidAmounts(appliedInstallmentPayments, installments, transfers);
-    msg = updatedCount
+  const updatedCount = updatePayPlanPaidAmounts(appliedInstallmentPayments, installments, transfers);
+  msg = updatedCount
       ? `Se actualizaron ${updatedCount} payplan(s)`
       : "No fue necesario actualizar montos";
   }
@@ -114,8 +114,7 @@ function loadInstallmentsByPayPlanIds(payPlanIds) {
 function updatePayPlanPaidAmounts(installmentPayments, installments, transfers) {
   const expectedByPayPlan = groupSumByPayPlanId(installmentPayments, "moneyInAmount");
   const currentByPayPlan = groupSumByPayPlanId(installments, "payed");
-  const allocationByPayPlan = buildAllocationByPayPlanId(installmentPayments);
-  const transferDateByPayPlan = buildTransferDateByPayPlanId(installmentPayments, transfers);
+  const metadataByPayPlan = buildPayPlanMetadataByPayPlanId(installmentPayments, transfers);
   const payPlans = uniqueNumbers([
     ...Object.keys(expectedByPayPlan || {}),
     ...Object.keys(currentByPayPlan || {})
@@ -136,7 +135,7 @@ function updatePayPlanPaidAmounts(installmentPayments, installments, transfers) 
       data: {
         entity: "PayPlan",
         entityId: payPlanId,
-        fieldValue: `payed = ${expectedPaid}, allocationId = ${allocationByPayPlan[payPlanId] ?? "NULL"}, payedDate = ${formatDateAssignment(transferDateByPayPlan[payPlanId])}`
+        fieldValue: `payed = ${expectedPaid}, allocationId = ${metadataByPayPlan[payPlanId]?.allocationId ?? "NULL"}, payedDate = ${formatDateAssignment(metadataByPayPlan[payPlanId]?.payedDate, expectedPaid)}`
       }
     });
 
@@ -148,16 +147,20 @@ function updatePayPlanPaidAmounts(installmentPayments, installments, transfers) 
   return updatedCount;
 }
 
-function buildTransferDateByPayPlanId(installmentPayments, transfers) {
+function buildPayPlanMetadataByPayPlanId(installmentPayments, transfers) {
   const transferDateByAllocationId = (Array.isArray(transfers) ? transfers : []).reduce((acc, item) => {
     const allocationId = Number(item?.allocationId);
     const date = item?.date;
 
-    if (!Number.isFinite(allocationId) || !date || acc[allocationId]) {
+    if (!Number.isFinite(allocationId) || !date) {
       return acc;
     }
 
-    acc[allocationId] = date;
+    const current = acc[allocationId];
+    if (!current || String(date) > String(current)) {
+      acc[allocationId] = date;
+    }
+
     return acc;
   }, {});
 
@@ -166,25 +169,27 @@ function buildTransferDateByPayPlanId(installmentPayments, transfers) {
     const allocationId = Number(item?.allocationId);
     const transferDate = transferDateByAllocationId[allocationId];
 
-    if (!Number.isFinite(payPlanId) || !Number.isFinite(allocationId) || !transferDate || acc[payPlanId]) {
+    if (!Number.isFinite(payPlanId) || !Number.isFinite(allocationId)) {
       return acc;
     }
 
-    acc[payPlanId] = transferDate;
-    return acc;
-  }, {});
-}
+    const candidate = {
+      allocationId,
+      payedDate: transferDate || null
+    };
 
-function buildAllocationByPayPlanId(items) {
-  return (Array.isArray(items) ? items : []).reduce((acc, item) => {
-    const payPlanId = Number(item?.payPlanId);
-    const allocationId = Number(item?.allocationId);
-
-    if (!Number.isFinite(payPlanId) || !Number.isFinite(allocationId) || acc[payPlanId]) {
+    const current = acc[payPlanId];
+    if (!current) {
+      acc[payPlanId] = candidate;
       return acc;
     }
 
-    acc[payPlanId] = allocationId;
+    const currentDate = current.payedDate ? String(current.payedDate) : "";
+    const candidateDate = candidate.payedDate ? String(candidate.payedDate) : "";
+    if (!currentDate || candidateDate > currentDate) {
+      acc[payPlanId] = candidate;
+    }
+
     return acc;
   }, {});
 }
@@ -240,9 +245,13 @@ function round2(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
-function formatDateAssignment(value) {
+function formatDateAssignment(value, expectedPaid) {
+  if (!Number.isFinite(Number(expectedPaid)) || Number(expectedPaid) <= 0.01) {
+    return "NULL";
+  }
+
   if (!value) {
-    return "GETDATE()";
+    return "NULL";
   }
 
   return `'${String(value).replace(/'/g, "''")}'`;
