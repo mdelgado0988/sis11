@@ -163,13 +163,13 @@ function normalizePayPlan(item, policyId) {
     transferId: item.transferId ?? null,
     coveredUntil: item.coveredUntil ?? null,
     allocationDate: item.allocationDate ?? null,
-    final: Boolean(item.final),
+    final: parseBoolean(item.final),
     finalDate: item.finalDate ?? null,
     allocationId: item.allocationId ?? null,
     currency: item.currency ?? "USD",
     cancellationDate: item.cancellationDate ?? null,
     compensationDate: item.compensationDate ?? null,
-    custom: Boolean(item.custom),
+    custom: parseBoolean(item.custom),
     created: item.created ?? null,
     penaltyInterest: n2(item.penaltyInterest),
     normalDueDate: item.normalDueDate ?? item.dueDate ?? null,
@@ -225,7 +225,7 @@ function normalizePayPlanDetails(details) {
       order: Number(detail?.order || 0),
       paid: n2(detail?.paid)
     }))
-    .filter(detail => detail.payPlanId >= 0 || detail.id >= 0);
+    .filter(isValidPayPlanDetail);
 }
 
 function clonePayPlan(item) {
@@ -251,10 +251,15 @@ function syncPolicyPayPlan(change, currentPayPlans, targetPayPlans) {
       .filter(item => Number(item?.id || 0) > 0)
       .map(item => [Number(item.id), item])
   );
-  const currentByNumber = new Map(
+  const currentByKey = new Map(
     (currentPayPlans || [])
-      .filter(item => Number(item?.numberInYear || 0) > 0)
-      .map(item => [Number(item.numberInYear), item])
+      .filter(item => Number(item?.contractYear || 0) > 0 && Number(item?.numberInYear || 0) > 0)
+      .map(item => [buildPayPlanMatchKey(item), item])
+  );
+  const currentByDueDate = new Map(
+    (currentPayPlans || [])
+      .filter(item => item?.dueDate)
+      .map(item => [buildPayPlanDueDateKey(item), item])
   );
 
   const matchedCurrentIds = new Set();
@@ -262,7 +267,7 @@ function syncPolicyPayPlan(change, currentPayPlans, targetPayPlans) {
   let newIndex = 0;
 
   for (const target of targetPayPlans || []) {
-    const current = findCurrentPayPlan(target, currentById, currentByNumber);
+    const current = findCurrentPayPlan(target, currentById, currentByKey, currentByDueDate);
 
     if (current?.id) {
       matchedCurrentIds.add(Number(current.id));
@@ -296,15 +301,20 @@ function syncPolicyPayPlan(change, currentPayPlans, targetPayPlans) {
   executeSql(sqlParts.join("\n"));
 }
 
-function findCurrentPayPlan(target, currentById, currentByNumber) {
+function findCurrentPayPlan(target, currentById, currentByKey, currentByDueDate) {
   const targetId = Number(target?.id || 0);
   if (targetId > 0 && currentById.has(targetId)) {
     return currentById.get(targetId);
   }
 
-  const numberInYear = Number(target?.numberInYear || 0);
-  if (numberInYear > 0 && currentByNumber.has(numberInYear)) {
-    return currentByNumber.get(numberInYear);
+  const matchKey = buildPayPlanMatchKey(target);
+  if (currentByKey.has(matchKey)) {
+    return currentByKey.get(matchKey);
+  }
+
+  const dueDateKey = buildPayPlanDueDateKey(target);
+  if (dueDateKey && currentByDueDate.has(dueDateKey)) {
+    return currentByDueDate.get(dueDateKey);
   }
 
   return null;
@@ -529,6 +539,61 @@ function executeSql(sql) {
 function sqlNumber(value) {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? String(num) : "0";
+}
+
+function buildPayPlanMatchKey(item) {
+  const contractYear = Number(item?.contractYear || 0);
+  const numberInYear = Number(item?.numberInYear || 0);
+  return `${contractYear}|${numberInYear}`;
+}
+
+function buildPayPlanDueDateKey(item) {
+  return normalizeDateKey(item?.dueDate);
+}
+
+function normalizeDateKey(value) {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+
+  const text = String(value);
+  return text.length >= 10 ? text.slice(0, 10) : text;
+}
+
+function parseBoolean(value) {
+  if (value === true || value === false) {
+    return value;
+  }
+
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+
+  if (["true", "1", "y", "yes", "si", "sí"].includes(text)) {
+    return true;
+  }
+
+  if (["false", "0", "n", "no"].includes(text)) {
+    return false;
+  }
+
+  return Boolean(value);
+}
+
+function isValidPayPlanDetail(detail) {
+  const hasAmount = Number.isFinite(Number(detail?.amount));
+  const hasConcept = String(detail?.concept ?? "").trim().length > 0;
+  const hasOrder = Number.isFinite(Number(detail?.order));
+  return hasAmount && hasConcept && hasOrder;
 }
 
 function sqlMoney(value) {
