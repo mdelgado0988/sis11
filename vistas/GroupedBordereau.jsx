@@ -1344,13 +1344,13 @@
     const { showFilter, closeFilter , filterForm, quickFilterForm } = useAppContext();    
     const cmdOption = Form.useWatch('cmdOption', quickFilterForm);
 	const titles = {
-		RepoCession: 'Cession Search',
-		RepoLossCession :'Claim Cession Search',
-		RepoSalvageCession : 'Salvage Cession Search'
+		RepoCession: t('Cession Search'),
+		RepoLossCession : t('Claim Cession Search'),
+		RepoSalvageCession : t('Salvage Cession Search')
 	}
     return <Drawer title={ titles[ cmdOption ] } open={showFilter} onClose={closeFilter} width={500}>
 		<Button icon={<ReloadIcon />} onClick={ ()=> filterForm.resetFields() }>
-			Reset
+			{t('Reset')}
 		</Button>
       { cmdOption === 'RepoCession'        && <CessionsFilter /> }
 	  { cmdOption === 'RepoLossCession'    && <LossFilter /> }
