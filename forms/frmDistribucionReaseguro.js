@@ -2412,7 +2412,7 @@ function resumenPorLinea(cessions) {
           g._participants.set(pKey, {
             id: p.id,
             name: p.name,
-            split: 0,
+            split: p.split,
             sumInsured: 0,
             premium: 0,
             commission: 0,
@@ -2422,8 +2422,8 @@ function resumenPorLinea(cessions) {
 
         const gp = g._participants.get(pKey);
 
-        gp.split += Number(montoSiEsCobertura(item.coverageCode,p.split || 0));
-        gp.sumInsured += Number(p.sumInsured || 0);
+        //gp.split += Number(montoSiEsCobertura(item.coverageCode,p.split || 0));
+        gp.sumInsured += Number(montoSiEsCobertura(item.coverageCode, p.sumInsured || 0));
         gp.premium += Number(p.premium || 0);
         gp.commission += Number(p.commission || 0);
         gp.tax += Number(p.tax || 0);
@@ -2522,7 +2522,7 @@ function renderResumen() {
             <!-- Línea 2 -->
             <div class="p-line">
               <span><b>Porcentaje:</b> ${formatearRedondeado(p.split)}%</span>
-              <span><b>Suma:</b> ${formatearRedondeado(p.sumInsured)}</span>
+              <span><b>Suma Aseg por Participante:</b> ${formatearRedondeado(p.sumInsured)}</span>
             </div>
 
             <!-- Línea 3 -->

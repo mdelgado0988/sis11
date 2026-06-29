@@ -22,7 +22,7 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
     ISNULL(ISNULL(an.fiscalNumber, lp.fiscalNumber),'0') AS Recibo,
-    CONVERT(VARCHAR, an.created, 103) AS FechaIngreso,
+	FORMAT(an.created, 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
     CONVERT(VARCHAR, an.created, 103) AS FechaEmision,
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prc.usuario, prcp.usuario) AS Usuario,
@@ -157,7 +157,7 @@ OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
 				NULLIF(LTRIM(RTRIM(acre.middleName)), ''),
 				NULLIF(LTRIM(RTRIM(acre.surname1)), ''),
 				NULLIF(LTRIM(RTRIM(acre.surname2)), '')
-			), 'No Tiene') AS Acreedor) acref
+			), 'No Tiene') AS Acreedor, acre.id) acref
 LEFT JOIN Product prod ON prod.code = lp.productCode
 LEFT JOIN Proceso prc ON prc.id = an.processId
 LEFT JOIN Proceso prcp ON prcp.id = lp.processId
@@ -328,7 +328,6 @@ OUTER APPLY (
 WHERE CAST(an.created AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
-AND lp.id = 807
 
 UNION ALL
 
@@ -346,11 +345,12 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
     ISNULL(bed.fiscalNumber, '0') AS Recibo,
-    CONVERT(VARCHAR, ed.creationDate, 103) AS FechaIngreso,
+	FORMAT(ed.creationDate, 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
     CONVERT(VARCHAR, ed.effectiveDate, 103) AS FechaEmision,
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prc.usuario, '') AS Usuario,
-    CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]), 103) AS Desde,
+    CASE WHEN ed.Discriminator = 'CancellationChange' THEN CONVERT(VARCHAR, ed.effectiveDate, 103)
+		 ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]), 103) END AS Desde,
     CONVERT(VARCHAR, ISNULL(ed.newEnd, lp.[end]), 103) AS Hasta
     ,CASE 
 		WHEN ed.Discriminator = 'AddCoverageChange' THEN 'Adición de Cobertura'
@@ -648,8 +648,7 @@ OUTER APPLY (
     WHERE bf.id = ISNULL(ed.newCessionBeneficiary, lp.cessionBeneficiary)
 ) bf
 
-WHERE CAST(ed.effectiveDate AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
+WHERE CAST(ed.creationDate AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
-AND ISNULL(mo.Monto,0) <> 0
-AND lp.id = 807
+/*AND ISNULL(mo.Monto,0) <> 0 */
