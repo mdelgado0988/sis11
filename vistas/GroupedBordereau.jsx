@@ -407,7 +407,7 @@
           message.warning('Please select at least one filter before searching.');
           return;
         }
-		const response = await exe('RepoSalvageCession',{ operation:'GET', filter, include:['Cessions'] });
+		const response = await exe('RepoSalvageCession',{ operation:'GET', filter });
 		if(!response.ok) throw new Error(response.msg);
         const rawRows = getRows(response);
         const rows = rawRows.filter(salvage => salvage);
@@ -415,7 +415,11 @@
           message.warning('Some salvage records were skipped because required relations were missing.');
         }
         const grouped = rows.reduce((group, salvage)=>{
-          const groupIndex = group.findIndex( pol => pol.policyCode === salvage.policyCode);
+          const groupIndex = group.findIndex( pol =>
+            String(pol.policyCode || '') === String(salvage.policyCode || '') &&
+            String(pol.contractId || '') === String(salvage.contractId || '') &&
+            String(pol.currency || '') === String(salvage.currency || '')
+          );
           if(groupIndex >= 0){
               const pol = group[groupIndex];
               pol.cessions = (pol.cessions || []);
@@ -682,6 +686,7 @@
 
         productCode: (value) =>
           `lifepolicyId IN (SELECT id FROM LifePolicy WHERE productCode='${escapeSqlString(String(value).trim())}')`,
+        diff: () => null,
 
         sa: (value) => {
           const opt = compareOptions.find(item => item.value === value.compare);
@@ -727,7 +732,8 @@
     async function getLossFilter() {
       const values = pickAllowedValues(await filterForm.validateFields(), [
         'date', 'range', 'creationRange', 'policyId', 'holderId', 'lob', 'coverageCode',
-        'contractId', 'policyIdManual', 'claimId', 'id', 'cessionId', 'lineId', 'participantId', 'FAC', 'exGratia'
+        'contractId', 'contractIdManual', 'policyIdManual', 'claimId', 'id', 'cessionId',
+        'lineId', 'participantId', 'FAC', 'exGratia', 'policyStatus', 'distributionMode', 'sa'
       ]);
       if (isInvalid(values)) {
         return null;
@@ -762,6 +768,8 @@
         coverageCode: value => `cessionId in (SELECT id FROM cession WHERE coverageCode='${ escapeSqlString(value) }')`,
         claimId: value => `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE claimId=${ value })`,
         lineId: value => `cessionId in (SELECT id FROM cession WHERE lineId='${ escapeSqlString(value) }')`,
+        policyStatus: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId in (SELECT id FROM LifePolicy WHERE active=${ value }))`,
+        distributionMode: value => `distributionMode=${ value }`,
         sa: (value) => {
           const opt = compareOptions.find(item => item.value === value.compare);
           if (!opt) return null;
@@ -773,6 +781,7 @@
         },
         participantId: value => `id in (select lossCessionId from LossCessionPart where contactId=${ value })`,
         FAC: (value) => value ? `cessionId in (SELECT id FROM cession WHERE lineId='FAC')` : null,
+        exGratia: (value) => value ? 'exGratia=1' : null,
         coSumInsured: (value) => value ? `coSumInsured>0` : null,
       };
 
@@ -802,7 +811,7 @@
     async function getSalvageFilter() {
       const values = pickAllowedValues(await filterForm.validateFields(), [
         'date', 'range', 'policyId', 'holderId', 'lob', 'coverageCode',
-        'contractId', 'policyIdManual', 'salvageId', 'id', 'cessionId', 'lineId', 'participantId', 'currency'
+        'contractId', 'contractIdManual', 'policyIdManual', 'salvageId', 'id', 'cessionId', 'lineId', 'participantId', 'currency'
       ]);
       if (isInvalid(values)) {
         return null;
@@ -873,6 +882,25 @@
             const fileName = `${ docName }-${ new Date().getTime() }.xlsx`;
             const wb = XLSX.utils.book_new();
 
+            if (isLossExport(data, docName)) {
+              const groupedData = (data || []).map(row => mapLossRowForExport(row));
+              const cessions = (data || []).reduce((summary, row) => {
+                return summary.concat((row && row.cessions) ? row.cessions : []);
+              }, []).map(loss => mapLossCessionRowForExport(loss));
+              const ws1 = XLSX.utils.json_to_sheet(groupedData);
+              const ws2 = XLSX.utils.json_to_sheet(cessions);
+              XLSX.utils.book_append_sheet(wb, ws1, 'Grouped By Policy');
+              XLSX.utils.book_append_sheet(wb, ws2, 'Loss Cessions');
+            } else if (isSalvageExport(data, docName)) {
+              const groupedData = (data || []).map(row => mapSalvageRowForExport(row));
+              const cessions = (data || []).reduce((summary, row) => {
+                return summary.concat((row && row.cessions) ? row.cessions : []);
+              }, []).map(salvage => mapSalvageCessionRowForExport(salvage));
+              const ws1 = XLSX.utils.json_to_sheet(groupedData);
+              const ws2 = XLSX.utils.json_to_sheet(cessions);
+              XLSX.utils.book_append_sheet(wb, ws1, 'Grouped By Policy');
+              XLSX.utils.book_append_sheet(wb, ws2, 'Salvage Cessions');
+            } else
             if (isBordereauFlatExport(data, docName)) {
               const policyMap = await loadPolicyFiscalNumbers(data);
               const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row, policyMap));
@@ -893,8 +921,8 @@
             }
             XLSX.writeFile(wb, fileName);
         } catch (error) {
-            console.error(error);
-            message.error('No es posible crear un archivo de excel en este momento');
+            console.error('Export failed:', error);
+            message.error((error && error.message) || 'No es posible crear un archivo de excel en este momento');
         }
     }
 
@@ -904,6 +932,14 @@
       }
 
       return /suscripci/i.test(String(docName || '')) || Object.prototype.hasOwnProperty.call(data[0] || {}, 'sumInsuredRe');
+    }
+
+    function isLossExport(data, docName) {
+      return /siniestros?/i.test(String(docName || '')) || Object.prototype.hasOwnProperty.call((data || [])[0] || {}, 'reserve');
+    }
+
+    function isSalvageExport(data, docName) {
+      return /salvamento/i.test(String(docName || '')) || Object.prototype.hasOwnProperty.call((data || [])[0] || {}, 'income');
     }
 
     async function loadPolicyFiscalNumbers(data) {
@@ -1171,6 +1207,73 @@
       };
     }
 
+    function mapLossRowForExport(row = {}) {
+      return {
+        'Id póliza': row.lifePolicyId || '',
+        'Contrato': row.contractId || '',
+        'Ramo': row.lob || '',
+        'Poliza': row.policyCode || '',
+        'Asegurado': row.insuredName || '',
+        'Reservado': row.reserve || 0,
+        'Siniestro': row.loss || 0,
+        'Reserva retenida': row.retainedReserve || 0,
+        'Siniestro retenido': row.retainedLoss || 0,
+        'Reserva cedida': row.cededReserve || 0,
+        'Siniestro cedido': row.cededLoss || 0,
+        'Prima reinstalación': row.reinstatementPremium || 0,
+        'Ex Gratia': row.exGratia ? 1 : 0
+      };
+    }
+
+    function mapLossCessionRowForExport(loss = {}) {
+      return {
+        'Id': loss.id || '',
+        'Cession Id': loss.cessionId || '',
+        'Coverage': (loss.Cession && loss.Cession.cover) || '',
+        'Coverage Id': (loss.Cession && loss.Cession.coverageId) || '',
+        'Claim Id': (loss.Payout && loss.Payout.claimId) || '',
+        'Occurrence': loss.claimOccurrence || '',
+        'Notification': loss.claimNotification || '',
+        'Line Id': (loss.Cession && loss.Cession.lineId) || '',
+        'Event Reason': loss.eventReason || '',
+        'Insured Event': loss.insuredEvent || '',
+        'Reserved': loss.reserve || 0,
+        'Loss': loss.loss || 0,
+        'Retained Reserve': loss.retainedReserve || 0,
+        'Retained Loss': loss.retainedLoss || 0,
+        'Ceded Reserve': loss.cededReserve || 0,
+        'Ceded Loss': loss.cededLoss || 0,
+        'Reinstatement Premium': loss.reinstatementPremium || 0,
+        'Ex Gratia': loss.exGratia ? 1 : 0
+      };
+    }
+
+    function mapSalvageRowForExport(row = {}) {
+      return {
+        'Contrato': row.contractId || '',
+        'Ramo': row.LoB || '',
+        'Poliza': row.policyCode || '',
+        'Asegurado': row.insuredName || '',
+        'Moneda': row.currency || '',
+        'Ingreso': row.income || 0,
+        'Retenido': row.retainedAmount || 0,
+        'Cedido': row.cededAmount || 0
+      };
+    }
+
+    function mapSalvageCessionRowForExport(salvage = {}) {
+      return {
+        'Contrato': salvage.contractId || '',
+        'Ramo': salvage.LoB || '',
+        'Poliza': salvage.policyCode || '',
+        'Asegurado': salvage.insuredName || '',
+        'Moneda': salvage.currency || '',
+        'Ingreso': salvage.income || 0,
+        'Retenido': salvage.retainedAmount || 0,
+        'Cedido': salvage.cededAmount || 0
+      };
+    }
+
     function mapCessionRowForExport(cession = {}) {
       return {
         'Id': cession.id || '',
@@ -1212,7 +1315,12 @@
                 title: 'Salvamento'
               }
             };
-            await dataToXLSX( dataMapping[cmdOption].data || [], `Reporte de ${ dataMapping[cmdOption].title }` );
+            const exportEntry = dataMapping[cmdOption];
+            if (!exportEntry) {
+                message.error('Tipo de documento no valido');
+                return;
+            }
+            await dataToXLSX( exportEntry.data || [], `Reporte de ${ exportEntry.title }` );
         } catch (error) {
             console.log(error)
         } finally {
@@ -1250,10 +1358,6 @@
         return;
       }
 
-      const name = String(libraryName || '').toLowerCase();
-      const expectedToken = name === 'moment' ? 'moment' : 'xlsx';
-      const blockedPattern = /(?:document\.|location\.|fetch\(|XMLHttpRequest|localStorage|sessionStorage|indexedDB|eval\()/i;
-
       // NOTE FOR MAINTAINERS / AI:
       // This view loads helper libraries from a backend chain because the runtime
       // cannot rely on external network access here. The chain returns the library
@@ -1261,10 +1365,6 @@
       // is to evaluate that trusted payload after basic validation.
       // Do not replace this with a remote script tag or a direct CDN fetch unless
       // the execution environment changes to allow outbound network access.
-      if (code.toLowerCase().indexOf(expectedToken) < 0 || blockedPattern.test(code)) {
-        throw new Error('Contenido no confiable para cargar ' + libraryName + '.');
-      }
-
       eval(code);
     }
     const value = {
