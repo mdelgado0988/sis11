@@ -22,14 +22,25 @@ const policy = getPolicy(claim);
 const reportCoverageName = getReportCoverageName(claimId);
 const product = getProduct(policy);
 const docs = getSettlementDocs(product, policy);
+const docsToGenerate = docs.filter(doc => doc?.template);
 let sentDocs = 0;
 
-// Start generating documents
-for (const doc of docs) {
+if (!docs.length) {
+    return {
+        ok: false,
+        msg: "No hay finiquitos configurados para este producto"
+    };
+}
 
-    if (!doc?.template) {
-        continue;
-    }
+if (!docsToGenerate.length) {
+    return {
+        ok: false,
+        msg: "Los finiquitos configurados no tienen plantilla"
+    };
+}
+
+// Start generating documents
+for (const doc of docsToGenerate) {
 
     doCmd({cmd: 'PutMessage', 
         data: { 

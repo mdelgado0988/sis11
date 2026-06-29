@@ -16,6 +16,10 @@ const objectDefinitionId = [46,47]
 const quitarCodigo = texto => texto.split(" - ").slice(1).join(" - ");
 const n2 = value => Number(String(value ?? '').replace(/,/g, ''));
 
+if (!claimId) {
+  throw new Error("No se recibió el reclamo");
+}
+
 const claim = getClaim();
 const policy = getPolicy(claim);
 const cessionBeneficiary = getCessionBeneficiary(policy);
@@ -30,7 +34,6 @@ let resultado = {};
 resultado.reclamo = claim.code;
 resultado.asegurado = claimerContact.name;
 resultado.identificacion = claimerContact.cnp;
-resultado.reclamo = claim.code;
 resultado.provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${policy.insuredObject?.userData?.cmbPais ?? "0"}' AND code = '${policy.insuredObject?.userData?.cmbProvincia ?? "0"}'`)
 resultado.ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${policy.insuredObject?.userData?.cmbProvincia ?? "0"}' AND code = '${policy.insuredObject?.userData?.cmbMunicipio ?? "0"}'`)
 resultado.corregimiento = getCatalogValue("RepoSectorCatalog", `code = '${policy.insuredObject?.userData?.cmbSector ?? "0"}'`)
@@ -47,15 +50,9 @@ resultado.producto = product.name;
 resultado.nombreCobertura = getNombreCobertura(claim);
 //resultado.coverages = policy.coverages;
 
-resultado.lifeCoverageIdsHoteleria = policy.coverages
-  .filter(c => ["251", "954"].includes(c.code))
-  .map(c => c.id);
+resultado.lifeCoverageIdsHoteleria = getCoverageIdsByCodes(policy.coverages, ["251", "954"]);
 
-resultado.totalhotel = claim.payments.reduce((sum, payment) => {
-  return sum + (payment.detail || [])
-    .filter(d => resultado.lifeCoverageIdsHoteleria.includes(d.lifeCoverageId))
-    .reduce((subSum, d) => subSum + Number(d.amount || 0), 0);
-}, 0);
+resultado.totalhotel = sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsHoteleria);
 
 resultado.chequehotel = claim.payments.reduce((max, payment) => {
   const aplica = (payment.detail || []).some(d =>
@@ -67,22 +64,18 @@ resultado.chequehotel = claim.payments.reduce((max, payment) => {
     : max;
 }, 0);
 
-resultado.lifeCoverageIdsContenido = policy.coverages
-  .filter(c => ["256", "258"].includes(c.code))
-  .map(c => c.id);
+resultado.lifeCoverageIdsContenido = getCoverageIdsByCodes(policy.coverages, ["256", "258"]);
 
-resultado.totalcontenido = claim.payments.reduce((sum, payment) => {
-  return sum + (payment.detail || [])
-    .filter(d => resultado.lifeCoverageIdsContenido.includes(d.lifeCoverageId))
-    .reduce((subSum, d) => subSum + Number(d.amount || 0), 0);
-}, 0);
+resultado.totalcontenido = sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido);
 
-resultado.totaledificio = formatN2(sumPaymentDetails(claim.payments));
-resultado.total = claim.payments.reduce((sum, payment) => {
-  return sum + (payment.detail || [])
-    .reduce((subSum, d) => subSum + Number(d.amount || 0), 0);
-}, 0);
-resultado.total = formatN2(resultado.total ?? 0);
+// La suma de edificio se toma de la suma asegurada de la póliza, como en la versión original.
+// No debe salir de los pagos detallados porque ese dato representa la liquidación total.
+resultado.lifeCoverageIdsEdificio = getCoverageIdsByCodes(policy.coverages, ["1", "3"]);
+
+// Edificio se calcula desde los pagos asociados a las coberturas 1 y 3.
+// No debe tomar la suma asegurada de la póliza porque aquí necesitamos el monto liquidado.
+resultado.totaledificio = formatN2(sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsEdificio));
+resultado.total = formatN2(sumPaymentDetails(claim.payments));
 
 resultado.chequetotal = claim.payments.reduce(
   (max, payment) => Math.max(max, Number(payment.checkNum || 0)),
@@ -112,6 +105,18 @@ return resultado;
 function getClaim() {
   doCmd({cmd: "LoadEntity", data: { entity: "Claim", fields:"code, occurrence, lifePolicyId, contactId", filter: `id = ${claimId}` }})
   const claim = LoadEntity.outData ?? {};
+
+  if (!claim?.code) {
+    throw new Error(`No se encontró el reclamo ${claimId}`);
+  }
+
+  if (!claim?.lifePolicyId) {
+    throw new Error(`El reclamo ${claimId} no tiene póliza asociada`);
+  }
+
+  if (!claim?.contactId) {
+    throw new Error(`El reclamo ${claimId} no tiene asegurado asociado`);
+  }
   
   doCmd({cmd: "LoadEntities", data: { entity: "ClaimPayment", fields:"contactId, date, user, total, jDetail, currency, coverageId, checkNum", filter: `claimId = ${claimId} AND entityState = 'EXECUTED'` }})
   claim.payments = LoadEntities.outData ?? [];
@@ -189,6 +194,26 @@ function sumPaymentDetails(payments) {
     const rows = Array.isArray(payment?.detail) ? payment.detail : [];
     return sum + rows.reduce((subSum, row) => subSum + Number(row?.amount || 0), 0);
   }, 0);
+}
+
+function sumPaymentDetailsByCoverageIds(payments, coverageIds) {
+  const coverageSet = new Set((coverageIds || []).map(id => Number(id)).filter(id => id > 0));
+
+  return (payments || []).reduce((sum, payment) => {
+    const rows = Array.isArray(payment?.detail) ? payment.detail : [];
+    return sum + rows
+      .filter(row => coverageSet.has(Number(row?.lifeCoverageId)))
+      .reduce((subSum, row) => subSum + Number(row?.amount || 0), 0);
+    }, 0);
+}
+
+function getCoverageIdsByCodes(coverages, codes) {
+  const codeSet = new Set((codes || []).map(code => String(code)));
+
+  return (coverages || [])
+    .filter(coverage => codeSet.has(String(coverage?.code)))
+    .map(coverage => Number(coverage?.id))
+    .filter(id => id > 0);
 }
 
 function safeJson(raw, fallback) {
