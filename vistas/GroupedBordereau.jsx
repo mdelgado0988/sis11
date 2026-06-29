@@ -226,11 +226,7 @@
                 const pol = group[groupIndex];
 
                 pol.cessions = (pol.cessions || []);
-                pol.cessions.push(cession);
-
-                // Max values
-                pol.premium +=  cession.premium;
-                
+                pol.cessions.push(cession);               
 
                 // Totals
                 pol.sumInsuredCedant += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant);
@@ -240,9 +236,15 @@
                 pol.sumInsuredComputed = totalSum;
 
                 addLineCedTotals(pol, cession);
+                addLinePremiumTotals(pol, cession);
+                addLineCommissionTotals(pol, cession);
+                addLineTaxTotals(pol, cession);
                 pol.tax += cession.tax;
                 pol.premiumCedant += cession.premiumCedant;
                 pol.premiumRe += cession.premiumRe;
+                const totalPremium = Number(pol.premiumCedant || 0) + Number(pol.premiumRe || 0);
+                pol.premium = totalPremium;
+
                 pol.comissionCedant += cession.comissionCedant;
                 pol.comissionCedantExtra += cession.comissionCedantExtra;
 
@@ -275,6 +277,15 @@
                     sumInsuredReCuotaParte: 0,
                     sumInsuredReExcedente: 0,
                     sumInsuredReFacultativa: 0,
+                    premiumReCuotaParte: 0,
+                    premiumReExcedente: 0,
+                    premiumReFacultativa: 0,
+                    commissionReCuotaParte: 0,
+                    commissionReExcedente: 0,
+                    commissionReFacultativa: 0,
+                    taxReCuotaParte: 0,
+                    taxReExcedente: 0,
+                    taxReFacultativa: 0,
 
                     tax: cession.tax,
 
@@ -291,7 +302,13 @@
                 newPol.sumInsured = totalSum;
                 newPol.sumInsuredComputed = totalSum;
 
+                const totalPremium = Number(newPol.premiumCedant || 0) + Number(newPol.premiumRe || 0);
+                newPol.premium += totalPremium;
+
                 addLineCedTotals(newPol, cession);
+                addLinePremiumTotals(newPol, cession);
+                addLineCommissionTotals(newPol, cession);
+                addLineTaxTotals(newPol, cession);
 
                 group.push(newPol);
             }
@@ -812,6 +829,7 @@
 
     function mapGroupedBordereauRowForExport(row = {}, policyMap = {}) {
       const first = getFirstCession(row);
+      const cserie = getCserieFromContractId(row.contractId);
       const sumInsured100 = Number(row.sumInsuredComputed || row.sumInsured || 0);
       const sumRet = Number(row.sumInsuredCedant || 0);
       const sumCed = Number(row.sumInsuredRe || 0);
@@ -843,21 +861,61 @@
         'Prima Suscrita 100%': prem100,
         'Prima Retenida': premRet,
         'Prima Cedida': premCed,
-        'Suma Prima Cuota Parte': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'CUOTA PARTE', premCed),
-        'Suma Prima Excedente': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'EXCED', premCed),
+        'Suma Prima Cuota Parte': Number(row.premiumReCuotaParte || 0),
+        'Suma Prima Excedente': Number(row.premiumReExcedente || 0),
         'Prima Cat': 0,
-        'Prima Facultativa': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'FAC', premCed),
+        'Prima Facultativa': Number(row.premiumReFacultativa || 0),
         'Comision Contractual': comision,
-        'Comision Cuota Parte': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'CUOTA PARTE', comision),
-        'Comision Excedente': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'EXCED', comision),
-        'Comision Facultativa': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'FAC', comision),
+        'Comision Cuota Parte': Number(row.commissionReCuotaParte || 0),
+        'Comision Excedente': Number(row.commissionReExcedente || 0),
+        'Comision Facultativa': Number(row.commissionReFacultativa || 0),
         Impuesto: tax,
-        'Impuesto Facultativo': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'FAC', tax),
+        'Impuesto Facultativo': Number(row.taxReFacultativa || 0),
         'Reaseguro por Cuota Parte': Number(row.sumInsuredReCuotaParte || 0),
         'Reaseguro por Excedente': Number(row.sumInsuredReExcedente || 0),
         'Reaseguro por Pagar': Number(sumCed || 0),
-        cserie: first.cserie || row.cserie || ''
+        cserie: cserie || first.cserie || row.cserie || ''
       };
+    }
+
+    function getCserieFromContractId(contractId) {
+      const id = String(contractId || '').trim();
+      if (!id) {
+        return '';
+      }
+
+      const contract = (contracts || []).find(item => String(item.id || '').trim() === id);
+      const startDate = contract && (contract.effectiveDate || contract.start || contract.vigenciaInicial);
+      return formatYYYYMM(startDate);
+    }
+
+    function formatYYYYMM(value) {
+      if (!value) {
+        return '';
+      }
+
+      const text = String(value).trim();
+      if (!text) {
+        return '';
+      }
+
+      if (/^\d{8}$/.test(text)) {
+        return text;
+      }
+
+      const iso = text.slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(iso)) {
+        return iso.replace('-', '');
+      }
+
+      const date = new Date(text);
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      return `${year}${month}`;
     }
 
     function addLineCedTotals(groupedRow, cession) {
@@ -882,6 +940,81 @@
 
       if (lineId === 'FAC' || lineId.indexOf('FAC') >= 0) {
         groupedRow.sumInsuredReFacultativa = Number(groupedRow.sumInsuredReFacultativa || 0) + cedValue;
+      }
+    }
+
+    function addLinePremiumTotals(groupedRow, cession) {
+      if (!groupedRow || !cession) {
+        return;
+      }
+
+      const lineId = String(cession.lineId || '').trim().toUpperCase();
+      const premiumValue = Number(cession.premiumRe || 0);
+
+      if (!premiumValue) {
+        return;
+      }
+
+      if (lineId === 'CUOTA PARTE' || lineId.indexOf('CUOTA PARTE') >= 0) {
+        groupedRow.premiumReCuotaParte = Number(groupedRow.premiumReCuotaParte || 0) + premiumValue;
+      }
+
+      if (lineId === 'EXCEDENTE 1' || lineId.indexOf('EXCEDENTE') >= 0) {
+        groupedRow.premiumReExcedente = Number(groupedRow.premiumReExcedente || 0) + premiumValue;
+      }
+
+      if (lineId === 'FAC' || lineId.indexOf('FAC') >= 0) {
+        groupedRow.premiumReFacultativa = Number(groupedRow.premiumReFacultativa || 0) + premiumValue;
+      }
+    }
+
+    function addLineCommissionTotals(groupedRow, cession) {
+      if (!groupedRow || !cession) {
+        return;
+      }
+
+      const lineId = String(cession.lineId || '').trim().toUpperCase();
+      const commissionValue = Number(cession.comissionCedant || 0);
+
+      if (!commissionValue) {
+        return;
+      }
+
+      if (lineId === 'CUOTA PARTE' || lineId.indexOf('CUOTA PARTE') >= 0) {
+        groupedRow.commissionReCuotaParte = Number(groupedRow.commissionReCuotaParte || 0) + commissionValue;
+      }
+
+      if (lineId === 'EXCEDENTE 1' || lineId.indexOf('EXCEDENTE') >= 0) {
+        groupedRow.commissionReExcedente = Number(groupedRow.commissionReExcedente || 0) + commissionValue;
+      }
+
+      if (lineId === 'FAC' || lineId.indexOf('FAC') >= 0) {
+        groupedRow.commissionReFacultativa = Number(groupedRow.commissionReFacultativa || 0) + commissionValue;
+      }
+    }
+
+    function addLineTaxTotals(groupedRow, cession) {
+      if (!groupedRow || !cession) {
+        return;
+      }
+
+      const lineId = String(cession.lineId || '').trim().toUpperCase();
+      const taxValue = Number(cession.tax || 0);
+
+      if (!taxValue) {
+        return;
+      }
+
+      if (lineId === 'CUOTA PARTE' || lineId.indexOf('CUOTA PARTE') >= 0) {
+        groupedRow.taxReCuotaParte = Number(groupedRow.taxReCuotaParte || 0) + taxValue;
+      }
+
+      if (lineId === 'EXCEDENTE 1' || lineId.indexOf('EXCEDENTE') >= 0) {
+        groupedRow.taxReExcedente = Number(groupedRow.taxReExcedente || 0) + taxValue;
+      }
+
+      if (lineId === 'FAC' || lineId.indexOf('FAC') >= 0) {
+        groupedRow.taxReFacultativa = Number(groupedRow.taxReFacultativa || 0) + taxValue;
       }
     }
 
@@ -1045,7 +1178,7 @@
         setCatalogsReady(false);
 
         return Promise.all([
-          exe('LoadEntities',{ entity:'Contract', fields:'id,code,name,endDate'}).then( response => setContracts(response.outData || [])),
+          exe('LoadEntities',{ entity:'Contract', fields:'id,code,name,effectiveDate,endDate'}).then( response => setContracts(response.outData || [])),
           exe('RepoLob',{ operation:'GET'}).then( response => {
             const opt = (response.outData || []).map( lob => ({ value: lob.code, label: lob.name }));
             setLobs(opt);
