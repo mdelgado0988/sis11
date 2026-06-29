@@ -735,7 +735,8 @@
             const wb = XLSX.utils.book_new();
 
             if (isBordereauFlatExport(data, docName)) {
-              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row));
+              const policyMap = await loadPolicyFiscalNumbers(data);
+              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row, policyMap));
               const ws = XLSX.utils.json_to_sheet(groupedData);
               XLSX.utils.book_append_sheet(wb, ws, 'Bordereau');
             } else {
@@ -766,7 +767,28 @@
       return /suscripci/i.test(String(docName || '')) || Object.prototype.hasOwnProperty.call(data[0] || {}, 'sumInsuredRe');
     }
 
-    function mapGroupedBordereauRowForExport(row = {}) {
+    async function loadPolicyFiscalNumbers(data) {
+      const ids = Array.from(new Set((data || []).map(row => Number(row && row.lifePolicyId || 0)).filter(Boolean)));
+      const map = {};
+
+      if (!ids.length) {
+        return map;
+      }
+
+      const filter = `id in (${ids.join(',')})`;
+      const response = await exe('RepoLifePolicy', { operation: 'GET', filter, fields: 'id,fiscalNumber' });
+      if (!response || !response.ok) {
+        return map;
+      }
+
+      (response.outData || []).forEach(item => {
+        map[String(item.id)] = item.fiscalNumber || '';
+      });
+
+      return map;
+    }
+
+    function mapGroupedBordereauRowForExport(row = {}, policyMap = {}) {
       const first = getFirstCession(row);
       const premiumType = String(row.premiumType || first.premiumType || '').toUpperCase();
       const sumInsured100 = Number(row.sumInsuredComputed || row.sumInsured || 0);
@@ -781,10 +803,10 @@
 
       return {
         id: row.lifePolicyId || '',
-        Ramo: row.lob || '',
+        Ramo: getLobDescription(row.lob),
         Plan: row.product || first.product || first.plan || '',
         Poliza: row.policyCode || '',
-        Recibo: first.receipt || first.recibo || first.receiptNumber || first.fiscalNumber || '',
+        Recibo: policyMap[String(row.lifePolicyId || '')] || first.receipt || first.recibo || first.receiptNumber || first.fiscalNumber || '',
         Tipo: row.premiumType || first.premiumType || '',
         Contratante: first.holderName || first.contratante || row.contractId || '',
         Asegurado: row.insuredName || first.insuredName || '',
@@ -815,6 +837,16 @@
         'Reaseguro por Pagar': Number(sumCed || 0),
         cserie: first.cserie || row.cserie || ''
       };
+    }
+
+    function getLobDescription(lobCode) {
+      const code = String(lobCode || '').trim();
+      if (!code) {
+        return '';
+      }
+
+      const match = (lobs || []).find(item => String(item.value || item.code || '').trim() === code);
+      return match ? (match.label || match.name || code) : code;
     }
 
     function getFirstCession(row = {}) {
