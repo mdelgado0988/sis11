@@ -91,11 +91,17 @@
           filter.push(`contractId=${ contractId }`);
         if(cmdOption === 'RepoCession') filter.push('overwritten=0')
         if(dateFilter){
-          const [year, month ] = formatSqlDate(dateFilter).split('-');
+          const { from, to } = getMonthDateBounds(dateFilter);
           switch(cmdOption){
-            case 'RepoCession':        filter.push(`YEAR([start]) = ${ Number(year) } AND MONTH([start])=${ Number(month) }`); break;
-            case 'RepoLossCession':    filter.push(`YEAR([claimOccurrence]) = ${ Number(year) } AND MONTH([claimOccurrence])=${ Number(month) }`); break;
-            case 'RepoSalvageCession': filter.push(`YEAR([claimOccurrence]) = ${ Number(year) } AND MONTH([claimOccurrence])=${ Number(month) }`); break;
+            case 'RepoCession':
+              filter.push(`lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${from}' AND '${to}')`);
+              break;
+            case 'RepoLossCession':
+              filter.push(`${sqlDateField('[claimOccurrence]')} BETWEEN '${from}' AND '${to}'`);
+              break;
+            case 'RepoSalvageCession':
+              filter.push(`${sqlDateField('[claimOccurrence]')} BETWEEN '${from}' AND '${to}'`);
+              break;
           }
         }
         await actionToPerform.action(filter.join(' AND '));
@@ -581,6 +587,28 @@
       return `${year}-${month}-${day}`;
     }
 
+    function getMonthDateBounds(value) {
+      if (!value) {
+        return { from: '', to: '' };
+      }
+
+      const date = value && typeof value.toDate === 'function' ? value.toDate() : new Date(value);
+      if (isNaN(date.getTime())) {
+        return { from: '', to: '' };
+      }
+
+      const from = new Date(date.getFullYear(), date.getMonth(), 1);
+      const to = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+      return {
+        from: formatSqlDate(from),
+        to: formatSqlDate(to)
+      };
+    }
+
+    function sqlDateField(fieldName) {
+      return `CAST(${fieldName} AS date)`;
+    }
+
     function getRows(response) {
       return (response && response.outData) || [];
     }
@@ -617,37 +645,29 @@
 
       const handlers = {
         date: (value) => {
-          const [year, month] = formatSqlDate(value).split('-');
-
-          return `YEAR([start])=${Number(year)} AND MONTH([start])=${Number(month)}`;
+          const { from, to } = getMonthDateBounds(value);
+          if (!from || !to) return null;
+          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${from}' AND '${to}')`;
         },
 
         period: (value) => {
-          const period = new Date(value);
-          const year = period.getFullYear();
-          const month = period.getMonth() + 1;
-
-          period.setMonth(period.getMonth() + 1);
-          period.setDate(0);
-
-          const endDay = period.getDate();
-
-          return `YEAR(start)=${year} AND MONTH(start)=${month} AND DAY(start)=1 
-            AND YEAR([end])=${year} AND MONTH([end])=${month} AND DAY([end])=${endDay}`;
+          const { from, to } = getMonthDateBounds(value);
+          if (!from || !to) return null;
+          return `${sqlDateField('[start]')} BETWEEN '${from}' AND '${to}' AND ${sqlDateField('[end]')} BETWEEN '${from}' AND '${to}'`;
         },
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `[start] BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
+          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}')`
         },
         creationRange: value => {
           if(!value) return null;
           let [ from, to ] = value;
           from = formatSqlDate(from);
           to = formatSqlDate(to);
-          return `(premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE created between '${ from }' AND  '${ to }') OR
-                  premiumType='ANNIVERSARY' AND anniversaryId in (SELECT id FROM Anniversary WHERE created between '${ from }' AND  '${ to }') OR
-              premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE creationDate between '${ from }' AND  '${ to }'))`
+          return `(premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }') OR
+                  premiumType='ANNIVERSARY' AND anniversaryId in (SELECT id FROM Anniversary WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }') OR
+              premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE ${sqlDateField('creationDate')} between '${ from }' AND  '${ to }'))`
         },
         policyId: value => {
           if(!value) return null;
@@ -666,14 +686,14 @@
           let [ from, to ] = value;
           from = formatSqlDate(from);
           to = formatSqlDate(to);
-          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE [start] between '${ from }' AND '${ to }')`
+          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[start]')} between '${ from }' AND '${ to }')`
         },
         policyEnd: value => {
           if(!value) return null;
           let [ from, to ] = value;
           from = formatSqlDate(from);
           to = formatSqlDate(to);
-          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE [end] between '${ from }' AND '${ to }')`
+          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[end]')} between '${ from }' AND '${ to }')`
         },
         policyStatus: (value) => {
           if (value === -1) return null;
@@ -741,21 +761,21 @@
 
       const handlers = {
         date: (value) => {
-          const [year, month] = formatSqlDate(value).split('-');
-
-          return `YEAR([claimOccurrence])=${Number(year)} AND MONTH([claimOccurrence])=${Number(month)}`;
+          const { from, to } = getMonthDateBounds(value);
+          if (!from || !to) return null;
+          return `${sqlDateField('[claimOccurrence]')} BETWEEN '${from}' AND '${to}'`;
         },
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `[claimOccurrence] BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
+          return `${sqlDateField('[claimOccurrence]')} BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
         },
         creationRange: value => {
           if(!value) return null;
           let [ from, to ] = value;
           from = formatSqlDate(from);
           to = formatSqlDate(to);
-          return `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE date between '${ from }' AND '${ to }')`
+          return `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE ${sqlDateField('date')} between '${ from }' AND '${ to }')`
         },
         policyIdManual: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
         contractIdManual: value => `contractId=${ value }`,
@@ -819,14 +839,14 @@
 
       const handlers = {
         date: (value) => {
-          const [year, month] = formatSqlDate(value).split('-');
-
-          return `YEAR([claimOccurrence])=${Number(year)} AND MONTH([claimOccurrence])=${Number(month)}`;
+          const { from, to } = getMonthDateBounds(value);
+          if (!from || !to) return null;
+          return `${sqlDateField('[claimOccurrence]')} BETWEEN '${from}' AND '${to}'`;
         },
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `[claimOccurrence] BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
+          return `${sqlDateField('[claimOccurrence]')} BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
         },
         policyIdManual: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
         contractIdManual: value => `contractId=${ value }`,
