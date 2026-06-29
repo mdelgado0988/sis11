@@ -732,21 +732,153 @@
                 return;
             }
             const fileName = `${ docName }-${ new Date().getTime() }.xlsx`;
-            // Clean data.
-            const groupedData = (data || []).map( row => ({...row, cessions: null }));
-            const cessions = (data || []).reduce((summary, row) => [...summary, ...row.cessions],[]);
-            /* create worksheet */
-            const ws1 = XLSX.utils.json_to_sheet(groupedData);
-            const ws2 = XLSX.utils.json_to_sheet(cessions);
-            /* create workbook and export */
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws1, 'Grouped By Policy');
-            XLSX.utils.book_append_sheet(wb, ws2, 'Cessions');
+
+            if (isBordereauFlatExport(data, docName)) {
+              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row));
+              const ws = XLSX.utils.json_to_sheet(groupedData);
+              XLSX.utils.book_append_sheet(wb, ws, 'Bordereau');
+            } else {
+              // Clean data.
+              const groupedData = (data || []).map( row => mapGroupedRowForExport(row) );
+              const cessions = (data || []).reduce((summary, row) => {
+                return summary.concat((row && row.cessions) ? row.cessions : []);
+              }, [])
+                .map(cession => mapCessionRowForExport(cession));
+              /* create worksheet */
+              const ws1 = XLSX.utils.json_to_sheet(groupedData);
+              const ws2 = XLSX.utils.json_to_sheet(cessions);
+              XLSX.utils.book_append_sheet(wb, ws1, 'Grouped By Policy');
+              XLSX.utils.book_append_sheet(wb, ws2, 'Cessions');
+            }
             XLSX.writeFile(wb, fileName);
         } catch (error) {
             console.error(error);
             message.error('No es posible crear un archivo de excel en este momento');
         }
+    }
+
+    function isBordereauFlatExport(data, docName) {
+      if (!Array.isArray(data) || data.length === 0) {
+        return false;
+      }
+
+      return /suscripci/i.test(String(docName || '')) || Object.prototype.hasOwnProperty.call(data[0] || {}, 'sumInsuredRe');
+    }
+
+    function mapGroupedBordereauRowForExport(row = {}) {
+      const first = getFirstCession(row);
+      const premiumType = String(row.premiumType || first.premiumType || '').toUpperCase();
+      const sumInsured100 = Number(row.sumInsuredComputed || row.sumInsured || 0);
+      const sumRet = Number(row.sumInsuredCedant || 0);
+      const sumCed = Number(row.sumInsuredRe || 0);
+      const prem100 = Number(row.premium || 0);
+      const premRet = Number(row.premiumCedant || 0);
+      const premCed = Number(row.premiumRe || 0);
+      const comision = Number(row.comissionCedant || 0);
+      const comisionExtra = Number(row.comissionCedantExtra || 0);
+      const tax = Number(row.tax || 0);
+
+      return {
+        id: row.lifePolicyId || '',
+        Ramo: row.lob || '',
+        Plan: row.product || first.product || first.plan || '',
+        Poliza: row.policyCode || '',
+        Recibo: first.receipt || first.recibo || first.receiptNumber || first.fiscalNumber || '',
+        Tipo: row.premiumType || first.premiumType || '',
+        Contratante: first.holderName || first.contratante || row.contractId || '',
+        Asegurado: row.insuredName || first.insuredName || '',
+        'Fecha Emision': formatExportDate(first.date || first.created || row.date),
+        'Fecha Desde': formatExportDate(first.start || row.date),
+        'Fecha Hasta': formatExportDate(first.end || ''),
+        'Suma Asegurada 100%': sumInsured100,
+        'Suma Retenida': sumRet,
+        'Suma Cedida': sumCed,
+        'Suma Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', sumCed),
+        'Suma Excedente': getTypeAmount(premiumType, 'EXCED', sumCed),
+        'Suma Facultativa': getTypeAmount(premiumType, 'FAC', sumCed),
+        'Prima Suscrita 100%': prem100,
+        'Prima Retenida': premRet,
+        'Prima Cedida': premCed,
+        'Suma Prima Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', premCed),
+        'Suma Prima Excedente': getTypeAmount(premiumType, 'EXCED', premCed),
+        'Prima Cat': 0,
+        'Prima Facultativa': getTypeAmount(premiumType, 'FAC', premCed),
+        'Comision Contractual': comision,
+        'Comision Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', comision),
+        'Comision Excedente': getTypeAmount(premiumType, 'EXCED', comision),
+        'Comision Facultativa': getTypeAmount(premiumType, 'FAC', comision),
+        Impuesto: tax,
+        'Impuesto Facultativo': getTypeAmount(premiumType, 'FAC', tax),
+        'Reaseguro por Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', sumCed),
+        'Reaseguro por Excedente': getTypeAmount(premiumType, 'EXCED', sumCed),
+        'Reaseguro por Pagar': Number(sumCed || 0),
+        cserie: first.cserie || row.cserie || ''
+      };
+    }
+
+    function getFirstCession(row = {}) {
+      if (row && Array.isArray(row.cessions) && row.cessions.length > 0) {
+        return row.cessions[0] || {};
+      }
+
+      return {};
+    }
+
+    function getTypeAmount(premiumType, expectedType, value) {
+      const type = String(premiumType || '').toUpperCase();
+      const expected = String(expectedType || '').toUpperCase();
+      if (type.indexOf(expected) >= 0) {
+        return Number(value || 0);
+      }
+      return 0;
+    }
+
+    function formatExportDate(value) {
+      if (!value) return '';
+      return String(value).slice(0, 10);
+    }
+
+    function mapGroupedRowForExport(row = {}) {
+      return {
+        'Id póliza': row.lifePolicyId || '',
+        'Contrato': row.contractId || '',
+        'Línea': row.lineId || '',
+        'Ramo': row.lob || '',
+        'Póliza': row.policyCode || '',
+        'Asegurado': row.insuredName || '',
+        'Tipo': row.premiumType || '',
+        'Suma asegurada': row.sumInsured || 0,
+        'Prima': row.premium || 0,
+        'Suma retenida': row.sumInsuredCedant || 0,
+        'Prima retenida': row.premiumCedant || 0,
+        'Comisión': row.comissionCedant || 0,
+        'Comisión extra': row.comissionCedantExtra || 0,
+        'Impuesto': row.tax || 0,
+        'Suma cedida': row.sumInsuredRe || 0,
+        'Prima cedida': row.premiumRe || 0
+      };
+    }
+
+    function mapCessionRowForExport(cession = {}) {
+      return {
+        'Id': cession.id || '',
+        'Contrato': cession.contractId || '',
+        'Id póliza': cession.lifePolicyId || '',
+        'Línea': cession.lineId || '',
+        'Cobertura': cession.cover || cession.coverageId || '',
+        'Código cobertura': cession.coverageCode || '',
+        'Tipo': cession.premiumType || '',
+        'Suma asegurada': cession.sumInsured || 0,
+        'Prima': cession.premium || 0,
+        'Suma retenida': cession.sumInsuredCedant || 0,
+        'Prima retenida': cession.premiumCedant || 0,
+        'Comisión': cession.comissionCedant || 0,
+        'Comisión extra': cession.comissionCedantExtra || 0,
+        'Impuesto': cession.tax || 0,
+        'Suma cedida': cession.sumInsuredRe || 0,
+        'Prima cedida': cession.premiumRe || 0
+      };
     }
     function onDownloadClick(){
         try {
