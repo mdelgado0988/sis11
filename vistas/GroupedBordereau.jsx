@@ -79,6 +79,10 @@
 
         }
         const actionToPerform = actionMappings[cmdOption];
+        if (!actionToPerform) {
+          message.error('Tipo de documento no valido.');
+          return;
+        }
         let saveData = actionToPerform.save
         setcmdOption(cmdOption);
         saveData([]);
@@ -87,7 +91,7 @@
           filter.push(`contractId=${ contractId }`);
         if(cmdOption === 'RepoCession') filter.push('overwritten=0')
         if(dateFilter){
-          const [year, month ] = new Date(dateFilter).toISOString().slice(0,10).split('-');
+          const [year, month ] = formatSqlDate(dateFilter).split('-');
           switch(cmdOption){
             case 'RepoCession':        filter.push(`YEAR([start]) = ${ Number(year) } AND MONTH([start])=${ Number(month) }`); break;
             case 'RepoLossCession':    filter.push(`YEAR([claimOccurrence]) = ${ Number(year) } AND MONTH([claimOccurrence])=${ Number(month) }`); break;
@@ -151,10 +155,13 @@
       state.value = value;
       async function fetch(){
         exe('RepoLifePolicy',{operation:'GET', filter:`[code] LIKE '${ escapeSqlString(value) }%' AND active=1`, size: 15 }).then( response => {
+          if(!response || !response.ok){
+            return callback([]);
+          }
           if(state.value != value){
             return callback([]);
           }
-          const mapped = response.outData.map(pol => ({value: pol.id, label: pol.code }));
+          const mapped = getRows(response).map(pol => ({value: pol.id, label: pol.code }));
           callback(mapped)          
         })
       }
@@ -170,10 +177,13 @@
       async function fetch(){
         let filterString = `(((RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) like N'%${ escapeSqlString(value) }%')) and [inactive]=0`
         exe('GetContacts',{operation:'GET', filter:filterString, size: 10 }).then( response => {
+          if(!response || !response.ok){
+            return callback([]);
+          }
           if(state.value != value){
             return callback([]);
           }
-          const mapped = response.outData.map(con => ({value: con.id, label: con.FullName }));
+          const mapped = getRows(response).map(con => ({value: con.id, label: con.FullName }));
           callback(mapped)          
         })
       }
@@ -191,9 +201,10 @@
 
         const response = await exe('RepoCession',{ operation:'GET', filter });
         if(!response.ok) throw new Error(response.msg);
+        const rows = getRows(response);
         
         // Group by policy
-        const grouped = response.outData.reduce((group, cession) => {
+        const grouped = rows.reduce((group, cession) => {
 
             // Llave artificial del movimiento
             const movementKey = (() => {
@@ -234,8 +245,8 @@
                 pol.cessions.push(cession);               
 
                 // Totals
-                pol.sumInsuredCedant += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant);
-                pol.sumInsuredRe += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe);
+                pol.sumInsuredCedant += Number(montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant) || 0);
+                pol.sumInsuredRe += Number(montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe) || 0);
                 const totalSum = Number(pol.sumInsuredCedant || 0) + Number(pol.sumInsuredRe || 0);
                 pol.sumInsured = totalSum;
                 pol.sumInsuredComputed = totalSum;
@@ -244,14 +255,14 @@
                 addLinePremiumTotals(pol, cession);
                 addLineCommissionTotals(pol, cession);
                 addLineTaxTotals(pol, cession);
-                pol.tax += cession.tax;
-                pol.premiumCedant += cession.premiumCedant;
-                pol.premiumRe += cession.premiumRe;
+                pol.tax += Number(cession.tax || 0);
+                pol.premiumCedant += Number(cession.premiumCedant || 0);
+                pol.premiumRe += Number(cession.premiumRe || 0);
                 const totalPremium = Number(pol.premiumCedant || 0) + Number(pol.premiumRe || 0);
                 pol.premium = totalPremium;
 
-                pol.comissionCedant += cession.comissionCedant;
-                pol.comissionCedantExtra += cession.comissionCedantExtra;
+                pol.comissionCedant += Number(cession.comissionCedant || 0);
+                pol.comissionCedantExtra += Number(cession.comissionCedantExtra || 0);
 
                 group[groupIndex] = pol;
 
@@ -273,7 +284,7 @@
                     product: cession.product,
                     changeId: cession.changeId,
 
-                    premium: cession.premium,
+                    premium: Number(cession.premium || 0),
                     //sumInsured: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsured),
                     //sumInsuredComputed: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredComputed),
 
@@ -292,13 +303,13 @@
                     taxReExcedente: 0,
                     taxReFacultativa: 0,
 
-                    tax: cession.tax,
+                    tax: Number(cession.tax || 0),
 
-                    premiumCedant: cession.premiumCedant,
-                    premiumRe: cession.premiumRe,
+                    premiumCedant: Number(cession.premiumCedant || 0),
+                    premiumRe: Number(cession.premiumRe || 0),
 
-                    comissionCedant: cession.comissionCedant,
-                    comissionCedantExtra: cession.comissionCedantExtra,
+                    comissionCedant: Number(cession.comissionCedant || 0),
+                    comissionCedantExtra: Number(cession.comissionCedantExtra || 0),
 
                     cessions: [cession]
                 };
@@ -338,9 +349,18 @@
     async function fetchLoss( quickFilter = null ){
         setLosses([]);
 		const filter = quickFilter || await getLossFilter();
+        if(!filter){
+            message.warning('Please select at least one filter before searching.');
+            return;
+        }
 		const response = await exe('RepoLossCession',{ operation:'GET', filter, include:['Cessions','Payout'] });
 		if(!response.ok) throw new Error(response.msg);		
-		const grouped = response.outData.reduce((group, loss)=> {
+        const rawRows = getRows(response);
+        const rows = rawRows.filter(loss => loss && loss.Cession && loss.Payout);
+        if (rows.length !== rawRows.length) {
+          message.warning('Some loss records were skipped because required relations were missing.');
+        }
+		const grouped = rows.reduce((group, loss)=> {
 			const policyId = loss.Cession.lifePolicyId,
 			      LoB      = loss.Cession.LoB;
             const groupIndex = group.findIndex(pol => pol.lifePolicyId === policyId );
@@ -349,13 +369,13 @@
                 pol.cessions = (pol.cessions || []);
                 pol.cessions.push(loss);
                 // Update totals
-                pol.reserve += loss.reserve
-                pol.loss += loss.loss;
-                pol.retainedReserve += loss.retainedReserve;
-                pol.retainedLoss += loss.retainedLoss;
-                pol.cededReserve += loss.cededReserve;
-                pol.cededLoss += loss.cededLoss;
-                pol.reinstatementPremium += loss.reinstatementPremium;
+                pol.reserve += Number(loss.reserve || 0)
+                pol.loss += Number(loss.loss || 0);
+                pol.retainedReserve += Number(loss.retainedReserve || 0);
+                pol.retainedLoss += Number(loss.retainedLoss || 0);
+                pol.cededReserve += Number(loss.cededReserve || 0);
+                pol.cededLoss += Number(loss.cededLoss || 0);
+                pol.reinstatementPremium += Number(loss.reinstatementPremium || 0);
                 group[groupIndex] = pol;
             } else {
                 const newPol = {
@@ -364,13 +384,13 @@
                     lob: LoB,
                     policyCode: loss.Cession.policyCode,
                     insuredName: String(loss.insuredName || loss.holderName).trim(),
-                    reserve: loss.reserve, 
-                    loss: loss.loss,
-                    retainedReserve: loss.retainedReserve,
-                    retainedLoss: loss.retainedLoss,
-                    cededReserve: loss.cededReserve,
-                    cededLoss: loss.cededLoss,
-                    reinstatementPremium: loss.reinstatementPremium,
+                    reserve: Number(loss.reserve || 0), 
+                    loss: Number(loss.loss || 0),
+                    retainedReserve: Number(loss.retainedReserve || 0),
+                    retainedLoss: Number(loss.retainedLoss || 0),
+                    cededReserve: Number(loss.cededReserve || 0),
+                    cededLoss: Number(loss.cededLoss || 0),
+                    reinstatementPremium: Number(loss.reinstatementPremium || 0),
                     exGratia: loss.exGratia,
                     cessions: [ loss ]
                 }
@@ -383,18 +403,27 @@
     async function fetchSalvage( quickFilter = null ){
         setSalvages([]);
         const filter = quickFilter || await getSalvageFilter();
-        const response = await exe('RepoSalvageCession',{ operation:'GET', filter, include:['Cessions','Payout'] });
-        if(!response.ok) throw new Error(response.msg);
-        const grouped = response.outData.reduce((group, salvage)=>{
+        if(!filter){
+          message.warning('Please select at least one filter before searching.');
+          return;
+        }
+		const response = await exe('RepoSalvageCession',{ operation:'GET', filter, include:['Cessions'] });
+		if(!response.ok) throw new Error(response.msg);
+        const rawRows = getRows(response);
+        const rows = rawRows.filter(salvage => salvage);
+        if (rows.length !== rawRows.length) {
+          message.warning('Some salvage records were skipped because required relations were missing.');
+        }
+        const grouped = rows.reduce((group, salvage)=>{
           const groupIndex = group.findIndex( pol => pol.policyCode === salvage.policyCode);
           if(groupIndex >= 0){
               const pol = group[groupIndex];
               pol.cessions = (pol.cessions || []);
               pol.cessions.push(salvage);
               // summary
-              pol.income += salvage.income;
-              pol.retainedAmount += salvage.retainedAmount;
-              pol.cededAmount += salvage.cededAmount;
+              pol.income += Number(salvage.income || 0);
+              pol.retainedAmount += Number(salvage.retainedAmount || 0);
+              pol.cededAmount += Number(salvage.cededAmount || 0);
               group[groupIndex] = pol;
             
           } else {
@@ -404,9 +433,9 @@
                   policyCode: salvage.policyCode,
                   insuredName: salvage.insuredName,
                   currency: salvage.currency,
-                  income: salvage.income,
-                  retainedAmount: salvage.retainedAmount,
-                  cededAmount: salvage.cededAmount,
+                  income: Number(salvage.income || 0),
+                  retainedAmount: Number(salvage.retainedAmount || 0),
+                  cededAmount: Number(salvage.cededAmount || 0),
                   cessions: [ salvage ],
               }
               group.push(newPol);
@@ -430,7 +459,7 @@
                 continue;
 
             configData.push(
-                ...(mapearTablaConfig(response.outData) || [])
+                ...(mapearTablaConfig(getRows(response)) || [])
             );
         }
 
@@ -527,6 +556,50 @@
 
         return false;
     }; 
+
+    function hasAnyValidValue(values) {
+      return !isInvalid(values);
+    }
+
+    function formatSqlDate(value) {
+      if (!value) return '';
+
+      if (value && typeof value.format === 'function') {
+        return value.format('YYYY-MM-DD');
+      }
+
+      if (value && typeof value.toDate === 'function') {
+        return formatSqlDate(value.toDate());
+      }
+
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return '';
+
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function getRows(response) {
+      return (response && response.outData) || [];
+    }
+
+    function pickAllowedValues(values, allowedKeys) {
+      const allowed = new Set((allowedKeys || []).map(key => String(key)));
+      const source = values || {};
+      const result = {};
+
+      Object.keys(source).forEach(key => {
+        if (!allowed.has(key)) {
+          return;
+        }
+
+        result[key] = source[key];
+      });
+
+      return result;
+    }
     
     async function getCessionsFilter() {
         
@@ -544,10 +617,7 @@
 
       const handlers = {
         date: (value) => {
-          const [year, month] = new Date(value)
-            .toISOString()
-            .slice(0, 10)
-            .split('-');
+          const [year, month] = formatSqlDate(value).split('-');
 
           return `YEAR([start])=${Number(year)} AND MONTH([start])=${Number(month)}`;
         },
@@ -568,13 +638,13 @@
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `[start] BETWEEN '${ from.toISOString().slice(0,10)}' AND '${ to.toISOString().slice(0,10)}'`
+          return `[start] BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
         },
         creationRange: value => {
           if(!value) return null;
           let [ from, to ] = value;
-          from = from.toISOString().slice(0,10);
-          to = to.toISOString().slice(0,10);
+          from = formatSqlDate(from);
+          to = formatSqlDate(to);
           return `(premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE created between '${ from }' AND  '${ to }') OR
                   premiumType='ANNIVERSARY' AND anniversaryId in (SELECT id FROM Anniversary WHERE created between '${ from }' AND  '${ to }') OR
               premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE creationDate between '${ from }' AND  '${ to }'))`
@@ -594,15 +664,15 @@
         policyStart: value => {
           if(!value) return null;
           let [ from, to ] = value;
-          from = from.toISOString().slice(0,10);
-          to = to.toISOString().slice(0,10);
+          from = formatSqlDate(from);
+          to = formatSqlDate(to);
           return `lifepolicyId in (SELECT id FROM LifePolicy WHERE [start] between '${ from }' AND '${ to }')`
         },
         policyEnd: value => {
           if(!value) return null;
           let [ from, to ] = value;
-          from = from.toISOString().slice(0,10);
-          to = to.toISOString().slice(0,10);
+          from = formatSqlDate(from);
+          to = formatSqlDate(to);
           return `lifepolicyId in (SELECT id FROM LifePolicy WHERE [end] between '${ from }' AND '${ to }')`
         },
         policyStatus: (value) => {
@@ -655,7 +725,13 @@
       return filters.join(' AND ');
     }
     async function getLossFilter() {
-      const values = await filterForm.validateFields();
+      const values = pickAllowedValues(await filterForm.validateFields(), [
+        'date', 'range', 'creationRange', 'policyId', 'holderId', 'lob', 'coverageCode',
+        'contractId', 'policyIdManual', 'claimId', 'id', 'cessionId', 'lineId', 'participantId', 'FAC', 'exGratia'
+      ]);
+      if (isInvalid(values)) {
+        return null;
+      }
       const isValid = (val) =>
         val !== null &&
         val !== undefined &&
@@ -663,23 +739,20 @@
 
       const handlers = {
         date: (value) => {
-          const [year, month] = new Date(value)
-            .toISOString()
-            .slice(0, 10)
-            .split('-');
+          const [year, month] = formatSqlDate(value).split('-');
 
           return `YEAR([claimOccurrence])=${Number(year)} AND MONTH([claimOccurrence])=${Number(month)}`;
         },
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `[claimOccurrence] BETWEEN '${ from.toISOString().slice(0,10)}' AND '${ to.toISOString().slice(0,10)}'`
+          return `[claimOccurrence] BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
         },
         creationRange: value => {
           if(!value) return null;
           let [ from, to ] = value;
-          from = from.toISOString().slice(0,10);
-          to = to.toISOString().slice(0,10);
+          from = formatSqlDate(from);
+          to = formatSqlDate(to);
           return `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE date between '${ from }' AND '${ to }')`
         },
         policyIdManual: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
@@ -727,7 +800,13 @@
       return filters.join(' AND ');
     }
     async function getSalvageFilter() {
-      const values = await filterForm.validateFields();
+      const values = pickAllowedValues(await filterForm.validateFields(), [
+        'date', 'range', 'policyId', 'holderId', 'lob', 'coverageCode',
+        'contractId', 'policyIdManual', 'salvageId', 'id', 'cessionId', 'lineId', 'participantId', 'currency'
+      ]);
+      if (isInvalid(values)) {
+        return null;
+      }
       const isValid = (val) =>
         val !== null &&
         val !== undefined &&
@@ -735,17 +814,14 @@
 
       const handlers = {
         date: (value) => {
-          const [year, month] = new Date(value)
-            .toISOString()
-            .slice(0, 10)
-            .split('-');
+          const [year, month] = formatSqlDate(value).split('-');
 
           return `YEAR([claimOccurrence])=${Number(year)} AND MONTH([claimOccurrence])=${Number(month)}`;
         },
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `[claimOccurrence] BETWEEN '${ from.toISOString().slice(0,10)}' AND '${ to.toISOString().slice(0,10)}'`
+          return `[claimOccurrence] BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}'`
         },
         policyIdManual: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
         contractIdManual: value => `contractId=${ value }`,
@@ -753,7 +829,7 @@
         lob: value => `cessionId in (SELECT id FROM cession WHERE LoB='${ escapeSqlString(value) }')`,
         coverageCode: value => `cessionId in (SELECT id FROM cession WHERE coverageCode='${ escapeSqlString(value) }')`,
         policyId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value})`,
-        claimId: value => `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE claimId=${ value })`,
+        claimId: value => `salvageId in (SELECT id FROM Salvage WHERE claimId=${ value })`,
         lineId: value => `cessionId in (SELECT id FROM cession WHERE lineId='${ escapeSqlString(value) }')`,
         participantId: value => `id in (select salvageCessionId from SalvageCessionPart where contactId=${ value })`,
       };
@@ -844,7 +920,7 @@
         return map;
       }
 
-      (response.outData || []).forEach(item => {
+      getRows(response).forEach(item => {
         map[String(item.id)] = item.fiscalNumber || '';
       });
 
@@ -1683,17 +1759,20 @@
         return <Table dataSource={ (cessions || []) } pagination={false} rowKey='id'>
 			<Column title={t('ID')} 			dataIndex='id' key='id'/>
 			<Column title={t('Cession ID')} 	dataIndex='cessionId' key='cessionId'/>
-            <Column title={t('Coverage')} 		dataIndex='Cession' key='coverageId' render={ (Cession) => <Tooltip title={ Cession.cover }><span>{ Cession.coverageId }</span> </Tooltip>}/>
-			<Column title={t('Claim') } 		dataIndex='Payout' key='claim' render={ Payout => Payout.claimId } />
-			<Column title={t('Occurrence') } 	dataIndex='claimOccurrence' key='claimOccurrence' render={ date => String(date).slice(0,10) } />
-			<Column title={t('Notification') } 	dataIndex='claimNotification' key='claimNotification' render={ date => String(date).slice(0,10) }  />
-			<Column title={t('Line') } 			dataIndex='Cession' key='lineId' render={ Payout => Payout.lineId } />
+            <Column title={t('Coverage')} 		dataIndex='Cession' key='coverageId' render={ (Cession) => {
+              const c = Cession || {};
+              return <Tooltip title={ c.cover || '' }><span>{ c.coverageId || '' }</span> </Tooltip>;
+            }}/>
+			<Column title={t('Claim') } 		dataIndex='Payout' key='claim' render={ Payout => (Payout || {}).claimId || '' } />
+			<Column title={t('Occurrence') } 	dataIndex='claimOccurrence' key='claimOccurrence' render={ date => String(date || '').slice(0,10) } />
+			<Column title={t('Notification') } 	dataIndex='claimNotification' key='claimNotification' render={ date => String(date || '').slice(0,10) }  />
+			<Column title={t('Line') } 			dataIndex='Cession' key='lineId' render={ Payout => (Payout || {}).lineId || '' } />
 			<Column title={t('Event Reason') } 	dataIndex='eventReason' key='eventReason' />
 			<Column title={t('Insured Event') } dataIndex='insuredEvent' key='insuredEvent' />
 
-            <Column title={t('Reserved')} 			dataIndex='coverageDeductible' key='coverageDeductible' render={renderNumber}/>
-            <Column title={t('Loss')}        		dataIndex='reserve' key='reserve' render={renderNumber} />
-            <Column title={t('Retained Reserve')} 	dataIndex='loss' key='loss' render={renderNumber} />
+            <Column title={t('Reserved')} 			dataIndex='reserve' key='reserve' render={renderNumber}/>
+            <Column title={t('Loss')}        		dataIndex='loss' key='loss' render={renderNumber} />
+            <Column title={t('Retained Reserve')} 	dataIndex='retainedReserve' key='retainedReserve' render={renderNumber} />
             <Column title={t('Retained Loss')} 		dataIndex='retainedLoss' key='retainedLoss' render={renderNumber} />
             <Column title={t('Ceded Reserve')}     	dataIndex='cededReserve' key='cededReserve' render={renderNumber} />
             <Column title={t('Ceded Loss')}         dataIndex='cededLoss' key='cededLoss' render={renderNumber} />
@@ -1719,13 +1798,19 @@
 
   }
   const QuickFilter=()=>{
-    const { CessionOpt, openFilter, contracts, quickFilterForm, onApplyQuickFilter, onDownloadClick, loading, catalogsReady } = useAppContext();
+    const { CessionOpt, openFilter, contracts, quickFilterForm, onApplyQuickFilter, onDownloadClick, loading, catalogsReady, filterForm } = useAppContext();
     const contractOpt = (contracts || []).map( con =>({ value: con.id, label: renderContractLabel(con) }));
+    const cmdOption = Form.useWatch('cmdOption', quickFilterForm);
 	useEffect(()=>{
 		if (catalogsReady) {
 			onApplyQuickFilter();
 		}
 	},[catalogsReady])
+	useEffect(()=>{
+		if (filterForm && filterForm.resetFields) {
+			filterForm.resetFields();
+		}
+	},[cmdOption])
     return (
       <Form form={quickFilterForm} layout='horizontal' initialValues={{ dateFilter: moment(), cmdOption: 'RepoCession' }}>
         <Space>
