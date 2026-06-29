@@ -11,7 +11,7 @@
  * Output: { resultado }
  */
 
-const claimId = context.row.reclamo;
+const claimId = context?.row?.reclamo;
 const objectDefinitionId = [46,47]
 const quitarCodigo = texto => texto.split(" - ").slice(1).join(" - ");
 const n2 = value => Number(String(value ?? '').replace(/,/g, ''));
@@ -56,7 +56,7 @@ resultado.totalhotel = sumPaymentDetailsByCoverageIds(claim.payments, resultado.
 
 resultado.chequehotel = claim.payments.reduce((max, payment) => {
   const aplica = (payment.detail || []).some(d =>
-    resultado.lifeCoverageIdsHoteleria.includes(d.lifeCoverageId)
+    resultado.lifeCoverageIdsHoteleria.includes(Number(d.lifeCoverageId))
   );
 
   return aplica
@@ -68,13 +68,9 @@ resultado.lifeCoverageIdsContenido = getCoverageIdsByCodes(policy.coverages, ["2
 
 resultado.totalcontenido = sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido);
 
-// La suma de edificio se toma de la suma asegurada de la póliza, como en la versión original.
-// No debe salir de los pagos detallados porque ese dato representa la liquidación total.
-resultado.lifeCoverageIdsEdificio = getCoverageIdsByCodes(policy.coverages, ["1", "3"]);
 
-// Edificio se calcula desde los pagos asociados a las coberturas 1 y 3.
-// No debe tomar la suma asegurada de la póliza porque aquí necesitamos el monto liquidado.
-resultado.totaledificio = formatN2(sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsEdificio));
+// Edificio sigue el criterio histórico: todo lo pagado que no pertenezca a contenido.
+resultado.totaledificio = formatN2(sumPaymentDetailsExcludingCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido));
 resultado.total = formatN2(sumPaymentDetails(claim.payments));
 
 resultado.chequetotal = claim.payments.reduce(
@@ -176,6 +172,8 @@ function getCatalogValue(cmd, filter, field = "name") {
     }
   });
 
+  // El runtime expone el resultado del último doCmd en this[cmd].
+  // Este patrón ya es el contrato esperado por los chains y no ha mostrado problemas en la ejecución actual.
   return this[cmd]?.outData?.[0]?.[field] ?? "";
 }
 
@@ -205,6 +203,17 @@ function sumPaymentDetailsByCoverageIds(payments, coverageIds) {
       .filter(row => coverageSet.has(Number(row?.lifeCoverageId)))
       .reduce((subSum, row) => subSum + Number(row?.amount || 0), 0);
     }, 0);
+}
+
+function sumPaymentDetailsExcludingCoverageIds(payments, coverageIds) {
+  const coverageSet = new Set((coverageIds || []).map(id => Number(id)).filter(id => id > 0));
+
+  return (payments || []).reduce((sum, payment) => {
+    const rows = Array.isArray(payment?.detail) ? payment.detail : [];
+    return sum + rows
+      .filter(row => !coverageSet.has(Number(row?.lifeCoverageId)))
+      .reduce((subSum, row) => subSum + Number(row?.amount || 0), 0);
+  }, 0);
 }
 
 function getCoverageIdsByCodes(coverages, codes) {

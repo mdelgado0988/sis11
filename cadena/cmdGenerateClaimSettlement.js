@@ -11,7 +11,7 @@
  * Output: { ok, msg }
  */
 
-const claimId = context.claimId;
+const claimId = context?.claimId;
 
 if (!claimId) {
     throw new Error("No se recibió el claimId");
@@ -125,12 +125,15 @@ function getReportCoverageName(claimId) {
     });
 
     const payments = LoadEntities.outData || [];
-    const coverageId = Number((payments
+    const coverageIds = payments
         .flatMap(p => {
             const detail = safeJson(p?.jDetail, []);
             return Array.isArray(detail) ? detail : (detail?.detail || detail?.details || []);
         })
-        .find(d => Number(d?.lifeCoverageId) > 0) || {}).lifeCoverageId || 0);
+        .map(d => Number(d?.lifeCoverageId))
+        .filter(id => id > 0);
+
+    const coverageId = coverageIds.length ? Math.min(...coverageIds) : 0;
 
     if (!coverageId) {
         return "";
@@ -205,7 +208,7 @@ function getReportName(doc, reportCoverageName) {
     const upperName = name.toUpperCase();
     const needsCoverageSuffix =
         upperName.includes("FINIQUITO") &&
-        !upperName.includes("ACREEDOR") &&
+        !upperName.includes("(ACREEDOR)") &&
         reportCoverageName &&
         !upperName.includes(reportCoverageName.toUpperCase());
 
