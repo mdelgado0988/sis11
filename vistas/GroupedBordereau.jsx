@@ -409,11 +409,7 @@
         }
 		const response = await exe('RepoSalvageCession',{ operation:'GET', filter });
 		if(!response.ok) throw new Error(response.msg);
-        const rawRows = getRows(response);
-        const rows = rawRows.filter(salvage => salvage);
-        if (rows.length !== rawRows.length) {
-          message.warning('Some salvage records were skipped because required relations were missing.');
-        }
+        const rows = getRows(response).filter(salvage => salvage);
         const grouped = rows.reduce((group, salvage)=>{
           const groupIndex = group.findIndex( pol =>
             String(pol.policyCode || '') === String(salvage.policyCode || '') &&
@@ -733,7 +729,7 @@
       const values = pickAllowedValues(await filterForm.validateFields(), [
         'date', 'range', 'creationRange', 'policyId', 'holderId', 'lob', 'coverageCode',
         'contractId', 'contractIdManual', 'policyIdManual', 'claimId', 'id', 'cessionId',
-        'lineId', 'participantId', 'FAC', 'exGratia', 'policyStatus', 'distributionMode', 'sa'
+        'lineId', 'participantId', 'FAC', 'exGratia', 'policyStatus', 'distributionMode', 'sa', 'currency'
       ]);
       if (isInvalid(values)) {
         return null;
