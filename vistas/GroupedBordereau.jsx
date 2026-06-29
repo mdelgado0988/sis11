@@ -33,6 +33,7 @@
     const [ quickFilterForm ] = Form.useForm();
     const [ cmdOption, setcmdOption] = useState('RepoCession');
     const [config, setConfig] = useState([]); 
+    const [ catalogsReady, setCatalogsReady ] = useState(false);
     const contractId = Form.useWatch('contractId', filterForm);
     const CessionOpt=[
       {value:'RepoCession', label:'Suscripción'},
@@ -56,6 +57,10 @@
     };
     async function onApplyQuickFilter(){
       try {
+        if (!catalogsReady) {
+          message.info('Estamos terminando de cargar los catálogos, intenta de nuevo en unos segundos.');
+          return;
+        }
         setLoading(true)
         const { contractId, dateFilter, cmdOption } = await quickFilterForm.validateFields();
         const actionMappings = {
@@ -106,6 +111,10 @@
     }
     async function onApplyFilter(){
         try {
+            if (!catalogsReady) {
+                message.info('Estamos terminando de cargar los catálogos, intenta de nuevo en unos segundos.');
+                return;
+            }
             setLoading(true)
             const loadOptions = {
                 RepoCession: fetchCession,
@@ -221,12 +230,16 @@
 
                 // Max values
                 pol.premium +=  cession.premium;
-                pol.sumInsured += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsured);
-                pol.sumInsuredComputed += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredComputed);
+                
 
                 // Totals
                 pol.sumInsuredCedant += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant);
                 pol.sumInsuredRe += montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe);
+                const totalSum = Number(pol.sumInsuredCedant || 0) + Number(pol.sumInsuredRe || 0);
+                pol.sumInsured = totalSum;
+                pol.sumInsuredComputed = totalSum;
+
+                addLineCedTotals(pol, cession);
                 pol.tax += cession.tax;
                 pol.premiumCedant += cession.premiumCedant;
                 pol.premiumRe += cession.premiumRe;
@@ -254,11 +267,14 @@
                     changeId: cession.changeId,
 
                     premium: cession.premium,
-                    sumInsured: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsured),
-                    sumInsuredComputed: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredComputed),
+                    //sumInsured: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsured),
+                    //sumInsuredComputed: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredComputed),
 
                     sumInsuredCedant: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredCedant),
-                    sumInsuredRe: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe),
+                    sumInsuredRe: montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, cession.sumInsuredRe),                    
+                    sumInsuredReCuotaParte: 0,
+                    sumInsuredReExcedente: 0,
+                    sumInsuredReFacultativa: 0,
 
                     tax: cession.tax,
 
@@ -270,6 +286,12 @@
 
                     cessions: [cession]
                 };
+
+                const totalSum = Number(newPol.sumInsuredCedant || 0) + Number(newPol.sumInsuredRe || 0);
+                newPol.sumInsured = totalSum;
+                newPol.sumInsuredComputed = totalSum;
+
+                addLineCedTotals(newPol, cession);
 
                 group.push(newPol);
             }
@@ -790,7 +812,6 @@
 
     function mapGroupedBordereauRowForExport(row = {}, policyMap = {}) {
       const first = getFirstCession(row);
-      const premiumType = String(row.premiumType || first.premiumType || '').toUpperCase();
       const sumInsured100 = Number(row.sumInsuredComputed || row.sumInsured || 0);
       const sumRet = Number(row.sumInsuredCedant || 0);
       const sumCed = Number(row.sumInsuredRe || 0);
@@ -816,27 +837,52 @@
         'Suma Asegurada 100%': sumInsured100,
         'Suma Retenida': sumRet,
         'Suma Cedida': sumCed,
-        'Suma Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', sumCed),
-        'Suma Excedente': getTypeAmount(premiumType, 'EXCED', sumCed),
-        'Suma Facultativa': getTypeAmount(premiumType, 'FAC', sumCed),
+        'Suma Cuota Parte': Number(row.sumInsuredReCuotaParte || 0),
+        'Suma Excedente': Number(row.sumInsuredReExcedente || 0),
+        'Suma Facultativa': Number(row.sumInsuredReFacultativa || 0),
         'Prima Suscrita 100%': prem100,
         'Prima Retenida': premRet,
         'Prima Cedida': premCed,
-        'Suma Prima Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', premCed),
-        'Suma Prima Excedente': getTypeAmount(premiumType, 'EXCED', premCed),
+        'Suma Prima Cuota Parte': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'CUOTA PARTE', premCed),
+        'Suma Prima Excedente': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'EXCED', premCed),
         'Prima Cat': 0,
-        'Prima Facultativa': getTypeAmount(premiumType, 'FAC', premCed),
+        'Prima Facultativa': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'FAC', premCed),
         'Comision Contractual': comision,
-        'Comision Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', comision),
-        'Comision Excedente': getTypeAmount(premiumType, 'EXCED', comision),
-        'Comision Facultativa': getTypeAmount(premiumType, 'FAC', comision),
+        'Comision Cuota Parte': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'CUOTA PARTE', comision),
+        'Comision Excedente': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'EXCED', comision),
+        'Comision Facultativa': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'FAC', comision),
         Impuesto: tax,
-        'Impuesto Facultativo': getTypeAmount(premiumType, 'FAC', tax),
-        'Reaseguro por Cuota Parte': getTypeAmount(premiumType, 'CUOTA PARTE', sumCed),
-        'Reaseguro por Excedente': getTypeAmount(premiumType, 'EXCED', sumCed),
+        'Impuesto Facultativo': getTypeAmount(String(row.premiumType || first.premiumType || '').toUpperCase(), 'FAC', tax),
+        'Reaseguro por Cuota Parte': Number(row.sumInsuredReCuotaParte || 0),
+        'Reaseguro por Excedente': Number(row.sumInsuredReExcedente || 0),
         'Reaseguro por Pagar': Number(sumCed || 0),
         cserie: first.cserie || row.cserie || ''
       };
+    }
+
+    function addLineCedTotals(groupedRow, cession) {
+      if (!groupedRow || !cession) {
+        return;
+      }
+
+      const lineId = String(cession.lineId || '').trim().toUpperCase();
+      const cedValue = montoSiEsCobertura(cession.LoB, cession.productCode, cession.coverageCode, Number(cession.sumInsuredRe || 0));      
+
+      if (!cedValue) {
+        return;
+      }
+
+      if (lineId === 'CUOTA PARTE' || lineId.indexOf('CUOTA PARTE') >= 0) {
+        groupedRow.sumInsuredReCuotaParte = Number(groupedRow.sumInsuredReCuotaParte || 0) + cedValue;
+      }
+
+      if (lineId === 'EXCEDENTE 1' || lineId.indexOf('EXCEDENTE') >= 0) {
+        groupedRow.sumInsuredReExcedente = Number(groupedRow.sumInsuredReExcedente || 0) + cedValue;
+      }
+
+      if (lineId === 'FAC' || lineId.indexOf('FAC') >= 0) {
+        groupedRow.sumInsuredReFacultativa = Number(groupedRow.sumInsuredReFacultativa || 0) + cedValue;
+      }
     }
 
     function getLobDescription(lobCode) {
@@ -970,7 +1016,7 @@
       showFilter, openFilter, closeFilter,
       fetchPol, onApplyFilter, fetchContact,
       cessions, products, lobs,currencies,
-      compareOptions, quickFilterForm, onApplyQuickFilter, config,
+      compareOptions, quickFilterForm, onApplyQuickFilter, config, catalogsReady,
 	  losses, salvages, onDownloadClick
     }
     useEffect(()=>{
@@ -995,20 +1041,30 @@
         setLoadingM(false);
       }
       
-      // Load Contract.
-      exe('LoadEntities',{ entity:'Contract', fields:'id,code,name,endDate'})
-      .then( response => setContracts(response.outData));
-      exe('RepoLob',{ operation:'GET'}).then( response => {
-        const opt = response.outData.map( lob => ({ value: lob.code, label: lob.name }));
-        setLobs(opt);
-      });
-      exe('GetProducts',{ }).then( response => {
-        const opt = response.outData.map( pro => ({ value: pro.code, label: pro.name, parent: pro.lobCode }));
-        setProducts(opt);
-      })
-      exe('RepoCurrency',{ operation:'GET', filter:`enabled=1`}).then( response => setCurrencies(response.outData || []))
+      const loadInitialData = () => {
+        setCatalogsReady(false);
 
-      loadConfigCoverages();
+        return Promise.all([
+          exe('LoadEntities',{ entity:'Contract', fields:'id,code,name,endDate'}).then( response => setContracts(response.outData || [])),
+          exe('RepoLob',{ operation:'GET'}).then( response => {
+            const opt = (response.outData || []).map( lob => ({ value: lob.code, label: lob.name }));
+            setLobs(opt);
+          }),
+          exe('GetProducts',{ }).then( response => {
+            const opt = (response.outData || []).map( pro => ({ value: pro.code, label: pro.name, parent: pro.lobCode }));
+            setProducts(opt);
+          }),
+          exe('RepoCurrency',{ operation:'GET', filter:`enabled=1`}).then( response => setCurrencies(response.outData || [])),
+          loadConfigCoverages()
+        ]).then(() => {
+          setCatalogsReady(true);
+        });
+      };
+
+      loadInitialData().catch(error => {
+        setCatalogsReady(false);
+        message.error((error && error.message) || 'No fue posible cargar los catálogos iniciales.');
+      });
       
     },[]);
     return <AppContext.Provider value={ value }>
@@ -1473,11 +1529,13 @@
 
   }
   const QuickFilter=()=>{
-    const { CessionOpt, openFilter, contracts, quickFilterForm, onApplyQuickFilter, onDownloadClick, loading } = useAppContext();
+    const { CessionOpt, openFilter, contracts, quickFilterForm, onApplyQuickFilter, onDownloadClick, loading, catalogsReady } = useAppContext();
     const contractOpt = (contracts || []).map( con =>({ value: con.id, label: renderContractLabel(con) }));
 	useEffect(()=>{
-		onApplyQuickFilter();
-	},[])
+		if (catalogsReady) {
+			onApplyQuickFilter();
+		}
+	},[catalogsReady])
     return (
       <Form form={quickFilterForm} layout='horizontal' initialValues={{ dateFilter: moment(), cmdOption: 'RepoCession' }}>
         <Space>
