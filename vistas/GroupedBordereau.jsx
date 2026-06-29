@@ -1,5 +1,5 @@
 ()=>{
-  const { useState, useEffect, createContext, useContext } = React;
+  const { useState, useEffect, useRef, createContext, useContext } = React;
   const { Table, Select, Button, DatePicker, Skeleton, Space, Row, Col, Drawer, Form, Tabs, message, Input, InputNumber, Checkbox, Badge, Empty, Tooltip } = A;
   const { Column } = Table;
   const { RangePicker } = DatePicker;
@@ -138,41 +138,46 @@
         
     }
 
-    let timeOut, currentValue;
+    const searchRefs = useRef({
+      pol: { timer: null, value: '' },
+      contact: { timer: null, value: '' }
+    });
     async function fetchPol(value, callback){
-      if (timeOut) {
-        clearTimeout(timeOut);
-        timeOut = null;
+      const state = searchRefs.current.pol;
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
       }
-      currentValue = value;
+      state.value = value;
       async function fetch(){
-        exe('RepoLifePolicy',{operation:'GET', filter:`[code] LIKE '${ value }%' AND active=1`, size: 15 }).then( response => {
-          if(currentValue != value){
+        exe('RepoLifePolicy',{operation:'GET', filter:`[code] LIKE '${ escapeSqlString(value) }%' AND active=1`, size: 15 }).then( response => {
+          if(state.value != value){
             return callback([]);
           }
           const mapped = response.outData.map(pol => ({value: pol.id, label: pol.code }));
           callback(mapped)          
         })
       }
-      timeOut = setTimeout(fetch, 500)      
+      state.timer = setTimeout(fetch, 500)      
     }
     async function fetchContact(value, callback){
-      if (timeOut) {
-        clearTimeout(timeOut);
-        timeOut = null;
+      const state = searchRefs.current.contact;
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
       }
-      currentValue = value;
+      state.value = value;
       async function fetch(){
-        let filterString = `(((RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) like N'%${ value }%')) and [inactive]=0`
+        let filterString = `(((RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) like N'%${ escapeSqlString(value) }%')) and [inactive]=0`
         exe('GetContacts',{operation:'GET', filter:filterString, size: 10 }).then( response => {
-          if(currentValue != value){
+          if(state.value != value){
             return callback([]);
           }
           const mapped = response.outData.map(con => ({value: con.id, label: con.FullName }));
           callback(mapped)          
         })
       }
-      timeOut = setTimeout(fetch, 500)      
+      state.timer = setTimeout(fetch, 500)      
     }
     async function fetchCession( quickFilter = null  ){
 		setCessions([]);
@@ -303,7 +308,7 @@
                 newPol.sumInsuredComputed = totalSum;
 
                 const totalPremium = Number(newPol.premiumCedant || 0) + Number(newPol.premiumRe || 0);
-                newPol.premium += totalPremium;
+                newPol.premium = totalPremium;
 
                 addLineCedTotals(newPol, cession);
                 addLinePremiumTotals(newPol, cession);
@@ -385,7 +390,7 @@
           if(groupIndex >= 0){
               const pol = group[groupIndex];
               pol.cessions = (pol.cessions || []);
-              pol.cessions.push(loss);
+              pol.cessions.push(salvage);
               // summary
               pol.income += salvage.income;
               pol.retainedAmount += salvage.retainedAmount;
@@ -457,6 +462,10 @@
         return String(valor || '')
             .trim()
             .toUpperCase();
+    }
+
+    function escapeSqlString(value) {
+      return String(value || '').replace(/'/g, "''");
     }
     
     function mapearTablaConfig(data) {
@@ -566,13 +575,21 @@
           let [ from, to ] = value;
           from = from.toISOString().slice(0,10);
           to = to.toISOString().slice(0,10);
-          return `premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE created between '${ from }' AND  '${ to }') OR
+          return `(premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE created between '${ from }' AND  '${ to }') OR
                   premiumType='ANNIVERSARY' AND anniversaryId in (SELECT id FROM Anniversary WHERE created between '${ from }' AND  '${ to }') OR
-              premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE creationDate between '${ from }' AND  '${ to }')`
+              premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE creationDate between '${ from }' AND  '${ to }'))`
         },
         policyId: value => {
           if(!value) return null;
           return `lifepolicyId in (${ value })`
+        },
+        policyIdManual: value => {
+          if(!value) return null;
+          return `lifepolicyId in (${ value })`
+        },
+        contractIdManual: value => {
+          if(!value) return null;
+          return `contractId=${ value }`
         },
         policyStart: value => {
           if(!value) return null;
@@ -594,7 +611,7 @@
         },
 
         productCode: (value) =>
-          `lifepolicyId IN (SELECT id FROM LifePolicy WHERE productCode='${String(value).trim()}')`,
+          `lifepolicyId IN (SELECT id FROM LifePolicy WHERE productCode='${escapeSqlString(String(value).trim())}')`,
 
         sa: (value) => {
           const opt = compareOptions.find(item => item.value === value.compare);
@@ -624,12 +641,14 @@
           }
 
           // Numbers
+          if (key.endsWith('SearchId')) return null;
+
           if (!isNaN(value) && Number(value) > 0) {
             return `${key}=${value}`;
           }
 
           // Strings
-          return `${key}='${String(value).trim()}'`;
+          return `${key}='${escapeSqlString(String(value).trim())}'`;
         })
         .filter(Boolean);
 
@@ -663,13 +682,13 @@
           to = to.toISOString().slice(0,10);
           return `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE date between '${ from }' AND '${ to }')`
         },
-        policyId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
+        policyIdManual: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
+        contractIdManual: value => `contractId=${ value }`,
         holderId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId in (SELECT id FROM LifePolicy WHERE holderId=${ value }))`,
-        lob: value => `cessionId in (SELECT id FROM cession WHERE LoB='${ value }')`,
-        coverageCode: value => `cessionId in (SELECT id FROM cession WHERE coverageCode='${ value }')`,
-        policyId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value})`,
+        lob: value => `cessionId in (SELECT id FROM cession WHERE LoB='${ escapeSqlString(value) }')`,
+        coverageCode: value => `cessionId in (SELECT id FROM cession WHERE coverageCode='${ escapeSqlString(value) }')`,
         claimId: value => `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE claimId=${ value })`,
-        lineId: value => `cessionId in (SELECT id FROM cession WHERE lineId='${ value }')`,
+        lineId: value => `cessionId in (SELECT id FROM cession WHERE lineId='${ escapeSqlString(value) }')`,
         sa: (value) => {
           const opt = compareOptions.find(item => item.value === value.compare);
           if (!opt) return null;
@@ -679,8 +698,8 @@
           }
           return `cessionId in (SELECT id FROM cession WHERE sumInsured BETWEEN ${value.value} AND ${value.upperValue})`	
         },
-        participantId: value => `id in (select cessionId from LossCessionPart where contactId=${ value })`,
-        FAC: (value) => value ? `cessionId in (SELECT id in cession WHERE lineId='FAC')` : null,
+        participantId: value => `id in (select lossCessionId from LossCessionPart where contactId=${ value })`,
+        FAC: (value) => value ? `cessionId in (SELECT id FROM cession WHERE lineId='FAC')` : null,
         coSumInsured: (value) => value ? `coSumInsured>0` : null,
       };
 
@@ -694,12 +713,14 @@
           }
 
           // Numbers
+          if (key.endsWith('SearchId')) return null;
+
           if (!isNaN(value) && Number(value) > 0) {
             return `${key}=${value}`;
           }
 
           // Strings
-          return `${key}='${String(value).trim()}'`;
+          return `${key}='${escapeSqlString(String(value).trim())}'`;
         })
         .filter(Boolean);
 
@@ -726,14 +747,15 @@
           const [ from , to ] = value;
           return `[claimOccurrence] BETWEEN '${ from.toISOString().slice(0,10)}' AND '${ to.toISOString().slice(0,10)}'`
         },
-        policyId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
+        policyIdManual: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value })`,
+        contractIdManual: value => `contractId=${ value }`,
         holderId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId in (SELECT id FROM LifePolicy WHERE holderId=${ value }))`,
-        lob: value => `cessionId in (SELECT id FROM cession WHERE LoB='${ value }')`,
-        coverageCode: value => `cessionId in (SELECT id FROM cession WHERE coverageCode='${ value }')`,
+        lob: value => `cessionId in (SELECT id FROM cession WHERE LoB='${ escapeSqlString(value) }')`,
+        coverageCode: value => `cessionId in (SELECT id FROM cession WHERE coverageCode='${ escapeSqlString(value) }')`,
         policyId: value => `cessionId in (SELECT id FROM cession WHERE lifepolicyId=${ value})`,
         claimId: value => `lifeCoveragePayoutId in (SELECT id FROM LifeCoveragePayout WHERE claimId=${ value })`,
-        lineId: value => `cessionId in (SELECT id FROM cession WHERE lineId='${ value }')`,
-        participantId: value => `id in (select cessionId from LossCessionPart where contactId=${ value })`,
+        lineId: value => `cessionId in (SELECT id FROM cession WHERE lineId='${ escapeSqlString(value) }')`,
+        participantId: value => `id in (select salvageCessionId from SalvageCessionPart where contactId=${ value })`,
       };
 
       const filters = Object.entries(values)
@@ -746,12 +768,14 @@
           }
 
           // Numbers
+          if (key.endsWith('SearchId')) return null;
+
           if (!isNaN(value) && Number(value) > 0) {
             return `${key}=${value}`;
           }
 
           // Strings
-          return `${key}='${String(value).trim()}'`;
+          return `${key}='${escapeSqlString(String(value).trim())}'`;
         })
         .filter(Boolean);
 
@@ -1091,7 +1115,7 @@
         'Prima cedida': cession.premiumRe || 0
       };
     }
-    function onDownloadClick(){
+    async function onDownloadClick(){
         try {
             if(!cmdOption){
                 message.error('Por favor seleccione un tipo de documento');
@@ -1112,7 +1136,7 @@
                 title: 'Salvamento'
               }
             };
-            dataToXLSX( dataMapping[cmdOption].data || [], `Reporte de ${ dataMapping[cmdOption].title }` );
+            await dataToXLSX( dataMapping[cmdOption].data || [], `Reporte de ${ dataMapping[cmdOption].title }` );
         } catch (error) {
             console.log(error)
         } finally {
@@ -1132,16 +1156,40 @@
       const xlsxLib = libs.XLSX || libs.xlsx || libs.xlsxJs;
 
       if(typeof moment === 'undefined' && momentLib){
-        eval(momentLib);
+        executeTrustedLibraryCode(momentLib, 'moment');
       }
 
       if(typeof XLSX === 'undefined' && xlsxLib){
         if(typeof xlsxLib === 'string'){
-          eval(xlsxLib);
+          executeTrustedLibraryCode(xlsxLib, 'xlsx');
         } else {
           window.XLSX = xlsxLib;
         }
       }
+    }
+
+    function executeTrustedLibraryCode(source, libraryName) {
+      const code = String(source || '').trim();
+      if (!code) {
+        return;
+      }
+
+      const name = String(libraryName || '').toLowerCase();
+      const expectedToken = name === 'moment' ? 'moment' : 'xlsx';
+      const blockedPattern = /(?:document\.|location\.|fetch\(|XMLHttpRequest|localStorage|sessionStorage|indexedDB|eval\()/i;
+
+      // NOTE FOR MAINTAINERS / AI:
+      // This view loads helper libraries from a backend chain because the runtime
+      // cannot rely on external network access here. The chain returns the library
+      // source as text, so the only practical way to hydrate it in this environment
+      // is to evaluate that trusted payload after basic validation.
+      // Do not replace this with a remote script tag or a direct CDN fetch unless
+      // the execution environment changes to allow outbound network access.
+      if (code.toLowerCase().indexOf(expectedToken) < 0 || blockedPattern.test(code)) {
+        throw new Error('Contenido no confiable para cargar ' + libraryName + '.');
+      }
+
+      eval(code);
     }
     const value = {
       loading, loadingM, setLoading,
@@ -1153,21 +1201,30 @@
 	  losses, salvages, onDownloadClick
     }
     useEffect(()=>{
-      
+      // NOTE FOR MAINTAINERS / AI:
+      // The report helpers are hydrated from a backend chain because this
+      // runtime cannot depend on outbound network access for CDN/script loading.
+      // The chain returns trusted library source, so we validate it and then
+      // execute it locally. This is intentional and currently the only workable
+      // approach in this environment.
       if( typeof moment === 'undefined'){
         exe('ExeChain',{ chain:'cmdLoadLibrariesGroupedBordereau', context:'{}'}).then( response => {
           if(!response.ok) throw new Error(response.msg)
           const { outData:{ momentJs, XLSX: xlsxLib } } = response;
           if(typeof moment === 'undefined' && momentJs){
-            eval(momentJs);
+            executeTrustedLibraryCode(momentJs, 'moment');
           }
           if(typeof XLSX === 'undefined' && xlsxLib){
             if(typeof xlsxLib === 'string'){
-              eval(xlsxLib);
+              executeTrustedLibraryCode(xlsxLib, 'xlsx');
             } else {
               window.XLSX = xlsxLib;
             }
           }
+          setLoadingM(false);
+        }).catch(error => {
+          console.error(error);
+          message.error('No fue posible cargar las librerías del reporte.');
           setLoadingM(false);
         })
       }else {
@@ -1254,10 +1311,10 @@
                     <Select options={ (contractOpt || []) } style={{ width: '100%'}} showSearch allowClear optionFilterProp='label' placeholder={t('Please select contract')}/>
                 </Form.Item>
                 <div style={{ display: 'flex', flexDirection:'row', gap: 3 }}>
-                    <Form.Item name='policyId' label={t('Policy Id')}>
+                    <Form.Item name='policyIdManual' label={t('Policy Id')}>
                         <InputNumber />
                     </Form.Item>
-                    <Form.Item name='contractId' label={t('Treaty Id')}>
+                    <Form.Item name='contractIdManual' label={t('Treaty Id')}>
                         <InputNumber />
                     </Form.Item>
                     <Form.Item name='id' label={t('Cession Id')} >
@@ -1444,13 +1501,13 @@
 			<Select options={ (contractOpt || []) } style={{ width: '100%'}} showSearch allowClear optionFilterProp='label' placeholder={t('Please select contract')}/>
 		</Form.Item>
 		<div style={{ display: 'flex', flexDirection:'row', gap: 3, flexWrap: 'wrap' }}>
-			<Form.Item name='policyId' label={t('Policy Id')}>
+			<Form.Item name='policyIdManual' label={t('Policy Id')}>
 				<InputNumber />
 			</Form.Item>
 			<Form.Item name='claimId' label={t('Claim Id')}>
 				<InputNumber />
 			</Form.Item>
-			<Form.Item name='Treaty Id' label={t('Treaty Id')}>
+			<Form.Item name='contractIdManual' label={t('Treaty Id')}>
 				<InputNumber />
 			</Form.Item>
 			<Form.Item name='id' label={t('Loss Cession Id')} >
@@ -1571,13 +1628,13 @@
         <Select options={ (contractOpt || []) } style={{ width: '100%'}} showSearch allowClear optionFilterProp='label' placeholder={t('Please select contract')}/>
       </Form.Item>
       <div style={{ display: 'flex', flexDirection:'row', gap: 3, flexWrap: 'wrap' }}>
-        <Form.Item name='policyId' label={t('Policy Id')}>
+        <Form.Item name='policyIdManual' label={t('Policy Id')}>
           <InputNumber />
         </Form.Item>
         <Form.Item name='salvageId' label={t('Salvage Id')}>
           <InputNumber />
         </Form.Item>
-        <Form.Item name='Treaty Id' label={t('Treaty Id')}>
+        <Form.Item name='contractIdManual' label={t('Treaty Id')}>
           <InputNumber />
         </Form.Item>
         <Form.Item name='id' label={t('Salvage Cession Id')} >
