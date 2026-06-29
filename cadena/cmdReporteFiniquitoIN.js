@@ -1,32 +1,27 @@
 //block
 //noreplace
-/*
-Michael Delgado. 2025.12.17. GLOB-119
-Parameters:
- context.row.reclamo       Id del siniestro
- simular: { row: { reclamo: 23 } }
 
-details:
-  lifeCoverageId = 251 cobertura de gastos de hoteleria
-*/
+/*
+ * Name: cmdReporteFiniquitoIN
+ * Description: Generates the claim settlement document DTO
+ * Author: Michael Delgado
+ * Email: michael.delgado@axxis-systems.com
+ * Creation Date: 06/01/2026
+ * Input: { row: { reclamo } }
+ * Output: { resultado }
+ */
 
 const claimId = context.row.reclamo;
-let claim;
-let policy;
-let cessionBeneficiary;
-let claimerContact;
-let lob;
-let product;
 const objectDefinitionId = [46,47]
 const quitarCodigo = texto => texto.split(" - ").slice(1).join(" - ");
 const n2 = value => Number(String(value ?? '').replace(/,/g, ''));
 
-setClaim();
-setPolicy();
-setCessionBeneficiary();
-setClaimerContact();
-setLob();
-setProduct();
+const claim = getClaim();
+const policy = getPolicy(claim);
+const cessionBeneficiary = getCessionBeneficiary(policy);
+const claimerContact = getClaimerContact(claim);
+const lob = getLob(policy);
+const product = getProduct(policy);
 
 //return { lob, product }
 
@@ -49,6 +44,7 @@ resultado.ramo = quitarCodigo(lob.name);
 resultado.telefono = claimerContact.phone;
 resultado.correo = claimerContact.email;
 resultado.producto = product.name;
+resultado.nombreCobertura = getNombreCobertura(claim);
 //resultado.coverages = policy.coverages;
 
 resultado.lifeCoverageIdsHoteleria = policy.coverages
@@ -81,7 +77,7 @@ resultado.totalcontenido = claim.payments.reduce((sum, payment) => {
     .reduce((subSum, d) => subSum + Number(d.amount || 0), 0);
 }, 0);
 
-resultado.totaledificio = formatN2(policy.insuredObject?.userData?.txtSA ?? "0.00");
+resultado.totaledificio = formatN2(sumPaymentDetails(claim.payments));
 resultado.total = claim.payments.reduce((sum, payment) => {
   return sum + (payment.detail || [])
     .reduce((subSum, d) => subSum + Number(d.amount || 0), 0);
@@ -113,21 +109,21 @@ resultado.totalletras = montoEnLetras(n2(resultado.total));
 
 return resultado;
 
-function setClaim() {
+function getClaim() {
   doCmd({cmd: "LoadEntity", data: { entity: "Claim", fields:"code, occurrence, lifePolicyId, contactId", filter: `id = ${claimId}` }})
-  claim = LoadEntity.outData ?? {};
+  const claim = LoadEntity.outData ?? {};
   
-  doCmd({cmd: "LoadEntities", data: { entity: "ClaimPayment", fields:"contactId, date, user, total, jDetail, currency", filter: `claimId = ${claimId} AND entityState = 'EXECUTED'` }})
+  doCmd({cmd: "LoadEntities", data: { entity: "ClaimPayment", fields:"contactId, date, user, total, jDetail, currency, coverageId, checkNum", filter: `claimId = ${claimId} AND entityState = 'EXECUTED'` }})
   claim.payments = LoadEntities.outData ?? [];
   for (let payment of claim.payments) {
-    payment.detail = payment?.jDetail ? JSON.parse(payment.jDetail) : {};
+    payment.detail = payment?.jDetail ? safeJson(payment.jDetail, []) : [];
   }
-  
+  return claim;
 }
 
-function setPolicy() {
+function getPolicy(claim) {
   doCmd({cmd: "LoadEntity", data: { entity: "LifePolicy", fields:"id, code, holderId, cessionBeneficiary, lob, productCode", filter: `id = ${claim.lifePolicyId}` }})
-  policy = LoadEntity.outData ?? {};
+  const policy = LoadEntity.outData ?? {};
 
   const ids = objectDefinitionId.join(',');
   
@@ -136,33 +132,34 @@ function setPolicy() {
 
   doCmd({cmd: "LoadEntities", data: { entity: "LifeCoverage", fields: "id, code, name, limit, deductible", filter: `lifepolicyId = ${policy.id}` }})
   policy.coverages = LoadEntities.outData ?? [];
-  
+  return policy;
 }
 
-function setLob() {
+function getLob(policy) {
   doCmd({cmd: "LoadEntity", data: { entity: "Lob", fields:"code, name", filter: `code = '${policy.lob}'` }})
-  lob = LoadEntity.outData ?? {};
+  return LoadEntity.outData ?? {};
 }
 
-function setProduct() {
+function getProduct(policy) {
   doCmd({cmd: "LoadEntity", data: { entity: "Product", fields:"code, name", filter: `code = '${policy.productCode}'` }})
-  product = LoadEntity.outData ?? {};
+  return LoadEntity.outData ?? {};
 }
 
-function setClaimerContact() {
+function getClaimerContact(claim) {
   doCmd({cmd: "LoadEntity", data: { entity: "Contact", fields:`id, CASE
         WHEN isPerson = 1 THEN LTRIM(RTRIM(CONCAT_WS(' ', name, middleName, surname1, surname2)))
         ELSE surname2
     END AS name, cnp, phone, email`, filter: `id = ${claim.contactId}` }})
-  claimerContact = LoadEntity.outData ?? {};
+  return LoadEntity.outData ?? {};
 }
 
-function setCessionBeneficiary() {
+function getCessionBeneficiary(policy) {
+  if (!policy?.cessionBeneficiary) return {};
   doCmd({cmd: "LoadEntity", data: { entity: "Contact", fields:`id, CASE
         WHEN isPerson = 1 THEN LTRIM(RTRIM(CONCAT_WS(' ', name, middleName, surname1, surname2)))
         ELSE surname2
     END AS name, CASE WHEN isPerson = 1 THEN cnp ELSE nif END cnp`, filter: `id = ${policy.cessionBeneficiary}` }})
-  cessionBeneficiary = LoadEntity.outData ?? {};
+  return LoadEntity.outData ?? {};
 }
 
 function getCatalogValue(cmd, filter, field = "name") {
@@ -175,6 +172,32 @@ function getCatalogValue(cmd, filter, field = "name") {
   });
 
   return this[cmd]?.outData?.[0]?.[field] ?? "";
+}
+
+function getNombreCobertura(claim) {
+  const coverageId = Number((claim?.payments || [])
+    .flatMap(payment => Array.isArray(payment?.detail) ? payment.detail : [])
+    .find(detail => Number(detail?.lifeCoverageId) > 0)?.lifeCoverageId || 0);
+
+  if (!coverageId) return "";
+
+  return (policy.coverages || []).find(item => Number(item?.id) === coverageId)?.name || "";
+}
+
+function sumPaymentDetails(payments) {
+  return (payments || []).reduce((sum, payment) => {
+    const rows = Array.isArray(payment?.detail) ? payment.detail : [];
+    return sum + rows.reduce((subSum, row) => subSum + Number(row?.amount || 0), 0);
+  }, 0);
+}
+
+function safeJson(raw, fallback) {
+  try {
+    if (!raw || !String(raw).trim()) return fallback;
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch (error) {
+    return fallback;
+  }
 }
 
 function montoEnLetras(monto) {

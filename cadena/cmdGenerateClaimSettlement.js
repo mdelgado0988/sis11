@@ -11,26 +11,18 @@
  * Output: { ok, msg }
  */
 
-let claim;
-let policy;
-let product;
-let docs = [];
-
 const claimId = context.claimId;
 
 if (!claimId) {
     throw new Error("No se recibió el claimId");
 }
 
-setClaim();
-setPolicy();
-setProduct();
-setSettlementDocs();
-
-//Remove hotel settlement if the policy doesn't have the corresponding coverage
-if(policy.coverages.length === 0) {
-    docs = docs.filter(x => x?.template !== "finiquito gastos de hoteleria.docx");
-}
+const claim = getClaim();
+const policy = getPolicy(claim);
+const reportCoverageName = getReportCoverageName(claimId);
+const product = getProduct(policy);
+const docs = getSettlementDocs(product, policy);
+let sentDocs = 0;
 
 // Start generating documents
 for (const doc of docs) {
@@ -40,27 +32,30 @@ for (const doc of docs) {
     }
 
     doCmd({cmd: 'PutMessage', 
-      data: { 
-          batch: `Generación de finiquito, reclamo ${claimId}`, 
-          notify: false, 
-          value: JSON.stringify({
-              cmd: 'GenerateClaimDoc', 
-              data: {
-                  claimId,
-                  template: doc.template
-              }})
-          }
+        data: { 
+            batch: `Generación de finiquito, reclamo ${claimId}`, 
+            notify: false, 
+            value: JSON.stringify({
+                cmd: 'GenerateClaimDoc', 
+                data: {
+                    claimId,
+                    template: doc.template,
+                    reportName: getReportName(doc, reportCoverageName)
+                }})
+            }
     });
+
+    sentDocs += 1;
   
 }
 
 return {
     ok: true,
-    msg: `Se generaron ${docs.length} finiquito(s)`
+    msg: `Se generaron ${sentDocs} finiquito(s)`
 };
 
 
-function setClaim() {
+function getClaim() {
 
     doCmd({
         cmd: "LoadEntity",
@@ -71,7 +66,7 @@ function setClaim() {
         }
     });
 
-    claim = LoadEntity.outData;
+    const claim = LoadEntity.outData;
 
     if (!claim?.id) {
         throw new Error(`No se encontró el reclamo ${claimId}`);
@@ -80,20 +75,22 @@ function setClaim() {
     if (!claim?.lifePolicyId) {
         throw new Error(`El reclamo ${claimId} no tiene póliza asociada`);
     }
+
+    return claim;
 }
 
-function setPolicy() {
+function getPolicy(claim) {
 
     doCmd({
         cmd: "LoadEntity",
         data: {
             entity: "LifePolicy",
-            fields: "id, code, productCode",
+            fields: "id, code, productCode, cessionBeneficiary",
             filter: `id = ${claim.lifePolicyId}`
         }
     });
 
-    policy = LoadEntity.outData;
+    const policy = LoadEntity.outData;
 
     if (!policy?.id) {
         throw new Error(`No se encontró la póliza ${claim.lifePolicyId}`);
@@ -103,20 +100,44 @@ function setPolicy() {
         throw new Error(`La póliza ${policy.code || policy.id} no tiene producto asociado`);
     }
 
+    return policy;
+}
+
+function getReportCoverageName(claimId) {
     doCmd({
         cmd: "LoadEntities",
         data: {
-            entity: "LifeCoverage",
-            fields: "code",
-            filter: `lifePolicyId = ${policy.id} AND code IN (251, 954)`
+            entity: "ClaimPayment",
+            fields: "jDetail",
+            filter: `claimId = ${claimId} AND entityState = 'EXECUTED'`
         }
     });
 
-    policy.coverages = LoadEntities.outData || [];
+    const payments = LoadEntities.outData || [];
+    const coverageId = Number((payments
+        .flatMap(p => {
+            const detail = safeJson(p?.jDetail, []);
+            return Array.isArray(detail) ? detail : (detail?.detail || detail?.details || []);
+        })
+        .find(d => Number(d?.lifeCoverageId) > 0) || {}).lifeCoverageId || 0);
 
+    if (!coverageId) {
+        return "";
+    }
+
+    doCmd({
+        cmd: "LoadEntity",
+        data: {
+            entity: "LifeCoverage",
+            fields: "id, name",
+            filter: `id = ${coverageId}`
+        }
+    });
+
+    return LoadEntity.outData?.name || "";
 }
 
-function setProduct() {
+function getProduct(policy) {
 
     doCmd({
         cmd: "RepoProduct",
@@ -126,7 +147,7 @@ function setProduct() {
         }
     });
 
-    product = RepoProduct.outData?.[0];
+    const product = RepoProduct.outData?.[0];
 
     if (!product) {
         throw new Error(`No se encontró el producto ${policy.productCode}`);
@@ -139,14 +160,52 @@ function setProduct() {
     } catch (error) {
         throw new Error(`Configuración JSON inválida para el producto ${policy.productCode}`);
     }
+
+    return product;
 }
 
-function setSettlementDocs() {
+function getSettlementDocs(product, policy) {
 
     const documents = product?.eConfig?.Documents || [];
+    const hasCessionBeneficiary = Boolean(policy?.cessionBeneficiary);
 
-    docs = documents.filter(x =>
-        (x?.entity || "").trim().toUpperCase() === "CLAIM" &&
-        (x?.name || "").trim().toUpperCase().includes("FINIQUITO")
-    );
+    return documents.filter(x => {
+        const entity = (x?.entity || "").trim().toUpperCase();
+        const name = (x?.name || "").trim().toUpperCase();
+
+        if (entity !== "CLAIM" || !name.includes("FINIQUITO")) {
+            return false;
+        }
+
+        if (name.includes("(ACREEDOR)")) {
+            return hasCessionBeneficiary;
+        }
+
+        if (name.includes("(SIN ACREEDOR)")) {
+            return !hasCessionBeneficiary;
+        }
+
+        return true;
+    });
+}
+
+function getReportName(doc, reportCoverageName) {
+    const name = String(doc?.name || "").trim();
+    const upperName = name.toUpperCase();
+    const needsCoverageSuffix =
+        upperName.includes("FINIQUITO") &&
+        !upperName.includes("ACREEDOR") &&
+        reportCoverageName &&
+        !upperName.includes(reportCoverageName.toUpperCase());
+
+    return needsCoverageSuffix ? `${name} - ${reportCoverageName}` : name;
+}
+
+function safeJson(raw, fallback) {
+    try {
+        if (!raw || !String(raw).trim()) return fallback;
+        return typeof raw === "string" ? JSON.parse(raw) : raw;
+    } catch (error) {
+        return fallback;
+    }
 }
