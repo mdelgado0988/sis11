@@ -21,13 +21,13 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname1)), ''),
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
-    ISNULL(ISNULL(an.fiscalNumber, lp.fiscalNumber),'0') AS Recibo,
-	FORMAT(an.created, 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
-    CONVERT(VARCHAR, an.created, 103) AS FechaEmision,
+    ISNULL(ISNULL(snap.fiscalNumber, lp.fiscalNumber),'0') AS Recibo,
+	FORMAT(CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
+    CONVERT(VARCHAR, CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,	
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prc.usuario, prcp.usuario) AS Usuario,
-    CONVERT(VARCHAR, an.[start], 103) AS Desde,
-    CONVERT(VARCHAR, an.[anniversary], 103) AS Hasta,
+    CONVERT(VARCHAR, CAST(an.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Desde,
+    CONVERT(VARCHAR, CAST(an.[anniversary] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta,
     CASE WHEN an.contractYear = 1 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
 
     ISNULL(pym.name, '') AS recursopago,
@@ -97,7 +97,8 @@ OUTER APPLY (SELECT
 				js.periodicity,
 				js.channel,
 				js.sellerId,
-				js.cessionBeneficiary
+				js.cessionBeneficiary,
+				js.fiscalNumber
 			FROM OPENJSON(an.jSnapshot)
 			WITH (
 				insuredSum    DECIMAL(18,2) '$.insuredSum',
@@ -111,6 +112,7 @@ OUTER APPLY (SELECT
 				periodicity   VARCHAR(50) '$.periodicity',
 				channel		  VARCHAR(50) '$.channel',
 				sellerId NUMERIC(11,0) '$.sellerId',
+				fiscalNumber VARCHAR(50) '$.fiscalNumber',
 				cessionBeneficiary NUMERIC(11,0) '$.cessionBeneficiary'
 			) js) snap
 
@@ -325,7 +327,7 @@ OUTER APPLY (
     WHERE bf.id = lp.cessionBeneficiary
 ) bf
 
-WHERE CAST(an.created AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
+WHERE CAST(an.created AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
 
@@ -345,20 +347,20 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
     ISNULL(bed.fiscalNumber, '0') AS Recibo,
-	FORMAT(ed.creationDate, 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
-    CONVERT(VARCHAR, ed.effectiveDate, 103) AS FechaEmision,
+	FORMAT(CAST(ed.executionDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
+    CONVERT(VARCHAR, CAST(ed.executionDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prc.usuario, '') AS Usuario,
     CASE WHEN ed.Discriminator = 'CancellationChange' THEN CONVERT(VARCHAR, ed.effectiveDate, 103)
-		 ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]), 103) END AS Desde,
-    CONVERT(VARCHAR, ISNULL(ed.newEnd, lp.[end]), 103) AS Hasta
+		 ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) END AS Desde,
+    CONVERT(VARCHAR, ISNULL(ed.newEnd, lp.[end]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta
     ,CASE 
 		WHEN ed.Discriminator = 'AddCoverageChange' THEN 'Adición de Cobertura'
 		WHEN ed.Discriminator = 'BeneficiaryChange' THEN 'Cambio de Beneficiario'
 		WHEN ed.Discriminator = 'BenefitChange' THEN 'Cambio de Beneficio'
 		WHEN ed.Discriminator = 'CancellationChange' THEN 'Cancelación'
 		WHEN ed.Discriminator = 'CapitalChange' THEN 'Cambio de Suma Asegurada'
-		WHEN ed.Discriminator = 'CessionBeneficiaryChange' THEN 'Cambio de Cesionario'
+		WHEN ed.Discriminator = 'CessionBeneficiaryChange' THEN 'Cambio de Acreedor'
 		WHEN ed.Discriminator = 'ClauseChange' THEN 'Cambio de Cláusula'
 		WHEN ed.Discriminator = 'ContingentBeneficiaryChange' THEN 'Cambio de Beneficiario Contingente'
 		WHEN ed.Discriminator = 'CoverageChange' THEN 'Cambio de Cobertura'
@@ -431,9 +433,9 @@ SELECT
     ,ISNULL(cc.name, '') AS Canal
 
 FROM lifePolicy lp
-INNER JOIN Change ed ON ed.lifePolicyId = lp.id AND ed.status = '1'
+INNER JOIN [Change] ed ON ed.lifePolicyId = lp.id AND ed.status = '1'
 LEFT JOIN Proceso pr ON pr.id = ed.processId
-INNER JOIN Bill bed ON bed.changeId = ed.id
+LEFT JOIN Bill bed ON bed.changeId = ed.id
 LEFT JOIN BillDiff bfed ON bfed.changeId = ed.id
 LEFT JOIN Contact c ON c.id = ISNULL(ed.newPolicyholder, lp.holderId)
 LEFT JOIN Contact br ON br.id = ISNULL(ed.newSellerId, lp.sellerId)
@@ -552,7 +554,10 @@ OUTER APPLY (SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 't
 			WHERE cov.lifePolicyId = lp.id) sumaAsegCancela
 
 /* Valores del OA */
-OUTER APPLY (SELECT datos.*
+OUTER APPLY (SELECT MAX(datos.cmbTipoObjeto_valor) cmbTipoObjeto_valor
+					, MAX(datos.selectReferido_valor) selectReferido_valor
+					, MAX(datos.txtNoPrestamo_valor) txtNoPrestamo_valor
+					, MAX(datos.txtNoGarantia_valor) txtNoGarantia_valor
 			FROM OPENJSON(ed.jNewInsuredObjects) obj
 			CROSS APPLY OPENJSON(obj.value) jValues
 			OUTER APPLY (SELECT 
@@ -561,7 +566,7 @@ OUTER APPLY (SELECT datos.*
 								WHEN JSON_VALUE(v.value, '$.name') = 'selectReferido'
 								THEN JSON_VALUE(v.value, '$.userData[0]')
 							END) AS selectReferido_valor,
-
+							
 							MAX(CASE 
 								WHEN JSON_VALUE(v.value, '$.name') = 'txtNoPrestamo'
 								THEN JSON_VALUE(v.value, '$.userData[0]')
@@ -648,7 +653,7 @@ OUTER APPLY (
     WHERE bf.id = ISNULL(ed.newCessionBeneficiary, lp.cessionBeneficiary)
 ) bf
 
-WHERE CAST(ed.creationDate AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
+WHERE CAST(ed.executionDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
 /*AND ISNULL(mo.Monto,0) <> 0 */

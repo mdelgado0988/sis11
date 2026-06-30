@@ -472,7 +472,7 @@
 
                 let newCoverages = [...Coverages.filter( item => !covId.includes(item.id)), ...tempNewCoverages];
 
-                const effectiveDateTime = buildEffectiveDateTime(effectiveDate, policyStart);
+                const effectiveDateTime = buildEffectiveDateTime(policyStart);
 
                 const jOldCoverages = JSON.stringify(Coverages),
                     jNewCoverages = JSON.stringify(newCoverages);
@@ -573,28 +573,48 @@
         return new URL(window.location.href.replace('#/')).searchParams.get('policyId') || 0;
     }
 
-    function buildEffectiveDateTime(dateString) {
-        const baseDate = String(dateString || '').trim();
-        if (!baseDate) return dateString;
+    function buildEffectiveDateTime(policyStart) {
+        const now = new Date();
+        const startDate = parseUtcDate(policyStart);
 
-        const parts = baseDate.split('-').map(part => Number(part));
-        if (parts.length !== 3 || parts.some(part => Number.isNaN(part))) {
-            return `${baseDate}T23:59:59`;
+        if (startDate && now.getTime() < startDate.getTime()) {
+            const utcNowDate = new Date(Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate(),
+                startDate.getUTCHours(),
+                startDate.getUTCMinutes(),
+                startDate.getUTCSeconds(),
+                startDate.getUTCMilliseconds()
+            ));
+
+            return formatUtcDateTime7(utcNowDate);
         }
 
-        const [ year, month, day ] = parts;
-        const localEndOfDay = new Date(year, month - 1, day, 23, 59, 59, 0);
+        return formatUtcDateTime7(now);
+    }
 
-        if (Number.isNaN(localEndOfDay.getTime())) {
-            return `${baseDate}T23:59:59`;
+    function parseUtcDate(value) {
+        if (!value) return null;
+
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function formatUtcDateTime7(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+            return '';
         }
 
-        const offsetMinutes = -localEndOfDay.getTimezoneOffset();
-        const offsetSign = offsetMinutes >= 0 ? '+' : '-';
-        const offsetHours = String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, '0');
-        const offsetMins = String(Math.abs(offsetMinutes) % 60).padStart(2, '0');
+        const year = String(date.getUTCFullYear()).padStart(4, '0');
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        const hours = String(date.getUTCHours()).padStart(2, '0');
+        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+        const milliseconds = String(date.getUTCMilliseconds()).padStart(3, '0');
 
-        return `${baseDate}T23:59:59${offsetSign}${offsetHours}:${offsetMins}`;
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}0000`;
     }
     /**
      * @function CoveragesTable
