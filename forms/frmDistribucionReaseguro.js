@@ -382,8 +382,10 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
       ? 0
       : redondear((ces.premium / gridDataSelected.Prima), 8, forzar);
 
-    const primaNoTecnicaCobertura = redondear(ces.premium * proporcionNoTecnica);
-    const primaCob = redondear(ces.premium - primaNoTecnicaCobertura);
+    // The non-technical premium is derived from each coverage premium and the overall
+    // distributed proportion. It is later accumulated only once per coverage in the summaries.
+    ces.nonTechnicalPremium = calcularPrimaNoTecnicaCobertura(ces.premium, proporcionNoTecnica);
+    const primaCob = redondear(ces.premium - ces.nonTechnicalPremium);
 
     ces.id = 0;
     
@@ -406,10 +408,6 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
     ces.sumInsuredRe = redondear(resultado[keys.porcentajeRe] * ces.sumInsured / 100);
     ces.premiumRe = redondear(resultado[keys.porcentajeRe] * primaCob / 100);
     ces.proportionRe = redondear(resultado[keys.porcentajeRe] / 100, 8, forzar);
-
-    //Calculamos la prima no técnica de cada distribución para evitar confusión
-    //const percentDistribution = (((usaCedant ? resultado[keys.porcentajeCed] : 0) + resultado[keys.porcentajeRe]) / 100);
-    ces.nonTechnicalPremium = redondear(primaNoTecnicaCobertura * (ces.proportionCed + ces.proportionRe));
 
     ces.err = false;
     ces.msg = "";
@@ -555,20 +553,41 @@ async function addCessions(newCessions){
 }  
 
 function ajustaTotalPrimaNoTecnica(newCessions, resultado) {
-  
-  const noTecnicatotal = resultado["mpnot"];
+  const noTecnicatotal = redondear(resultado["mpnot"], 2);
+  const coverageTotals = new Map();
 
-  const totalSuma = newCessions.reduce((acc, item) => {
-    if (item.contractId == contractId) {
-      return acc + (Number(item.nonTechnicalPremium) || 0);
+  // Non-technical premium must be counted once per coverage, even if the coverage has multiple rows.
+  newCessions.forEach(item => {
+    if (item.contractId != contractId) {
+      return;
     }
-    return acc;
-  }, 0);
 
-  const primerCobertura = newCessions.find(item => item.contractId == contractId);
-  
-  primerCobertura.nonTechnicalPremium += redondear(noTecnicatotal - totalSuma);
-  
+    const coverageKey = normalizeCondition(item.coverageCode ?? item.coverageId ?? item.id ?? "");
+
+    if (!coverageTotals.has(coverageKey)) {
+      coverageTotals.set(coverageKey, {
+        total: 0,
+        firstItem: item
+      });
+    }
+
+    const coverageEntry = coverageTotals.get(coverageKey);
+    if (coverageEntry.total === 0) {
+      coverageEntry.total = Number(item.nonTechnicalPremium) || 0;
+    }
+  });
+
+  const totalSuma = Array.from(coverageTotals.values()).reduce((acc, entry) => acc + entry.total, 0);
+  const firstCoverage = Array.from(coverageTotals.values()).find(entry => entry.firstItem);
+
+  if (!firstCoverage?.firstItem) {
+    return;
+  }
+
+  firstCoverage.firstItem.nonTechnicalPremium = redondear(
+    Number(firstCoverage.firstItem.nonTechnicalPremium || 0) + (noTecnicatotal - totalSuma),
+    2
+  );
 }
 
 function dameTotal(newCessions, contrato, field, validaCobertura = false) {
@@ -621,6 +640,14 @@ function montoSiEsCobertura(coverageCode, amount) {
   return suma ? amount : 0;
 }
 
+function calcularPrimaNoTecnicaCobertura(primaCobertura, proporcionNoTecnica) {
+  // Non-technical premium must be calculated from the coverage premium, not from
+  // participant totals. This value is later summed once per coverage in grouped views.
+  const premium = Number(primaCobertura ?? 0);
+  const proportion = Number(proporcionNoTecnica ?? 0);
+  return redondear(premium * proportion);
+}
+
 const normalizeCondition = v => (v ?? "").toString().trim().toUpperCase();
 
 function filterCondition(line, c) {
@@ -660,10 +687,15 @@ function onRowSelected(row) {
   pcex1 = 0, mcex1 = 0, piex1 = 0, miex1 = 0,
   premium = 0, mpnot = 0,
   srcp = 0, srex1 = 0, srfp = 0, srfo = 0;
+  let firstNonTechnicalDistribution = null;
+  let firstPremiumTarget = null;
+  let firstCommissionTarget = null;
+  let firstTaxTarget = null;
 
   //convierto distribuciones a un arreglo de objetos mapeando el valor
   const distribucionesCalculo = distribuciones.map(x => ({ name: x, porcentajesCalculados: null }));
-  //const coveragesCalulateNOT = [];
+  // Use a coverage-level set so non-technical premium is added only once per coverage.
+  const coveragesCalulateNOT = new Set();
   
   distribucionesCalculo.forEach(calc => {
 
@@ -696,16 +728,23 @@ function onRowSelected(row) {
           map[dist]?.(distribucion.proportionRe);
         }
 
-        // //Validamos prima no técnica, una vez por cobertura
-        // const ContratoYCoberturaCalculada = coveragesCalulateNOT.find(d => normalizeCondition(d) == normalizeCondition(distribucion.coverageCode));
-        // if(!ContratoYCoberturaCalculada){                    
-        //   coveragesCalulateNOT.push(distribucion.coverageCode);
-        // }
-        
         msret += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredCedant);
         mpret += distribucion.premiumCedant;
         premium += distribucion.premium;
-        mpnot += distribucion.nonTechnicalPremium;
+        if (!firstPremiumTarget && Number(distribucion.premiumCedant || 0) !== 0) {
+          firstPremiumTarget = {
+            distribution: distribucion,
+            fieldName: "premiumCedant",
+            scalarName: "mpret"
+          };
+        }
+        if (!coveragesCalulateNOT.has(normalizeCondition(distribucion.coverageCode))) {
+          if (!firstNonTechnicalDistribution) {
+            firstNonTechnicalDistribution = distribucion;
+          }
+          mpnot += distribucion.nonTechnicalPremium;
+          coveragesCalulateNOT.add(normalizeCondition(distribucion.coverageCode));
+        }
   
         switch(dist){
           case "CUOTA PARTE":
@@ -713,24 +752,108 @@ function onRowSelected(row) {
             mpcp += distribucion.premiumRe;
             mccp += distribucion.comissionCedant;
             micp += distribucion.tax;
+            if (!firstPremiumTarget && Number(distribucion.premiumRe || 0) !== 0) {
+              firstPremiumTarget = {
+                distribution: distribucion,
+                fieldName: "premiumRe",
+                scalarName: "mpcp"
+              };
+            }
+            if (!firstCommissionTarget && Number(distribucion.comissionCedant || 0) !== 0) {
+              firstCommissionTarget = {
+                distribution: distribucion,
+                fieldName: "comissionCedant",
+                scalarName: "mccp"
+              };
+            }
+            if (!firstTaxTarget && Number(distribucion.tax || 0) !== 0) {
+              firstTaxTarget = {
+                distribution: distribucion,
+                fieldName: "tax",
+                scalarName: "micp"
+              };
+            }
             break;
           case "EXCEDENTE 1":
             msex1 += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
             mpex1 += distribucion.premiumRe;
             mcex1 += distribucion.comissionCedant;
             miex1 += distribucion.tax;
+            if (!firstPremiumTarget && Number(distribucion.premiumRe || 0) !== 0) {
+              firstPremiumTarget = {
+                distribution: distribucion,
+                fieldName: "premiumRe",
+                scalarName: "mpex1"
+              };
+            }
+            if (!firstCommissionTarget && Number(distribucion.comissionCedant || 0) !== 0) {
+              firstCommissionTarget = {
+                distribution: distribucion,
+                fieldName: "comissionCedant",
+                scalarName: "mcex1"
+              };
+            }
+            if (!firstTaxTarget && Number(distribucion.tax || 0) !== 0) {
+              firstTaxTarget = {
+                distribution: distribucion,
+                fieldName: "tax",
+                scalarName: "miex1"
+              };
+            }
             break;
           case "FAC":
             msfp += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
             mpfp += distribucion.premiumRe;
             mcfp += distribucion.comissionCedant;
             mifp += distribucion.tax;
+            if (!firstPremiumTarget && Number(distribucion.premiumRe || 0) !== 0) {
+              firstPremiumTarget = {
+                distribution: distribucion,
+                fieldName: "premiumRe",
+                scalarName: "mpfp"
+              };
+            }
+            if (!firstCommissionTarget && Number(distribucion.comissionCedant || 0) !== 0) {
+              firstCommissionTarget = {
+                distribution: distribucion,
+                fieldName: "comissionCedant",
+                scalarName: "mcfp"
+              };
+            }
+            if (!firstTaxTarget && Number(distribucion.tax || 0) !== 0) {
+              firstTaxTarget = {
+                distribution: distribucion,
+                fieldName: "tax",
+                scalarName: "mifp"
+              };
+            }
             break;
           case "FRO":
             msfo += montoSiEsCobertura(distribucion.coverageCode,distribucion.sumInsuredRe);
             mpfo += distribucion.premiumRe;
             mcfo += distribucion.comissionCedant;
             mifo += distribucion.tax;
+            if (!firstPremiumTarget && Number(distribucion.premiumRe || 0) !== 0) {
+              firstPremiumTarget = {
+                distribution: distribucion,
+                fieldName: "premiumRe",
+                scalarName: "mpfo"
+              };
+            }
+            if (!firstCommissionTarget && Number(distribucion.comissionCedant || 0) !== 0) {
+              firstCommissionTarget = {
+                distribution: distribucion,
+                fieldName: "comissionCedant",
+                scalarName: "mcfo"
+              };
+            }
+            if (!firstTaxTarget && Number(distribucion.tax || 0) !== 0) {
+              firstTaxTarget = {
+                distribution: distribucion,
+                fieldName: "tax",
+                scalarName: "mifo"
+              };
+            }
             break;
         }
         
@@ -795,6 +918,73 @@ function onRowSelected(row) {
   pcfo = calcularPorcentaje(mpfo, mcfo);
   pifo = calcularPorcentaje(mpfo, mifo);
 
+  // If the coverage-based non-technical premium differs by up to one cent due to rounding,
+  // absorb the delta in the first distribution so the displayed total matches the business total.
+  const expectedNonTechnicalTotal = redondear(gridDataSelected?.PrimaNoTecnica ?? 0, 2);
+  const currentNonTechnicalTotal = redondear(mpnot, 2);
+  const nonTechnicalDiff = redondear(expectedNonTechnicalTotal - currentNonTechnicalTotal, 2);
+
+  if (Math.abs(nonTechnicalDiff) <= 0.01 && firstNonTechnicalDistribution) {
+    applyOneCentAdjustment(firstNonTechnicalDistribution, "nonTechnicalPremium", nonTechnicalDiff);
+    mpnot = redondear(mpnot + nonTechnicalDiff, 2);
+  }
+
+  // Keep the selected row totals aligned when the difference is just a rounding cent.
+  const expectedPremiumTotal = redondear(gridDataSelected?.Prima ?? 0, 2);
+  const currentPremiumTotal = redondear(mpret + mpcp + mpex1 + mpfp + mpfo + mpnot, 2);
+  const premiumDiff = redondear(expectedPremiumTotal - currentPremiumTotal, 2);
+
+  if (Math.abs(premiumDiff) <= 0.01 && firstPremiumTarget) {
+    applyOneCentAdjustment(firstPremiumTarget.distribution, firstPremiumTarget.fieldName, premiumDiff);
+    if (firstPremiumTarget.scalarName === "mpret") {
+      mpret = redondear(mpret + premiumDiff, 2);
+    } else if (firstPremiumTarget.scalarName === "mpcp") {
+      mpcp = redondear(mpcp + premiumDiff, 2);
+    } else if (firstPremiumTarget.scalarName === "mpex1") {
+      mpex1 = redondear(mpex1 + premiumDiff, 2);
+    } else if (firstPremiumTarget.scalarName === "mpfp") {
+      mpfp = redondear(mpfp + premiumDiff, 2);
+    } else if (firstPremiumTarget.scalarName === "mpfo") {
+      mpfo = redondear(mpfo + premiumDiff, 2);
+    } else if (firstPremiumTarget.scalarName === "mpnot") {
+      mpnot = redondear(mpnot + premiumDiff, 2);
+    }
+  }
+
+  const expectedCommissionTotal = redondear(gridDataSelected?.Comision ?? 0, 2);
+  const currentCommissionTotal = redondear(mccp + mcex1 + mcfp + mcfo, 2);
+  const commissionDiff = redondear(expectedCommissionTotal - currentCommissionTotal, 2);
+
+  if (Math.abs(commissionDiff) <= 0.01 && firstCommissionTarget) {
+    applyOneCentAdjustment(firstCommissionTarget.distribution, firstCommissionTarget.fieldName, commissionDiff);
+    if (firstCommissionTarget.scalarName === "mccp") {
+      mccp = redondear(mccp + commissionDiff, 2);
+    } else if (firstCommissionTarget.scalarName === "mcex1") {
+      mcex1 = redondear(mcex1 + commissionDiff, 2);
+    } else if (firstCommissionTarget.scalarName === "mcfp") {
+      mcfp = redondear(mcfp + commissionDiff, 2);
+    } else if (firstCommissionTarget.scalarName === "mcfo") {
+      mcfo = redondear(mcfo + commissionDiff, 2);
+    }
+  }
+
+  const expectedTaxTotal = redondear(gridDataSelected?.Impuesto ?? 0, 2);
+  const currentTaxTotal = redondear(micp + miex1 + mifp + mifo, 2);
+  const taxDiff = redondear(expectedTaxTotal - currentTaxTotal, 2);
+
+  if (Math.abs(taxDiff) <= 0.01 && firstTaxTarget) {
+    applyOneCentAdjustment(firstTaxTarget.distribution, firstTaxTarget.fieldName, taxDiff);
+    if (firstTaxTarget.scalarName === "micp") {
+      micp = redondear(micp + taxDiff, 2);
+    } else if (firstTaxTarget.scalarName === "miex1") {
+      miex1 = redondear(miex1 + taxDiff, 2);
+    } else if (firstTaxTarget.scalarName === "mifp") {
+      mifp = redondear(mifp + taxDiff, 2);
+    } else if (firstTaxTarget.scalarName === "mifo") {
+      mifo = redondear(mifo + taxDiff, 2);
+    }
+  }
+
   const total = pret + pcp + pex1 + pfp + pfo;
   const diff = 100 - total;
 
@@ -834,6 +1024,16 @@ function normalizarPorcentaje(valor, tolerancia = 0.0001) {
     return Math.abs(valor - redondeado) <= tolerancia
         ? redondeado
         : valor;
+}
+
+function applyOneCentAdjustment(target, fieldName, difference) {
+  if (!target || Math.abs(difference) > 0.01) {
+    return false;
+  }
+
+  // Keep the first contributing line aligned with the business total when the mismatch is only a rounding cent.
+  target[fieldName] = redondear(Number(target[fieldName] || 0) + difference, 2);
+  return true;
 }
 
 async function loadCessions(){
@@ -1989,8 +2189,9 @@ function agruparCessionsPorLinea(cessions) {
         tax: 0,
         count: 0,
 
-        // set para controlar qué coberturas ya fueron sumadas
-        _coveragesProcesadas: new Set()
+        // Sets used to avoid double counting coverage-based values.
+        _coveragesProcesadas: new Set(),
+        _nonTechnicalProcesadas: new Set()
       });
 
     }
@@ -2004,7 +2205,11 @@ function agruparCessionsPorLinea(cessions) {
       g.sumInsured += Number(montoSiEsCobertura(item.coverageCode, item.sumInsured || 0));
       g.premium += Number(item.premium || 0);      
       g._coveragesProcesadas.add(coverageKey);
+    }
+
+    if (!g._nonTechnicalProcesadas.has(coverageKey)) {
       g.nonTechnicalPremium += Number(item.nonTechnicalPremium || 0);
+      g._nonTechnicalProcesadas.add(coverageKey);
     }
 
     // estos campos sí se suman siempre (por cada línea)
@@ -2020,6 +2225,7 @@ function agruparCessionsPorLinea(cessions) {
   // eliminar propiedad interna antes de devolver
   return Array.from(grouped.values()).map(g => {
     delete g._coveragesProcesadas;
+    delete g._nonTechnicalProcesadas;
     return g;
   });
 }
@@ -2370,6 +2576,7 @@ function resumenPorLinea(cessions) {
         count: 0,
 
         _coveragesProcesadas: new Set(),
+        _nonTechnicalProcesadas: new Set(),
 
         // NUEVO: agrupador de participantes
         _participants: new Map()
@@ -2384,7 +2591,11 @@ function resumenPorLinea(cessions) {
       g.sumInsured += Number(montoSiEsCobertura(item.coverageCode, item.sumInsured || 0));
       g.premium += Number(item.premium || 0);      
       g._coveragesProcesadas.add(coverageKey);
+    }
+
+    if (!g._nonTechnicalProcesadas.has(coverageKey)) {
       g.nonTechnicalPremium += Number(item.nonTechnicalPremium || 0);
+      g._nonTechnicalProcesadas.add(coverageKey);
     }
 
     //Retención
@@ -2438,9 +2649,26 @@ function resumenPorLinea(cessions) {
   return Array.from(grouped.values()).map(g => {
 
     delete g._coveragesProcesadas;
+    delete g._nonTechnicalProcesadas;
 
     // convertir Map → Array
-    g.Participants = Array.from(g._participants.values());
+    g.sumInsured = redondear(g.sumInsured, 2);
+    g.sumInsuredCedant = redondear(g.sumInsuredCedant, 2);
+    g.sumInsuredRe = redondear(g.sumInsuredRe, 2);
+    g.premium = redondear(g.premium, 2);
+    g.premiumCedant = redondear(g.premiumCedant, 2);
+    g.premiumRe = redondear(g.premiumRe, 2);
+    g.comissionCedant = redondear(g.comissionCedant, 2);
+    g.nonTechnicalPremium = redondear(g.nonTechnicalPremium, 2);
+    g.tax = redondear(g.tax, 2);
+
+    g.Participants = Array.from(g._participants.values()).map(p => ({
+      ...p,
+      sumInsured: redondear(p.sumInsured, 2),
+      premium: redondear(p.premium, 2),
+      commission: redondear(p.commission, 2),
+      tax: redondear(p.tax, 2)
+    }));
 
     delete g._participants;
 
