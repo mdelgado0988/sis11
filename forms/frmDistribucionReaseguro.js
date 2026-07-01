@@ -2242,9 +2242,9 @@ function mapCessionsToGrid(cessions) {
       Contrato: g.contractId,
       Endoso: g.changeId,
       Tipo: g.premiumType,
-      Suma: g.sumInsured,
-      Prima: g.premium,
-      PrimaRet: g.premiumCedant,
+      Suma: redondear(g.sumInsured),
+      Prima: redondear(g.premium),
+      PrimaRet: redondear(g.premiumCedant),
       SumaRet: redondear(g.sumInsuredCedant),
       PrimaCed: redondear(g.premiumRe),
       SumaCed: redondear(g.sumInsuredRe),
@@ -2800,8 +2800,10 @@ function redondear(valor, decimales = 2, forzar = false) {
     if (isNaN(num)) return 0;
 
     // Redondeo a los decimales indicados
-    const factor = Math.pow(10, decimales);
-    return Math.round((num + Number.EPSILON) * factor) / factor;
+    return Number(num.toFixed(decimales ?? 2) ?? 0);
+
+    /*const factor = Math.pow(10, decimales);
+    return Math.round((num + Number.EPSILON) * factor) / factor;*/
 }
 
 function formatInput(value, type) {
