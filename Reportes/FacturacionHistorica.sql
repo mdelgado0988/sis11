@@ -21,7 +21,7 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname1)), ''),
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
-    ISNULL(ISNULL(snap.fiscalNumber, lp.fiscalNumber),'0') AS Recibo,
+    ISNULL(snap.fiscalNumber,ISNULL(fr.fiscalNumber,'0')) AS Recibo,
 	FORMAT(CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
     CONVERT(VARCHAR, CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,	
     ISNULL(refe.ReferidoName, '') AS [Referido por],
@@ -83,6 +83,7 @@ SELECT
 
 FROM lifePolicy lp
 LEFT JOIN Anniversary an ON an.lifePolicyId = lp.id
+LEFT JOIN [dbo].[FiscalDocGenerated] fr ON fr.policyId = lp.id AND fr.[action] = 'IssuePolicy'
 
 /* información de la póliza según snapshot  */
 OUTER APPLY (SELECT 

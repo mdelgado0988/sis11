@@ -114,7 +114,7 @@ function getClaim() {
     throw new Error(`El reclamo ${claimId} no tiene asegurado asociado`);
   }
   
-  doCmd({cmd: "LoadEntities", data: { entity: "ClaimPayment", fields:"contactId, date, user, total, jDetail, currency, coverageId, checkNum", filter: `claimId = ${claimId} AND entityState = 'EXECUTED'` }})
+  doCmd({cmd: "LoadEntities", data: { entity: "ClaimPayment", fields:"contactId, date, user, total, jDetail, currency, coverageId, checkNum", filter: `claimId = ${claimId}` }})
   claim.payments = LoadEntities.outData ?? [];
   for (let payment of claim.payments) {
     payment.detail = payment?.jDetail ? safeJson(payment.jDetail, []) : [];
