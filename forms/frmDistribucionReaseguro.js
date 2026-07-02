@@ -1217,7 +1217,19 @@ function preserveDistribution(){
 ///////////////////////////////////////////////////////////
 
 async function guardarAceptantes(){
-    
+  const lineasInvalidas = reaseguradoresData
+    .map((r, index) => ({ r, index }))
+    .filter(({ r }) => Number(r.split ?? 0) <= 0);
+
+  if (lineasInvalidas.length > 0) {
+    const lineas = lineasInvalidas.map(({ index }) => index + 1).join(", ");
+    mostrarNotificacion(
+      `No se puede guardar la distribución con porcentaje de reasegurador en cero. Corrija la línea ${lineas} antes de continuar.`,
+      "warning"
+    );
+    return;
+  }
+
   const cessionCobs = cessions.filter(x => x.lineId.toUpperCase() == tipoContratoSelected.toUpperCase());
 
   let resultado = validarTotalesReaseguradores(cessionCobs);
@@ -1845,6 +1857,16 @@ function abrirAceptantes(idControl, contrato) {
   $("#tabsDistribucion .tab-btn").removeClass("active");
   $('#tabsDistribucion .tab-btn[data-tab="tabReaseguradores"]').addClass("active");
 
+}
+
+function refreshReaseguradoresTab() {
+  if (!tipoContratoSelected) {
+    return;
+  }
+
+  reaseguradoresData = agruparParticipantsCuotaParte(cessions, tipoContratoSelected);
+  renderGrid();
+  updateReaseguradoresStatus(tipoContratoSelected);
 }
 
 function normalizeDistributionLabel(value) {
@@ -2494,6 +2516,10 @@ function renderTabsDistribucion() {
     if (tab === "tabReaseguradores" && distributionDirty) {
       mostrarNotificacion(`Debe guardar la distribución para reflejar los cambios en Aceptantes.`, "warning");
       return;
+    }
+
+    if (tab === "tabReaseguradores") {
+      refreshReaseguradoresTab();
     }
 
     $(".tab-btn").removeClass("active");
