@@ -1514,10 +1514,23 @@ function renderReaseguradores() {
         </thead>
         <tbody></tbody>
       </table>
+
+      <div id="reaseguradoresStatus" style="
+        margin-top: 10px;
+        padding: 8px 12px;
+        border: 1px solid #d9d9d9;
+        border-radius: 6px;
+        background: #fafafa;
+        color: rgba(0, 0, 0, 0.65);
+        font-weight: 600;
+      ">
+        Distribución seleccionada: Ninguna
+      </div>
     </div>
   `;
 
   $container.append(html);
+  updateReaseguradoresStatus();
 
   function getNameById(id) {
     return aceptantes.find(a => a.id === id)?.nombre || "";
@@ -1817,8 +1830,10 @@ function abrirAceptantes(idControl, contrato) {
 
   //Cargo mis aceptantes
   reaseguradoresData = agruparParticipantsCuotaParte(cessions, contrato);
+  tipoContratoSelected = contrato || "";
   renderGrid();
   updateAceptantesTabState(true);
+  updateReaseguradoresStatus(contrato);
   
   // Oculta todas las pestañas
   $("#tabsDistribucion .tab-content").hide();
@@ -1830,6 +1845,31 @@ function abrirAceptantes(idControl, contrato) {
   $("#tabsDistribucion .tab-btn").removeClass("active");
   $('#tabsDistribucion .tab-btn[data-tab="tabReaseguradores"]').addClass("active");
 
+}
+
+function normalizeDistributionLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "Ninguna";
+
+  if (/^[A-Z0-9]+$/.test(text) && text.length <= 4) {
+    return text;
+  }
+
+  return text
+    .split(/\s+/)
+    .map(part => {
+      if (/^[A-Z0-9]+$/.test(part) && part.length <= 4) {
+        return part;
+      }
+
+      return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
+function updateReaseguradoresStatus(contrato) {
+  const label = normalizeDistributionLabel(contrato || tipoContratoSelected);
+  $("#reaseguradoresStatus").text(`Distribución seleccionada: ${label}`);
 }
 
 function updateAceptantesTabState(enabled) {
