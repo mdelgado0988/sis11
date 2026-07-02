@@ -19,7 +19,6 @@
 });*/
 
 const plantilla = "AutorizaPagoReclamoGerencia";
-var correos = [];
 
 const input = context ?? null;
 if (!input || typeof input !== "object") {
@@ -42,14 +41,24 @@ if (!userGroup) {
   return { ok: false, msg: "No se encontro el grupo de usuarios de Gerencia de Siniestros." };
 }
 
+if (!Array.isArray(userGroup.Members) || userGroup.Members.length === 0) {
+  return { ok: false, msg: "El grupo de usuarios no tiene miembros configurados." };
+}
+
 const montoFormato = formatearN2(amountResult.value);
-const asegurado = getInsured(lifePolicyId);
+const insuredResult = getInsured(lifePolicyId);
+if (!insuredResult.ok) return insuredResult;
+const asegurado = insuredResult.value;
 
 var enviados = 0;
-
-let test = [];
+var omitidos = 0;
 
 userGroup.Members.forEach(x => {
+  if (!x || !isValidEmail(x.usrEmail)) {
+    omitidos += 1;
+    return;
+  }
+
   const userName = obtenerUsuarioEmail(x.usrEmail);
 
   let contextHtmlTemplate = {
@@ -80,12 +89,10 @@ userGroup.Members.forEach(x => {
       })
     }
   });
-
-  test.push(PutMessage);
   enviados += 1;
 });
 
-return { ok: true, msg: `Correos enviados: ${enviados}`, test: test };
+return { ok: true, msg: `Correos enviados: ${enviados}. Omitidos: ${omitidos}` };
 
 /////////////////////////////////////////////////////////////////////////////
 ///Auxiliares
@@ -116,8 +123,8 @@ function getValidId(value, fieldName) {
 
 function getAmount(value) {
   const amount = Number(value);
-  if (!Number.isFinite(amount) || amount < 0) {
-    return { ok: false, msg: "El campo amount es obligatorio y debe ser un numero valido mayor o igual a cero." };
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, msg: "El campo amount es obligatorio y debe ser un numero valido mayor a cero." };
   }
 
   return { ok: true, value: amount };
@@ -143,11 +150,16 @@ function getClaimData(claimId) {
     return { ok: false, msg: "El reclamo no tiene poliza asociada." };
   }
 
+  const policyData = getPolicyData(lifePolicyId);
+  if (!policyData.ok) {
+    return policyData;
+  }
+
   return {
     ok: true,
     claimCode: claim.code || "0",
     lifePolicyId: lifePolicyId,
-    ...getPolicyData(lifePolicyId)
+    ...policyData
   };
 }
 
@@ -162,7 +174,12 @@ function getPolicyData(lifePolicyId) {
   });
 
   const policy = LoadEntity?.outData || {};
+  if (!policy || !policy.code) {
+    return { ok: false, msg: "La poliza asociada al reclamo no existe o no pudo cargarse." };
+  }
+
   return {
+    ok: true,
     policyCode: policy.code || "0",
     currency: policy.currency || ""
   };
@@ -179,7 +196,11 @@ function getInsured(lifePolicyId) {
   });
 
   const asegurado = LoadEntity?.outData?.name || "";
-  return asegurado;
+  if (!asegurado) {
+    return { ok: false, msg: "La poliza no tiene asegurado configurado." };
+  }
+
+  return { ok: true, value: asegurado };
 }
 
 function formatearN2(valor) {
@@ -210,4 +231,21 @@ function obtenerUsuarioEmail(email) {
   if (posicionArroba <= 0) return "";
 
   return email.substring(0, posicionArroba).toUpperCase();
+}
+
+function isValidEmail(email) {
+  if (typeof email !== "string") return false;
+
+  const value = email.trim();
+  if (value.length < 5) return false;
+
+  const parts = value.split("@");
+  if (parts.length !== 2) return false;
+
+  const [localPart, domainPart] = parts;
+  if (!localPart || !domainPart) return false;
+  if (domainPart.trim().length < 3) return false;
+  if (!domainPart.includes(".")) return false;
+
+  return true;
 }
