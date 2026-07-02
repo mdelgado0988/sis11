@@ -21,6 +21,8 @@ let gridSelectedIndex = null;
 let contractId = 0;
 let tipoContratoSelected = "";
 let tipoPrimaSelected = "";
+let aceptantesTabEnabled = false;
+let distributionDirty = false;
 const policyId = window.location.href.split('/')[5] || 3403;
 
 const TIPO_MOVIMIENTO_ES = {
@@ -200,6 +202,8 @@ async function saveChanges() {
     if(resultado.isOk){        
       newCessions = resultado.newSaveCessions;
       mostrarNotificacion(`Distribución de reaseguro guardada satisfactoriamente` , "success");
+      distributionDirty = false;
+      syncAceptantesTabState();
       cessions = newCessions;
       preserveDistribution();
       gridData = mapCessionsToGrid(cessions); //Actualizamos gridData con los nuevos valores calculados
@@ -1015,6 +1019,7 @@ function onRowSelected(row) {
   });
 
   calculaTotales();
+  setAceptanteButtonsEnabled(true);
 
 }
 
@@ -1813,6 +1818,7 @@ function abrirAceptantes(idControl, contrato) {
   //Cargo mis aceptantes
   reaseguradoresData = agruparParticipantsCuotaParte(cessions, contrato);
   renderGrid();
+  updateAceptantesTabState(true);
   
   // Oculta todas las pestañas
   $("#tabsDistribucion .tab-content").hide();
@@ -1826,11 +1832,51 @@ function abrirAceptantes(idControl, contrato) {
 
 }
 
+function updateAceptantesTabState(enabled) {
+  aceptantesTabEnabled = Boolean(enabled);
+  syncAceptantesTabState();
+}
+
+function markDistributionDirty() {
+  distributionDirty = true;
+  syncAceptantesTabState();
+}
+
+function syncAceptantesTabState() {
+  const $tab = $('#tabsDistribucion .tab-btn[data-tab="tabReaseguradores"]');
+  if (!$tab.length) return;
+
+  const enabled = Boolean(aceptantesTabEnabled);
+  $tab.prop("disabled", !enabled);
+  $tab.toggleClass("tab-disabled", !enabled);
+
+  if (!enabled) {
+    $tab.attr("title", "Primero use la opcion de mostrar aceptantes");
+    return;
+  }
+
+  if (distributionDirty) {
+    $tab.attr("title", "Debe guardar la distribucion para reflejar los cambios en Aceptantes");
+    return;
+  }
+
+  $tab.attr("title", "Ver aceptantes");
+}
+
 function addParticipantsEvent() {
   $(document)
   .off("click", ".btn-aceptante")
   .on("click", ".btn-aceptante", function(e) {
     e.preventDefault();
+
+    if (this.disabled) {
+      return;
+    }
+
+    if (distributionDirty) {
+      mostrarNotificacion(`Debe guardar la distribución para reflejar los cambios en Aceptantes.`, "warning");
+      return;
+    }
 
     const idControl = $(this).data("id");
 
@@ -1976,7 +2022,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
             <span>${c.nombre}</span>
       
             ${c.tieneAceptante ? `
-              <button class="btn-aceptante" data-id="${c.id}" type="button" title="Ver aceptantes">
+              <button class="btn-aceptante tab-disabled" data-id="${c.id}" type="button" disabled title="Seleccione una distribución para ver aceptantes">
                 <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
                   <path d="M880 298H472l-76-92a32 32 0 0 0-25-12H144c-17.7 0-32 14.3-32 32v568c0 
                   17.7 14.3 32 32 32h736c17.7 0 32-14.3 
@@ -2032,6 +2078,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
   });
 
   $container.append($wrapper);
+  setAceptanteButtonsEnabled(false);
 
   $("#controlesDistribucion input.number, #controlesDistribucion input.percent").on("input", function(e) {
     const input = this;
@@ -2083,6 +2130,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
                        montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea);
     }
     calculaTotales();
+    markDistributionDirty();
     
   });
 
@@ -2145,6 +2193,20 @@ function calculaSaldoReaseguro(saldoReaId, prima, comision, impuesto){
 
   $(`#${saldoReaId}`).val(formatearRedondeado(prima-comision-impuesto));
 
+}
+
+function setAceptanteButtonsEnabled(enabled) {
+  const isEnabled = Boolean(enabled);
+
+  $("#controlesDistribucion .btn-aceptante")
+    .prop("disabled", !isEnabled)
+    .toggleClass("tab-disabled", !isEnabled)
+    .attr(
+      "title",
+      isEnabled
+        ? "Ver aceptantes"
+        : "Seleccione una distribución para ver aceptantes"
+    );
 }
 
 ///////////////////////////////////////////////////////////
@@ -2366,7 +2428,7 @@ function renderTabsDistribucion() {
 
     <div class="tabs-header">
       <button class="tab-btn active" data-tab="tabControles">Distribución</button>
-      <button class="tab-btn" data-tab="tabReaseguradores">Reaseguradores</button>
+      <button class="tab-btn" data-tab="tabReaseguradores" disabled title="Primero use la opción de mostrar aceptantes">Reaseguradores</button>
       <button class="tab-btn" data-tab="tabResumen">Resumen</button>
     </div>
 
@@ -2378,11 +2440,21 @@ function renderTabsDistribucion() {
   `;
   
   $container.append(html);
+  updateAceptantesTabState(false);
 
   // eventos tabs
   $(".tab-btn").off("click")
     .on("click", function () {
+    if (this.disabled) {
+      return;
+    }
+
     const tab = $(this).data("tab");
+
+    if (tab === "tabReaseguradores" && distributionDirty) {
+      mostrarNotificacion(`Debe guardar la distribución para reflejar los cambios en Aceptantes.`, "warning");
+      return;
+    }
 
     $(".tab-btn").removeClass("active");
     $(this).addClass("active");
@@ -3079,6 +3151,26 @@ $("<style>")
       color: #1890ff;
       font-weight: 500;
     }
+
+    #tabsDistribucion .tab-btn.tab-disabled,
+    #tabsDistribucion .tab-btn:disabled {
+      opacity: 1;
+      cursor: not-allowed;
+      color: #6b7280;
+      background: #eef2f7;
+      border: 1px solid #d1d5db;
+      border-bottom: none;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+    }
+
+    #tabsDistribucion .tab-btn.tab-disabled:hover,
+    #tabsDistribucion .tab-btn:disabled:hover {
+      color: #4b5563;
+      background: #e5e7eb;
+    }
     
     /* ===== LINEA INFERIOR (INK BAR) ===== */
     #tabsDistribucion .tab-btn.active::after {
@@ -3126,6 +3218,25 @@ $("<style>")
       border-radius: 6px;
     
       transition: all 0.2s ease;
+    }
+
+    .btn-aceptante.tab-disabled,
+    .btn-aceptante:disabled {
+      color: rgba(0, 0, 0, 0.25);
+      background: rgba(0, 0, 0, 0.03);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      opacity: 0.8;
+      cursor: not-allowed;
+      box-shadow: none;
+      filter: grayscale(0.35);
+    }
+
+    .btn-aceptante.tab-disabled:hover,
+    .btn-aceptante:disabled:hover {
+      color: rgba(0, 0, 0, 0.25);
+      background: rgba(0, 0, 0, 0.03);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: none;
     }
     
     /* Hover (azul Ant) */
