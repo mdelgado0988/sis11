@@ -16,6 +16,7 @@ const extraeValor = (text) => {
   return str.length <= 3 ? '' : str.slice(3);
 };
 
+const TARGET_INSTALLMENT_SCHEME_ID = 7;
 const lob = "1";
 try {
     
@@ -45,11 +46,11 @@ try {
       payerId: 0,
       insuredSum: 0,
       currency: product?.currency ?? "USD",
-      insuredSum: context.row.insuredSum,
+      insuredSum: toNumber(context.row.insuredSum),
       start: formatearFecha(context.row.start),
       end: formatearFecha(context.row.end),
       duration: 1,
-      installmentSchemeId: 0,
+      installmentSchemeId: TARGET_INSTALLMENT_SCHEME_ID,
       sellerId: 0,      
       description: `Lote ${context.batchId}`,
       periodicity: "m",
@@ -336,7 +337,7 @@ function addPolicy(dto) {
     groupCoverageType: "DIFFERENT",
     paymentDuration: 0,
     periodicity: 'm',
-    installmentSchemeId: null,
+    installmentSchemeId: TARGET_INSTALLMENT_SCHEME_ID,
     receiptTypeCode: "1",
     masterCode: poliza.productCode,
     version: 1,
@@ -441,7 +442,7 @@ function IssuePolicy(dto) {
      }
    });
   
-  if (!IssuePolicy.ok) throw new Error(`No se confirmo la póliza.: ${pol.id}, Detalle: ${IssuePolicy.msg}`);
+  if (!IssuePolicy.ok) throw new Error(`No se confirmó la póliza.: ${dto.polCerti.id}, Detalle: ${IssuePolicy.msg}`);
 }
 
 function cargaAsegurado(contactId) {
@@ -870,13 +871,56 @@ function formatSqlValue(value) {
     return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+function toNumber(value) {
+    if (value === null || value === undefined) return NaN;
+
+    if (typeof value === "number") return value;
+
+    if (typeof value !== "string") return NaN;
+
+    let str = value.trim();
+    if (str === "") return NaN;
+
+    // Quitar espacios
+    str = str.replace(/\s/g, "");
+
+    const commaCount = (str.match(/,/g) || []).length;
+    const dotCount = (str.match(/\./g) || []).length;
+
+    let decimalSeparator = null;
+
+    if (commaCount > 0 && dotCount > 0) {
+        // Ambos presentes → el último define decimal
+        decimalSeparator = str.lastIndexOf(",") > str.lastIndexOf(".") ? "," : ".";
+    } else if (commaCount === 1 && dotCount === 0) {
+        decimalSeparator = ",";
+    } else if (dotCount === 1 && commaCount === 0) {
+        decimalSeparator = ".";
+    }
+
+    if (decimalSeparator) {
+        const parts = str.split(decimalSeparator);
+
+        const integerPart = parts[0].replace(/[.,]/g, "");
+        const decimalPart = parts.slice(1).join("");
+
+        str = integerPart + "." + decimalPart;
+    } else {
+        // Solo miles o ningún separador
+        str = str.replace(/[.,]/g, "");
+    }
+
+    const result = Number(str);
+    return isNaN(result) ? NaN : result;
+}
+
 /*
 test:
 row:
   productCode: "1_10"
   start: "01/04/2026"
   end: "01/04/2027"
-  insuredSum: 10000
+  insuredSum: "10,008.00"
   nombreCompleto: "MICHAEL ANTONIO DELGADO CASTRO"
   cnp: "123456778"
   tipoObjeto: "EDIFICIO"  
