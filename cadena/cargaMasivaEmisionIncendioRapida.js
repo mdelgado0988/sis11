@@ -6,7 +6,7 @@
 * @author Michael Delgado 
 * @created 2026-04-21
 * @chain cargaMasivaEmisionIncendioRapida
-* @Purpose: Carga masiva de incendio pólizas individuales con datos básicos
+* @Purpose Carga masiva de incendio pólizas individuales con datos básicos
 * @copyright Axxis Systems S.A.
 */
 
