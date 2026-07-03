@@ -2947,7 +2947,7 @@ function redondear(valor, decimales = 2, forzar = false) {
 function formatInput(value, type) {
   try {
     let dec = type === "number" ? 2 : 8;
-    value = parseFloat(value) || 0;
+    value = parseFloat(String(value ?? "").replace(/,/g, "")) || 0;
     value = redondear(value, dec);
     return formatearNumero(value);
   } catch (error) {
