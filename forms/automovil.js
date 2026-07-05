@@ -20,9 +20,68 @@ const changeMarca = async () => {
   }   
 };
 
+function prepareTabContainer() {
+  try {
+    const $certificado = $("#txtCertificado");
+    const $form = $certificado.closest("form");
+
+    if (!$form.length) {
+      return;
+    }
+
+    if ($("#customSectionTabs").length) {
+      return;
+    }
+
+    const tabsHtml = `
+      <ul id="customSectionTabs" class="nav nav-tabs">
+        <li class="nav-item">
+          <a href="" data-target="#tabHome" data-toggle="tab" class="nav-link small text-uppercase active">Datos Generales</a>
+        </li>
+      </ul>
+      <div class="tab-content">
+        <div id="tabHome" class="tab-pane active" style="padding: 1em;"></div>
+      </div>
+    `;
+
+    $form.prepend(tabsHtml);
+
+    $("#customSectionTabs a").on("click", function (e) {
+      e.preventDefault();
+      $(this).tab("show");
+    });
+  } catch (error) {
+    console.error(`Error preparando pestañas: ${error.toString()}`);
+  }
+}
+
+function moveFieldsToTabHome() {
+  try {
+    const $tabHome = $("#tabHome");
+    if (!$tabHome.length) {
+      return;
+    }
+
+    const movedRows = new Set();
+
+    $(".ptab").each(function () {
+      const $row = $(this).closest(".row");
+
+      if ($row.length && !movedRows.has($row[0])) {
+        movedRows.add($row[0]);
+        $tabHome.append($row);
+      }
+    });
+  } catch (error) {
+    console.error(`Error moviendo campos al tab principal: ${error.toString()}`);
+  }
+}
+
 
 const onDocumentReady = async() => {
   
+    prepareTabContainer();
+    moveFieldsToTabHome();
     $("#cmbMarca").on("change", changeMarca);
     // Keep the certificate field read-only at all times.
     $("#txtCertificado").prop("readonly", true);
