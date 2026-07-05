@@ -261,6 +261,7 @@
                 addLinePremiumTotals(pol, cession);
                 addLineCommissionTotals(pol, cession);
                 addLineTaxTotals(pol, cession);
+                addNonTechnicalPremiumOnce(pol, cession);
                 pol.tax += Number(cession.tax || 0);
                 pol.premiumCedant += Number(cession.premiumCedant || 0);
                 pol.premiumRe += Number(cession.premiumRe || 0);
@@ -308,6 +309,7 @@
                     taxReCuotaParte: 0,
                     taxReExcedente: 0,
                     taxReFacultativa: 0,
+                    nonTechnicalPremium: 0,
 
                     tax: Number(cession.tax || 0),
 
@@ -331,6 +333,7 @@
                 addLinePremiumTotals(newPol, cession);
                 addLineCommissionTotals(newPol, cession);
                 addLineTaxTotals(newPol, cession);
+                addNonTechnicalPremiumOnce(newPol, cession);
 
                 group.push(newPol);
             }
@@ -991,6 +994,17 @@
       const comision = Number(row.comissionCedant || 0);
       const comisionExtra = Number(row.comissionCedantExtra || 0);
       const tax = Number(row.tax || 0);
+      const primaCat = Number(row.nonTechnicalPremium || row.nonTecnicalPremium || 0);
+      const netCuotaParte = roundMoney(
+        Number(row.premiumReCuotaParte || 0) -
+        Number(row.commissionReCuotaParte || 0) -
+        Number(row.taxReCuotaParte || 0)
+      );
+      const netExcedente = roundMoney(
+        Number(row.premiumReExcedente || 0) -
+        Number(row.commissionReExcedente || 0) -
+        Number(row.taxReExcedente || 0)
+      );
 
       return {
         id: row.lifePolicyId || '',
@@ -1015,7 +1029,7 @@
         'Prima Cedida': premCed,
         'Suma Prima Cuota Parte': Number(row.premiumReCuotaParte || 0),
         'Suma Prima Excedente': Number(row.premiumReExcedente || 0),
-        'Prima Cat': 0,
+        'Prima CAT': primaCat,
         'Prima Facultativa': Number(row.premiumReFacultativa || 0),
         'Comision Contractual': comision,
         'Comision Cuota Parte': Number(row.commissionReCuotaParte || 0),
@@ -1023,9 +1037,9 @@
         'Comision Facultativa': Number(row.commissionReFacultativa || 0),
         Impuesto: tax,
         'Impuesto Facultativo': Number(row.taxReFacultativa || 0),
-        'Reaseguro por Cuota Parte': Number(row.sumInsuredReCuotaParte || 0),
-        'Reaseguro por Excedente': Number(row.sumInsuredReExcedente || 0),
-        'Reaseguro por Pagar': Number(sumCed || 0),
+        'Reaseguro por Cuota Parte': netCuotaParte,
+        'Reaseguro por Excedente': netExcedente,
+        'Reaseguro por Pagar': roundMoney(netCuotaParte + netExcedente),
         cserie: cserie || first.cserie || row.cserie || ''
       };
     }
@@ -1170,6 +1184,32 @@
       }
     }
 
+    function addNonTechnicalPremiumOnce(groupedRow, cession) {
+      if (!groupedRow || !cession) {
+        return;
+      }
+
+      const premiumValue = Number(cession.nonTechnicalPremium || cession.nonTecnicalPremium || 0);
+      if (!premiumValue) {
+        return;
+      }
+
+      // Count the non-technical premium only once per coverage within the grouped policy.
+      const coverageKey = String(cession.coverageId || cession.coverageCode || '').trim();
+      if (!coverageKey) {
+        groupedRow.nonTechnicalPremium = Number(groupedRow.nonTechnicalPremium || 0) + premiumValue;
+        return;
+      }
+
+      groupedRow._nonTechnicalPremiumCoverageIds = groupedRow._nonTechnicalPremiumCoverageIds || {};
+      if (groupedRow._nonTechnicalPremiumCoverageIds[coverageKey]) {
+        return;
+      }
+
+      groupedRow._nonTechnicalPremiumCoverageIds[coverageKey] = true;
+      groupedRow.nonTechnicalPremium = Number(groupedRow.nonTechnicalPremium || 0) + premiumValue;
+    }
+
     function getLobDescription(lobCode) {
       const code = String(lobCode || '').trim();
       if (!code) {
@@ -1200,6 +1240,15 @@
     function formatExportDate(value) {
       if (!value) return '';
       return String(value).slice(0, 10);
+    }
+
+    function roundMoney(value) {
+      const num = Number(value || 0);
+      if (!isFinite(num)) {
+        return 0;
+      }
+
+      return Math.round((num + Number.EPSILON) * 100) / 100;
     }
 
     function mapGroupedRowForExport(row = {}) {
@@ -1610,6 +1659,7 @@
             <Column title={t('Line Id')} dataIndex='lineId' key='lineId' />
             <Column title={t('Sum Insured')}        dataIndex='sumInsured' key='sumInsured' render={renderNumber} />
             <Column title={t('Premium Sum')}        dataIndex='premium' key='premium' render={renderNumber} />
+            <Column title={t('Prima CAT')}          key='nonTechnicalPremium' render={ (value, record) => renderNumber(record.nonTechnicalPremium || record.nonTecnicalPremium || 0) } />
             <Column title={t('Cedant Sum Insured')} dataIndex='sumInsuredCedant' key='sumInsuredCedant' render={renderNumber} />
             <Column title={t('Cedant Premium')}     dataIndex='premiumCedant' key='premiumCedant' render={renderNumber} />
             <Column title={t('Commission')}         dataIndex='comissionCedant' key='comissionCedant' render={renderNumber} />
@@ -1630,6 +1680,7 @@
         <Column title={t('Type')}               dataIndex='premiumType' key='premiumType'/>
         <Column title={t('Sum Insured')}        dataIndex='sumInsured' key='sumInsured' render={renderNumber} />
         <Column title={t('Premium Sum')}        dataIndex='premium' key='premium' render={renderNumber} />
+        <Column title={t('Premium CAT')}        key='nonTechnicalPremium' render={ (value, record) => renderNumber(record.nonTechnicalPremium || record.nonTecnicalPremium || 0) } />
         <Column title={t('Cedant Sum Insured')} dataIndex='sumInsuredCedant' key='sumInsuredCedant' render={renderNumber} />
         <Column title={t('Cedant Premium')}     dataIndex='premiumCedant' key='premiumCedant' render={renderNumber} />
         <Column title={t('Commission')}         dataIndex='comissionCedant' key='comissionCedant' render={renderNumber} />
