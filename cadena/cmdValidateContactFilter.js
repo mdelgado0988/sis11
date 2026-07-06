@@ -1,141 +1,165 @@
 //block
 //noreplace
 /**
- * 
  * @Author: Michael Delgado
  * @Email: michael.delgado@axxis.com
  * @Created: 2025-10-10
- * @Purpose: Validar campos requeridos según rol seleccionado.
+ * @Purpose: Normalize contact filters by matching LIKE values against identification patterns and building exact contact field predicates.
  * @Command: cmdValidateContactFilter
- * */
- 
-let filter = context.filtros?.filter;
+ */
 
-const regexMap = {
-    AV: /\d{2}-AV-\d{4}-\d{5}/,
-    C: /\d{2}-\d{4}-\d{5}/,
-    CI: /\d{9}/,
-    CO: /\d{5}/,
-    E: /E -\d{4}-\d{5}/,
-    E1: /E -\d{4}-\d{6}/,
-    N: /N -\d{4}-\d{5}/,
-    PE: /PE-\d{4}-\d{5}/,
-    PI: /\d{2}-PI-\d{4}-\d{5}/,
-    R: /\d{7}-\d{4}-\d{6}/,
-    R2: /\d{9}-\d-\d{4}/,
-    R3: /\d{9}-\d-\d{4}/,
-    RN: /\d{7}-\d{7}/,
-    RU: /\d{6}-\d{6}-\d{4}/,
-    SC: /\d{11}/,
-    SP: /\d{11}/,
-    NT: /\d{2}-NT-\d{5}-\d{8}/
+let filter = String(context?.filtros?.filter ?? context?.filter ?? '').trim();
+
+//doCmd({ cmd: 'GetPing', data: { filter } });
+
+const regexEntries = [
+    ['AV', /^\d{2}-AV-\d{4}-\d{5}$/],
+    ['C', /^\d{2}-\d{4}-\d{5}$/],
+    ['CI', /^\d{9}$/],
+    ['CO', /^\d{5}$/],
+    ['E', /^E -\d{4}-\d{5}$/],
+    ['E1', /^E -\d{4}-\d{6}$/],
+    ['N', /^N -\d{4}-\d{5}$/],
+    ['P', /^[A-Za-z0-9]{1,13}$/],
+    ['PE', /^PE-\d{4}-\d{5}$/],
+    ['PI', /^\d{2}-PI-\d{4}-\d{5}$/],
+    ['R', /^\d{7}-\d{4}-\d{6}$/],
+    ['R2', /^\d{9}-\d-\d{4}$/],
+    ['R3', /^\d{9}-\d-\d{4}$/],
+    ['RN', /^\d{7}-\d{7}$/],
+    ['RU', /^\d{6}-\d{6}-\d{4}$/],
+    ['SC', /^\d{11}$/],
+    ['SE', /^[A-Za-z0-9]{1,13}$/],
+    ['SP', /^\d{11}$/],
+    ['NT', /^\d{2}-NT-\d{5}-\d{8}$/]
+];
+
+const codeFieldMap = {
+    AV: ['cnp'],
+    C: ['nif'],
+    CI: ['cnp'],
+    CO: ['nif'],
+    E: ['cnp'],
+    E1: ['cnp'],
+    N: ['cnp'],
+    P: ['passport', 'cnp'],
+    PE: ['cnp'],
+    PI: ['cnp'],
+    R: ['nif'],
+    R2: ['nif'],
+    R3: ['nif'],
+    RN: ['nif'],
+    RU: ['nif'],
+    SC: ['nif'],
+    SE: ['passport'],
+    SP: ['cnp'],
+    NT: ['nif']
 };
 
-try{
-  
-  //doCmd({cmd: "GetPing", data: { filter: filter }});
-  if(!filter)
-    return { ok: true, msg: "Nada que filtrar", filter: filter }
-  
-  const documento = extraerDocumento(filter);
-  if(documento?.valor){
-    const existeIdentificacion = obtenerBusquedaCnp(filter, regexMap);
-    if(!existeIdentificacion){
-      filter = agregarFiltroCnp(filter, documento.valor);
+try {
+    if (!filter) {
+        return { ok: true, msg: 'Nada que filtrar', filter };
     }
-  }
-  
-  return { ok: true, msg: "Filtro sobreescrito", filter: filter }
 
-}catch(error){
-  return { ok: false, msg: error.toString(), filter: filter }
-}
-  
-function extraerDocumento(filtro) {
-    for (const [tipo, regex] of Object.entries(regexMap)) {
-        const match = filtro.match(regex);
-        if (match) {
+    const likeValue = extractLikeValue(filter);
+    const matchedCodes = getMatchedCodes(likeValue);
+
+    if (!matchedCodes.length) {
+        if (containsIdentificationField(filter)) {
             return {
-                tipo,
-                valor: match[0]
+                ok: true,
+                msg: 'Filtro sin cambios',
+                filter,
+                likeValue,
+                matchedCodes
             };
         }
-    }
-    return null;
-}
 
-function obtenerBusquedaCnp(filtro, regexMap = {}) {
+        const fallbackFilter = buildIdentifierFilter(likeValue, ['cnp', 'nif']);
+        filter = `(${filter}) OR (${fallbackFilter})`;
 
-    if (!filtro || typeof filtro !== "string") {
-        return null;
-    }
-
-    // Normaliza espacios, tabs y saltos de línea
-    const filtroNormalizado = filtro.replace(/\s+/g, " ");
-
-    // Detecta:
-    // cnp like N'%valor%'
-    // [cnp] like N'%valor%'
-    // tabla.cnp like N'%valor%'
-    const match = filtroNormalizado.match(
-        /(?:\[\s*cnp\s*\]|(?:\w+\.)?cnp)\s*like\s*N?\s*'%(.*?)%'/i
-    );
-
-    if (!match) {
-        return null;
-    }
-
-    const valor = match[1].trim();
-
-    // Si no se proporcionó regexMap, retorna el valor encontrado
-    if (!regexMap || Object.keys(regexMap).length === 0) {
         return {
-            campo: "cnp",
-            valor
+            ok: true,
+            msg: 'Filtro sobreescrito',
+            filter,
+            likeValue,
+            matchedCodes,
+            identifierFields: ['cnp', 'nif'],
+            identifierFilter: fallbackFilter
         };
     }
 
-    // Determina el tipo de documento
-    for (const [tipo, regex] of Object.entries(regexMap)) {
-        if (regex.test(valor)) {
-            return {
-                campo: "cnp",
-                tipo,
-                valor
-            };
+    const identifierFields = getIdentifierFields(matchedCodes);
+    const identifierFilter = buildIdentifierFilter(likeValue, identifierFields);
+    filter = `(${filter}) OR (${identifierFilter})`;
+
+    return {
+        ok: true,
+        msg: 'Filtro sobreescrito',
+        filter,
+        likeValue,
+        matchedCodes,
+        identifierFields,
+        identifierFilter
+    };
+} catch (error) {
+    return { ok: false, msg: error.toString(), filter };
+}
+
+function extractLikeValue(filtro) {
+    const text = String(filtro || '').replace(/\s+/g, ' ');
+    const match = text.match(/like\s+N?\s*'([^']+)'/i);
+
+    if (!match || !match[1]) {
+        return '';
+    }
+
+    return String(match[1]).replace(/^%+|%+$/g, '').trim();
+}
+
+function getMatchedCodes(value) {
+    const text = String(value || '').trim();
+    if (!text) {
+        return [];
+    }
+
+    const matches = [];
+
+    for (const [code, regex] of regexEntries) {
+        if (regex.test(text)) {
+            matches.push(code);
         }
     }
 
-    // Encontró búsqueda en cnp pero no coincide con ningún formato
-    return {
-        campo: "cnp",
-        tipo: null,
-        valor
-    };
+    return Array.from(new Set(matches));
 }
 
-function agregarFiltroCnp(filtro, valorCnp) {
+function getIdentifierFields(codes) {
+    const fields = (codes || []).flatMap(code => codeFieldMap[code] || []);
+    const uniqueFields = Array.from(new Set(fields));
 
-    if (!filtro || !valorCnp) {
-        return filtro;
+    if (uniqueFields.length) {
+        return uniqueFields;
     }
 
-    const filtroNormalizado = filtro.replace(/\s+/g, " ");
+    return ['cnp', 'nif', 'passport'];
+}
 
-    // Detecta:
-    // cnp like ...
-    // cnp = ...
-    // [cnp] like ...
-    // tabla.cnp = ...
-    const existeFiltroCnp =
-        /(?:\[\s*cnp\s*\]|(?:\w+\.)?cnp)\s*(?:like|=)/i
-            .test(filtroNormalizado);
+function buildIdentifierFilter(value, fields) {
+    const safeValue = escapeSql(value);
+    const fieldList = Array.isArray(fields) ? fields : [fields];
+    const predicates = fieldList
+        .map(field => String(field || '').trim().toLowerCase())
+        .filter(Boolean)
+        .map(field => `${field} = '${safeValue}'`);
 
-    if (existeFiltroCnp) {
-        return filtro;
-    }
+    return `(${predicates.join(' OR ')})`;
+}
 
-    return filtro
-        ? `(${filtro}) OR (cnp = '${valorCnp}')`
-        : `(cnp = '${valorCnp}')`;
+function containsIdentificationField(filtro) {
+    return /\b(cnp|nif|passport)\b/i.test(String(filtro || ''));
+}
+
+function escapeSql(value) {
+    return String(value ?? '').replace(/'/g, "''");
 }

@@ -2,7 +2,7 @@ use sis11
 
 go
 
-declare @transferId varchar(50) = '988';
+declare @transferId varchar(50) = '10248';
 
 SELECT 
     t.id TransferId,
@@ -14,6 +14,7 @@ SELECT
     ISNULL(h.name,'') + ' ' + ISNULL(h.surname1, '') + ' ' + ISNULL(h.surname2, '') 
     END AS asegurado,
 
+	FORMAT(CAST(t.date AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy') AS FechaPago,
 
     t.amount AS monto_transaccion,
     'CONVERTIR_A_LETRAS(' + CAST(at.moneyInAmount AS VARCHAR) + ')' AS monto_en_letras,
@@ -56,3 +57,4 @@ FROM transfer AS t
 						CAST(pt.pInteres * at.moneyInAmount AS DECIMAL(18,2)) AS interes) AS montos
 	OUTER APPLY (SELECT (montos.primas + montos.impuesto + montos.interes + montos.gastos_de) total) tt
 WHERE t.id = (select top 1 value from STRING_SPLIT(@transferId,','))
+
