@@ -39,6 +39,7 @@ const cfgCoberturaReaseguro = [
   { lob: 31, name: "cfgCoberturaProductoReaVida" },
   { lob: 52, name: "cfgCoberturaProductoReaRiesgosVarios" },
   { lob: 1, name: "cfgCoberturaProductoRea" },
+  { lob: 6, name: "cfgCoberturaProductoReaAuto" },
   { lob: 81, name: "cfgCoberturaProductoRea" },
   { lob: 82, name: "cfgCoberturaProductoRea" },
   { lob: 83, name: "cfgCoberturaProductoRea" }

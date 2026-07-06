@@ -14,6 +14,7 @@
     { name: "cfgCoberturaProductoReaVidaColectivo" },
     { name: "cfgCoberturaProductoReaVida" },
     { name: "cfgCoberturaProductoReaRiesgosVarios" },
+    { name: "cfgCoberturaProductoReaAuto" },
     { name: "cfgCoberturaProductoRea" }
   ];
   

@@ -16,20 +16,21 @@ const objectDefinitionCode = "DTAUT";
 let tarifas;
 let oaUserData;
 let resultCoverages = [];
-const tarifaVida = [
+const tarifaAuto = [
   { lob: 6, name: "tarificacionSIS9Auto"  }
 ]
 
 try {
+  validateInput();
 
   log("Calculando tarifas");
-  setTarifas();
+  tarifas = getTarifas();
 
   log("Calculando objeto asegurado");
-  setInsuredObject();
+  oaUserData = getInsuredObject();
 
   log("Estableciendo coberturas");
-  setResultCoverages();
+  resultCoverages = getResultCoverages();
 
   log("Iterando coberturas para cálculos");
 
@@ -98,6 +99,49 @@ catch(error){
   throw `@${error.toString()}`;
 }
 
+function validateInput() {
+  if (!poliza || typeof poliza !== "object") {
+    throw new Error("La póliza no fue enviada o no tiene un formato válido.");
+  }
+
+  if (!poliza.id || isNaN(Number(poliza.id))) {
+    throw new Error("La póliza no contiene un id válido.");
+  }
+
+  if (poliza.lob == null || String(poliza.lob).trim() === "") {
+    throw new Error("La póliza no contiene un ramo válido.");
+  }
+
+  if (poliza.productCode == null || String(poliza.productCode).trim() === "") {
+    throw new Error("La póliza no contiene un código de producto válido.");
+  }
+
+  if (!poliza.start || !isValidDate(poliza.start)) {
+    throw new Error("La póliza no contiene una fecha de inicio válida.");
+  }
+
+  if (!poliza.end || !isValidDate(poliza.end)) {
+    throw new Error("La póliza no contiene una fecha de fin válida.");
+  }
+
+  if (!Array.isArray(poliza.Coverages) || poliza.Coverages.length === 0) {
+    throw new Error("La póliza no contiene coberturas para calcular.");
+  }
+
+  const invalidCoverages = poliza.Coverages.filter(function (cov) {
+    return !cov || cov.code == null || String(cov.code).trim() === "";
+  });
+
+  if (invalidCoverages.length > 0) {
+    throw new Error("Existe al menos una cobertura sin código válido en la póliza.");
+  }
+}
+
+function isValidDate(value) {
+  const date = new Date(value);
+  return !isNaN(date.getTime());
+}
+
 function getQuotationObject(coverageCode) {
 
   log(`Calculando objeto cov: ${coverageCode}`);
@@ -112,7 +156,7 @@ function getQuotationObject(coverageCode) {
     
     return false; // números, booleanos, objetos, etc. NO son vacíos
   };
-
+  
   // buscar en cobtar y asignar valores
   let item = (oaUserData.cobtar || []).find(x => x.COVERAGECODE == coverageCode);
 
@@ -136,11 +180,9 @@ function getQuotationObject(coverageCode) {
   });
 
   //Convertimos a números valores sencibles:
-  obj.msumaaseg = n(obj.txtSumaAsegurada);
-  obj.txtSumaAsegurada = n(obj.txtSumaAsegurada);
-  obj.txtSalario = n(obj.txtSalario);
+  obj.msumaaseg = n(obj.txtSA);
+  obj.txtSumaAsegurada = n(obj.txtSA);
   obj.XMONTH = getMonthsBetween(poliza.start, poliza.end);
-  obj.edadReal = calcularEdad();
 
   //Calculo de factor de vigencia, ojo
   //* calculamos la duración de la cobertura
@@ -148,6 +190,22 @@ function getQuotationObject(coverageCode) {
   const qDuration = item?.DURACIONDIAS ?? 0;
   
   obj["VIGENCIA_FACTOR"] = (qDuration >= 365) ? Number((qDuration / 365).toFixed(4)) : 1;  
+
+  //Calculamos para nueva
+  const aniosAuto = validaAniosPolizas({
+    cendoso: 36,
+    canoHof: Number(obj.txtAnioAuto ?? 0),
+    currentYear: new Date().getFullYear()
+  });
+
+  /*const anos37 = validaAniosPolizas({
+    cendoso: 37,
+    canoCerti: 2020,
+    fdesdeYear: 2021,
+    fhastaYear: 2026
+  });*/
+
+  obj.ANIOAUTO = aniosAuto ?? 0;
 
   //Normalizamos nombres de los campos del DT para evitar problemas con caracteres especiales.
   const keys = Object.keys(obj);
@@ -161,21 +219,31 @@ function getQuotationObject(coverageCode) {
   return safeObj;
 }
 
-function setTarifas() {
+function getTarifas() {
 
-  const tableName = tarifaVida.find(t => t.lob == poliza.lob)?.name;
+  const tableName = tarifaAuto.find(t => t.lob == poliza.lob)?.name;
+
+  if (!tableName) {
+    throw new Error(`No existe una tabla de tarifas configurada para el ramo ${poliza.lob}.`);
+  }
 
   doCmd({cmd :"GetFullTable", data: {table: tableName}});
 
-   if(!GetFullTable.ok)
-      console.error("Error leyendo configuración de tarifas");
+   if(!GetFullTable || !GetFullTable.ok || !Array.isArray(GetFullTable.outData)) {
+      throw new Error("No fue posible leer la configuración de tarifas.");
+   }
 
   tarifas = mapearTablaConfig(GetFullTable.outData ?? []);
   tarifas = tarifas.filter(x => vEqual(x.cramo) == vEqual(poliza.lob) && vEqual(x.codigoplan) == vEqual(poliza.productCode));
-  
+
+  if (!Array.isArray(tarifas) || tarifas.length === 0) {
+    throw new Error("No existen tarifas configuradas para la póliza.");
+  }
+
+  return tarifas;
 }
 
-function setInsuredObject() {
+function getInsuredObject() {
   
   doCmd({cmd: "RepoObjectDefinition", data:{ operation: "GET", filter: `code = '${objectDefinitionCode}'`, noTracking: true}});
   const objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
@@ -204,12 +272,67 @@ function setInsuredObject() {
   oaUserData.cobtar = oaUserData.hiddenCobtar ? JSON.parse(oaUserData.hiddenCobtar) : [];  
   oaUserData.cobtar = normalizeArray(oaUserData.cobtar);
 
+  return oaUserData;
+
 }
 
-function setResultCoverages() {
+function getResultCoverages() {
+  const coverages = [];
+
   for (let cov of poliza.Coverages) {
-    resultCoverages.push({ code: cov.code.toString(), limit: 0, premium: 0, dedutible: 0, description: "" });    
+    coverages.push({ code: cov.code.toString(), limit: 0, premium: 0, dedutible: 0, description: "" });    
   }  
+
+  return coverages;
+}
+
+function getInsuredObject() {
+  doCmd({
+    cmd: "RepoObjectDefinition",
+    data: {
+      operation: "GET",
+      filter: `code = '${objectDefinitionCode}'`,
+      noTracking: true
+    }
+  });
+
+  if (!RepoObjectDefinition || !RepoObjectDefinition.ok || !Array.isArray(RepoObjectDefinition.outData) || RepoObjectDefinition.outData.length === 0) {
+    throw new Error("No se encontró configuración del objeto asegurado.");
+  }
+
+  const objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
+  if (objectDefinitionId == 0) {
+    throw new Error("No se encontró configuración del objeto asegurado.");
+  }
+
+  doCmd({
+    cmd: "LoadEntity",
+    data: {
+      entity: "InsuredObject",
+      filter: `lifePolicyId = ${poliza.id} and objectDefinitionId in (${objectDefinitionId})`,
+      noTracking: true
+    }
+  });
+
+  if (!LoadEntity || !LoadEntity.ok || !LoadEntity.outData) {
+    throw new Error("Debe guardar el objeto asegurado.");
+  }
+
+  oaUserData = safeJsonParse(LoadEntity.outData?.jValues, [], "los valores del objeto asegurado");
+  oaUserData = mapearCamposOA(oaUserData);
+
+  if (!oaUserData || typeof oaUserData !== "object") {
+    throw new Error("No se pudo recuperar el objeto asegurado, verifique que se haya registrado correctamente.");
+  }
+
+  oaUserData.cobtar = safeJsonParse(oaUserData.hiddenCobtar, [], "hiddenCobtar");
+  oaUserData.cobtar = normalizeArray(oaUserData.cobtar);
+
+  if (!Array.isArray(oaUserData.cobtar)) {
+    throw new Error("El detalle de coberturas del objeto asegurado no es válido.");
+  }
+
+  return oaUserData;
 }
 
 function mapearTablaConfig(data) {
@@ -279,26 +402,49 @@ function getBirthDay() {
   return LoadEntity.outData?.birth;
 }
 
-function calcularEdad(fechaCalculo = new Date()) {
+function validaAniosPolizas({
+  cendoso,
+  currentYear = new Date().getFullYear(),
+  canoHof = null,
+  canoCerti = null,
+  fdesdeYear = null,
+  fhastaYear = null
+}) {
+  let anoT = 0;
+  let anoA = 0;
+  let anoP = 0;
 
-    const fechaNacimiento = getBirthDay();
+  cendoso = Number(cendoso || 0);
 
-    const nac = new Date(fechaNacimiento);
-    const cuando = new Date(fechaCalculo);
+  if (cendoso === 36) {
+    anoA = Number(canoHof || 0);
+    anoT = currentYear - anoA;
 
-    let edad = cuando.getFullYear() - nac.getFullYear();
-
-    // Equivalente a:
-    // set @nac = dateadd(yy, @ed, @nac)
-    const fechaCumple = new Date(nac);
-    fechaCumple.setFullYear(nac.getFullYear() + edad);
-
-    // if @nac>@cuando set @ed=@ed-1
-    if (fechaCumple > cuando) {
-        edad--;
+    if (anoT <= 0) {
+      anoT = 0;
     }
+  }
 
-    return edad;
+  if (cendoso === 37) {
+    anoA = Number(canoCerti || 0);
+    fdesdeYear = Number(fdesdeYear || 0);
+    fhastaYear = Number(fhastaYear || 0);
+
+    anoA = fhastaYear - anoA;
+    anoP = fdesdeYear - anoA;
+
+    if (anoA === 0) {
+      anoT = anoA + 1;
+    } else {
+      if (anoA === anoP) {
+        anoT = anoA + 1;
+      } else {
+        anoT = anoA;
+      }
+    }
+  }
+
+  return anoT;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -357,6 +503,18 @@ function mapearCamposOA(arr) {
         Array.isArray(x.userData) ? x.userData[0] : x.userData
       ])
   );
+}
+
+function safeJsonParse(value, fallback, label) {
+  if (value == null || String(value).trim() === "") {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error(`El contenido de ${label} no tiene un formato JSON válido.`);
+  }
 }
 
 function n(v) {

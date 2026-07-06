@@ -19,7 +19,6 @@ const changeMarca = async () => {
   try {
      const Modelo = $("#cmbModelo").val();
      const Marca = $("#cmbMarca").val();
-      debugger;
      await loadDataTableModelo({reference:'#cmbModelo',tableName:'TablaModelos',indexCode:1,indexDisplay:2,indexMarca:0,valMarca:Marca});
   } catch (error) {
     console.error(`Error seleccionando la Marca: ${error.toString()}`)
@@ -214,7 +213,8 @@ const onDocumentReady = async() => {
     // Keep the certificate field read-only at all times.
     $("#txtCertificado").prop("readonly", true);
     await loadDataTable({reference:'#cmbMarca',tableName:'TablaMarcas',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:0,indexDisplay:2});
+    await changeMarca();
+    await loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:1,indexDisplay:2});
     await loadDataTable({reference:'#cmbUsoAuto',tableName:'tblUsoPorRamo',indexCode:1,indexDisplay:2});
     await cargarCobtarDinamico();
     validaInputs();
@@ -245,7 +245,7 @@ async function loadDataTable ({
 
     const dataValue = $(reference).attr('user-data');
     if(!!dataValue){
-        $(reference).val(dataValue);
+        $(reference).val(String(dataValue).trim()).trigger('change');
     }
     return data;
 }
@@ -264,14 +264,14 @@ async function loadDataTableModelo ({
   
     data.splice(0, 1);
     data.forEach(item => {
-      if (valMarca == item[indexCode]){
+      if (valMarca == item[indexMarca]){
         $(reference).append('<option value="' + item[indexCode] + '">' + item[indexDisplay] + '</option>');
       }
     });
 
     const dataValue = $(reference).attr('user-data');
     if(!!dataValue){
-        $(reference).val(dataValue);
+        $(reference).val(String(dataValue).trim()).trigger('change');
     }
     return data;
 }
@@ -430,27 +430,21 @@ function inyectarEstilosAntdCobtar() {
 
 async function loadPolicy() {
     try {
-        const result = await me.exe('LoadEntity', {
-            entity: 'LifePolicy',
-            fields: '[id],[lob],[productCode],[insuredSum],[start],[end],[active]',
-            filter: 'id=' + policyId,
+        const result = await me.exe('RepoLifePolicy', {
+            operation: 'GET',
+            include: ["Insureds","Coverages"],
+            filter: `id=${policyId}`,
             noTracking: true
         });
+        policy = result.outData?.[0] || {};
 
-        policy = (result && result.outData) ? result.outData : {};
-        if ($.isArray(policy)) {
-            policy = policy[0] || {};
-        }
-        polizaConfirmada = policy && policy.active ? true : false;
-
-        const coverages = await me.exe('LoadEntities', {
-            entity: 'LifeCoverage',
-            fields: 'code,name,basic,[start],[end],limit,premium,mandatory,description,reinsurance,commercialName,appliesTo,number',
-            filter: 'lifePolicyId=' + policyId,
-            noTracking: true
-        });
-
-        policy.Coverages = (coverages && coverages.outData) ? coverages.outData : [];
+        const formatoN2 = v =>
+        (isNaN(v = Number((v || '').toString().replace(/[,\s]/g, ''))) ? 0 : v)
+        .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+        $("#txtSA").prop("readonly", true);
+        $("#txtSA").val(policy?.insuredSum || '0');
+        
     } catch (error) {
         console.error(error);
     }
@@ -465,7 +459,7 @@ async function getProduct(lobCode, productCode) {
 }
 
 async function setConfigCoverages() {
-    const tableNames = ['cfgCobtarAuto', 'cfgCobtarVida', 'cfgCobtar'];
+    const tableNames = ['cfgCoberturaProductoReaAuto'];
     let tableConfig = { ok: false, outData: [] };
 
     for (let i = 0; i < tableNames.length; i++) {
@@ -575,6 +569,7 @@ async function cargarCobtarDinamico() {
 
 async function listarCobtar() {
     try {
+        
         const tables = ['cfgCobtarAuto'];
         let tableCobtar = null;
 
