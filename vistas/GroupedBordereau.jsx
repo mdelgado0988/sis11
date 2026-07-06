@@ -996,16 +996,21 @@
       const comisionExtra = Number(row.comissionCedantExtra || 0);
       const tax = Number(row.tax || 0);
       const primaCat = Number(row.nonTechnicalPremium || row.nonTecnicalPremium || 0);
-      const netCuotaParte = roundMoney(
+      const netCuotaParteRaw =
         Number(row.premiumReCuotaParte || 0) -
         Number(row.commissionReCuotaParte || 0) -
-        Number(row.taxReCuotaParte || 0)
-      );
-      const netExcedente = roundMoney(
+        Number(row.taxReCuotaParte || 0);
+      const netExcedenteRaw =
         Number(row.premiumReExcedente || 0) -
         Number(row.commissionReExcedente || 0) -
-        Number(row.taxReExcedente || 0)
-      );
+        Number(row.taxReExcedente || 0);
+      const netFacultativoRaw =
+        Number(row.premiumReFacultativa || 0) -
+        Number(row.commissionReFacultativa || 0) -
+        Number(row.taxReFacultativa || 0);
+      const netCuotaParte = roundMoney(netCuotaParteRaw);
+      const netExcedente = roundMoney(netExcedenteRaw);
+      const netFacultativo = roundMoney(netFacultativoRaw);
 
       return {
         id: row.lifePolicyId || '',
@@ -1019,28 +1024,29 @@
         'Fecha Emision': formatExportDate(first.date || first.created || row.date),
         'Fecha Desde': formatExportDate(first.start || row.date),
         'Fecha Hasta': formatExportDate(first.end || ''),
-        'Suma Asegurada 100%': sumInsured100,
-        'Suma Retenida': sumRet,
-        'Suma Cedida': sumCed,
-        'Suma Cuota Parte': Number(row.sumInsuredReCuotaParte || 0),
-        'Suma Excedente': Number(row.sumInsuredReExcedente || 0),
-        'Suma Facultativa': Number(row.sumInsuredReFacultativa || 0),
-        'Prima Suscrita 100%': prem100,
-        'Prima Retenida': premRet,
-        'Prima Cedida': premCed,
-        'Suma Prima Cuota Parte': Number(row.premiumReCuotaParte || 0),
-        'Suma Prima Excedente': Number(row.premiumReExcedente || 0),
-        'Prima CAT': primaCat,
-        'Prima Facultativa': Number(row.premiumReFacultativa || 0),
-        'Comision Contractual': comision,
-        'Comision Cuota Parte': Number(row.commissionReCuotaParte || 0),
-        'Comision Excedente': Number(row.commissionReExcedente || 0),
-        'Comision Facultativa': Number(row.commissionReFacultativa || 0),
-        Impuesto: tax,
-        'Impuesto Facultativo': Number(row.taxReFacultativa || 0),
-        'Reaseguro por Cuota Parte': netCuotaParte,
-        'Reaseguro por Excedente': netExcedente,
-        'Reaseguro por Pagar': roundMoney(netCuotaParte + netExcedente),
+        'Suma Asegurada 100%': formatExportMoney(sumInsured100),
+        'Suma Retenida': formatExportMoney(sumRet),
+        'Suma Cedida': formatExportMoney(sumCed),
+        'Suma Cuota Parte': formatExportMoney(Number(row.sumInsuredReCuotaParte || 0)),
+        'Suma Excedente': formatExportMoney(Number(row.sumInsuredReExcedente || 0)),
+        'Suma Facultativa': formatExportMoney(Number(row.sumInsuredReFacultativa || 0)),
+        'Prima Suscrita 100%': formatExportMoney(prem100),
+        'Prima CAT': formatExportMoney(primaCat),
+        'Prima Retenida': formatExportMoney(premRet),
+        'Prima Cedida': formatExportMoney(premCed),
+        'Suma Prima Cuota Parte': formatExportMoney(Number(row.premiumReCuotaParte || 0)),
+        'Suma Prima Excedente': formatExportMoney(Number(row.premiumReExcedente || 0)),        
+        'Prima Facultativa': formatExportMoney(Number(row.premiumReFacultativa || 0)),
+        'Comision Contractual': formatExportMoney(comision),
+        'Comision Cuota Parte': formatExportMoney(Number(row.commissionReCuotaParte || 0)),
+        'Comision Excedente': formatExportMoney(Number(row.commissionReExcedente || 0)),
+        'Comision Facultativa': formatExportMoney(Number(row.commissionReFacultativa || 0)),
+        Impuesto: formatExportMoney(tax),
+        'Impuesto Facultativo': formatExportMoney(Number(row.taxReFacultativa || 0)),
+        'Reaseguro por Cuota Parte': formatExportMoney(netCuotaParte),
+        'Reaseguro por Excedente': formatExportMoney(netExcedente),
+        'Reaseguro por Facultativo': formatExportMoney(netFacultativo),
+        'Reaseguro por Pagar': formatExportMoney(roundMoney(netCuotaParteRaw + netExcedenteRaw + netFacultativoRaw)),
         cserie: cserie || first.cserie || row.cserie || ''
       };
     }
@@ -1240,7 +1246,28 @@
 
     function formatExportDate(value) {
       if (!value) return '';
-      return String(value).slice(0, 10);
+      if (value instanceof Date) {
+        const day = String(value.getDate()).padStart(2, '0');
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const year = value.getFullYear();
+        return `${day}/${month}/${year}`;
+      }
+
+      const text = String(value).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+        const [year, month, day] = text.split('-');
+        return `${day}/${month}/${year}`;
+      }
+
+      const date = new Date(text);
+      if (isNaN(date.getTime())) {
+        return text;
+      }
+
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     }
 
     function roundMoney(value) {
@@ -1252,6 +1279,14 @@
       return Math.round((num + Number.EPSILON) * 100) / 100;
     }
 
+    function formatExportMoney(value) {
+      const num = roundMoney(value);
+      return num.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
     function mapGroupedRowForExport(row = {}) {
       return {
         'Id póliza': row.lifePolicyId || '',
@@ -1261,15 +1296,15 @@
         'Póliza': row.policyCode || '',
         'Asegurado': row.insuredName || '',
         'Tipo': row.premiumType || '',
-        'Suma asegurada': row.sumInsured || 0,
-        'Prima': row.premium || 0,
-        'Suma retenida': row.sumInsuredCedant || 0,
-        'Prima retenida': row.premiumCedant || 0,
-        'Comisión': row.comissionCedant || 0,
-        'Comisión extra': row.comissionCedantExtra || 0,
-        'Impuesto': row.tax || 0,
-        'Suma cedida': row.sumInsuredRe || 0,
-        'Prima cedida': row.premiumRe || 0
+        'Suma asegurada': formatExportMoney(row.sumInsured || 0),
+        'Prima': formatExportMoney(row.premium || 0),
+        'Suma retenida': formatExportMoney(row.sumInsuredCedant || 0),
+        'Prima retenida': formatExportMoney(row.premiumCedant || 0),
+        'Comisión': formatExportMoney(row.comissionCedant || 0),
+        'Comisión extra': formatExportMoney(row.comissionCedantExtra || 0),
+        'Impuesto': formatExportMoney(row.tax || 0),
+        'Suma cedida': formatExportMoney(row.sumInsuredRe || 0),
+        'Prima cedida': formatExportMoney(row.premiumRe || 0)
       };
     }
 
@@ -1280,13 +1315,13 @@
         'Ramo': row.lob || '',
         'Poliza': row.policyCode || '',
         'Asegurado': row.insuredName || '',
-        'Reservado': row.reserve || 0,
-        'Siniestro': row.loss || 0,
-        'Reserva retenida': row.retainedReserve || 0,
-        'Siniestro retenido': row.retainedLoss || 0,
-        'Reserva cedida': row.cededReserve || 0,
-        'Siniestro cedido': row.cededLoss || 0,
-        'Prima reinstalación': row.reinstatementPremium || 0,
+        'Reservado': formatExportMoney(row.reserve || 0),
+        'Siniestro': formatExportMoney(row.loss || 0),
+        'Reserva retenida': formatExportMoney(row.retainedReserve || 0),
+        'Siniestro retenido': formatExportMoney(row.retainedLoss || 0),
+        'Reserva cedida': formatExportMoney(row.cededReserve || 0),
+        'Siniestro cedido': formatExportMoney(row.cededLoss || 0),
+        'Prima reinstalación': formatExportMoney(row.reinstatementPremium || 0),
         'Ex Gratia': row.exGratia ? 1 : 0
       };
     }
@@ -1303,13 +1338,13 @@
         'Line Id': (loss.Cession && loss.Cession.lineId) || '',
         'Event Reason': loss.eventReason || '',
         'Insured Event': loss.insuredEvent || '',
-        'Reserved': loss.reserve || 0,
-        'Loss': loss.loss || 0,
-        'Retained Reserve': loss.retainedReserve || 0,
-        'Retained Loss': loss.retainedLoss || 0,
-        'Ceded Reserve': loss.cededReserve || 0,
-        'Ceded Loss': loss.cededLoss || 0,
-        'Reinstatement Premium': loss.reinstatementPremium || 0,
+        'Reserved': formatExportMoney(loss.reserve || 0),
+        'Loss': formatExportMoney(loss.loss || 0),
+        'Retained Reserve': formatExportMoney(loss.retainedReserve || 0),
+        'Retained Loss': formatExportMoney(loss.retainedLoss || 0),
+        'Ceded Reserve': formatExportMoney(loss.cededReserve || 0),
+        'Ceded Loss': formatExportMoney(loss.cededLoss || 0),
+        'Reinstatement Premium': formatExportMoney(loss.reinstatementPremium || 0),
         'Ex Gratia': loss.exGratia ? 1 : 0
       };
     }
@@ -1321,9 +1356,9 @@
         'Poliza': row.policyCode || '',
         'Asegurado': row.insuredName || '',
         'Moneda': row.currency || '',
-        'Ingreso': row.income || 0,
-        'Retenido': row.retainedAmount || 0,
-        'Cedido': row.cededAmount || 0
+        'Ingreso': formatExportMoney(row.income || 0),
+        'Retenido': formatExportMoney(row.retainedAmount || 0),
+        'Cedido': formatExportMoney(row.cededAmount || 0)
       };
     }
 
@@ -1334,9 +1369,9 @@
         'Poliza': salvage.policyCode || '',
         'Asegurado': salvage.insuredName || '',
         'Moneda': salvage.currency || '',
-        'Ingreso': salvage.income || 0,
-        'Retenido': salvage.retainedAmount || 0,
-        'Cedido': salvage.cededAmount || 0
+        'Ingreso': formatExportMoney(salvage.income || 0),
+        'Retenido': formatExportMoney(salvage.retainedAmount || 0),
+        'Cedido': formatExportMoney(salvage.cededAmount || 0)
       };
     }
 
@@ -1349,15 +1384,15 @@
         'Cobertura': cession.cover || cession.coverageId || '',
         'Código cobertura': cession.coverageCode || '',
         'Tipo': cession.premiumType || '',
-        'Suma asegurada': cession.sumInsured || 0,
-        'Prima': cession.premium || 0,
-        'Suma retenida': cession.sumInsuredCedant || 0,
-        'Prima retenida': cession.premiumCedant || 0,
-        'Comisión': cession.comissionCedant || 0,
-        'Comisión extra': cession.comissionCedantExtra || 0,
-        'Impuesto': cession.tax || 0,
-        'Suma cedida': cession.sumInsuredRe || 0,
-        'Prima cedida': cession.premiumRe || 0
+        'Suma asegurada': formatExportMoney(cession.sumInsured || 0),
+        'Prima': formatExportMoney(cession.premium || 0),
+        'Suma retenida': formatExportMoney(cession.sumInsuredCedant || 0),
+        'Prima retenida': formatExportMoney(cession.premiumCedant || 0),
+        'Comisión': formatExportMoney(cession.comissionCedant || 0),
+        'Comisión extra': formatExportMoney(cession.comissionCedantExtra || 0),
+        'Impuesto': formatExportMoney(cession.tax || 0),
+        'Suma cedida': formatExportMoney(cession.sumInsuredRe || 0),
+        'Prima cedida': formatExportMoney(cession.premiumRe || 0)
       };
     }
     async function onDownloadClick(){
