@@ -78,14 +78,14 @@ function rewriteLikeClauses(filtro) {
     const text = String(filtro || '');
     const clauses = [];
     let changed = false;
-    const likeRegex = /like\s+N?\s*'([^']+)'/ig;
+    const likeRegex = /like\s+N?\s*'((?:''|[^'])*)'/ig;
     const replacements = [];
     let match;
 
     while ((match = likeRegex.exec(text)) !== null) {
         const likeMatch = match[0];
         const rawValue = match[1];
-        const likeValue = String(rawValue || '').replace(/^%+|%+$/g, '').trim();
+        const likeValue = unescapeSqlLiteral(String(rawValue || '').replace(/^%+|%+$/g, '').trim());
         const matchedCodes = getMatchedCodes(likeValue);
         const clauseStart = findClauseStart(text, match.index);
         const clauseText = text.slice(clauseStart, match.index + likeMatch.length);
@@ -94,6 +94,11 @@ function rewriteLikeClauses(filtro) {
             matchedCodes,
             identifierFields: []
         };
+
+        if (!canRewriteUsurpation(clauseText)) {
+            clauses.push(clauseInfo);
+            continue;
+        }
 
         if (!matchedCodes.length) {
             if (containsIdentificationField(clauseText)) {
@@ -135,6 +140,18 @@ function rewriteLikeClauses(filtro) {
         changed,
         clauses
     };
+}
+
+function canRewriteUsurpation(clauseText) {
+    const text = normalizeFilterText(clauseText);
+    const cnpLikePattern = /(?:^|\(|\s)cnp\s+like\s+N?\s*'((?:''|[^'])*)'/i;
+    const fullNamePattern = /\(\(\s*RTRIM\s*\(\s*ISNULL\s*\(\s*\[name\]\s*,\s*''\s*\)\s*\)\s*\+\s*' '\s*\+\s*RTRIM\s*\(\s*ISNULL\s*\(\s*surname1\s*,\s*''\s*\)\s*\)\s*\+\s*' '\s*\+\s*RTRIM\s*\(\s*ISNULL\s*\(\s*surname2\s*,\s*''\s*\)\s*\)\s*\)\s*like\s+N?\s*'((?:''|[^'])*)'/i;
+
+    return cnpLikePattern.test(text) || fullNamePattern.test(text);
+}
+
+function normalizeFilterText(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function findClauseStart(text, likeIndex) {
@@ -263,4 +280,8 @@ function containsIdentificationField(filtro) {
 
 function escapeSql(value) {
     return String(value ?? '').replace(/'/g, "''");
+}
+
+function unescapeSqlLiteral(value) {
+    return String(value ?? '').replace(/''/g, "'");
 }
