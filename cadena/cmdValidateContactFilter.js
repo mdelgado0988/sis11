@@ -20,7 +20,7 @@ const regexEntries = [
     ['E', /^E -\d{4}-\d{5}$/],
     ['E1', /^E -\d{4}-\d{6}$/],
     ['N', /^N -\d{4}-\d{5}$/],
-    ['P', /^[A-Za-z0-9]{1,13}$/],
+    ['P', /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{1,13}$/],
     ['PE', /^PE-\d{4}-\d{5}$/],
     ['PI', /^\d{2}-PI-\d{4}-\d{5}$/],
     ['R', /^\d{7}-\d{4}-\d{6}$/],
@@ -42,7 +42,7 @@ const codeFieldMap = {
     E: ['cnp'],
     E1: ['cnp'],
     N: ['cnp'],
-    P: ['passport', 'cnp'],
+    P: ['cnp'],
     PE: ['cnp'],
     PI: ['cnp'],
     R: ['nif'],
@@ -51,7 +51,7 @@ const codeFieldMap = {
     RN: ['nif'],
     RU: ['nif'],
     SC: ['nif'],
-    SE: ['passport'],
+    SE: ['cnp'],
     SP: ['cnp'],
     NT: ['nif']
 };
@@ -61,60 +61,161 @@ try {
         return { ok: true, msg: 'Nada que filtrar', filter };
     }
 
-    const likeValue = extractLikeValue(filter);
-    const matchedCodes = getMatchedCodes(likeValue);
-
-    if (!matchedCodes.length) {
-        if (containsIdentificationField(filter)) {
-            return {
-                ok: true,
-                msg: 'Filtro sin cambios',
-                filter,
-                likeValue,
-                matchedCodes
-            };
-        }
-
-        const fallbackFilter = buildIdentifierFilter(likeValue, ['cnp', 'nif']);
-        filter = `(${filter}) OR (${fallbackFilter})`;
-
-        return {
-            ok: true,
-            msg: 'Filtro sobreescrito',
-            filter,
-            likeValue,
-            matchedCodes,
-            identifierFields: ['cnp', 'nif'],
-            identifierFilter: fallbackFilter
-        };
-    }
-
-    const identifierFields = getIdentifierFields(matchedCodes);
-    const identifierFilter = buildIdentifierFilter(likeValue, identifierFields);
-    filter = `(${filter}) OR (${identifierFilter})`;
+    const rewrite = rewriteLikeClauses(filter);
+    filter = rewrite.filter;
 
     return {
         ok: true,
-        msg: 'Filtro sobreescrito',
+        msg: rewrite.changed ? 'Filtro sobreescrito' : 'Filtro sin cambios',
         filter,
-        likeValue,
-        matchedCodes,
-        identifierFields,
-        identifierFilter
+        clauses: rewrite.clauses
     };
 } catch (error) {
     return { ok: false, msg: error.toString(), filter };
 }
 
-function extractLikeValue(filtro) {
-    const text = String(filtro || '').replace(/\s+/g, ' ');
-    const match = text.match(/like\s+N?\s*'([^']+)'/i);
+function rewriteLikeClauses(filtro) {
+    const text = String(filtro || '');
+    const clauses = [];
+    let changed = false;
+    const likeRegex = /like\s+N?\s*'([^']+)'/ig;
+    const replacements = [];
+    let match;
 
-    if (!match || !match[1]) {
-        return '';
+    while ((match = likeRegex.exec(text)) !== null) {
+        const likeMatch = match[0];
+        const rawValue = match[1];
+        const likeValue = String(rawValue || '').replace(/^%+|%+$/g, '').trim();
+        const matchedCodes = getMatchedCodes(likeValue);
+        const clauseStart = findClauseStart(text, match.index);
+        const clauseText = text.slice(clauseStart, match.index + likeMatch.length);
+        const clauseInfo = {
+            likeValue,
+            matchedCodes,
+            identifierFields: []
+        };
+
+        if (!matchedCodes.length) {
+            if (containsIdentificationField(clauseText)) {
+                clauses.push(clauseInfo);
+                continue;
+            }
+
+            const identifierFields = ['cnp', 'nif'];
+            const identifierFilter = buildIdentifierFilter(likeValue, identifierFields);
+            clauseInfo.identifierFields = identifierFields;
+            clauseInfo.identifierFilter = identifierFilter;
+            clauses.push(clauseInfo);
+            changed = true;
+            replacements.push({
+                start: clauseStart,
+                end: match.index + likeMatch.length,
+                value: `(${clauseText} OR ${identifierFilter})`
+            });
+            continue;
+        }
+
+        const identifierFields = getIdentifierFields(matchedCodes);
+        const identifierFilter = buildIdentifierFilter(likeValue, identifierFields);
+        clauseInfo.identifierFields = identifierFields;
+        clauseInfo.identifierFilter = identifierFilter;
+        clauses.push(clauseInfo);
+        changed = true;
+        replacements.push({
+            start: clauseStart,
+            end: match.index + likeMatch.length,
+            value: `(${clauseText} OR ${identifierFilter})`
+        });
     }
 
-    return String(match[1]).replace(/^%+|%+$/g, '').trim();
+    const rewritten = applyReplacements(text, replacements);
+
+    return {
+        filter: changed ? rewritten : text,
+        changed,
+        clauses
+    };
+}
+
+function findClauseStart(text, likeIndex) {
+    const source = String(text || '');
+    const lower = source.toLowerCase();
+    let depth = 0;
+    let inString = false;
+    let lastLogicalEnd = 0;
+
+    for (let i = 0; i < likeIndex; i++) {
+        const char = source[i];
+
+        if (char === "'") {
+            if (inString && source[i + 1] === "'") {
+                i += 1;
+                continue;
+            }
+
+            inString = !inString;
+            continue;
+        }
+
+        if (inString) {
+            continue;
+        }
+
+        if (char === "(") {
+            depth += 1;
+            continue;
+        }
+
+        if (char === ")") {
+            depth = Math.max(0, depth - 1);
+            continue;
+        }
+
+        if (depth === 0) {
+            if (isLogicalOperatorAt(lower, i, "and")) {
+                lastLogicalEnd = i + 3;
+                i += 2;
+                continue;
+            }
+
+            if (isLogicalOperatorAt(lower, i, "or")) {
+                lastLogicalEnd = i + 2;
+                i += 1;
+                continue;
+            }
+        }
+    }
+
+    let start = lastLogicalEnd;
+    while (start < likeIndex && /\s/.test(source[start])) {
+        start += 1;
+    }
+
+    return start;
+}
+
+function isLogicalOperatorAt(text, index, operator) {
+    const before = index === 0 ? " " : text[index - 1];
+    const after = text[index + operator.length] || " ";
+
+    return text.slice(index, index + operator.length) === operator
+        && /\s|\(/.test(before)
+        && /\s|\(/.test(after);
+}
+
+function applyReplacements(text, replacements) {
+    if (!Array.isArray(replacements) || replacements.length === 0) {
+        return text;
+    }
+
+    const ordered = replacements.sort((a, b) => b.start - a.start);
+    let result = String(text || '');
+
+    for (const item of ordered) {
+        result = result.slice(0, item.start) + item.value + result.slice(item.end);
+    }
+
+    return result;
 }
 
 function getMatchedCodes(value) {
@@ -142,7 +243,7 @@ function getIdentifierFields(codes) {
         return uniqueFields;
     }
 
-    return ['cnp', 'nif', 'passport'];
+    return ['cnp', 'nif'];
 }
 
 function buildIdentifierFilter(value, fields) {
@@ -157,7 +258,7 @@ function buildIdentifierFilter(value, fields) {
 }
 
 function containsIdentificationField(filtro) {
-    return /\b(cnp|nif|passport)\b/i.test(String(filtro || ''));
+    return /\b(cnp|nif)\b/i.test(String(filtro || ''));
 }
 
 function escapeSql(value) {
