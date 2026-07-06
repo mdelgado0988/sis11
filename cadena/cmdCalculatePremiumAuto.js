@@ -23,16 +23,16 @@ const tarifaAuto = [
 try {
   validateInput();
 
-  log("Calculando tarifas");
+  // log("Calculando tarifas");
   tarifas = getTarifas();
 
-  log("Calculando objeto asegurado");
+  // log("Calculando objeto asegurado");
   oaUserData = getInsuredObject();
 
-  log("Estableciendo coberturas");
+  // log("Estableciendo coberturas");
   resultCoverages = getResultCoverages();
 
-  log("Iterando coberturas para cálculos");
+  // log("Iterando coberturas para cálculos");
 
   for (let cov of poliza.Coverages) {
 
@@ -41,13 +41,13 @@ try {
 
     //log(`obj: $${JSON.stringify(obj)}`);
 
-    log(`Tarificando cobertura: ${cov.code}`);
+    // log(`Tarificando cobertura: ${cov.code}`);
     
     //find configs by coverageCode
     const configs = tarifas.filter(x => x.ccobertura == cov.code);    
     for (let tarifa of configs) {
       
-      log(`Condición: ${tarifa.condicion}`);
+      // log(`Condición: ${tarifa.condicion}`);
       const condicion = evalConfig(obj, tarifa.condicion);      
 
       //log(`Condición res: ${condicion}`);
@@ -55,23 +55,23 @@ try {
       //Si encuentro condición en verdadero recupero los valores y no continuo;
       if(condicion){
 
-        log(`Evaluando suma: ${tarifa.sumaasegurada}`);
+        // log(`Evaluando suma: ${tarifa.sumaasegurada}`);
         resultCoverage.limit = evalConfig(obj, tarifa.sumaasegurada);    
         resultCoverage.limit = n(resultCoverage.limit);   // a dos decimales
         oaUserData[`SUMA${cov.code}`] = resultCoverage.limit;
 
-        log(`Evaluando prima: ${tarifa.prima}`);
+        // log(`Evaluando prima: ${tarifa.prima}`);
         //log(`objeto: ${JSON.stringify(obj)}`);
         resultCoverage.premium = evalConfig(obj, tarifa.prima);    
         resultCoverage.premium = n(resultCoverage.premium);   // a dos decimales
         oaUserData[`PRIMA${cov.code}`] = resultCoverage.premium;
 
-        log(`Evaluando deducible}: ${tarifa.deducible}`);
+        // log(`Evaluando deducible}: ${tarifa.deducible}`);
         resultCoverage.dedutible = evalConfig(obj, tarifa.deducible);    
         resultCoverage.dedutible = n(resultCoverage.dedutible);   // a dos decimales
         oaUserData[`DEDU${cov.code}`] = resultCoverage.dedutible;
 
-        log(`Evaluando etiqueta}: ${tarifa.etiqueta}`);
+        // log(`Evaluando etiqueta}: ${tarifa.etiqueta}`);
         resultCoverage.description = evalConfig(obj, tarifa.etiqueta);    
         oaUserData[`DES${cov.code}`] = resultCoverage.description;
 
@@ -144,7 +144,7 @@ function isValidDate(value) {
 
 function getQuotationObject(coverageCode) {
 
-  log(`Calculando objeto cov: ${coverageCode}`);
+  // log(`Calculando objeto cov: ${coverageCode}`);
   
   // clonar objeto base    
   const obj = JSON.parse(JSON.stringify(oaUserData));
@@ -244,49 +244,6 @@ function getTarifas() {
 }
 
 function getInsuredObject() {
-  
-  doCmd({cmd: "RepoObjectDefinition", data:{ operation: "GET", filter: `code = '${objectDefinitionCode}'`, noTracking: true}});
-  const objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
-  if(objectDefinitionId == 0)
-    throw new Error("No se encontró configuración del objeto asegurado ")
-  
-  doCmd({
-      cmd: "LoadEntity",
-      data: {
-          entity: 'InsuredObject',
-          filter: `lifePolicyId = ${poliza.id} and objectDefinitionId in (${objectDefinitionId})`,
-          noTracking: true
-      }
-  });
-
-  if (!LoadEntity.outData) {
-      throw ' Debe guardar el objeto asegurado'
-  }
-
-  oaUserData = LoadEntity.outData?.jValues ? JSON.parse(LoadEntity.outData?.jValues) : [];
-  oaUserData = mapearCamposOA(oaUserData);
-
-  if(!oaUserData)
-    throw ' No se pudo recuperar el objeto asegurado, verifique que se haya registrado correctamente.';
-
-  oaUserData.cobtar = oaUserData.hiddenCobtar ? JSON.parse(oaUserData.hiddenCobtar) : [];  
-  oaUserData.cobtar = normalizeArray(oaUserData.cobtar);
-
-  return oaUserData;
-
-}
-
-function getResultCoverages() {
-  const coverages = [];
-
-  for (let cov of poliza.Coverages) {
-    coverages.push({ code: cov.code.toString(), limit: 0, premium: 0, dedutible: 0, description: "" });    
-  }  
-
-  return coverages;
-}
-
-function getInsuredObject() {
   doCmd({
     cmd: "RepoObjectDefinition",
     data: {
@@ -333,6 +290,30 @@ function getInsuredObject() {
   }
 
   return oaUserData;
+}
+
+function getResultCoverages() {
+  const coverages = [];
+
+  if (!Array.isArray(poliza?.Coverages)) {
+    return coverages;
+  }
+
+  for (let cov of poliza.Coverages) {
+    if (!cov || cov.code == null) {
+      continue;
+    }
+
+    coverages.push({
+      code: cov.code.toString(),
+      limit: 0,
+      premium: 0,
+      dedutible: 0,
+      description: ""
+    });
+  }
+
+  return coverages;
 }
 
 function mapearTablaConfig(data) {
@@ -586,21 +567,25 @@ function parseFechaUTCMedioDia(fechaStr) {
 /*
 *@test:
 poliza:
-  id: 3184
-  lob: 31
-  productCode: APAM1
+  id: 3435
+  lob: 6
+  productCode: "6_22"
   start: '2026-05-01'
   end: '2027-05-01'
   Coverages: 
-    - code: 163
+    - code: 12
       name: ""
-    - code: 165
+    - code: 13
       name: ""
-    - code: 166
+    - code: 14
       name: ""
-    - code: 167
+    - code: 15
       name: ""
-  MainInsured:
-    contactId: 3
+    - code: 35
+      name: ""
+    - code: 39
+      name: ""
+    - code: 90
+      name: ""
         
 */
