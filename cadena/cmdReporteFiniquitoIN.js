@@ -54,15 +54,11 @@ resultado.lifeCoverageIdsHoteleria = getCoverageIdsByCodes(policy.coverages, ["2
 
 resultado.totalhotel = sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsHoteleria);
 
-resultado.chequehotel = claim.payments.reduce((max, payment) => {
-  const aplica = (payment.detail || []).some(d =>
+resultado.chequehotel = getCurrentCheckNumber(claim.payments, payment =>
+  (payment.detail || []).some(d =>
     resultado.lifeCoverageIdsHoteleria.includes(Number(d.lifeCoverageId))
-  );
-
-  return aplica
-    ? Math.max(max, Number(payment.checkNum || 0))
-    : max;
-}, 0);
+  )
+);
 
 resultado.lifeCoverageIdsContenido = getCoverageIdsByCodes(policy.coverages, ["256", "258"]);
 
@@ -73,10 +69,7 @@ resultado.totalcontenido = sumPaymentDetailsByCoverageIds(claim.payments, result
 resultado.totaledificio = formatN2(sumPaymentDetailsExcludingCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido));
 resultado.total = formatN2(sumPaymentDetails(claim.payments));
 
-resultado.chequetotal = claim.payments.reduce(
-  (max, payment) => Math.max(max, Number(payment.checkNum || 0)),
-  0
-);
+resultado.chequetotal = getCurrentCheckNumber(claim.payments);
 
 resultado.acreedor = cessionBeneficiary.name ?? "No Tiene";
 resultado.identificacionacreedor = cessionBeneficiary.cnp ?? "";
@@ -223,6 +216,33 @@ function getCoverageIdsByCodes(coverages, codes) {
     .filter(coverage => codeSet.has(String(coverage?.code)))
     .map(coverage => Number(coverage?.id))
     .filter(id => id > 0);
+}
+
+function getCurrentCheckNumber(payments, predicate = () => true) {
+  const candidates = (payments || [])
+    .filter(payment => predicate(payment))
+    .map(payment => ({
+      checkNum: Number(payment?.checkNum || 0),
+      date: parsePaymentDate(payment?.date)
+    }))
+    .filter(item => item.checkNum > 0 && item.date);
+
+  if (!candidates.length) {
+    return 0;
+  }
+
+  candidates.sort((a, b) => {
+    const timeDiff = b.date.getTime() - a.date.getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return b.checkNum - a.checkNum;
+  });
+
+  return candidates[0].checkNum;
+}
+
+function parsePaymentDate(value) {
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? null : date;
 }
 
 function safeJson(raw, fallback) {
