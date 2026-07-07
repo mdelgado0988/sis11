@@ -63,9 +63,14 @@ function loadActivePolicies(contactId) {
     AND EXISTS (
       SELECT 1
       FROM Anniversary a
-      WHERE a.lifePolicyId = LifePolicy.id
+      WHERE a.lifePolicyId = LifePolicy.id AND a.entityState = 'EXECUTED'
         AND a.anniversary >= CAST(GETDATE() AS DATE)
         AND a.[start] <= CAST(GETDATE() AS DATE)
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM Insured a
+      WHERE a.lifePolicyId = LifePolicy.id AND a.role = '0' AND a.contactId = ${contactId}
     )
   `;
 
@@ -98,11 +103,15 @@ function buildBaseDto(policies) {
 }
 
 function buildFullDto(policies) {
+  const today = getBusinessTodayDatePart();
+
   const rows = policies.flatMap(policy => {
     const anniversaries = asArray(policy?.Anniversaries);
     const payPlans = asArray(policy?.PayPlan);
 
-    return anniversaries.map(ann => {
+    return anniversaries
+      .filter(ann => isActiveAnniversary(ann, today))
+      .map(ann => {
       const contractYear = Number(ann?.contractYear ?? 0);
       const payPlansForAnn = payPlans.filter(pp => Number(pp?.contractYear ?? 0) === contractYear);
 
@@ -122,8 +131,8 @@ function buildFullDto(policies) {
         Moneda: 0,
         Titularidad: "",
         rol: "",
-        FechaInicio: ann?.start ? toSqlDateTime(ann.start) : null,
-        FechaFin: ann?.anniversary ? toSqlDateTime(ann.anniversary) : null,
+        FechaInicio: ann?.start ? formatBusinessDateTime(ann.start) : null,
+        FechaFin: ann?.anniversary ? formatBusinessDateTime(ann.anniversary) : null,
         PrimaAnual: montoPrima,
         SaldoPrima: round2(montoPrima - montoPagado),
         MontoPagado: montoPagado,
@@ -199,21 +208,83 @@ function getPolicyLobCode(policy) {
   return String(policy?.Lob?.code ?? policy?.lob ?? "").trim();
 }
 
-function toSqlDateTime(fecha) {
-  const d = fecha instanceof Date ? fecha : new Date(fecha);
-  if (Number.isNaN(d.getTime())) {
+function isActiveAnniversary(anniversary, today) {
+  const startDate = toBusinessDatePart(anniversary?.start);
+  const endDate = toBusinessDatePart(anniversary?.anniversary);
+
+  if (!startDate || !endDate || !today) {
+    return false;
+  }
+
+  return endDate >= today && startDate <= today;
+}
+
+function getBusinessTodayDatePart() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toBusinessDatePart(value) {
+  if (value == null || value === "") {
     return null;
   }
 
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const seconds = String(d.getSeconds()).padStart(2, "0");
-  const milliseconds = String(d.getMilliseconds()).padStart(3, "0");
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
 
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const text = String(value).trim();
+  const dateMatch = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return dateMatch ? dateMatch[1] : null;
+}
+
+function formatBusinessDateTime(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
+
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    const hours = String(value.getUTCHours()).padStart(2, "0");
+    const minutes = String(value.getUTCMinutes()).padStart(2, "0");
+    const seconds = String(value.getUTCSeconds()).padStart(2, "0");
+    const milliseconds = String(value.getUTCMilliseconds()).padStart(3, "0");
+
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+  }
+
+  const text = String(value).trim();
+  const normalized = text
+    .replace("T", " ")
+    .replace(/Z$/i, "")
+    .replace(/[+-]\d{2}:\d{2}$/, "");
+
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?)?$/);
+  if (!match) {
+    return null;
+  }
+
+  const datePart = match[1];
+  const timePart = match[2] || "00:00:00";
+  const msPart = (match[3] || "000").padEnd(3, "0").slice(0, 3);
+
+  return `${datePart} ${timePart}.${msPart}`;
 }
 
 /*
