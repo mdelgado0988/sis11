@@ -1,23 +1,23 @@
 use sis11
 go
 
-DECLARE  @Fecha DATE = '20260501'
-		,@ramo varchar(50) = null
+DECLARE  @Fecha DATE = '20260730'
+		,@ramo varchar(50) = '1'
 		,@producto varchar(50) = null,
-		@poliza varchar(50) = null,
+		@poliza varchar(50) = 'IN-GL-000160',
 		@holder varchar(50) = null
 
 SELECT 
 
     ROW_NUMBER() OVER (ORDER BY p.code) AS Id,
-    ISNULL(p.fiscalNumber, 0) AS Recibo,
+	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,'0') END AS Recibo,
     p.code AS [Póliza],
     0 AS Ref_Banco,
     pr.name AS Ramo,
     p.commercial AS [Plan],
-    CONVERT(VARCHAR,p.created,103) AS [F. Ingreso],
-    CONVERT(VARCHAR,p.[start],103) AS Desde,
-    CONVERT(VARCHAR,p.[end],103)   AS Hasta,
+    CASE WHEN ISNULL(an.contractYear,0) = 1 THEN CONVERT(VARCHAR,an.executionDate,103) else CONVERT(VARCHAR,p.created,103) END AS [F. Ingreso],
+    CONVERT(VARCHAR,fechas.[start],103) AS Desde,
+    CONVERT(VARCHAR,fechas.[end],103)   AS Hasta,
     p.holderId AS [Cod. Tenedor],
     c.id [Id Cliente],
     ISNULL(c.nationalId,'0') AS Cobis,
@@ -30,7 +30,8 @@ SELECT
     CASE WHEN c.isPerson = 1 THEN ISNULL(c.cnp, '0') ELSE '0' END AS [IDENTIDAD PERSONAL],
     CASE WHEN c.isPerson = 0 THEN ISNULL(c.nif, '0') ELSE '0' END AS RUC,
     CASE WHEN c.isPerson = 1 THEN 'NATURAL' ELSE 'JURIDICA' END AS [TIPO PERSONA],
-    [cuota].Cuotas,
+    /*[cuota].Cuotas,*/
+	s.Cuotas,
 	ISNULL(pm.name, '') AS [Forma cobro],
 
     CASE
@@ -77,12 +78,18 @@ SELECT
     0 AS Descuento
 
 FROM LifePolicy p
+LEFT JOIN Anniversary an on an.lifePolicyId = p.id AND (an.entityState = 'EXECUTED' OR an.contractYear <= 1)
+OUTER APPLY (SELECT CASE WHEN an.[start] IS NOT NULL THEN an.[start] ELSE p.[start] END AS [start]
+				, CASE WHEN an.anniversary IS NOT NULL THEN an.anniversary ELSE p.[end] END AS [end]) fechas
+
+/* información de la póliza según snapshot  */
+LEFT JOIN [dbo].[FiscalDocGenerated] fr ON fr.policyId = p.id AND fr.[action] = 'IssuePolicy'
 INNER JOIN Product pr ON pr.code = p.productCode
 INNER JOIN Contact c  ON c.id = p.holderId
 LEFT JOIN Contact ac ON ac.id = p.cessionBeneficiary
 LEFT JOIN Contact sl ON sl.id = p.sellerId
 
-OUTER APPLY (
+/*OUTER APPLY (
     SELECT
         CONCAT_WS('/',
             (SELECT TOP (1) pp2.numberInYear
@@ -94,11 +101,11 @@ OUTER APPLY (
                   FROM PayPlan pp3
                   WHERE pp3.lifePolicyId = p.id) AS VARCHAR(10))
         ) AS Cuotas
-) AS [cuota]
+) AS [cuota]*/
 
 OUTER APPLY (SELECT TOP (1) 1 Tiene
 			 FROM PayPlan pl
-			 WHERE pl.lifePolicyId = p.id
+			 WHERE pl.lifePolicyId = p.id AND pl.contractYear = ISNULL(an.contractYear,pl.contractYear)
 			 AND pl.payed = 0 AND pl.minimum > 0) tpl
 
 LEFT JOIN PaymentMethodCatalog pm ON pm.code = p.paymentMethod
@@ -173,8 +180,10 @@ OUTER APPLY (
               ELSE 0
         END) AS [Vencido]
 
+		,COUNT(DISTINCT pp.numberInYear) Cuotas
+
     FROM PayPlan pp
-    WHERE pp.lifePolicyId = p.id
+    WHERE pp.lifePolicyId = p.id AND pp.contractYear = ISNULL(an.contractYear,pp.contractYear)
 ) AS [s]
 
 /*-- Objeto Asegurado */
@@ -202,7 +211,7 @@ OUTER APPLY (
 ) oa
 
 WHERE
-    @Fecha BETWEEN p.[start] AND p.[end]
+    ((@Fecha BETWEEN fechas.[start] AND fechas.[end]) OR ISNULL([s].Pendiente, 0) <> 0)
     AND (@ramo IS NULL OR p.lob = @ramo)
     AND (@poliza IS NULL OR p.code = @poliza)
     AND (@producto IS NULL OR p.productCode = @producto)
