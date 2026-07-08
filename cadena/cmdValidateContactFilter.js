@@ -36,7 +36,7 @@ const regexEntries = [
 
 const codeFieldMap = {
     AV: ['cnp'],
-    C: ['nif'],
+    C: ['cnp'],
     CI: ['cnp'],
     CO: ['nif'],
     E: ['cnp'],
