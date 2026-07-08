@@ -44,7 +44,8 @@ const resultado = ExeChain?.outData ?? {};
 
 resultado.coverageCode = cov.code;
 resultado.sumaCoberturasRiesgoReaseguro = sumaCoberturasRiesgoReaseguro;
-resultado.primaTecnica = Math.round((cov.premium * 0.9) * 100) / 100;
+resultado.primaNoTecnica = Math.round((cov.premium * 0.1) * 100) / 100;
+resultado.primaTecnica = n2(cov.premium - resultado.primaNoTecnica);
 const resto = resultado.resto;
 resultado.suma = cov.limit;
 resultado.prima = cov.premium;
@@ -52,7 +53,7 @@ resultado.sumaDistribuye = Math.min(resultado.sumaCoberturasRiesgoReaseguro, res
 
 //Calculo si existe algo facultativo que distribuir (Suma total de coberturas - resto según cúmulo)
 resultado.sumaFac = n2(resultado.sumaCoberturasRiesgoReaseguro - resultado.sumaDistribuye);
-resultado.proporcionFac = (resultado.sumaFac / resultado.sumaCoberturasRiesgoReaseguro);
+resultado.proporcionFac = safeDivide(resultado.sumaFac, resultado.sumaCoberturasRiesgoReaseguro);
 resultado.proporcionContrato = 1.00 - resultado.proporcionFac;
 
 //resultado.proporcionDistribuye = (resultado.sumaDistribuye / resultado.suma);
@@ -65,6 +66,8 @@ resultado.ced = n2(resultado.sumaContrato - resultado.re);
 resultado.cedantPremium = n2(resultado.primaContrato * 0.35);
 resultado.reinsurerPremium = n2(resultado.primaContrato - (resultado.cedantPremium));
 resultado.primaFac = n2(resultado.primaTecnica - (resultado.cedantPremium + resultado.reinsurerPremium));
+
+validatePremiumTotals(resultado);
 
 //doCmd({cmd: "GetPing", data: {resultado: resultado}});
 
@@ -146,6 +149,28 @@ function mapearTablaConfig(data) {
 
 function normalizeCondition(value) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+function safeDivide(numerator, denominator) {
+  const den = Number(denominator ?? 0);
+  if (!Number.isFinite(den) || den === 0) {
+    return 0;
+  }
+
+  return n2(Number(numerator ?? 0) / den);
+}
+
+function validatePremiumTotals(resultado) {
+  const totalAllocated = n2(
+    Number(resultado?.primaFac ?? 0)
+    + Number(resultado?.cedantPremium ?? 0)
+    + Number(resultado?.reinsurerPremium ?? 0)
+  );
+  const basePremium = n2(resultado?.primaTecnica ?? 0);
+
+  if (totalAllocated > basePremium) {
+    throw new Error("La suma de primaFac, cedantPremium y reinsurerPremium no puede exceder la prima tecnica");
+  }
 }
 
 /*
