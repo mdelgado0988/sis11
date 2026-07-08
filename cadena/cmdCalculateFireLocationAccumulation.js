@@ -23,7 +23,7 @@ try {
 
   const posicion = loadPolicyLocation(policyId);
   if (!posicion?.userData) {
-    throw new Error("No se encontro un objeto asegurado valido para calcular el cumulo");
+    throw new Error("No se encontró un objeto asegurado válido para calcular el cúmulo");
   }
 
   const { cmbEdificios, cmbBarriadas } = posicion.userData;
@@ -31,12 +31,12 @@ try {
   const fieldValue = hasValue(cmbEdificios) ? String(cmbEdificios) : String(cmbBarriadas);
 
   if (!hasValue(fieldValue)) {
-    throw new Error("No se selecciono edificio ni barriada");
+    throw new Error("No se seleccionó edificio ni barriada");
   }
 
   const configuracionCumulo = loadConfiguracionCumulo(contractId, currency);
   if (!configuracionCumulo.length) {
-    throw new Error("No se encontro configuracion de cumulo para la moneda y contrato indicados");
+    throw new Error("No se encontró configuración de cúmulo para la moneda y contrato indicados");
   }
 
   const limite = parseFloat(configuracionCumulo?.[0]?.capacity ?? 0);
@@ -51,7 +51,7 @@ try {
   });
 
   if (!DoQuery?.ok) {
-    throw new Error(DoQuery?.msg || "No fue posible ejecutar la consulta de cumulo");
+    throw new Error(DoQuery?.msg || "No fue posible ejecutar la consulta de cúmulo");
   }
 
   const rows = asArray(DoQuery?.outData);
@@ -69,7 +69,7 @@ try {
 
   return {
     ok: true,
-    msg: "Cumulo calculado correctamente",
+    msg: "Cúmulo calculado correctamente",
     limite: n2(limite),
     cumulo: n2(cumuloTotal),
     resto: n2(resto),

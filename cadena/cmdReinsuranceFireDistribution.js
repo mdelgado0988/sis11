@@ -42,22 +42,28 @@ if (!ExeChain?.ok) {
 
 const resultado = ExeChain?.outData ?? {};
 
+resultado.coverageCode = cov.code;
 resultado.sumaCoberturasRiesgoReaseguro = sumaCoberturasRiesgoReaseguro;
 resultado.primaTecnica = Math.round((cov.premium * 0.9) * 100) / 100;
 const resto = resultado.resto;
 resultado.suma = cov.limit;
 resultado.prima = cov.premium;
-resultado.sumaDistribuye = Math.min(resultado.suma, resto);
-resultado.proporcionDistribuye = (resultado.sumaDistribuye / resultado.suma);
-resultado.primaDistribuye = n2(resultado.proporcionDistribuye * resultado.primaTecnica);
-resultado.re = n2(resultado.sumaDistribuye * 0.65);
-resultado.ced = n2(resultado.sumaDistribuye - resultado.re);
+resultado.sumaDistribuye = Math.min(resultado.sumaCoberturasRiesgoReaseguro, resto);
+
+//Calculo si existe algo facultativo que distribuir (Suma total de coberturas - resto según cúmulo)
+resultado.sumaFac = n2(resultado.sumaCoberturasRiesgoReaseguro - resultado.sumaDistribuye);
+resultado.proporcionFac = (resultado.sumaFac / resultado.sumaCoberturasRiesgoReaseguro);
+resultado.proporcionContrato = 1.00 - resultado.proporcionFac;
+
+//resultado.proporcionDistribuye = (resultado.sumaDistribuye / resultado.suma);
+resultado.primaContrato = n2(resultado.proporcionContrato * resultado.primaTecnica);
+resultado.sumaContrato = n2(resultado.suma * resultado.proporcionContrato);
+resultado.re = n2(resultado.sumaContrato * 0.65);
+resultado.ced = n2(resultado.sumaContrato - resultado.re);
 
 //calculos finales
-resultado.cedantPremium = n2(resultado.primaDistribuye * 0.35);
-resultado.reinsurerPremium = n2(resultado.primaDistribuye - (resultado.cedantPremium));
-
-resultado.sumaFac = n2(resultado.suma - resultado.sumaDistribuye);
+resultado.cedantPremium = n2(resultado.primaContrato * 0.35);
+resultado.reinsurerPremium = n2(resultado.primaContrato - (resultado.cedantPremium));
 resultado.primaFac = n2(resultado.primaTecnica - (resultado.cedantPremium + resultado.reinsurerPremium));
 
 //doCmd({cmd: "GetPing", data: {resultado: resultado}});
