@@ -51,7 +51,7 @@ const codeFieldMap = {
     RN: ['nif'],
     RU: ['nif'],
     SC: ['nif'],
-    SE: ['cnp'],
+    SE: ['nif'],
     SP: ['cnp'],
     NT: ['nif']
 };
