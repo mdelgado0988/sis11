@@ -52,8 +52,8 @@ resultado.prima = cov.premium;
 resultado.sumaDistribuye = Math.min(resultado.sumaCoberturasRiesgoReaseguro, resto);
 
 //Calculo si existe algo facultativo que distribuir (Suma total de coberturas - resto según cúmulo)
-resultado.sumaFac = n2(resultado.sumaCoberturasRiesgoReaseguro - resultado.sumaDistribuye);
-resultado.proporcionFac = safeDivide(resultado.sumaFac, resultado.sumaCoberturasRiesgoReaseguro);
+resultado.sumaFacultativaExceso = n2(resultado.sumaCoberturasRiesgoReaseguro - resultado.sumaDistribuye);
+resultado.proporcionFac = safeDivide(resultado.sumaFacultativaExceso, resultado.sumaCoberturasRiesgoReaseguro);
 resultado.proporcionContrato = 1.00 - resultado.proporcionFac;
 
 //resultado.proporcionDistribuye = (resultado.sumaDistribuye / resultado.suma);
@@ -66,6 +66,7 @@ resultado.ced = n2(resultado.sumaContrato - resultado.re);
 resultado.cedantPremium = n2(resultado.primaContrato * 0.35);
 resultado.reinsurerPremium = n2(resultado.primaContrato - (resultado.cedantPremium));
 resultado.primaFac = n2(resultado.primaTecnica - (resultado.cedantPremium + resultado.reinsurerPremium));
+resultado.sumaFac = n2(resultado.suma - (resultado.re + resultado.ced));
 
 validatePremiumTotals(resultado);
 
@@ -157,7 +158,7 @@ function safeDivide(numerator, denominator) {
     return 0;
   }
 
-  return n2(Number(numerator ?? 0) / den);
+  return Number(numerator ?? 0) / den;
 }
 
 function validatePremiumTotals(resultado) {

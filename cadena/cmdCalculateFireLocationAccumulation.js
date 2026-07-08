@@ -15,7 +15,6 @@ let inicio = Date.now();
 try {
   const policyId = validateInput(context);
   const policy = loadPolicyData(policyId);
-  const contractId = 16;
   const fDesde = policy.start;
   const currency = policy.currency;
   const insuredSum = Number(policy.insuredSum ?? 0);
@@ -34,7 +33,7 @@ try {
     throw new Error("No se seleccionó edificio ni barriada");
   }
 
-  const configuracionCumulo = loadConfiguracionCumulo(contractId, currency);
+  const configuracionCumulo = loadConfiguracionCumulo(currency);
   if (!configuracionCumulo.length) {
     throw new Error("No se encontró configuración de cúmulo para la moneda y contrato indicados");
   }
@@ -146,7 +145,7 @@ function validateInput(source) {
   return policyId;
 }
 
-function loadConfiguracionCumulo(contractId, currency) {
+function loadConfiguracionCumulo(currency) {
   doCmd({
     cmd: "GetFullTable",
     data: { table: "tblCapacidadEdificios" }
@@ -157,8 +156,7 @@ function loadConfiguracionCumulo(contractId, currency) {
   }
 
   return mapearTablaConfig(GetFullTable.outData ?? [])
-    .filter(x => String(x.contractId ?? "").trim() === String(contractId).trim()
-      && String(x.currency ?? "").trim() === String(currency).trim());
+    .filter(x => String(x.currency ?? "").trim() === String(currency).trim());
 }
 
 function buildCumuloQuery(campo, valor, currentYear, currency, lob, objectDefinitionId) {
@@ -167,13 +165,17 @@ SELECT io.lifePolicyId, pol.code, JSON_VALUE(j.value, '$.name') AS name, JSON_VA
        f.[start], f.[end], pol.insuredSum
 FROM insuredObject io
 INNER JOIN LifePolicy pol ON pol.id = io.lifePolicyId
-LEFT JOIN Anniversary an
-    ON an.lifePolicyId = pol.id
-   AND an.entityState = 'EXECUTED'
 OUTER APPLY (
     SELECT
+        TOP 1
         ISNULL(an.[start], pol.[start]) AS [start],
         ISNULL(an.anniversary, pol.[end]) AS [end]
+    FROM Anniversary an
+    WHERE an.lifePolicyId = pol.id
+      AND an.entityState = 'EXECUTED'
+      AND CAST(ISNULL(an.anniversary, pol.[end]) AS DATE) >= DATEFROMPARTS(${Number(currentYear)}, 1, 1)
+      AND CAST(ISNULL(an.[start], pol.[start]) AS DATE) <= DATEFROMPARTS(${Number(currentYear)}, 12, 31)
+    ORDER BY ISNULL(an.anniversary, pol.[end]) DESC, ISNULL(an.[start], pol.[start]) DESC, an.id DESC
 ) f
 CROSS APPLY OPENJSON(
     CASE
@@ -188,8 +190,8 @@ WHERE io.objectDefinitionId = '${escapeSqlString(objectDefinitionId)}'
   AND pol.lob = ${Number(lob)}
   AND JSON_VALUE(j.value, '$.name') = '${escapeSqlString(campo)}'
   AND JSON_VALUE(j.value, '$.userData[0]') = '${escapeSqlString(valor)}'
-  AND CAST(f.[end] AS DATE) >= DATEFROMPARTS(${Number(currentYear)}, 1, 1)
-  AND CAST(f.[start] AS DATE) <= DATEFROMPARTS(${Number(currentYear)}, 12, 31)`;
+  AND f.[start] IS NOT NULL
+  AND f.[end] IS NOT NULL`;
 }
 
 function mapearTablaConfig(data) {
