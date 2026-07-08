@@ -209,6 +209,8 @@
         const response = await exe('RepoCession',{ operation:'GET', filter });
         if(!response.ok) throw new Error(response.msg);
         const rows = getRows(response);
+        const policyMap = await loadPolicyExportData(rows);
+        const changeMap = await loadChangeExportData(rows);
         
         // Group by policy
         const grouped = rows.reduce((group, cession) => {
@@ -243,10 +245,15 @@
 
             const product = products.find(p => p.parent === cession.LoB && normalizarTexto(p.label) === normalizarTexto(cession.product))
             cession.productCode = product ? product.value : "";
+            const policyInfo = policyMap[String(cession.lifePolicyId || '')] || {};
+            const changeInfo = changeMap[String(cession.changeId || '')] || {};
+            const emissionDate = getEmissionDateForGrid(cession, policyInfo, changeInfo);
+            const rawPremiumType = String(cession.premiumType || '').toUpperCase();
 
             if (groupIndex >= 0) {
 
                 const pol = group[groupIndex];
+                pol.rawPremiumType = pol.rawPremiumType || rawPremiumType;
 
                 pol.cessions = (pol.cessions || []);
                 pol.cessions.push(cession);               
@@ -285,9 +292,10 @@
                     lob: cession.LoB,
                     policyCode: cession.policyCode,
                     insuredName: String(cession.insuredName || cession.holderName).trim(),
-                    date: cession.start,
+                    date: emissionDate,
 
                     premiumType: premiumTypeTranslate[cession.premiumType] || cession.premiumType,
+                    rawPremiumType,
 
                     product: cession.product,
                     changeId: cession.changeId,
@@ -322,6 +330,7 @@
 
                     cessions: [cession]
                 };
+                newPol.rawPremiumType = rawPremiumType;
 
                 const totalSum = Number(newPol.sumInsuredCedant || 0) + Number(newPol.sumInsuredRe || 0);
                 newPol.sumInsured = totalSum;
@@ -922,8 +931,9 @@
               XLSX.utils.book_append_sheet(wb, ws2, 'Salvage Cessions');
             } else
             if (isBordereauFlatExport(data, docName)) {
-              const policyMap = await loadPolicyFiscalNumbers(data);
-              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row, policyMap));
+              const policyMap = await loadPolicyExportData(data);
+              const changeMap = await loadChangeExportData(data);
+              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row, policyMap, changeMap));
               const ws = XLSX.utils.json_to_sheet(groupedData);
               XLSX.utils.book_append_sheet(wb, ws, 'Bordereau');
             } else {
@@ -962,7 +972,7 @@
       return /salvamento/i.test(String(docName || '')) || Object.prototype.hasOwnProperty.call((data || [])[0] || {}, 'income');
     }
 
-    async function loadPolicyFiscalNumbers(data) {
+    async function loadPolicyExportData(data) {
       const ids = Array.from(new Set((data || []).map(row => Number(row && row.lifePolicyId || 0)).filter(Boolean)));
       const map = {};
 
@@ -971,20 +981,48 @@
       }
 
       const filter = `id in (${ids.join(',')})`;
-      const response = await exe('RepoLifePolicy', { operation: 'GET', filter, fields: 'id,fiscalNumber' });
+      const response = await exe('RepoLifePolicy', { operation: 'GET', filter, fields: 'id,fiscalNumber,activeDate' });
       if (!response || !response.ok) {
         return map;
       }
 
       getRows(response).forEach(item => {
-        map[String(item.id)] = item.fiscalNumber || '';
+        map[String(item.id)] = {
+          fiscalNumber: item.fiscalNumber || '',
+          activeDate: item.activeDate || ''
+        };
       });
 
       return map;
     }
 
-    function mapGroupedBordereauRowForExport(row = {}, policyMap = {}) {
+    async function loadChangeExportData(data) {
+      const ids = Array.from(new Set((data || []).map(row => Number(row && row.changeId || 0)).filter(Boolean)));
+      const map = {};
+
+      if (!ids.length) {
+        return map;
+      }
+
+      const filter = `id in (${ids.join(',')})`;
+      const response = await exe('RepoChange', { operation: 'GET', filter, fields: 'id,executionDate' });
+      if (!response || !response.ok) {
+        return map;
+      }
+
+      getRows(response).forEach(item => {
+        map[String(item.id)] = {
+          executionDate: item.executionDate || ''
+        };
+      });
+
+      return map;
+    }
+
+    function mapGroupedBordereauRowForExport(row = {}, policyMap = {}, changeMap = {}) {
       const first = getFirstCession(row);
+      const policyInfo = policyMap[String(row.lifePolicyId || '')] || {};
+      const changeInfo = changeMap[String(row.changeId || '')] || {};
       const cserie = getCserieFromContractId(row.contractId);
       const sumInsured100 = Number(row.sumInsuredComputed || row.sumInsured || 0);
       const sumRet = Number(row.sumInsuredCedant || 0);
@@ -1011,17 +1049,18 @@
       const netCuotaParte = roundMoney(netCuotaParteRaw);
       const netExcedente = roundMoney(netExcedenteRaw);
       const netFacultativo = roundMoney(netFacultativoRaw);
+      const emissionDate = getEmissionDateForExport(row, first, policyInfo, changeInfo);
 
       return {
         id: row.lifePolicyId || '',
         Ramo: getLobDescription(row.lob),
         Plan: row.product || first.product || first.plan || '',
         Poliza: row.policyCode || '',
-        Recibo: policyMap[String(row.lifePolicyId || '')] || first.receipt || first.recibo || first.receiptNumber || first.fiscalNumber || '',
+        Recibo: (policyMap[String(row.lifePolicyId || '')] || {}).fiscalNumber || first.receipt || first.recibo || first.receiptNumber || first.fiscalNumber || '',
         Tipo: row.premiumType || first.premiumType || '',
         Contratante: first.holderName || first.contratante || row.contractId || '',
         Asegurado: row.insuredName || first.insuredName || '',
-        'Fecha Emision': formatExportDate(first.date || first.created || row.date),
+        'Fecha Emision': formatExportDate(emissionDate),
         'Fecha Desde': formatExportDate(first.start || row.date),
         'Fecha Hasta': formatExportDate(first.end || ''),
         'Suma Asegurada 100%': formatExportMoney(sumInsured100),
@@ -1049,6 +1088,40 @@
         'Reaseguro por Pagar': formatExportMoney(roundMoney(netCuotaParteRaw + netExcedenteRaw + netFacultativoRaw)),
         cserie: cserie || first.cserie || row.cserie || ''
       };
+    }
+
+    function getEmissionDateForExport(row = {}, first = {}, policyInfo = {}, changeInfo = {}) {
+      const premiumType = normalizeMovementType(row, first);
+
+      if (premiumType === 'CHANGE') {
+        return changeInfo.executionDate || first.executionDate || row.executionDate || first.created || row.created || first.date || row.date || '';
+      }
+
+      return policyInfo.activeDate || row.activeDate || first.activeDate || first.date || first.created || row.date || '';
+    }
+
+    function getEmissionDateForGrid(cession = {}, policyInfo = {}, changeInfo = {}) {
+      const premiumType = normalizeMovementType(cession);
+
+      if (premiumType === 'CHANGE') {
+        return changeInfo.executionDate || cession.executionDate || cession.changeExecutionDate || cession.changeDate || cession.created || cession.start || policyInfo.activeDate || '';
+      }
+
+      return policyInfo.activeDate || cession.activeDate || cession.start || cession.created || '';
+    }
+
+    function normalizeMovementType(row = {}, fallback = {}) {
+      const rawType = String(row.rawPremiumType || row.premiumType || fallback.rawPremiumType || fallback.premiumType || '').trim().toUpperCase();
+
+      if (!rawType) {
+        return '';
+      }
+
+      if (rawType === 'ENDOSO') {
+        return 'CHANGE';
+      }
+
+      return rawType;
     }
 
     function getCserieFromContractId(contractId) {
