@@ -638,6 +638,8 @@
       return `(${[
         `(premiumType='NEW' AND lifepolicyId IN (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${start}' AND '${end}'))`,
         `(premiumType='CHANGE' AND changeId IN (SELECT id FROM Change WHERE ${sqlDateField('executionDate')} BETWEEN '${start}' AND '${end}'))`,
+        `(premiumType='CANCELLATION' AND changeId IN (SELECT id FROM Change WHERE ${sqlDateField('executionDate')} BETWEEN '${start}' AND '${end}'))`,
+        `(premiumType='ACTIVE' AND lifepolicyId IN (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${start}' AND '${end}'))`,
         `(premiumType='ANNIVERSARY' AND anniversaryId IN (SELECT id FROM Anniversary WHERE ${sqlDateField('executionDate')} BETWEEN '${start}' AND '${end}'))`
       ].join(' OR ')})`;
     }
@@ -698,9 +700,11 @@
           let [ from, to ] = value;
           from = formatSqlDate(from);
           to = formatSqlDate(to);
-          return `(premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }') OR
-                  premiumType='ANNIVERSARY' AND anniversaryId in (SELECT id FROM Anniversary WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }') OR
-              premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE ${sqlDateField('creationDate')} between '${ from }' AND  '${ to }'))`
+          return `((premiumType='NEW' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }')) OR
+                  (premiumType='ACTIVE' AND lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }')) OR
+                  (premiumType='ANNIVERSARY' AND anniversaryId in (SELECT id FROM Anniversary WHERE ${sqlDateField('created')} between '${ from }' AND  '${ to }')) OR
+                  (premiumType='CHANGE' AND changeId in (SELECT id FROM Change WHERE ${sqlDateField('creationDate')} between '${ from }' AND  '${ to }')) OR
+                  (premiumType='CANCELLATION' AND changeId in (SELECT id FROM Change WHERE ${sqlDateField('creationDate')} between '${ from }' AND  '${ to }')))`
         },
         policyId: value => {
           if(!value) return null;
@@ -1174,6 +1178,10 @@
         return changeInfo.executionDate || first.executionDate || row.executionDate || first.created || row.created || first.date || row.date || '';
       }
 
+      if (premiumType === 'CANCELLATION') {
+        return changeInfo.executionDate || first.executionDate || row.executionDate || first.created || row.created || first.date || row.date || policyInfo.activeDate || '';
+      }
+
       if (premiumType === 'ANNIVERSARY') {
         return anniversaryInfo.executionDate || first.executionDate || row.executionDate || first.created || row.created || first.date || row.date || policyInfo.activeDate || '';
       }
@@ -1185,6 +1193,10 @@
       const premiumType = normalizeMovementType(cession);
 
       if (premiumType === 'CHANGE') {
+        return changeInfo.executionDate || cession.executionDate || cession.changeExecutionDate || cession.changeDate || cession.created || cession.start || policyInfo.activeDate || '';
+      }
+
+      if (premiumType === 'CANCELLATION') {
         return changeInfo.executionDate || cession.executionDate || cession.changeExecutionDate || cession.changeDate || cession.created || cession.start || policyInfo.activeDate || '';
       }
 
