@@ -95,7 +95,7 @@
           const { from, to } = getMonthDateBounds(dateFilter);
           switch(cmdOption){
             case 'RepoCession':
-              filter.push(`lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${from}' AND '${to}')`);
+              filter.push(buildCessionEmissionFilter(from, to));
               break;
             case 'RepoLossCession':
               filter.push(`${sqlDateField('[claimOccurrence]')} BETWEEN '${from}' AND '${to}'`);
@@ -211,6 +211,8 @@
         const rows = getRows(response);
         const policyMap = await loadPolicyExportData(rows);
         const changeMap = await loadChangeExportData(rows);
+        const cessionAnniversaryMap = await loadCessionAnniversaryData(rows);
+        const anniversaryMap = await loadAnniversaryExportData(cessionAnniversaryMap);
         
         // Group by policy
         const grouped = rows.reduce((group, cession) => {
@@ -247,7 +249,9 @@
             cession.productCode = product ? product.value : "";
             const policyInfo = policyMap[String(cession.lifePolicyId || '')] || {};
             const changeInfo = changeMap[String(cession.changeId || '')] || {};
-            const emissionDate = getEmissionDateForGrid(cession, policyInfo, changeInfo);
+            const cessionInfo = cessionAnniversaryMap[String(cession.id || '')] || {};
+            const anniversaryInfo = anniversaryMap[String(cessionInfo.anniversaryId || '')] || {};
+            const emissionDate = getEmissionDateForGrid(cession, policyInfo, changeInfo, anniversaryInfo);
             const rawPremiumType = String(cession.premiumType || '').toUpperCase();
 
             if (groupIndex >= 0) {
@@ -623,6 +627,21 @@
       return `CAST(${fieldName} AS date)`;
     }
 
+    function buildCessionEmissionFilter(from, to) {
+      const start = formatSqlDate(from);
+      const end = formatSqlDate(to);
+
+      if (!start || !end) {
+        return null;
+      }
+
+      return `(${[
+        `(premiumType='NEW' AND lifepolicyId IN (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${start}' AND '${end}'))`,
+        `(premiumType='CHANGE' AND changeId IN (SELECT id FROM Change WHERE ${sqlDateField('executionDate')} BETWEEN '${start}' AND '${end}'))`,
+        `(premiumType='ANNIVERSARY' AND anniversaryId IN (SELECT id FROM Anniversary WHERE ${sqlDateField('executionDate')} BETWEEN '${start}' AND '${end}'))`
+      ].join(' OR ')})`;
+    }
+
     function getRows(response) {
       return (response && response.outData) || [];
     }
@@ -661,7 +680,7 @@
         date: (value) => {
           const { from, to } = getMonthDateBounds(value);
           if (!from || !to) return null;
-          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${from}' AND '${to}')`;
+          return buildCessionEmissionFilter(from, to);
         },
 
         period: (value) => {
@@ -672,7 +691,7 @@
         range: value =>{
           if(!value) return null;
           const [ from , to ] = value;
-          return `lifepolicyId in (SELECT id FROM LifePolicy WHERE ${sqlDateField('[activeDate]')} BETWEEN '${ formatSqlDate(from)}' AND '${ formatSqlDate(to)}')`
+          return buildCessionEmissionFilter(formatSqlDate(from), formatSqlDate(to));
         },
         creationRange: value => {
           if(!value) return null;
@@ -759,6 +778,7 @@
 
       return filters.join(' AND ');
     }
+
     async function getLossFilter() {
       const values = pickAllowedValues(await filterForm.validateFields(), [
         'date', 'range', 'creationRange', 'policyId', 'holderId', 'lob', 'coverageCode',
@@ -934,7 +954,9 @@
             if (isBordereauFlatExport(data, docName)) {
               const policyMap = await loadPolicyExportData(data);
               const changeMap = await loadChangeExportData(data);
-              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row, policyMap, changeMap));
+              const cessionAnniversaryMap = await loadCessionAnniversaryData(data);
+              const anniversaryMap = await loadAnniversaryExportData(cessionAnniversaryMap);
+              const groupedData = (data || []).map(row => mapGroupedBordereauRowForExport(row, policyMap, changeMap, cessionAnniversaryMap, anniversaryMap));
               const ws = XLSX.utils.json_to_sheet(groupedData);
               XLSX.utils.book_append_sheet(wb, ws, 'Bordereau');
             } else {
@@ -1020,10 +1042,64 @@
       return map;
     }
 
-    function mapGroupedBordereauRowForExport(row = {}, policyMap = {}, changeMap = {}) {
+    async function loadCessionAnniversaryData(data) {
+      const ids = Array.from(new Set(collectCessionIds(data)));
+      const map = {};
+
+      if (!ids.length) {
+        return map;
+      }
+
+      const response = await exe('LoadEntities', {
+        entity: 'Cession',
+        fields: 'id,anniversaryId',
+        filter: `id in (${ids.join(',')})`,
+        noTracking: true
+      });
+
+      if (!response || !response.ok) {
+        return map;
+      }
+
+      getRows(response).forEach(item => {
+        map[String(item.id)] = {
+          anniversaryId: Number(item.anniversaryId || 0)
+        };
+      });
+
+      return map;
+    }
+
+    async function loadAnniversaryExportData(cessionAnniversaryMap) {
+      const ids = Array.from(new Set(Object.values(cessionAnniversaryMap || {}).map(item => Number(item && item.anniversaryId || 0)).filter(Boolean)));
+      const map = {};
+
+      if (!ids.length) {
+        return map;
+      }
+
+      const filter = `id in (${ids.join(',')}) AND entityState='EXECUTED'`;
+      const response = await exe('RepoAnniversary', { operation: 'GET', filter, fields: 'id,executionDate,entityState' });
+      if (!response || !response.ok) {
+        return map;
+      }
+
+      getRows(response).forEach(item => {
+        map[String(item.id)] = {
+          executionDate: item.executionDate || ''
+        };
+      });
+
+      return map;
+    }
+
+    function mapGroupedBordereauRowForExport(row = {}, policyMap = {}, changeMap = {}, cessionAnniversaryMap = {}, anniversaryMap = {}) {
       const first = getFirstCession(row);
       const policyInfo = policyMap[String(row.lifePolicyId || '')] || {};
       const changeInfo = changeMap[String(row.changeId || '')] || {};
+      const firstCessionId = String(first.id || '').trim();
+      const firstCessionInfo = cessionAnniversaryMap[String(firstCessionId)] || {};
+      const anniversaryInfo = anniversaryMap[String(firstCessionInfo.anniversaryId || '')] || {};
       const cserie = getCserieFromContractId(row.contractId);
       const sumInsured100 = Number(row.sumInsuredComputed || row.sumInsured || 0);
       const sumRet = Number(row.sumInsuredCedant || 0);
@@ -1050,7 +1126,7 @@
       const netCuotaParte = roundMoney(netCuotaParteRaw);
       const netExcedente = roundMoney(netExcedenteRaw);
       const netFacultativo = roundMoney(netFacultativoRaw);
-      const emissionDate = getEmissionDateForExport(row, first, policyInfo, changeInfo);
+      const emissionDate = getEmissionDateForExport(row, first, policyInfo, changeInfo, anniversaryInfo);
 
       return {
         id: row.lifePolicyId || '',
@@ -1091,21 +1167,29 @@
       };
     }
 
-    function getEmissionDateForExport(row = {}, first = {}, policyInfo = {}, changeInfo = {}) {
+    function getEmissionDateForExport(row = {}, first = {}, policyInfo = {}, changeInfo = {}, anniversaryInfo = {}) {
       const premiumType = normalizeMovementType(row, first);
 
       if (premiumType === 'CHANGE') {
         return changeInfo.executionDate || first.executionDate || row.executionDate || first.created || row.created || first.date || row.date || '';
       }
 
+      if (premiumType === 'ANNIVERSARY') {
+        return anniversaryInfo.executionDate || first.executionDate || row.executionDate || first.created || row.created || first.date || row.date || policyInfo.activeDate || '';
+      }
+
       return policyInfo.activeDate || row.activeDate || first.activeDate || first.date || first.created || row.date || '';
     }
 
-    function getEmissionDateForGrid(cession = {}, policyInfo = {}, changeInfo = {}) {
+    function getEmissionDateForGrid(cession = {}, policyInfo = {}, changeInfo = {}, anniversaryInfo = {}) {
       const premiumType = normalizeMovementType(cession);
 
       if (premiumType === 'CHANGE') {
         return changeInfo.executionDate || cession.executionDate || cession.changeExecutionDate || cession.changeDate || cession.created || cession.start || policyInfo.activeDate || '';
+      }
+
+      if (premiumType === 'ANNIVERSARY') {
+        return anniversaryInfo.executionDate || cession.executionDate || cession.start || cession.created || policyInfo.activeDate || '';
       }
 
       return policyInfo.activeDate || cession.activeDate || cession.start || cession.created || '';
@@ -1123,6 +1207,27 @@
       }
 
       return rawType;
+    }
+
+    function collectCessionIds(data) {
+      return (data || []).reduce((ids, row) => {
+        if (row && Array.isArray(row.cessions) && row.cessions.length) {
+          row.cessions.forEach(cession => {
+            const id = Number(cession && cession.id || 0);
+            if (id > 0) {
+              ids.push(id);
+            }
+          });
+          return ids;
+        }
+
+        const id = Number(row && row.id || 0);
+        if (id > 0) {
+          ids.push(id);
+        }
+
+        return ids;
+      }, []);
     }
 
     function getCserieFromContractId(contractId) {
