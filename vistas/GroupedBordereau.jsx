@@ -273,7 +273,8 @@
                 pol.tax += Number(cession.tax || 0);
                 pol.premiumCedant += Number(cession.premiumCedant || 0);
                 pol.premiumRe += Number(cession.premiumRe || 0);
-                const totalPremium = Number(pol.premiumCedant || 0) + Number(pol.premiumRe || 0);
+                // Premium must match the full distribution total: retained + ceded + CAT.
+                const totalPremium = Number(pol.premiumCedant || 0) + Number(pol.premiumRe || 0) + Number(pol.nonTechnicalPremium || 0);
                 pol.premium = totalPremium;
 
                 pol.comissionCedant += Number(cession.comissionCedant || 0);
@@ -336,14 +337,14 @@
                 newPol.sumInsured = totalSum;
                 newPol.sumInsuredComputed = totalSum;
 
-                const totalPremium = Number(newPol.premiumCedant || 0) + Number(newPol.premiumRe || 0);
-                newPol.premium = totalPremium;
-
                 addLineCedTotals(newPol, cession);
                 addLinePremiumTotals(newPol, cession);
                 addLineCommissionTotals(newPol, cession);
                 addLineTaxTotals(newPol, cession);
                 addNonTechnicalPremiumOnce(newPol, cession);
+                // Premium must match the full distribution total: retained + ceded + CAT.
+                const totalPremium = Number(newPol.premiumCedant || 0) + Number(newPol.premiumRe || 0) + Number(newPol.nonTechnicalPremium || 0);
+                newPol.premium = totalPremium;
 
                 group.push(newPol);
             }
