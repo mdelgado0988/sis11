@@ -41,6 +41,7 @@ try {
   if (hasWorkspaceId) {
     workspaceSources.push({
       source: "transferWorkspaceId",
+      input: transferWorkspaceIdInput,
       value: transferWorkspaceIdInput
     });
   }
@@ -48,6 +49,7 @@ try {
   if (hasTransferId) {
     workspaceSources.push({
       source: "transferId",
+      input: transferIdInput,
       value: resolveTransferWorkspaceIdFromTransfer(transferIdInput)
     });
   }
@@ -55,15 +57,24 @@ try {
   if (hasAllocationId) {
     workspaceSources.push({
       source: "allocationId",
+      input: allocationIdInput,
       value: resolveTransferWorkspaceIdFromAllocation(allocationIdInput)
     });
   }
 
-  const resolvedWorkspaceSources = workspaceSources.filter(item => isValidId(item?.value));
+  const invalidSources = workspaceSources.filter(item => !isValidId(item?.value));
+  if (invalidSources.length) {
+    const invalidLabel = invalidSources
+      .map(item => `${item.source}=${item.input}`)
+      .join(", ");
 
-  if (!resolvedWorkspaceSources.length) {
-    return { ok: false, msg: "No fue posible identificar la caja asociada al identificador indicado." };
+    return {
+      ok: false,
+      msg: `No fue posible identificar la caja para: ${invalidLabel}.`
+    };
   }
+
+  const resolvedWorkspaceSources = workspaceSources;
 
   const transferWorkspaceId = hasWorkspaceId
     ? transferWorkspaceIdInput
@@ -148,7 +159,7 @@ function resolveTransferWorkspaceIdFromTransfer(transferId) {
 }
 
 function resolveTransferWorkspaceIdFromAllocation(allocationId) {
-  // Allocation stores the workspace directly, so we resolve the workspace from Allocation.transferWorkspaceId.
+  // Allocation stores the workspace directly in Allocation.transferWorkspaceId, so we resolve the workspace from there.
   doCmd({
     cmd: "LoadEntities",
     data: {
