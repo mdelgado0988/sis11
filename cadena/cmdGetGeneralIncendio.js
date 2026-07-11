@@ -72,6 +72,9 @@ try {
     let deductibleReturn = 0;
     let limitReturn = 0;
     let descriptionReturn = '';
+    const isCapitalChange = endoso && safeAction === 'ChangePolicyCapital';
+    const oldCapital = Number(policyGet?.poliza?.insuredSum || 0);
+    const newCapital = Number(extra?.data?.newCapital || extra?.newCapital || 0);
 
     let sentenciaprima = "";
     let sentenciadeducible = "";
@@ -96,7 +99,7 @@ try {
     var prorate = 1;
     let detail = {};
     if (endoso && extra?.data?.newCapital > 0) {
-        const sumInsured = extra.data.newCapital;
+        sumInsured = extra.data.newCapital;
 
         sumaasegurada256 =
             SA_INC =
@@ -328,8 +331,18 @@ try {
         
         //Aquí aplicamos prorrata según configuración de la tabla.
         const primaSinProrrata = premiumReturn;
-        //log(`Prima sin prorrata: ${primaSinProrrata}`);
-        if (premiumReturn > 0 && prorate > 0 && rowtarifas.usaProrrata === true) {            
+        const primaExistenteCobertura = Number(covItem?.premium || covItem?.basePremium || 0);
+
+        // GLOB-925. For ChangePolicyCapital we keep the current coverage premium as the base,
+        // calculate the premium delta produced by the capital increase, prorate only that delta,
+        // and then add the prorated delta back to the existing coverage premium.
+        if (isCapitalChange) {
+            const deltaPrima = primaSinProrrata - primaExistenteCobertura;
+            const deltaProrrateado = deltaPrima * prorate;
+
+            premiumReturn = primaExistenteCobertura + deltaProrrateado;
+            premiumReturn = Math.round((premiumReturn + Number.EPSILON) * 100) / 100;
+        } else if (premiumReturn > 0 && prorate > 0 && rowtarifas.usaProrrata === true) {            
             premiumReturn = (premiumReturn * prorate);
             //redondeamos            
             premiumReturn = Math.round((premiumReturn + Number.EPSILON) * 100) / 100;
@@ -526,10 +539,22 @@ function calculateProrateFromDates(start, end, effectiveDate) {
 
 function parseDateSafe(value) {
   if (!value) return null;
-  const date = new Date(value);
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // Normalize the business date without shifting it by local timezone rules.
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    const utcDate = new Date(Date.UTC(year, month, day));
+    return Number.isNaN(utcDate.getTime()) ? null : utcDate;
+  }
+
+  const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
 function getTarifasCatalog() {
