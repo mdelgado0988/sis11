@@ -115,7 +115,11 @@ try {
 
       const effectiveDate = extra?.data?.effectiveDate ?? extra?.effectiveDate;
 
-      if (isCapitalChange) {
+    if (isCapitalChange) {
+        // GLOB-925. For capital changes we validate the prorate from the effective date
+        // because the proration calculated by the endorsement flow can differ from the
+        // business date that should drive the final premium. We keep the date-based
+        // calculation as the source of truth for this scenario.
         prorate = calculateProrateFromDates(policyGet?.poliza?.start, policyGet?.poliza?.end, effectiveDate);
       } else if (detail?.prorate > 0) {
         prorate = detail.prorate;
@@ -570,18 +574,40 @@ function parsePanamaDateSafe(value) {
   const raw = String(value).trim();
   if (!raw) return null;
 
+  // If the payload already comes as date-only, keep the business date untouched.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parts = raw.split('-');
+    const directDate = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+    return Number.isNaN(directDate.getTime()) ? null : directDate;
+  }
+
+  const panamaDateTime = toPanamaDateTimeString(raw);
+  if (!panamaDateTime) return null;
+
+  const datePart = panamaDateTime.split(' ')[0];
+  return parseDateSafe(datePart);
+}
+
+function toPanamaDateTimeString(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return null;
+  if (Number.isNaN(date.getTime())) return '';
 
   // effectiveDate arrives in UTC. Convert it to Panama local time first so the
   // business date does not shift when the timestamp falls near midnight UTC.
   // Panama time is UTC-5 and does not use DST.
   const panamaDate = new Date(date.getTime() - (5 * 60 * 60 * 1000));
-  return new Date(Date.UTC(
-    panamaDate.getUTCFullYear(),
-    panamaDate.getUTCMonth(),
-    panamaDate.getUTCDate()
-  ));
+
+  const year = panamaDate.getUTCFullYear();
+  const month = String(panamaDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(panamaDate.getUTCDate()).padStart(2, '0');
+  const hour = String(panamaDate.getUTCHours()).padStart(2, '0');
+  const minute = String(panamaDate.getUTCMinutes()).padStart(2, '0');
+  const second = String(panamaDate.getUTCSeconds()).padStart(2, '0');
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
 function getTarifasCatalog() {
