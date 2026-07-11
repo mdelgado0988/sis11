@@ -113,10 +113,13 @@ try {
     if (endoso && !["CancellationChange","ChangeCancellation", "ChangeLoading"].includes(safeAction)) {
       detail = safeJson(extra?.data?.jDetail ?? extra?.jDetail, {});
 
-      if (detail?.prorate > 0) {
+      const effectiveDate = extra?.data?.effectiveDate ?? extra?.effectiveDate;
+
+      if (isCapitalChange) {
+        prorate = calculateProrateFromDates(policyGet?.poliza?.start, policyGet?.poliza?.end, effectiveDate);
+      } else if (detail?.prorate > 0) {
         prorate = detail.prorate;
       } else {
-        const effectiveDate = extra?.data?.effectiveDate ?? extra?.effectiveDate;
         prorate = calculateProrateFromDates(policyGet?.poliza?.start, policyGet?.poliza?.end, effectiveDate);
       }
     }
@@ -518,7 +521,7 @@ function safeJson(value, fallback) {
 function calculateProrateFromDates(start, end, effectiveDate) {
   const startDate = parseDateSafe(start);
   const endDate = parseDateSafe(end);
-  const changeDate = parseDateSafe(effectiveDate);
+  const changeDate = parsePanamaDateSafe(effectiveDate);
 
   if (!startDate || !endDate || !changeDate) {
     return 1;
@@ -559,6 +562,26 @@ function parseDateSafe(value) {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return null;
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function parsePanamaDateSafe(value) {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+
+  // effectiveDate arrives in UTC. Convert it to Panama local time first so the
+  // business date does not shift when the timestamp falls near midnight UTC.
+  // Panama time is UTC-5 and does not use DST.
+  const panamaDate = new Date(date.getTime() - (5 * 60 * 60 * 1000));
+  return new Date(Date.UTC(
+    panamaDate.getUTCFullYear(),
+    panamaDate.getUTCMonth(),
+    panamaDate.getUTCDate()
+  ));
 }
 
 function getTarifasCatalog() {
