@@ -334,14 +334,18 @@ try {
         const primaExistenteCobertura = Number(covItem?.premium || covItem?.basePremium || 0);
 
         // GLOB-925. For ChangePolicyCapital we keep the current coverage premium as the base,
-        // calculate the premium delta produced by the capital increase, prorate only that delta,
-        // and then add the prorated delta back to the existing coverage premium.
+        // calculate the premium delta produced by the capital increase, prorate only that delta
+        // when the tariff allows it, and then add the prorated delta back to the existing coverage premium.
         if (isCapitalChange) {
-            const deltaPrima = primaSinProrrata - primaExistenteCobertura;
-            const deltaProrrateado = deltaPrima * prorate;
+            if (rowtarifas.usaProrrata === true && prorate > 0) {
+                const deltaPrima = primaSinProrrata - primaExistenteCobertura;
+                const deltaProrrateado = deltaPrima * prorate;
 
-            premiumReturn = primaExistenteCobertura + deltaProrrateado;
-            premiumReturn = Math.round((premiumReturn + Number.EPSILON) * 100) / 100;
+                premiumReturn = primaExistenteCobertura + deltaProrrateado;
+                premiumReturn = Math.round((premiumReturn + Number.EPSILON) * 100) / 100;
+            } else {
+                premiumReturn = Math.round((primaSinProrrata + Number.EPSILON) * 100) / 100;
+            }
         } else if (premiumReturn > 0 && prorate > 0 && rowtarifas.usaProrrata === true) {            
             premiumReturn = (premiumReturn * prorate);
             //redondeamos            
