@@ -3,50 +3,56 @@
 /**
  * @author Noel Obando
  * @name cmdCalculateISCancellation
- * @description Calcula el "Impuesto de Seguros" basandose en la formula del producto;
+ * @description Calculates the cancellation insurance tax by reusing cmdGetCancellationPremium.
  */
-const { policyId, effectiveDate, start, end, annualPremium, annualTotal, tax, rate } = context;
-const n2 = (value) => Number(value.toFixed(2));
 
-// Get Paid Premiums.
-doCmd({cmd:'LoadEntity',data:{entity:'PayPlan',filter:`lifePolicyId=${policyId}`, fields:`SUM(payed) as paid`}});
-const { outData:{ paid }} = LoadEntity;
+const policyId = Number(context?.policyId ?? 0);
+const effectiveDate = String(context?.effectiveDate ?? "").trim();
+const rate = Number(context?.rate ?? 1);
 
-const startDate = new Date(start),
-      endDate = new Date(end),
-      changeDate = new Date(effectiveDate);
+if (!Number.isFinite(policyId) || policyId <= 0) {
+  throw new Error("La poliza es requerida para calcular el impuesto de cancelacion");
+}
 
-startDate.setHours(0, 0, 0, 0);
-endDate.setHours(0, 0, 0, 0);
-changeDate.setHours(0, 0, 0, 0);
+if (!effectiveDate) {
+  throw new Error("La fecha efectiva es requerida para calcular el impuesto de cancelacion");
+}
 
-const totalDays = Math.floor(
-  (endDate - startDate) / (1000 * 60 * 60 * 24)
-);
+doCmd({
+  cmd: "LoadEntity",
+  data: {
+    entity: "PayPlan",
+    filter: `lifePolicyId=${policyId}`,
+    fields: `SUM(payed) as paid`
+  }
+});
 
-let pastDays = Math.floor(
-  (changeDate - startDate) / (1000 * 60 * 60 * 24)
-);
+if (!LoadEntity?.ok) {
+  throw new Error(LoadEntity?.msg || "No fue posible recuperar lo pagado de la poliza");
+}
 
-if(pastDays < 0)
-  pastDays = 0;
+const paid = round2(Number(LoadEntity?.outData?.paid ?? 0));
 
-const prorate = totalDays == 0 ? 0 : (pastDays == 0 ? 1 : (pastDays / totalDays));
+doCmd({
+  cmd: "ExeChain",
+  data: {
+    chain: "cmdGetCancellationPremium",
+    context: JSON.stringify({
+      pol: { id: policyId },
+      paid: paid,
+      changeDate: effectiveDate
+    })
+  }
+});
 
-//Michael Delgado. 2026.05.22. GLOB-688. Se debe cancelar en la misma proporción que la prima.
-const porc = annualTotal == 0 ? 0 : (tax / annualTotal);
-const impPagado = n2(porc * paid);
-const impDiario = n2(totalDays == 0 ? 0 : (tax / totalDays));
-const impDevengado = n2(impDiario * pastDays);
-const resultado = n2(impDevengado - impPagado);
+if (!ExeChain?.ok) {
+  throw new Error(ExeChain?.msg || "No fue posible calcular el impuesto de cancelacion");
+}
 
-const dataLog = { impPagado: impPagado, impDiario: impDiario, impDevengado: impDevengado, resultado: resultado, pastDays: pastDays };
-//return dataLog
-//doCmd({cmd: "GetPing", data: dataLog});
+const result = round2(Number(ExeChain?.outData?.impuesto ?? 0));
 
-return resultado
+return rate ? round2(result * rate) : result;
 
-//const result = totalDays !== 0 ? annualPremium * pastDays/ totalDays - paid : 0;
-//return result * rate;
-
-
+function round2(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
