@@ -11,8 +11,9 @@ select t.cramo, t.cplan, t.ccober, 36 cendoso
 from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
+INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 6
-and t.cplan = '6_22' 
+and t.cplan = '6_23' 
 and t.cendoso = 36
 --and t.ccober = 25
 and tf.formula<> '{Qanos6}=1'
@@ -28,7 +29,7 @@ inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 where c.cramo = 6
 --AND pl.istatplan = 'V'
-and C.cplan = '6_22' 
+--and C.cplan = '6_22' 
 --AND (ISNULL(c.SA,'-1') <> '-1' OR ISNULL(c.CGRUPO,'-1') <> '-1' OR ISNULL(c.CGRUPO1,'-1') <> '-1' OR ISNULL(c.CGRUPO2,'-1') <> '-1')
 order by 1,2,4
 
