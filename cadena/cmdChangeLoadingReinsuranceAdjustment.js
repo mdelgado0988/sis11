@@ -26,7 +26,7 @@ if (normalizeText(changeInfo?.Discriminator) !== "LoadingChange") {
 
 const policyRea = getPolicyRea(changeId);
 if (!Array.isArray(policyRea) || policyRea.length === 0) {
-  return endStatement(false, "El endoso no tiene reaseguro que ajustar");
+  return endStatement(true, "El endoso no tiene reaseguro que ajustar");
 }
 
 const policyId = toValidNumber(policyRea?.[0]?.lifePolicyId);
@@ -163,6 +163,7 @@ function buildCessionUpdateSql(cessions) {
         premiumRe = ${sqlLiteral(cession?.premiumRe)},
         comissionCedant = ${sqlLiteral(cession?.comissionCedant)},
         comissionCedantExtra = ${sqlLiteral(cession?.comissionCedantExtra)},
+        tax = ${sqlLiteral(cession?.tax)},
         proportionCed = ${sqlLiteral(cession?.proportionCed)},
         proportionRe = ${sqlLiteral(cession?.proportionRe)}
       WHERE id = ${cessionId};

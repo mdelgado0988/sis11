@@ -38,28 +38,13 @@ try {
   const primas = sumMovementValues(movements, "primaNoDevengada");
   const impuestos = sumMovementValues(movements, "impuestoNoDevengado");
   const totalNoDevengado = round2(primas + impuestos);
-  const totalPagado = round2(input.paid);
-
-  const policyPremium = round2(policy?.annualPremium ?? policy?.anualPremium ?? 0);
-  const policyTax = round2(policy?.tax ?? 0);
-  const policyTotal = round2(policy?.annualTotal ?? policy?.anualTotal ?? (policyPremium + policyTax));
-
-  const pagadoPrima = policyTotal === 0 ? 0 : round2(totalPagado * (policyPremium / policyTotal));
-  const pagadoImpuesto = round2(totalPagado - pagadoPrima);
-
-  const primaNeta = round2(primas - pagadoPrima);
-  const impuestoNeto = round2(impuestos - pagadoImpuesto);
-  const saldoFinal = round2(primaNeta + impuestoNeto);
 
   return {
-    prima: primaNeta,
-    impuesto: impuestoNeto,
+    prima: round2(primas),
+    impuesto: round2(impuestos),
     primaNoDevengada: round2(primas),
     impuestoNoDevengado: round2(impuestos),
-    pagado: totalPagado,
-    pagadoPrima,
-    pagadoImpuesto,
-    total: saldoFinal,
+    total: totalNoDevengado,
     movimientos: movements,
     cancellationDate: cancellationDate
   };
@@ -78,7 +63,6 @@ function normalizeInput(source) {
   return {
     pol,
     policyId,
-    paid: toNumber(source?.paid ?? 0),
     totalDays: toNumber(source?.totalDays ?? 0),
     pastDays: Math.max(toInteger(source?.pastDays ?? 0), 0),
     changeDate: normalizeChangeDate(source?.changeDate ?? source?.changeDateTime ?? source?.effectiveDate)
@@ -527,7 +511,6 @@ test:
 pol:
   id: 3440
 
-paid: 0
 totalDays: 365
 pastDays: 190
 changeDate: "2026-06-01"
