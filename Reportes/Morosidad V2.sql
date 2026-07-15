@@ -16,8 +16,10 @@ SELECT
     pr.name AS Ramo,
     p.commercial AS [Plan],
     CASE WHEN ISNULL(an.contractYear,0) = 1 THEN CONVERT(VARCHAR,an.executionDate,103) else CONVERT(VARCHAR,p.created,103) END AS [F. Ingreso],
-    CONVERT(VARCHAR,fechas.[start],103) AS Desde,
-    CONVERT(VARCHAR,fechas.[end],103)   AS Hasta,
+
+	FORMAT(CAST(fechas.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy') AS Desde,
+	FORMAT(CAST(fechas.[end] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy') AS Hasta,
+
     p.holderId AS [Cod. Tenedor],
     c.id [Id Cliente],
     ISNULL(c.nationalId,'0') AS Cobis,
