@@ -145,7 +145,7 @@ function rewriteLikeClauses(filtro) {
 function canRewriteUsurpation(clauseText) {
     const text = normalizeFilterText(clauseText);
     const cnpLikePattern = /(?:^|\(|\s)cnp\s+like\s+N?\s*'((?:''|[^'])*)'/i;
-    const fullNamePattern = /\(\(\s*RTRIM\s*\(\s*ISNULL\s*\(\s*\[name\]\s*,\s*''\s*\)\s*\)\s*\+\s*' '\s*\+\s*RTRIM\s*\(\s*ISNULL\s*\(\s*surname1\s*,\s*''\s*\)\s*\)\s*\+\s*' '\s*\+\s*RTRIM\s*\(\s*ISNULL\s*\(\s*surname2\s*,\s*''\s*\)\s*\)\s*\)\s*like\s+N?\s*'((?:''|[^'])*)'/i;
+    const fullNamePattern = /\(?\s*RTRIM\s*\(\s*ISNULL\s*\(\s*\[name\]\s*,\s*''\s*\)\s*\)\s*\+\s*' '\s*\+\s*RTRIM\s*\(\s*ISNULL\s*\(\s*surname1\s*,\s*''\s*\)\s*\)\s*\+\s*' '\s*\+\s*RTRIM\s*\(\s*ISNULL\s*\(\s*surname2\s*,\s*''\s*\)\s*\)\s*\)?\s*like\s+N?\s*'((?:''|[^'])*)'/i;
 
     return cnpLikePattern.test(text) || fullNamePattern.test(text);
 }
