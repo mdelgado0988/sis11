@@ -21,11 +21,11 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname1)), ''),
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
-    ISNULL(snap.fiscalNumber,ISNULL(fr.fiscalNumber,'0')) AS Recibo,
+	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,ISNULL(lp.fiscalNumber,'0')) END AS Recibo,
 	FORMAT(CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
     CONVERT(VARCHAR, CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,	
     ISNULL(refe.ReferidoName, '') AS [Referido por],
-    ISNULL(prc.usuario, prcp.usuario) AS Usuario,
+    CASE WHEN ISNULL(bu.Usuario,'') <> '' THEN bu.Usuario ELSE ISNULL(prc.usuario, prcp.usuario) END AS Usuario,
     CONVERT(VARCHAR, CAST(an.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Desde,
     CONVERT(VARCHAR, CAST(an.[anniversary] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta,
     CASE WHEN an.contractYear = 1 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
@@ -162,6 +162,22 @@ OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
 				NULLIF(LTRIM(RTRIM(acre.surname2)), '')
 			), 'No Tiene') AS Acreedor, acre.id) acref
 LEFT JOIN Product prod ON prod.code = lp.productCode
+
+/* Datos Usuario */
+OUTER APPLY (SELECT an1.id
+			 FROM Anniversary an1
+			 WHERE an1.lifePolicyId = lp.id AND an1.contractYear = an.contractYear - 1) anu
+OUTER APPLY (SELECT TOP 1 b.[user] Usuario
+			FROM [Batch] b
+			CROSS APPLY OPENJSON(
+			  CASE
+				WHEN ISJSON(b.jData) = 1 THEN b.jData
+				ELSE '[]'
+			  END
+			) j
+			WHERE ISNULL(an.id,0) <> 0 AND TRY_CAST(JSON_VALUE(j.value, '$[0]') AS INT) = anu.id
+			ORDER BY b.id DESC) bu
+
 LEFT JOIN Proceso prc ON prc.id = an.processId
 LEFT JOIN Proceso prcp ON prcp.id = lp.processId
 LEFT JOIN ChannelCatalog cc ON cc.code = snap.channel
