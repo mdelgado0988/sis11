@@ -73,22 +73,17 @@ try {
   if(!resultAsocia.ok)
     return resultAsocia;
   
-  //Obtenemos el id de documento generado el cual es necesario para poder actualizar los campos del registro
-  const documentResult = getDocument(policyId);
-  if(!documentResult.ok)
-      return documentResult;
-  
-  vIdDoc = toValidNumber(documentResult?.ResultadoDoc?.id);
-  log(`Current vIdDoc: ${vIdDoc}`);
+  vIdDoc = toValidNumber(resultAsocia?.ResultadoDoc?.id);
   if (vIdDoc <= 0) {
-    vIdDoc = getDocumentId(policyId);
+    return { ok: false, msg: 'No se pudo recuperar el id del documento recién creado', ResultadoDoc: null };
   }
-  log(`New Current vIdDoc: ${vIdDoc}`);
+
+  log(`Document id from ADD: ${vIdDoc}`);
   
   if(vIdDoc <= 0)
     return {ok:false, msg: `Error recuperando id del reporte` , ResultadoDoc: null};
   
-  const resultUpdate = updateDocumentName(ResultadoGenerateDoc, ReportName)
+  const resultUpdate = updateDocumentName(ResultadoGenerateDoc, ReportName, vIdDoc)
   if(!resultUpdate.ok)
     return resultUpdate;
   
@@ -172,56 +167,17 @@ function setDocumentPolicy(ResultadoGenerateDoc, policyId) {
   if(!RepoDocument.ok)
     return {ok:false, msg: `Error asociado reporte a la cotización: ${RepoDocument?.msg ?? "No Detallado"}` , ResultadoDoc: null};
 
-  return { ok: true, msg: "Documento asociado", ResultadoDoc: null };
-}
-
-function getDocument(policyId) {
-  doCmd({
-    cmd: "LoadEntities",
-    data:{
-      entity: "Document",
-      fields: "id",
-      filter: `lifePolicyId=${policyId}`
-    }  
-  });
-  
-  if(!LoadEntities.ok)
-    return {ok:false, msg: `Error recuperando id del reporte: ${LoadEntities?.msg ?? "No Detallado"}` , ResultadoDoc: null};
-
-  const rows = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
-  const documentRow = rows.find(x => x && toValidNumber(x.id) > 0) || null;
-
-  if (!documentRow) {
-    return { ok: false, msg: 'No se encontró el documento generado', ResultadoDoc: null };
+  const addedDocument = normalizeDocumentResult(RepoDocument.outData);
+  if (!addedDocument || toValidNumber(addedDocument.id) <= 0) {
+    return { ok: false, msg: 'No se pudo recuperar el id del documento creado', ResultadoDoc: null };
   }
 
-  return {ok:true, msg: `Documento recuperado` , ResultadoDoc: documentRow};
+  return { ok: true, msg: "Documento asociado", ResultadoDoc: addedDocument };
 }
 
-function getDocumentId(policyId) {
-  doCmd({
-    cmd: "LoadEntities",
-    data:{
-      entity: "Document",
-      fields: "id",
-      filter: `lifePolicyId=${policyId}`
-    }  
-  });
-
-  if (!LoadEntities.ok) {
-    return 0;
-  }
-
-  const rows = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
-  const doc = rows.find(x => x && x.name == null && toValidNumber(x.id) > 0) || rows[0] || null;
-  const docId = toValidNumber(doc?.id);
-  log(`Recovered vIdDoc: ${docId}`);
-  return docId;
-
-}
-
-function updateDocumentName(ResultadoGenerateDoc, ReportName) {
-  if (!vIdDoc || vIdDoc <= 0) {
+function updateDocumentName(ResultadoGenerateDoc, ReportName, documentId) {
+  const docId = toValidNumber(documentId);
+  if (!docId || docId <= 0) {
     return { ok: false, msg: 'Id de documento inválido', result: null };
   }
 
@@ -230,7 +186,7 @@ function updateDocumentName(ResultadoGenerateDoc, ReportName) {
     data:{
       entity: "Document",
       fieldValue: `fileName='${ResultadoGenerateDoc.fileName}', name='${ReportName}', url='${ResultadoGenerateDoc.url}', created= GETDATE()`,
-      entityId: vIdDoc
+      entityId: docId
     }  
   });
 
@@ -239,6 +195,18 @@ function updateDocumentName(ResultadoGenerateDoc, ReportName) {
 
   return { ok: true, msg: "Documento renombrado" };
   
+}
+
+function normalizeDocumentResult(value) {
+  if (Array.isArray(value)) {
+    return value.find(item => item && toValidNumber(item.id) > 0) || null;
+  }
+
+  if (value && typeof value === 'object') {
+    return value;
+  }
+
+  return null;
 }
 
 function setPolicyData(policyId) {
