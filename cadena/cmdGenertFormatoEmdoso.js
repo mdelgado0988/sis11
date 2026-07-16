@@ -587,10 +587,10 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       let newLimit = changeCov?.limit ?? oldLimit;
 
       let primaDiff = (changeCovDetail ? n(changeCovDetail.premiumDif) : 0);
-      if(changeName == 'CancellationChange'){
+      /*if(changeName == 'CancellationChange'){
         primaDiff = (changeCovDetail ? n(changeCovDetail.premiumCost) : 0);
         newLimit = 0;
-      }
+      }*/
 
       //Michael Delgado. GLOBUAT-66. Los endosos que no generan prima no deben mostrar nada, ni lo de la póliza      
       return {
@@ -608,11 +608,11 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     custom.TotalACobrar = endosoSinPrima ? n(0) : n(billDiff?.annualTotal ?? 0);
 
     if(changeName == 'CancellationChange' && details){
-      const primaNetaTotal = details.coveragesCost ?? 0;
+      const primaNetaTotal = details.coveragesDif ?? 0;
       const totalCobro = details.annualPremiumDif ?? 0;
       custom.PrimaNetaTotal = n(primaNetaTotal); //n(details.coveragesDif ?? 0);
       custom.TotalACobrar = n(totalCobro);
-      custom.Impuesto = n(totalCobro - primaNetaTotal);
+      custom.Impuesto = n((totalCobro - primaNetaTotal));
     }
 
     if(custom.Endoso.Coberturas){

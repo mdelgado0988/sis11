@@ -35,16 +35,30 @@ try {
   );
   movements.push(...endorsementMovements);
 
-  const primas = sumMovementValues(movements, "primaNoDevengada");
-  const impuestos = sumMovementValues(movements, "impuestoNoDevengado");
-  const totalNoDevengado = round2(primas + impuestos);
+  const primasCanceladas = sumMovementValues(movements, "primaNoDevengada");
+  const impuestosCancelados = sumMovementValues(movements, "impuestoNoDevengado");
+  const totalCancelado = round2(primasCanceladas + impuestosCancelados);
+
+  const primaActual = round2(toNumber(policy?.annualPremium ?? policy?.anualPremium ?? 0));
+  const impuestoActual = round2(toNumber(policy?.tax ?? 0));
+  const totalActual = round2(toNumber(policy?.annualTotal ?? policy?.anualTotal ?? 0));
+
+  const primaFinal = round2(primaActual - primasCanceladas);
+  const impuestoFinal = round2(impuestoActual - impuestosCancelados);
+  const totalFinal = round2(totalActual - totalCancelado);
 
   return {
-    prima: round2(primas),
-    impuesto: round2(impuestos),
-    primaNoDevengada: round2(primas),
-    impuestoNoDevengado: round2(impuestos),
-    total: totalNoDevengado,
+    prima: primaFinal,
+    impuesto: impuestoFinal,
+    total: totalFinal,
+    primaCancelada: round2(primasCanceladas),
+    impuestoCancelado: round2(impuestosCancelados),
+    totalCancelado: totalCancelado,
+    primaNoDevengada: round2(primasCanceladas),
+    impuestoNoDevengado: round2(impuestosCancelados),
+    primaActual: primaActual,
+    impuestoActual: impuestoActual,
+    totalActual: totalActual,
     movimientos: movements,
     cancellationDate: cancellationDate
   };
