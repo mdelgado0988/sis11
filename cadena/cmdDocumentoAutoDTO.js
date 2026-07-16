@@ -151,7 +151,6 @@ resultado.Cuotas = Array.isArray(paramPayPlan) ? paramPayPlan.length : (Array.is
 //Datos de Coberturas
 const tarifaEntrada = parseJsonArray(oaUserData?.hiddenCobtar);
 doCmd({"cmd":"GetFullTable","data":{"table":"cfgCobtarRamoTecnico"}});
-const configCobtar = mapearTablaConfig(GetFullTable.outData ?? []);
 resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : [])
   .sort((a, b) => Number(a.number ?? 0) - Number(b.number ?? 0))
   .map(({ code, name, limit, premium, deductible }) => {
@@ -735,40 +734,4 @@ function getCurrency(currencyCode) {
   if(!data)
     throw new Error(`No se pudo recuperar la moneda de la póliza: ${RepoCurrency.msg}`);
   return data;
-}
-
-function mapearTablaConfig(data) {
-
-  if (!data || !data.length) return [];
-
-  const headersOriginal = data[0];
-
-  // Resolver nombres duplicados
-  const headers = [];
-  const contador = {};
-
-  headersOriginal.forEach(h => {
-    const key = h.trim();
-
-    if (contador[key]) {
-      contador[key]++;
-      headers.push(`${key}_${contador[key]}`);
-    } else {
-      contador[key] = 1;
-      headers.push(key);
-    }
-  });
-
-  // Mapear filas
-  const result = data.slice(1).map(row => {
-    const obj = {};
-
-    headers.forEach((col, i) => {
-      obj[col] = row[i];
-    });
-
-    return obj;
-  });
-
-  return result;
 }
