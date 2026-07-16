@@ -229,7 +229,7 @@ function adjustCancellationDetail(detail, billSummary, rows) {
     round2(firstNumber([detail?.oldAnnualPremium, 0]) - oldCoverages)
   ]);
   const newTax = round2(Number(billSummary?.targetTax ?? 0));
-  const taxDif = round2(oldTax - newTax);
+  const taxDif = round2(newTax - oldTax);
   const taxCost = round2(taxDif * prorate);
 
   const oldAnnualPremium = firstNumber([

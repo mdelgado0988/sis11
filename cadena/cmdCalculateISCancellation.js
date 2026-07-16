@@ -19,27 +19,11 @@ if (!effectiveDate) {
 }
 
 doCmd({
-  cmd: "LoadEntity",
-  data: {
-    entity: "PayPlan",
-    filter: `lifePolicyId=${policyId}`,
-    fields: `SUM(payed) as paid`
-  }
-});
-
-if (!LoadEntity?.ok) {
-  throw new Error(LoadEntity?.msg || "No fue posible recuperar lo pagado de la poliza");
-}
-
-const paid = round2(Number(LoadEntity?.outData?.paid ?? 0));
-
-doCmd({
   cmd: "ExeChain",
   data: {
     chain: "cmdGetCancellationPremium",
     context: JSON.stringify({
       pol: { id: policyId },
-      paid: paid,
       changeDate: effectiveDate
     })
   }
