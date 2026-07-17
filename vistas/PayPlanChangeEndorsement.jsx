@@ -320,7 +320,7 @@
                 rowKey="id"
                 pagination={{ pageSize: 25 }}
                 loading={loading}
-                scroll={{ x: 1100, y: 260 }}
+                scroll={{ x: 1100, y: 390 }}
                 rowClassName={function(record) {
                   if (!lockPaidRows) {
                     return '';
