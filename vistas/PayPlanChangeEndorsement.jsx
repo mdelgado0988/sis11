@@ -313,14 +313,14 @@
       $('<style>', { id: styleId, type: 'text/css' }).html(`
         .payplan-table-wrap .ant-table-thead > tr > th,
         .payplan-table-wrap .ant-table-tbody > tr > td {
-          padding-top: 8px !important;
-          padding-bottom: 8px !important;
-          padding-left: 10px !important;
-          padding-right: 10px !important;
-          line-height: 1.15 !important;
+          padding-top: 4px !important;
+          padding-bottom: 4px !important;
+          padding-left: 8px !important;
+          padding-right: 8px !important;
+          line-height: 1 !important;
         }
         .payplan-table-wrap .ant-table-tbody > tr {
-          height: 36px !important;
+          height: 28px !important;
         }
         .payplan-locked-row td {
           background: #fff1f0 !important;
@@ -450,6 +450,12 @@
     const policyHref = policy && policy.id ? `/#/lifePolicy/${policy.id}` : '#/home';
 
     function openEndorsementModal() {
+      const formValues = form.getFieldsValue();
+      if (!hasEndorsementChanges(formValues)) {
+        message.error(t('No changes were detected in the endorsement.'));
+        return;
+      }
+
       const currentValues = form.getFieldsValue();
       endorsementForm.setFieldsValue({
         effectiveDate: currentValues.effectiveDate || toPanamaMoment(policy && policy.start),
@@ -584,6 +590,10 @@
       return roundMoney(value).toFixed(2);
     }
 
+    function normalizeComparableString(value) {
+      return safeString(value).toLowerCase();
+    }
+
     function getComparablePlanRows(source) {
       return toRows(source).slice().sort(function(a, b) {
         return safeNumber(a && a.numberInYear) - safeNumber(b && b.numberInYear);
@@ -600,20 +610,19 @@
     function hasEndorsementChanges(values) {
       const currentRows = getComparablePlanRows(payPlans);
       const newRows = getComparablePlanRows(newPayPlans.length ? newPayPlans : payPlans);
-
       if (currentRows.length !== newRows.length) {
         return true;
       }
-
-      if (safeString(values && values.currentPaymentMethod) !== safeString(values && values.newPaymentMethod)) {
+      
+      if (normalizeComparableString(getPaymentMethodCode(policy)) !== normalizeComparableString(values && values.newPaymentMethod)) {
         return true;
       }
 
-      if (safeString(values && values.currentFrequency).toLowerCase() !== safeString(values && values.newFrequency).toLowerCase()) {
+      if (normalizeComparableString(policy && policy.periodicity) !== normalizeComparableString(values && values.newFrequency)) {
         return true;
       }
 
-      if (safeNumber(values && values.currentInstallments) !== safeNumber(values && values.newInstallments)) {
+      if (safeNumber(payPlans.length) !== safeNumber(values && values.newInstallments)) {
         return true;
       }
 
@@ -640,12 +649,6 @@
     async function confirmEndorsementModal() {
       try {
         const values = await endorsementForm.validateFields();
-        const formValues = form.getFieldsValue();
-
-        if (!hasEndorsementChanges(formValues)) {
-          message.error(t('No changes were detected in the endorsement.'));
-          return;
-        }
 
         form.setFieldsValue({
           effectiveDate: values.effectiveDate,
@@ -731,7 +734,7 @@
       const rows = toRows(source);
       const isNewPayPlan = safeString(title) === safeString(t('New pay plan'));
       return (
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff', minHeight: 898, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff', minHeight: 988, display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ marginTop: 0, marginBottom: 16 }}>{title}</h3>
           {rows.length === 0 ? (
             <Empty description={t('There are no installments to display')} />
@@ -742,26 +745,34 @@
                 rowKey="id"
                 pagination={{ pageSize: 25 }}
                 loading={loading}
-                scroll={{ x: 1100, y: 515 }}
+                scroll={{ x: 1100, y: 567 }}
                 rowClassName={function(record) {
                   return safeNumber(record && record.payed) > 0 ? 'payplan-locked-row' : '';
                 }}
               >
-                <Column title={t('Installment no.')} dataIndex="numberInYear" key={`${title}-numberInYear`} render={renderPlanValue} />
-                <Column title={t('Contract year')} dataIndex="contractYear" key={`${title}-contractYear`} render={renderPlanValue} />
+                <Column title={t('Installment no.')} dataIndex="numberInYear" key={`${title}-numberInYear`} render={renderPlanValue} align="center" />
                 <Column title={t('Concept')} dataIndex="concept" key={`${title}-concept`} render={renderPlanValue} />
-                <Column title={t('Minimum amount')} dataIndex="minimum" key={`${title}-minimum`} render={formatMoney} />
+                <Column title={t('Minimum amount')} dataIndex="minimum" key={`${title}-minimum`} render={formatMoney} align="right" />
                 <Column
                   title={t('Due date')}
                   dataIndex="dueDate"
                   key={`${title}-dueDate`}
+                  align="center"
                   render={function(value, record, index) {
                     const isLocked = safeNumber(record && record.payed) > 0;
+                    const currentValue = getPlanDueDateMoment(record);
                     if (!isNewPayPlan || isLocked) {
-                      return formatDateOnly(value);
+                      return (
+                        <DatePicker
+                          value={currentValue}
+                          allowClear={false}
+                          disabled
+                          style={{ width: '100%' }}
+                          format="DD/MM/YYYY"
+                        />
+                      );
                     }
 
-                    const currentValue = getPlanDueDateMoment(record);
                     const nextRow = rows[index + 1] || null;
                     const nextDueDate = getPlanDueDateMoment(nextRow);
 
@@ -785,8 +796,8 @@
                     );
                   }}
                 />
-                <Column title={t('Paid')} dataIndex="payed" key={`${title}-payed`} render={formatMoney} />
-                <Column title={t('Payment date')} dataIndex="payedDate" key={`${title}-payedDate`} render={formatDateTime} />
+                <Column title={t('Paid')} dataIndex="payed" key={`${title}-payed`} render={formatMoney} align="right" />
+                <Column title={t('Payment date')} dataIndex="payedDate" key={`${title}-payedDate`} render={formatDateTime} align="center" />
               </Table>
             </div>
           )}
