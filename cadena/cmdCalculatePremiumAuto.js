@@ -14,6 +14,8 @@
 const { poliza, action, extra } = context;
 const objectDefinitionCode = "DTAUT";
 let tarifas;
+let tbTarConfig = [];
+let vwGetConfigTar = [];
 let oaUserData;
 let resultCoverages = [];
 const tarifaAuto = [
@@ -25,6 +27,12 @@ try {
 
   // log("Calculando tarifas");
   tarifas = getTarifas();
+
+  // log("Cargando tb_tarConfig");
+  tbTarConfig = getTarConfigTable();
+
+  // log("Cargando vw_getConfigTar");
+  vwGetConfigTar = getVwGetConfigTarTable();
 
   // log("Calculando objeto asegurado");
   oaUserData = getInsuredObject();
@@ -38,6 +46,14 @@ try {
 
     const resultCoverage = resultCoverages.find(x => x.code == cov.code);
     const obj = getQuotationObject(cov.code);
+    const pprima = getPPrima(tbTarConfig, cov.code, obj);
+    const porcentaje = getPorcentaje(vwGetConfigTar, cov.code);
+    const porcentajeGrupo = getPorcentajePorGrupo(vwGetConfigTar, poliza.productCode, obj?.OPCION ?? 0);
+    const porcentajeDedu = getPorcentajeDeduPorGrupo(vwGetConfigTar, poliza.productCode, obj?.OPCION ?? 0);
+    obj.pprima = pprima ?? 0;
+    obj.porcentaje = porcentaje ?? 0;
+    obj.porcentajeGrupo = porcentajeGrupo ?? 0;
+    obj.porcentajeDedu = porcentajeDedu ?? 0;
 
     //log(`obj: $${JSON.stringify(obj)}`);
 
@@ -243,6 +259,139 @@ function getTarifas() {
   return tarifas;
 }
 
+function getTarConfigTable() {
+  doCmd({ cmd: "GetFullTable", data: { table: "tb_tarConfig" } });
+
+  if (!GetFullTable || !GetFullTable.ok || !Array.isArray(GetFullTable.outData)) {
+    throw new Error("No fue posible leer la tabla tb_tarConfig.");
+  }
+
+  return mapTableByHeaders(GetFullTable.outData);
+}
+
+function getVwGetConfigTarTable() {
+  doCmd({ cmd: "GetFullTable", data: { table: "vw_getConfigTar" } });
+
+  if (!GetFullTable || !GetFullTable.ok || !Array.isArray(GetFullTable.outData)) {
+    throw new Error("No fue posible leer la tabla vw_getConfigTar.");
+  }
+
+  return mapTableByHeaders(GetFullTable.outData);
+}
+
+function getPPrima(table, cober, obj) {
+  const rows = Array.isArray(table) ? table : [];
+  const coberValue = normalizeComparable(cober);
+  const qanos6 = normalizeComparable(obj?.ANIOAUTO ?? 0);
+  const cgrupo1 = normalizeComparable(obj?.LIMITE ?? 0);
+
+  const isFirstBranch = rows.some(row =>
+    normalizeComparable(row?.cramo) === "6" &&
+    normalizeComparable(row?.ccategoria) === "1" &&
+    normalizeComparable(row?.Topcion) === coberValue &&
+    normalizeComparable(row?.norden) === qanos6 &&
+    ["39", "15"].includes(normalizeComparable(row?.Topcion))
+  );
+
+  if (isFirstBranch) {
+    const row = rows.find(item =>
+      normalizeComparable(item?.cramo) === "6" &&
+      normalizeComparable(item?.ccategoria) === "1" &&
+      normalizeComparable(item?.Topcion) === coberValue &&
+      normalizeComparable(item?.norden) === qanos6
+    );
+
+    return n(row?.Porcentaje ?? 0);
+  }
+
+  const isSecondBranch = rows.some(row =>
+    normalizeComparable(row?.cramo) === "6" &&
+    normalizeComparable(row?.ccategoria) === "1" &&
+    normalizeComparable(row?.Topcion) === coberValue &&
+    normalizeComparable(row?.norden) === cgrupo1 &&
+    ["12", "13", "14"].includes(normalizeComparable(row?.Topcion))
+  );
+
+  if (isSecondBranch) {
+    const row = rows.find(item =>
+      normalizeComparable(item?.cramo) === "6" &&
+      normalizeComparable(item?.ccategoria) === "1" &&
+      normalizeComparable(item?.Topcion) === coberValue &&
+      normalizeComparable(item?.norden) === cgrupo1
+    );
+
+    return n(row?.Porcentaje ?? 0);
+  }
+
+  return 0;
+}
+
+function getPorcentaje(table, cober, norden = -1) {
+  const rows = Array.isArray(table) ? table : [];
+  const coberValue = normalizeComparable(cober);
+  const nordenValue = normalizeComparable(norden);
+
+  const row = rows.find(item =>
+    normalizeComparable(item?.cramo) === "6" &&
+    normalizeComparable(item?.Topcion) === coberValue &&
+    normalizeComparable(item?.norden) === nordenValue
+  );
+
+  return n(row?.Porcentaje ?? 0);
+}
+
+function getPorcentajePorGrupo(table, xplan, cgrupo) {
+  const rows = Array.isArray(table) ? table : [];
+  const planValue = normalizeComparable(xplan);
+  const grupoValue = normalizeComparable(cgrupo);
+
+  const row = rows.find(item =>
+    normalizeComparable(item?.ccategoria) === "0" &&
+    normalizeComparable(item?.cramo) === "6" &&
+    normalizeComparable(item?.cplan) === planValue
+  ) || null;
+
+  if (!row) {
+    return 0;
+  }
+
+  const selectedValue = grupoValue === "1"
+    ? row?.opt1
+    : grupoValue === "2"
+      ? row?.opt2
+      : grupoValue === "3"
+        ? row?.opt3
+        : 0;
+
+  return n(100 - Number(selectedValue ?? 0));
+}
+
+function getPorcentajeDeduPorGrupo(table, xplan, cgrupo) {
+  const rows = Array.isArray(table) ? table : [];
+  const planValue = normalizeComparable(xplan);
+  const grupoValue = normalizeComparable(cgrupo);
+
+  const row = rows.find(item =>
+    normalizeComparable(item?.ccategoria) === "0" &&
+    normalizeComparable(item?.cramo) === "6" &&
+    normalizeComparable(item?.cplan) === planValue
+  ) || null;
+
+  if (!row) {
+    return 0;
+  }
+
+  const selectedValue = grupoValue === "1"
+    ? row?.dedu1
+    : grupoValue === "2"
+      ? row?.dedu2
+      : grupoValue === "3"
+        ? row?.dedu3
+        : 0;
+
+  return n(Number(selectedValue ?? 0));
+}
+
 function getInsuredObject() {
   doCmd({
     cmd: "RepoObjectDefinition",
@@ -350,6 +499,51 @@ function mapearTablaConfig(data) {
   });
 
   return result;
+}
+
+function mapTableByHeaders(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return [];
+  }
+
+  const headersOriginal = Array.isArray(data[0]) ? data[0] : Object.values(data[0] || {});
+  if (!Array.isArray(headersOriginal) || headersOriginal.length === 0) {
+    return [];
+  }
+
+  const headers = [];
+  const contador = {};
+
+  headersOriginal.forEach(h => {
+    const key = normalizeHeaderName(h);
+
+    if (contador[key]) {
+      contador[key]++;
+      headers.push(`${key}_${contador[key]}`);
+    } else {
+      contador[key] = 1;
+      headers.push(key);
+    }
+  });
+
+  return data.slice(1).map(row => {
+    const values = Array.isArray(row) ? row : Object.values(row || {});
+    const obj = {};
+
+    headers.forEach((col, i) => {
+      obj[col] = values[i];
+    });
+
+    return obj;
+  });
+}
+
+function normalizeHeaderName(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeComparable(value) {
+  return String(value ?? "").trim().toUpperCase();
 }
 
 function evalConfig(obj, formula) {
