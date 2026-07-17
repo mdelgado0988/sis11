@@ -534,7 +534,8 @@
               pendingAmount: 0,
               payed: paidAmount,
               payedDate: row && row.payedDate ? row.payedDate : null,
-              pending: false
+              pending: false,
+              edited: false
             };
           });
 
@@ -551,6 +552,7 @@
             const amount = roundMoney(amountCents / 100);
             const dueDate = toUtcIsoFromPanamaDate(dueMoment);
             const coveredUntil = toUtcIsoFromPanamaDate(coveredUntilMoment);
+            const originalRow = unpaidSources[index] || null;
 
             recalculatedRows.push({
               ...sourceRow,
@@ -566,7 +568,21 @@
               normalDueDate: dueDate,
               coveredUntil: coveredUntil,
               pending: true,
-              final: index === remainingSlots - 1 ? true : false
+              final: index === remainingSlots - 1 ? true : false,
+              edited: hasRowChanged(originalRow, {
+                ...sourceRow,
+                minimum: amount,
+                expected: amount,
+                dueAmount: amount,
+                pendingAmount: amount,
+                payed: 0,
+                payedDate: null,
+                dueDate: dueDate,
+                normalDueDate: dueDate,
+                coveredUntil: coveredUntil,
+                pending: true,
+                final: index === remainingSlots - 1 ? true : false
+              })
             });
           }
 
@@ -646,18 +662,177 @@
       setEndorsementModalOpen(false);
     }
 
+    function buildEditedPayPlanPayload() {
+      const sourceRows = newPayPlans.length ? newPayPlans : payPlans;
+      return toRows(sourceRows).map(function(row) {
+        const clonedRow = {
+          ...row,
+          PayPlanDetail: toRows(row && row.PayPlanDetail).map(function(detail) {
+            return { ...detail };
+          })
+        };
+
+        return clonedRow;
+      });
+    }
+
+    function buildEffectiveDateTime(policyStart, value) {
+      const selectedDate = parseSelectedDate(value);
+      if (!selectedDate) {
+        return null;
+      }
+
+      const now = new Date();
+      const startDate = parseUtcDate(policyStart);
+      const selectedTime = Date.UTC(
+        selectedDate.getUTCFullYear(),
+        selectedDate.getUTCMonth(),
+        selectedDate.getUTCDate(),
+        now.getUTCHours(),
+        now.getUTCMinutes(),
+        now.getUTCSeconds(),
+        now.getUTCMilliseconds()
+      );
+
+      if (startDate && selectedTime < startDate.getTime()) {
+        const adjustedTime = Date.UTC(
+          selectedDate.getUTCFullYear(),
+          selectedDate.getUTCMonth(),
+          selectedDate.getUTCDate(),
+          startDate.getUTCHours(),
+          startDate.getUTCMinutes(),
+          startDate.getUTCSeconds(),
+          startDate.getUTCMilliseconds()
+        );
+
+        return formatUtcDateTime7(new Date(adjustedTime));
+      }
+
+      return formatUtcDateTime7(new Date(selectedTime));
+    }
+
+    function parseSelectedDate(value) {
+      if (!value) {
+        return null;
+      }
+
+      if (typeof value.toDate === 'function') {
+        const asDate = value.toDate();
+        return asDate instanceof Date && !Number.isNaN(asDate.getTime()) ? asDate : null;
+      }
+
+      if (typeof value.format === 'function') {
+        return parseSelectedDate(value.format('YYYY-MM-DD'));
+      }
+
+      const raw = safeString(value);
+      if (!raw) {
+        return null;
+      }
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        const parts = raw.split('-');
+        const year = Number(parts[0]);
+        const month = Number(parts[1]) - 1;
+        const day = Number(parts[2]);
+        const date = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function parseUtcDate(value) {
+      if (!value) {
+        return null;
+      }
+
+      const raw = safeString(value);
+      if (!raw) {
+        return null;
+      }
+
+      const utcValue = /z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/i.test(raw) ? raw : raw + 'Z';
+      const date = new Date(utcValue);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatUtcDateTime7(date) {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return null;
+      }
+
+      const year = String(date.getUTCFullYear()).padStart(4, '0');
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const hours = String(date.getUTCHours()).padStart(2, '0');
+      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+      const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+      const milliseconds = String(date.getUTCMilliseconds()).padStart(3, '0');
+
+      return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds + '.' + milliseconds + '0000';
+    }
+
+    function hasRowChanged(originalRow, previewRow) {
+      if (!originalRow || !previewRow) {
+        return false;
+      }
+
+      return normalizeComparableDueDate(originalRow.dueDate || originalRow.normalDueDate || originalRow.coveredUntil) !==
+        normalizeComparableDueDate(previewRow.dueDate || previewRow.normalDueDate || previewRow.coveredUntil) ||
+        normalizeComparableMoney(originalRow.minimum) !== normalizeComparableMoney(previewRow.minimum) ||
+        normalizeComparableMoney(originalRow.expected) !== normalizeComparableMoney(previewRow.expected) ||
+        normalizeComparableMoney(originalRow.payed) !== normalizeComparableMoney(previewRow.payed) ||
+        normalizeComparableDueDate(originalRow.payedDate) !== normalizeComparableDueDate(previewRow.payedDate) ||
+        normalizeComparableDueDate(originalRow.coveredUntil) !== normalizeComparableDueDate(previewRow.coveredUntil);
+    }
+
     async function confirmEndorsementModal() {
       try {
         const values = await endorsementForm.validateFields();
 
-        form.setFieldsValue({
-          effectiveDate: values.effectiveDate,
-          description: values.description
+        if (!policy || !policy.id) {
+          throw new Error(t('The policy information is not available.'));
+        }
+
+        const effectiveDate = buildEffectiveDateTime(policy && policy.start, values.effectiveDate);
+        if (!effectiveDate) {
+          throw new Error(t('The effective date is invalid.'));
+        }
+
+        const editedPayPlan = buildEditedPayPlanPayload();
+        if (!editedPayPlan.length) {
+          throw new Error(t('The edited pay plan is not available.'));
+        }
+
+        setLoading(true);
+        const response = await exe('ChangePayPlan', {
+            policyId: policy.id,
+            effectiveDate: effectiveDate,
+            operation: 'ADD',
+            code: null,
+            note: safeString(values.description),
+            changeIdToBeAmended: null,
+            jEditedPayPlan: JSON.stringify(editedPayPlan),
+            Surcharges: []
         });
+
+        if (!response || !response.ok) {
+          throw new Error((response && response.msg) ? response.msg : t('The endorsement could not be executed.'));
+        }
+
         setEndorsementModalOpen(false);
-        message.success(t('Endorsement data updated'));
+        message.success(response.msg || t('Endorsement executed successfully'));
+        await loadData();
       } catch (error) {
-        // Validation feedback is handled by Ant Design.
+        if (error && error.errorFields) {
+          return;
+        }
+
+        message.error((error && error.message) ? error.message : String(error || t('The endorsement could not be executed.')));
+      } finally {
+        setLoading(false);
       }
     }
 
@@ -698,10 +873,19 @@
         }
 
         const updatedDate = toUtcIsoFromPanamaDate(selectedDate);
+        const originalRow = toRows(payPlans).find(function(item) {
+          return safeNumber(item && item.numberInYear) === safeNumber(currentRow && currentRow.numberInYear);
+        }) || null;
+
         rows[rowIndex] = {
           ...currentRow,
           dueDate: updatedDate,
-          normalDueDate: updatedDate
+          normalDueDate: updatedDate,
+          edited: hasRowChanged(originalRow, {
+            ...currentRow,
+            dueDate: updatedDate,
+            normalDueDate: updatedDate
+          })
         };
 
         return rows;
