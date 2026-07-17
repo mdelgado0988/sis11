@@ -676,6 +676,69 @@
       });
     }
 
+    function getChangeIdFromResponse(response) {
+      if (!response) {
+        return 0;
+      }
+
+      if (safeNumber(response.changeId) > 0) {
+        return safeNumber(response.changeId);
+      }
+
+      if (safeNumber(response.id) > 0) {
+        return safeNumber(response.id);
+      }
+
+      if (response.outData) {
+        if (Array.isArray(response.outData) && response.outData.length > 0) {
+          const firstRow = response.outData[0];
+          if (safeNumber(firstRow && firstRow.id) > 0) {
+            return safeNumber(firstRow.id);
+          }
+          if (safeNumber(firstRow && firstRow.changeId) > 0) {
+            return safeNumber(firstRow.changeId);
+          }
+        }
+
+        if (safeNumber(response.outData.id) > 0) {
+          return safeNumber(response.outData.id);
+        }
+
+        if (safeNumber(response.outData.changeId) > 0) {
+          return safeNumber(response.outData.changeId);
+        }
+      }
+
+      return 0;
+    }
+
+    async function clearChangePaymentPlanFields(changeId, values) {
+      if (!(safeNumber(changeId) > 0)) {
+        return;
+      }
+
+      const currentFrequencyValue = safeString(values && values.currentFrequency) || safeString(policy && policy.periodicity);
+      const currentPaymentMethodValue = safeString(values && values.currentPaymentMethod) || safeString(getPaymentMethodCode(policy));
+      const payload = [
+        `newPaymentMethod='${safeString(values && values.newPaymentMethod).replace(/'/g, "''")}'`,
+        `oldPaymentMethod='${currentPaymentMethodValue.replace(/'/g, "''")}'`,
+        `newFrequency='${safeString(values && values.newFrequency).replace(/'/g, "''")}'`,
+        `oldFrequency='${currentFrequencyValue.replace(/'/g, "''")}'`
+      ].join(',');
+
+      const resultado = await exe('SetField',
+        {
+          entity: 'Change',
+          entityId: safeNumber(changeId),
+          fieldValue: payload
+        }
+      );
+
+      if (!resultado.ok) {
+        throw new Error((resultado && resultado.msg) ? resultado.msg : t('The endorsement was executed, but the change fields could not be updated.'));
+      }
+    }
+
     function buildEffectiveDateTime(policyStart, value) {
       const selectedDate = parseSelectedDate(value);
       if (!selectedDate) {
@@ -806,6 +869,7 @@
           throw new Error(t('The edited pay plan is not available.'));
         }
 
+        const currentValues = form.getFieldsValue(true);
         setLoading(true);
         const response = await exe('ChangePayPlan', {
             policyId: policy.id,
@@ -822,9 +886,9 @@
           throw new Error((response && response.msg) ? response.msg : t('The endorsement could not be executed.'));
         }
 
+        await clearChangePaymentPlanFields(getChangeIdFromResponse(response), currentValues);
         setEndorsementModalOpen(false);
         message.success(response.msg || t('Endorsement executed successfully'));
-        await loadData();
       } catch (error) {
         if (error && error.errorFields) {
           return;
