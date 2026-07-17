@@ -282,7 +282,7 @@
 
   function SummaryField({ label, value }) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
         <span style={{ color: 'rgba(0,0,0,0.65)', fontSize: 12 }}>{label}</span>
         <Input value={value == null ? '-' : value} disabled style={{ backgroundColor: '#fafafa', color: '#262626' }} />
       </div>
@@ -826,9 +826,9 @@
           <>
             <Row gutter={16}>
               <Col xs={24} lg={12}>
-                <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff' }}>
-                  <h3 style={{ marginTop: 0, marginBottom: 16 }}>{t('Before')}</h3>
-                  <Row gutter={16}>
+                <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, background: '#fff' }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>{t('Before')}</h3>
+                  <Row gutter={8}>
                     <Col xs={24} md={12}>
                       <SummaryField label={t('Current frequency')} value={policySummary.frequency} />
                     </Col>
@@ -836,7 +836,7 @@
                       <SummaryField label={t('Current payment method')} value={policySummary.paymentMethod} />
                     </Col>
                   </Row>
-                  <Row gutter={16}>
+                  <Row gutter={8}>
                     <Col xs={24} md={12}>
                       <SummaryField label={t('Current installment count')} value={policySummary.installments} />
                     </Col>
@@ -844,7 +844,7 @@
                       <SummaryField label={t('Policy')} value={(policy && policy.code) ? policy.code : ((policy && policy.id) ? policy.id : '-')} />
                     </Col>
                   </Row>
-                  <Row gutter={16}>
+                  <Row gutter={8}>
                     <Col xs={24}>
                       <SummaryField label={t('Current term')} value={`${formatDate(policy && policy.start)} - ${formatDate(policy && policy.end)}`} />
                     </Col>
@@ -853,11 +853,11 @@
               </Col>
 
               <Col xs={24} lg={12}>
-                <div style={{ border: '1px solid #d9f7be', borderRadius: 8, padding: 16, background: '#f6ffed' }}>
-                  <h3 style={{ marginTop: 0, marginBottom: 16 }}>{t('After')}</h3>
+                <div style={{ border: '1px solid #d9f7be', borderRadius: 8, padding: 12, background: '#f6ffed' }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>{t('After')}</h3>
 
                   <Form form={form} layout="vertical">
-                    <Row gutter={16}>
+                    <Row gutter={8}>
                       <Col xs={24} md={12}>
                         <Form.Item
                           label={t('New frequency')}
@@ -885,7 +885,7 @@
                       </Col>
                     </Row>
 
-                    <Row gutter={16}>
+                    <Row gutter={8}>
                       <Col xs={24} md={12}>
                         <Form.Item
                           label={t('New installment count')}
@@ -906,7 +906,7 @@
                       </Col>
                     </Row>
 
-                    <Row gutter={16}>
+                    <Row gutter={8}>
                       <Col xs={24}>
                         <Button htmlType="button" type="primary" style={{ backgroundColor: '#389e0d', borderColor: '#389e0d' }} onClick={previewEndorsement}>
                           {t('Preview')}
