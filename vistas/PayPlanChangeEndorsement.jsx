@@ -1,19 +1,19 @@
 ()=>{
   const { useEffect, useMemo, useState } = React;
-  const { Table, Button, Row, Col, Form, Select, Input, InputNumber, DatePicker, Skeleton, Empty, message, Space, Divider } = A;
+  const { Table, Button, Row, Col, Form, Select, Input, InputNumber, DatePicker, Skeleton, Empty, message, Space, Divider, Modal } = A;
   const { Column } = Table;
 
-  const frequencyOptions = [
-    { value: 'm', label: 'Mensual' },
-    { value: 'b', label: 'Bimensual' },
-    { value: 't', label: 'Trimestral' },
-    { value: 's', label: 'Semestral' },
-    { value: 'q', label: 'Semestral' },
-    { value: 'y', label: 'Anual' },
-    { value: 'c', label: 'Contado' }
+  const fallbackFrequencyOptions = [
+    { value: 'm', label: 'Mensual', months: 1 },
+    { value: 'b', label: 'Bimensual', months: 2 },
+    { value: 't', label: 'Trimestral', months: 3 },
+    { value: 's', label: 'Semestral', months: 6 },
+    { value: 'q', label: 'Trimestral', months: 3 },
+    { value: 'y', label: 'Anual', months: 12 },
+    { value: 'c', label: 'Contado', months: 12 }
   ];
 
-  const frequencyLabelMap = frequencyOptions.reduce((acc, item) => {
+  const fallbackFrequencyLabelMap = fallbackFrequencyOptions.reduce((acc, item) => {
     acc[String(item.value).toLowerCase()] = item.label;
     return acc;
   }, {});
@@ -41,6 +41,7 @@
   const toFirstRow = (value) => toRows(value)[0] || null;
   const safeString = (value) => String(value == null ? '' : value).trim();
   const safeNumber = (value) => Number(value == null ? 0 : value);
+  const roundMoney = (value) => Number((Number(value == null ? 0 : value) || 0).toFixed(2));
   const panamaOffsetMs = 5 * 60 * 60 * 1000;
 
   function parseUtcDate(value) {
@@ -135,9 +136,148 @@
     return safeString(policy && policy.paymentMethodCode != null ? policy.paymentMethodCode : (policy && policy.paymentMethod != null ? policy.paymentMethod : ''));
   }
 
-  function getFrequencyLabel(value) {
+  function getFrequencyLabel(value, labelMap) {
     const key = safeString(value).toLowerCase();
-    return frequencyLabelMap[key] || safeString(value) || '-';
+    const map = labelMap && typeof labelMap === 'object' ? labelMap : fallbackFrequencyLabelMap;
+    return map[key] || safeString(value) || '-';
+  }
+
+  function buildFrequencyOption(item) {
+    const raw = safeString(item);
+    if (!raw) {
+      return null;
+    }
+
+    const lower = raw.toLowerCase();
+    const labels = {
+      m: { label: 'Mensual', months: 1 },
+      b: { label: 'Bimensual', months: 2 },
+      t: { label: 'Trimestral', months: 3 },
+      s: { label: 'Semestral', months: 6 },
+      q: { label: 'Trimestral', months: 3 },
+      y: { label: 'Anual', months: 12 },
+      c: { label: 'Contado', months: 12 }
+    };
+    const mapped = labels[lower];
+
+    return {
+      value: lower,
+      label: mapped ? mapped.label : raw,
+      months: mapped ? mapped.months : 1
+    };
+  }
+
+  function buildProductFrequencyOptions(product) {
+    const options = [];
+    const seen = {};
+    let config = {};
+
+    try {
+      config = product && product.configJson ? JSON.parse(product.configJson) : {};
+    } catch (error) {
+      config = {};
+    }
+
+    const premiumConfig = config && config.Premium ? config.Premium : {};
+    let periodicity = [];
+
+    if (Array.isArray(premiumConfig.periodicity)) {
+      periodicity = premiumConfig.periodicity;
+    } else if (Array.isArray(config.periodicity)) {
+      periodicity = config.periodicity;
+    }
+
+    periodicity.forEach(function(item) {
+      if (typeof item === 'string') {
+        const option = buildFrequencyOption(item);
+        if (option && !seen[option.value]) {
+          seen[option.value] = true;
+          options.push(option);
+        }
+        return;
+      }
+
+      if (item && Array.isArray(item.custom)) {
+        item.custom.forEach(function(customItem) {
+          const value = safeString(customItem && customItem.expression);
+          const label = safeString(customItem && customItem.name);
+
+          if (!value || !label || seen[value.toLowerCase()]) {
+            return;
+          }
+
+          seen[value.toLowerCase()] = true;
+          options.push({
+            value: value.toLowerCase(),
+            label: label,
+            months: parseFrequencyMonths(value)
+          });
+        });
+      } else if (item && item.expression && item.name) {
+        const expressionValue = safeString(item.expression).toLowerCase();
+        if (expressionValue && !seen[expressionValue]) {
+          seen[expressionValue] = true;
+          options.push({
+            value: expressionValue,
+            label: safeString(item.name),
+            months: parseFrequencyMonths(expressionValue)
+          });
+        }
+      }
+    });
+
+    return options.length ? options : fallbackFrequencyOptions.slice();
+  }
+
+  function parseFrequencyMonths(value) {
+    const key = safeString(value).toLowerCase();
+    if (!key) {
+      return 1;
+    }
+
+    if (key.indexOf('m') === 0 && key.length > 1) {
+      const numeric = Number(key.substring(1));
+      return numeric > 0 ? numeric : 1;
+    }
+
+    if (key === 'm') return 1;
+    if (key === 'b') return 2;
+    if (key === 't') return 3;
+    if (key === 's' || key === 'q') return 6;
+    if (key === 'y' || key === 'c') return 12;
+
+    const numericValue = Number(key);
+    return numericValue > 0 ? numericValue : 1;
+  }
+
+  function getFrequencyMonths(value, options) {
+    const key = safeString(value).toLowerCase();
+    const option = toRows(options).find(function(item) {
+      return safeString(item && item.value).toLowerCase() === key;
+    });
+
+    if (option && safeNumber(option.months) > 0) {
+      return safeNumber(option.months);
+    }
+
+    return parseFrequencyMonths(key);
+  }
+
+  function toUtcIsoFromPanamaDate(dateLike) {
+    if (!dateLike) {
+      return null;
+    }
+
+    const date = typeof dateLike.clone === 'function'
+      ? dateLike.clone()
+      : moment(dateLike);
+
+    if (!date || typeof date.format !== 'function') {
+      return null;
+    }
+
+    const datePart = date.format('YYYY-MM-DD');
+    return datePart ? `${datePart}T05:00:00Z` : null;
   }
 
   function SummaryField({ label, value }) {
@@ -154,8 +294,18 @@
     const [loading, setLoading] = useState(false);
     const [policy, setPolicy] = useState(null);
     const [payPlans, setPayPlans] = useState([]);
+    const [newPayPlans, setNewPayPlans] = useState([]);
     const [paymentMethods, setPaymentMethods] = useState([]);
+    const [frequencyOptions, setFrequencyOptions] = useState(fallbackFrequencyOptions.slice());
     const [form] = Form.useForm();
+    const [endorsementForm] = Form.useForm();
+    const [endorsementModalOpen, setEndorsementModalOpen] = useState(false);
+    const frequencyLabelMap = useMemo(function() {
+      return frequencyOptions.reduce(function(acc, item) {
+        acc[String(item.value).toLowerCase()] = item.label;
+        return acc;
+      }, {});
+    }, [frequencyOptions]);
 
     useEffect(function() {
       const styleId = 'payplan-endorsement-styles';
@@ -233,6 +383,19 @@
           return safeNumber(a && a.numberInYear) - safeNumber(b && b.numberInYear);
         });
 
+        let currentFrequencyOptions = fallbackFrequencyOptions.slice();
+        if (safeString(currentPolicy && currentPolicy.productCode)) {
+          try {
+            const productResponse = await exe('RepoProduct', {
+              operation: 'GET',
+              filter: `code = '${safeString(currentPolicy.productCode).replace(/'/g, "''")}'`
+            });
+            currentFrequencyOptions = buildProductFrequencyOptions(toFirstRow(productResponse && productResponse.outData));
+          } catch (error) {
+            currentFrequencyOptions = fallbackFrequencyOptions.slice();
+          }
+        }
+
         const methodOptions = toRows(paymentMethodResponse && paymentMethodResponse.outData).map(item => ({
           value: safeString(item && item.code),
           label: safeString((item && item.name) || (item && item.code))
@@ -240,16 +403,19 @@
 
         setPolicy(currentPolicy);
         setPayPlans(currentPayPlans);
+        setNewPayPlans(currentPayPlans);
         setPaymentMethods(methodOptions);
+        setFrequencyOptions(currentFrequencyOptions);
 
         form.setFieldsValue({
           currentPaymentMethod: getPaymentMethodCode(currentPolicy),
-          currentFrequency: safeString(currentPolicy && currentPolicy.periodicity ? currentPolicy.periodicity : ''),
+          currentFrequency: safeString(currentPolicy && currentPolicy.periodicity ? currentPolicy.periodicity : '').toLowerCase(),
           currentInstallments: currentPayPlans.length,
           newPaymentMethod: getPaymentMethodCode(currentPolicy),
-          newFrequency: safeString(currentPolicy && currentPolicy.periodicity ? currentPolicy.periodicity : ''),
+          newFrequency: safeString(currentPolicy && currentPolicy.periodicity ? currentPolicy.periodicity : '').toLowerCase(),
           newInstallments: currentPayPlans.length || safeNumber(currentPolicy && currentPolicy.installment ? currentPolicy.installment : 0),
           effectiveDate: toPanamaMoment(currentPolicy && currentPolicy.start),
+          startDate: toPanamaMoment(currentPolicy && currentPolicy.start),
           description: ''
         });
       } catch (error) {
@@ -268,12 +434,12 @@
         };
       }
 
-      return {
-        paymentMethod: getPaymentMethodCode(policy) ? getPolicyPaymentMethodLabel(paymentMethods, policy) : '-',
-        frequency: getFrequencyLabel(policy && policy.periodicity),
-        installments: payPlans.length
-      };
-    }, [policy, payPlans, paymentMethods]);
+        return {
+          paymentMethod: getPaymentMethodCode(policy) ? getPolicyPaymentMethodLabel(paymentMethods, policy) : '-',
+          frequency: getFrequencyLabel(policy && policy.periodicity, frequencyLabelMap),
+          installments: payPlans.length
+        };
+    }, [policy, payPlans, paymentMethods, frequencyLabelMap]);
 
     function getPolicyPaymentMethodLabel(options, currentPolicy) {
       const code = getPaymentMethodCode(currentPolicy);
@@ -282,6 +448,262 @@
     }
 
     const policyHref = policy && policy.id ? `/#/lifePolicy/${policy.id}` : '#/home';
+
+    function openEndorsementModal() {
+      const currentValues = form.getFieldsValue();
+      endorsementForm.setFieldsValue({
+        effectiveDate: currentValues.effectiveDate || toPanamaMoment(policy && policy.start),
+        description: currentValues.description || ''
+      });
+      setEndorsementModalOpen(true);
+    }
+
+    function previewEndorsement() {
+      form.validateFields(['newFrequency', 'newInstallments', 'startDate']).then(function(values) {
+        try {
+          const currentRows = toRows(payPlans).slice().sort(function(a, b) {
+            return safeNumber(a && a.numberInYear) - safeNumber(b && b.numberInYear);
+          });
+          const desiredInstallments = safeNumber(values.newInstallments);
+          const paidRows = currentRows.filter(function(row) {
+            return safeNumber(row && row.payed) > 0;
+          });
+          const paidCount = paidRows.length;
+          const startDate = values.startDate || toPanamaMoment(policy && policy.start);
+          const policyStart = toPanamaMoment(policy && policy.start);
+          const policyEnd = toPanamaMoment(policy && policy.end);
+          const frequencyMonths = getFrequencyMonths(values.newFrequency, frequencyOptions);
+
+          if (!policy || !policy.id) {
+            throw new Error(t('The policy information is not available.'));
+          }
+
+          if (!startDate || typeof startDate.isValid !== 'function' || !startDate.isValid()) {
+            throw new Error(t('The start date is required.'));
+          }
+
+          if (!policyStart || !policyEnd) {
+            throw new Error(t('The policy validity is not available.'));
+          }
+
+          if (startDate.isBefore(policyStart, 'day') || startDate.isAfter(policyEnd, 'day')) {
+            throw new Error(t('The start date must be within the policy validity.'));
+          }
+
+          if (!(desiredInstallments > 0)) {
+            throw new Error(t('The installment count is required.'));
+          }
+
+          if (desiredInstallments <= paidCount) {
+            throw new Error(t('The number of installments must be greater than the paid installments.'));
+          }
+
+          if (!(frequencyMonths > 0)) {
+            throw new Error(t('The selected frequency is invalid.'));
+          }
+
+          const totalMinimum = roundMoney(sumPlanAmount(currentRows, 'minimum'));
+          const totalPaid = roundMoney(sumPlanAmount(currentRows, 'payed'));
+          const pendingAmount = roundMoney(totalMinimum - totalPaid);
+          const remainingSlots = desiredInstallments - paidCount;
+
+          if (!(remainingSlots > 0)) {
+            throw new Error(t('The number of installments must be greater than the paid installments.'));
+          }
+
+          const baseCents = Math.round(roundMoney(pendingAmount) * 100);
+          const centsPerRow = remainingSlots > 0 ? Math.floor(baseCents / remainingSlots) : 0;
+          const remainder = remainingSlots > 0 ? baseCents - (centsPerRow * remainingSlots) : 0;
+
+          const lockedPreviewRows = paidRows.map(function(row) {
+            const paidAmount = roundMoney(row && row.payed);
+            const currentMinimum = roundMoney(row && row.minimum);
+            const lockedMinimum = paidAmount > 0 && paidAmount < currentMinimum ? paidAmount : currentMinimum;
+
+            return {
+              ...row,
+              minimum: lockedMinimum,
+              expected: lockedMinimum,
+              dueAmount: 0,
+              pendingAmount: 0,
+              payed: paidAmount,
+              payedDate: row && row.payedDate ? row.payedDate : null,
+              pending: false
+            };
+          });
+
+          const unpaidSources = currentRows.filter(function(row) {
+            return safeNumber(row && row.payed) <= 0;
+          });
+
+          const recalculatedRows = [];
+          for (let index = 0; index < remainingSlots; index += 1) {
+            const sourceRow = unpaidSources[index] || unpaidSources[unpaidSources.length - 1] || currentRows[currentRows.length - 1] || {};
+            const dueMoment = startDate.clone().add(frequencyMonths * index, 'months');
+            const coveredUntilMoment = dueMoment.clone().add(frequencyMonths, 'months');
+            const amountCents = centsPerRow + (index === remainingSlots - 1 ? remainder : 0);
+            const amount = roundMoney(amountCents / 100);
+            const dueDate = toUtcIsoFromPanamaDate(dueMoment);
+            const coveredUntil = toUtcIsoFromPanamaDate(coveredUntilMoment);
+
+            recalculatedRows.push({
+              ...sourceRow,
+              id: sourceRow && sourceRow.id != null ? sourceRow.id : `preview-${index + 1}`,
+              numberInYear: paidCount + index + 1,
+              minimum: amount,
+              expected: amount,
+              dueAmount: amount,
+              pendingAmount: amount,
+              payed: 0,
+              payedDate: null,
+              dueDate: dueDate,
+              normalDueDate: dueDate,
+              coveredUntil: coveredUntil,
+              pending: true,
+              final: index === remainingSlots - 1 ? true : false
+            });
+          }
+
+          const previewRows = lockedPreviewRows.concat(recalculatedRows);
+          setNewPayPlans(previewRows);
+          message.success(t('Preview updated successfully'));
+        } catch (error) {
+          message.error((error && error.message) ? error.message : t('Unable to build the preview.'));
+        }
+      }).catch(function() {
+        // Field-level validation feedback is handled by Ant Design.
+      });
+    }
+
+    function normalizeComparableDueDate(value) {
+      const date = toPanamaMoment(value);
+      return date && typeof date.format === 'function' ? date.format('YYYY-MM-DD') : safeString(value);
+    }
+
+    function normalizeComparableMoney(value) {
+      return roundMoney(value).toFixed(2);
+    }
+
+    function getComparablePlanRows(source) {
+      return toRows(source).slice().sort(function(a, b) {
+        return safeNumber(a && a.numberInYear) - safeNumber(b && b.numberInYear);
+      }).map(function(item) {
+        return {
+          numberInYear: safeNumber(item && item.numberInYear),
+          dueDate: normalizeComparableDueDate(item && (item.dueDate || item.normalDueDate || item.coveredUntil)),
+          minimum: normalizeComparableMoney(item && item.minimum),
+          payed: normalizeComparableMoney(item && item.payed)
+        };
+      });
+    }
+
+    function hasEndorsementChanges(values) {
+      const currentRows = getComparablePlanRows(payPlans);
+      const newRows = getComparablePlanRows(newPayPlans.length ? newPayPlans : payPlans);
+
+      if (currentRows.length !== newRows.length) {
+        return true;
+      }
+
+      if (safeString(values && values.currentPaymentMethod) !== safeString(values && values.newPaymentMethod)) {
+        return true;
+      }
+
+      if (safeString(values && values.currentFrequency).toLowerCase() !== safeString(values && values.newFrequency).toLowerCase()) {
+        return true;
+      }
+
+      if (safeNumber(values && values.currentInstallments) !== safeNumber(values && values.newInstallments)) {
+        return true;
+      }
+
+      for (let index = 0; index < currentRows.length; index += 1) {
+        const currentRow = currentRows[index] || {};
+        const newRow = newRows[index] || {};
+
+        if (String(currentRow.dueDate) !== String(newRow.dueDate)) {
+          return true;
+        }
+
+        if (String(currentRow.minimum) !== String(newRow.minimum)) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    function closeEndorsementModal() {
+      setEndorsementModalOpen(false);
+    }
+
+    async function confirmEndorsementModal() {
+      try {
+        const values = await endorsementForm.validateFields();
+        const formValues = form.getFieldsValue();
+
+        if (!hasEndorsementChanges(formValues)) {
+          message.error(t('No changes were detected in the endorsement.'));
+          return;
+        }
+
+        form.setFieldsValue({
+          effectiveDate: values.effectiveDate,
+          description: values.description
+        });
+        setEndorsementModalOpen(false);
+        message.success(t('Endorsement data updated'));
+      } catch (error) {
+        // Validation feedback is handled by Ant Design.
+      }
+    }
+
+    function getPlanDueDateMoment(row) {
+      if (!row) {
+        return null;
+      }
+
+      return toPanamaMoment(row.dueDate || row.normalDueDate || row.coveredUntil);
+    }
+
+    function updatePreviewDueDate(rowIndex, selectedDate) {
+      setNewPayPlans(function(previousRows) {
+        const rows = toRows(previousRows).slice();
+        const currentRow = rows[rowIndex];
+
+        if (!currentRow) {
+          return previousRows;
+        }
+
+        if (!selectedDate || typeof selectedDate.isValid !== 'function' || !selectedDate.isValid()) {
+          message.error(t('The due date is required.'));
+          return previousRows;
+        }
+
+        const nextRow = rows[rowIndex + 1] || null;
+        const nextDueDate = getPlanDueDateMoment(nextRow);
+        if (nextDueDate && selectedDate.isAfter(nextDueDate, 'day')) {
+          message.error(t('The due date cannot be greater than the next installment date.'));
+          return previousRows;
+        }
+
+        const previousRow = rowIndex > 0 ? rows[rowIndex - 1] : null;
+        const previousDueDate = getPlanDueDateMoment(previousRow);
+        if (previousDueDate && selectedDate.isBefore(previousDueDate, 'day')) {
+          message.error(t('The due date cannot be earlier than the previous installment date.'));
+          return previousRows;
+        }
+
+        const updatedDate = toUtcIsoFromPanamaDate(selectedDate);
+        rows[rowIndex] = {
+          ...currentRow,
+          dueDate: updatedDate,
+          normalDueDate: updatedDate
+        };
+
+        return rows;
+      });
+    }
 
   function renderPlanValue(value) {
       return value == null || value === '' ? '-' : value;
@@ -307,9 +729,9 @@
 
     function renderPayPlanTable(title, source, lockPaidRows) {
       const rows = toRows(source);
-      const hasTotals = safeString(title) === safeString(t('Current pay plan'));
+      const isNewPayPlan = safeString(title) === safeString(t('New pay plan'));
       return (
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff', minHeight: 680, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff', minHeight: 898, display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ marginTop: 0, marginBottom: 16 }}>{title}</h3>
           {rows.length === 0 ? (
             <Empty description={t('There are no installments to display')} />
@@ -320,12 +742,8 @@
                 rowKey="id"
                 pagination={{ pageSize: 25 }}
                 loading={loading}
-                scroll={{ x: 1100, y: 390 }}
+                scroll={{ x: 1100, y: 515 }}
                 rowClassName={function(record) {
-                  if (!lockPaidRows) {
-                    return '';
-                  }
-
                   return safeNumber(record && record.payed) > 0 ? 'payplan-locked-row' : '';
                 }}
               >
@@ -333,13 +751,46 @@
                 <Column title={t('Contract year')} dataIndex="contractYear" key={`${title}-contractYear`} render={renderPlanValue} />
                 <Column title={t('Concept')} dataIndex="concept" key={`${title}-concept`} render={renderPlanValue} />
                 <Column title={t('Minimum amount')} dataIndex="minimum" key={`${title}-minimum`} render={formatMoney} />
-                <Column title={t('Due date')} dataIndex="dueDate" key={`${title}-dueDate`} render={formatDateOnly} />
+                <Column
+                  title={t('Due date')}
+                  dataIndex="dueDate"
+                  key={`${title}-dueDate`}
+                  render={function(value, record, index) {
+                    const isLocked = safeNumber(record && record.payed) > 0;
+                    if (!isNewPayPlan || isLocked) {
+                      return formatDateOnly(value);
+                    }
+
+                    const currentValue = getPlanDueDateMoment(record);
+                    const nextRow = rows[index + 1] || null;
+                    const nextDueDate = getPlanDueDateMoment(nextRow);
+
+                    return (
+                      <DatePicker
+                        value={currentValue}
+                        allowClear={false}
+                        style={{ width: '100%' }}
+                        format="DD/MM/YYYY"
+                        disabledDate={function(currentDate) {
+                          if (!nextDueDate || !currentDate) {
+                            return false;
+                          }
+
+                          return currentDate.isAfter(nextDueDate, 'day');
+                        }}
+                        onChange={function(selectedDate) {
+                          updatePreviewDueDate(index, selectedDate);
+                        }}
+                      />
+                    );
+                  }}
+                />
                 <Column title={t('Paid')} dataIndex="payed" key={`${title}-payed`} render={formatMoney} />
                 <Column title={t('Payment date')} dataIndex="payedDate" key={`${title}-payedDate`} render={formatDateTime} />
               </Table>
             </div>
           )}
-          {hasTotals ? renderPlanTotals(rows) : null}
+          {renderPlanTotals(rows)}
         </div>
       );
     }
@@ -354,7 +805,7 @@
             <Button type="default" href={policyHref}>
               <BackIcon /> {t('Back')}
             </Button>
-            <Button type="primary" onClick={loadData} loading={loading}>{t('Refresh')}</Button>
+            <Button type="primary" onClick={openEndorsementModal} loading={loading}>{t('Execute Endorsement')}</Button>
           </Space>
         )}
       >
@@ -397,7 +848,11 @@
                   <Form form={form} layout="vertical">
                     <Row gutter={16}>
                       <Col xs={24} md={12}>
-                        <Form.Item label={t('New frequency')} name="newFrequency">
+                        <Form.Item
+                          label={t('New frequency')}
+                          name="newFrequency"
+                          rules={[{ required: true, message: t('Please select the new frequency') }]}
+                        >
                           <Select
                             options={frequencyOptions}
                             placeholder={t('Select the new frequency')}
@@ -421,12 +876,20 @@
 
                     <Row gutter={16}>
                       <Col xs={24} md={12}>
-                        <Form.Item label={t('New installment count')} name="newInstallments">
+                        <Form.Item
+                          label={t('New installment count')}
+                          name="newInstallments"
+                          rules={[{ required: true, message: t('Please enter the installment count') }]}
+                        >
                           <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder={t('Installment count')} />
                         </Form.Item>
                       </Col>
                       <Col xs={24} md={12}>
-                        <Form.Item label={t('Effective date')} name="effectiveDate">
+                        <Form.Item
+                          label={t('Start date')}
+                          name="startDate"
+                          rules={[{ required: true, message: t('Please select the start date') }]}
+                        >
                           <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
                         </Form.Item>
                       </Col>
@@ -434,9 +897,9 @@
 
                     <Row gutter={16}>
                       <Col xs={24}>
-                        <Form.Item label={t('Endorsement description')} name="description">
-                          <Input.TextArea rows={4} placeholder={t('Enter a description for the endorsement')} />
-                        </Form.Item>
+                        <Button htmlType="button" type="primary" style={{ backgroundColor: '#389e0d', borderColor: '#389e0d' }} onClick={previewEndorsement}>
+                          {t('Preview')}
+                        </Button>
                       </Col>
                     </Row>
                   </Form>
@@ -451,9 +914,36 @@
                 {renderPayPlanTable(t('Current pay plan'), payPlans, true)}
               </Col>
               <Col xs={24} lg={12}>
-                {renderPayPlanTable(t('New pay plan'), payPlans)}
+                {renderPayPlanTable(t('New pay plan'), newPayPlans.length ? newPayPlans : payPlans)}
               </Col>
             </Row>
+
+            <Modal
+              title={t('Execute Endorsement')}
+              open={endorsementModalOpen}
+              onOk={confirmEndorsementModal}
+              onCancel={closeEndorsementModal}
+              okText={t('Execute Endorsement')}
+              cancelText={t('Cancel')}
+              destroyOnClose
+            >
+              <Form form={endorsementForm} layout="vertical">
+                <Form.Item
+                  label={t('Effective date')}
+                  name="effectiveDate"
+                  rules={[{ required: true, message: t('Please select the effective date') }]}
+                >
+                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                </Form.Item>
+                <Form.Item
+                  label={t('Endorsement description')}
+                  name="description"
+                  rules={[{ required: true, message: t('Please enter an endorsement description') }]}
+                >
+                  <Input.TextArea rows={4} placeholder={t('Enter a description for the endorsement')} />
+                </Form.Item>
+              </Form>
+            </Modal>
           </>
         )}
       </DefaultPage>
