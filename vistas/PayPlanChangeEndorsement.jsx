@@ -1075,7 +1075,7 @@
             <Row gutter={16}>
               <Col xs={24} lg={12}>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, background: '#fff' }}>
-                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>{t('Before')}</h3>
+                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>{t('Current')}</h3>
                   <Row gutter={8}>
                     <Col xs={24} md={12}>
                       <SummaryField label={t('Current frequency')} value={policySummary.frequency} />
@@ -1157,7 +1157,7 @@
                     <Row gutter={8}>
                       <Col xs={24}>
                         <Button htmlType="button" type="primary" style={{ backgroundColor: '#389e0d', borderColor: '#389e0d' }} onClick={previewEndorsement}>
-                          {t('Preview')}
+                          {t('Calculate installments')}
                         </Button>
                       </Col>
                     </Row>
