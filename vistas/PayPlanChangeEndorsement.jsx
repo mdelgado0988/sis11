@@ -300,6 +300,7 @@
     const [form] = Form.useForm();
     const [endorsementForm] = Form.useForm();
     const [endorsementModalOpen, setEndorsementModalOpen] = useState(false);
+    const [previewNeedsRefresh, setPreviewNeedsRefresh] = useState(false);
     const frequencyLabelMap = useMemo(function() {
       return frequencyOptions.reduce(function(acc, item) {
         acc[String(item.value).toLowerCase()] = item.label;
@@ -406,6 +407,7 @@
         setNewPayPlans(currentPayPlans);
         setPaymentMethods(methodOptions);
         setFrequencyOptions(currentFrequencyOptions);
+        setPreviewNeedsRefresh(false);
 
         form.setFieldsValue({
           currentPaymentMethod: getPaymentMethodCode(currentPolicy),
@@ -451,6 +453,11 @@
 
     function openEndorsementModal() {
       const formValues = form.getFieldsValue();
+      if (previewNeedsRefresh) {
+        message.error(t('Please calculate installments again before executing the endorsement.'));
+        return;
+      }
+
       if (!hasEndorsementChanges(formValues)) {
         message.error(t('No changes were detected in the endorsement.'));
         return;
@@ -556,7 +563,8 @@
 
             recalculatedRows.push({
               ...sourceRow,
-              id: sourceRow && sourceRow.id != null ? sourceRow.id : `preview-${index + 1}`,
+              id: originalRow && originalRow.id != null ? originalRow.id : 0,
+              tempKey: originalRow && originalRow.id != null ? `plan-${originalRow.id}` : `preview-${index + 1}`,
               numberInYear: paidCount + index + 1,
               minimum: amount,
               expected: amount,
@@ -588,6 +596,7 @@
 
           const previewRows = lockedPreviewRows.concat(recalculatedRows);
           setNewPayPlans(previewRows);
+          setPreviewNeedsRefresh(false);
           message.success(t('Preview updated successfully'));
         } catch (error) {
           message.error((error && error.message) ? error.message : t('Unable to build the preview.'));
@@ -671,6 +680,8 @@
             return { ...detail };
           })
         };
+
+        delete clonedRow.tempKey;
 
         return clonedRow;
       });
@@ -859,6 +870,10 @@
           throw new Error(t('The policy information is not available.'));
         }
 
+        if (previewNeedsRefresh) {
+          throw new Error(t('Please calculate installments again before executing the endorsement.'));
+        }
+
         const effectiveDate = buildEffectiveDateTime(policy && policy.start, values.effectiveDate);
         if (!effectiveDate) {
           throw new Error(t('The effective date is invalid.'));
@@ -990,7 +1005,17 @@
             <div className="payplan-table-wrap" style={{ overflow: 'hidden' }}>
               <Table
                 dataSource={source}
-                rowKey="id"
+                rowKey={function(record, index) {
+                  if (record && safeNumber(record.id) > 0) {
+                    return String(record.id);
+                  }
+
+                  if (record && record.tempKey) {
+                    return String(record.tempKey);
+                  }
+
+                  return `plan-row-${index}`;
+                }}
                 pagination={{ pageSize: 25 }}
                 loading={loading}
                 scroll={{ x: 1100, y: 567 }}
@@ -1117,6 +1142,9 @@
                             placeholder={t('Select the new frequency')}
                             showSearch
                             optionFilterProp="label"
+                            onChange={function() {
+                              setPreviewNeedsRefresh(true);
+                            }}
                           />
                         </Form.Item>
                       </Col>
@@ -1140,7 +1168,9 @@
                           name="newInstallments"
                           rules={[{ required: true, message: t('Please enter the installment count') }]}
                         >
-                          <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder={t('Installment count')} />
+                          <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder={t('Installment count')} onChange={function() {
+                            setPreviewNeedsRefresh(true);
+                          }} />
                         </Form.Item>
                       </Col>
                       <Col xs={24} md={12}>
@@ -1149,7 +1179,9 @@
                           name="startDate"
                           rules={[{ required: true, message: t('Please select the start date') }]}
                         >
-                          <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                          <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" onChange={function() {
+                            setPreviewNeedsRefresh(true);
+                          }} />
                         </Form.Item>
                       </Col>
                     </Row>
