@@ -276,8 +276,12 @@
       return null;
     }
 
-    const datePart = date.format('YYYY-MM-DD');
-    return datePart ? `${datePart}T05:00:00Z` : null;
+    if (!date.isValid()) {
+      return null;
+    }
+
+    const utcDate = new Date(date.toDate().getTime() + panamaOffsetMs);
+    return utcDate.toISOString();
   }
 
   function SummaryField({ label, value }) {
@@ -723,6 +727,72 @@
       return 0;
     }
 
+    function getProcessIdFromResponse(response) {
+      if (!response) {
+        return 0;
+      }
+
+      if (safeNumber(response.processId) > 0) {
+        return safeNumber(response.processId);
+      }
+
+      if (response.outData) {
+        if (Array.isArray(response.outData) && response.outData.length > 0) {
+          const firstRow = response.outData[0];
+          if (safeNumber(firstRow && firstRow.processId) > 0) {
+            return safeNumber(firstRow.processId);
+          }
+        }
+
+        if (safeNumber(response.outData.processId) > 0) {
+          return safeNumber(response.outData.processId);
+        }
+      }
+
+      return 0;
+    }
+
+    async function getChangeProcessId(changeId, response) {
+      const responseProcessId = getProcessIdFromResponse(response);
+      if (responseProcessId > 0) {
+        return responseProcessId;
+      }
+
+      if (!(safeNumber(changeId) > 0)) {
+        return 0;
+      }
+
+      const changeResponse = await exe('LoadEntity', {
+        entity: 'Change',
+        fields: 'id,processId',
+        noTracking: true,
+        filter: `id=${safeNumber(changeId)}`
+      });
+
+      const change = changeResponse && changeResponse.outData ? changeResponse.outData : null;
+      return safeNumber(change && change.processId);
+    }
+
+    async function approveEndorsementWorkflow(processId) {
+      const procesoId = safeNumber(processId);
+
+      if (!(procesoId > 0)) {
+        throw new Error(t('The endorsement workflow process could not be determined.'));
+      }
+
+      const result = await exe('GotoStep', {
+        procesoId: procesoId,
+        estado: 'APROVED'
+      });
+      const response = Array.isArray(result) ? (result[0] || {}) : result;
+
+      if (!response || !response.ok) {
+        throw new Error((response && response.msg) ? response.msg : t('The endorsement workflow could not be approved.'));
+      }
+
+      return response;
+    }
+
     async function clearChangePaymentPlanFields(changeId, values) {
       if (!(safeNumber(changeId) > 0)) {
         return;
@@ -901,9 +971,28 @@
           throw new Error((response && response.msg) ? response.msg : t('The endorsement could not be executed.'));
         }
 
-        await clearChangePaymentPlanFields(getChangeIdFromResponse(response), currentValues);
+        const changeId = getChangeIdFromResponse(response);
+        if (!(changeId > 0)) {
+          throw new Error(t('The endorsement change could not be determined.'));
+        }
+
+        await clearChangePaymentPlanFields(changeId, currentValues);
+        const processId = await getChangeProcessId(changeId, response);
+        await approveEndorsementWorkflow(processId);
+
+        const executeResult = await exe('ExeChangePayPlan', {
+          changeId: changeId,
+          operation: 'EXECUTE',
+          exeNow: true
+        });
+
+        if (!executeResult || !executeResult.ok) {
+          throw new Error((executeResult && executeResult.msg) ? executeResult.msg : t('The endorsement could not be executed.'));
+        }
+
         setEndorsementModalOpen(false);
-        message.success(response.msg || t('Endorsement executed successfully'));
+        message.success(executeResult.msg || response.msg || t('Endorsement executed successfully'));
+        window.location.href = policyHref;
       } catch (error) {
         if (error && error.errorFields) {
           return;
