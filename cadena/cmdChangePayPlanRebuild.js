@@ -394,12 +394,18 @@ function updatePolicyPaymentData(change) {
 }
 
 function updateChangePayPlan(changeId, payPlan) {
+  const cleanPayPlan = (payPlan || []).map(item => {
+    const cloned = clonePayPlan(item);
+    delete cloned._hasSourceId;
+    return cloned;
+  });
+
   doCmd({
     cmd: "SetField",
     data: {
       entity: "Change",
       entityId: changeId,
-      fieldValue: `jNewPayPlan=${sqlString(JSON.stringify(payPlan))}`,
+      fieldValue: `jNewPayPlan=${sqlString(JSON.stringify(cleanPayPlan))}`,
       raw: true
     }
   });
@@ -422,6 +428,7 @@ function normalizePayPlan(item, policyId) {
 
   return {
     ...clonePayPlan(item),
+    _hasSourceId: Object.prototype.hasOwnProperty.call(item, "id"),
     id: Number(item.id || 0),
     lifePolicyId: Number(item.lifePolicyId || policyId || 0),
     concept: item.concept || "Prima",
@@ -452,7 +459,7 @@ function normalizePayPlan(item, policyId) {
 
 function findCurrentPayPlan(target, currentById, currentByKey, currentByDueDate) {
   const targetId = Number(target?.id || 0);
-  if (!(targetId > 0)) {
+  if (!(targetId > 0) && target?._hasSourceId) {
     return null;
   }
 

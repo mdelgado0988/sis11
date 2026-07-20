@@ -280,7 +280,16 @@
       return null;
     }
 
-    const utcDate = new Date(date.toDate().getTime() + panamaOffsetMs);
+    const utcDate = new Date(Date.UTC(
+      date.year(),
+      date.month(),
+      date.date(),
+      date.hour(),
+      date.minute(),
+      date.second(),
+      date.millisecond()
+    ));
+
     return utcDate.toISOString();
   }
 
