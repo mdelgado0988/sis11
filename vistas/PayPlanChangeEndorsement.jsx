@@ -972,6 +972,7 @@
             newPaymentMethod: newPaymentMethod,
             effectiveDate: effectiveDate,
             note: safeString(values.description),
+            informative: true,
             operation: 'ADD'
           });
           executeCommand = 'ExeChangePaymentMethod';

@@ -55,20 +55,6 @@ function loadChange(changeId) {
 }
 
 function loadBillingData(change) {
-  const bill = loadOneEntity(
-    "Bill",
-    "id, changeId, anualPremium, tax, anualTotal",
-    `changeId = ${sqlNumber(change.id)}`
-  );
-
-  if (bill) {
-    return {
-      premium: n2(bill.anualPremium),
-      tax: n2(bill.tax),
-      total: n2(bill.anualTotal)
-    };
-  }
-
   const policy = loadOneEntity(
     "LifePolicy",
     "id, anualPremium, tax, anualTotal",
