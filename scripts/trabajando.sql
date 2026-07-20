@@ -13,7 +13,7 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 6
-and t.cplan = 'AGENCIA' 
+and t.cplan = 'AULEMEILU$' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -29,14 +29,16 @@ inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 where c.cramo = 6
 --AND pl.istatplan = 'V'
-and C.cplan = 'AGENCIA' 
+and C.cplan = 'AULEMEILU$' 
 --AND (ISNULL(c.SA,'-1') <> '-1' OR ISNULL(c.CGRUPO,'-1') <> '-1' OR ISNULL(c.CGRUPO1,'-1') <> '-1' OR ISNULL(c.CGRUPO2,'-1') <> '-1')
 order by 1,2,4
 
-select * from ccerti_preguntas where cramo = 6 --and cplan = '6_21'
+select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
---SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'LIMITE_DAÑ06'
---select * from tarifasvar where variable = 'sa6'
+--SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Dañ08'
+--select * from tarifasvar where variable = 'OptMoPDeducible'
+
+
 
 return;
 
@@ -48,8 +50,8 @@ return;
 --ORDER BY o.cproces DESC
 
 
-declare @ramo int = 6
-select CONCAT(@ramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(@ramo,'_'),''),'$','')) Contador, cplan, xplan, istatplan
+declare @ramo int = 81
+select CONCAT(@ramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(@ramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
 		, (SELECT COUNT(1) FROM maplancob c where c.cramo = pl.cramo and c.cplan = pl.cplan) Coberturas
 		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
 		, CASE WHEN EXISTS(SELECT 1 FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) THEN 'Si' ELSE 'No' end TienePolizas
@@ -58,7 +60,16 @@ from maplanes pl
 where cramo = @ramo 
 --AND pl.istatplan = 'V'
 order by 2
---AND cplan NOT IN ('Basico Vid','TAR_PRO2')
+
+--select CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
+--		, (SELECT COUNT(1) FROM maplancob c where c.cramo = pl.cramo and c.cplan = pl.cplan) Coberturas
+--		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
+--		, CASE WHEN EXISTS(SELECT 1 FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) THEN 'Si' ELSE 'No' end TienePolizas
+--		, (SELECT TOP (1) cnpoliza FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) Ejemplo
+--from maplanes pl
+--where cramo in (81,82,83,84)
+----AND pl.istatplan = 'V'
+--order by 2
 
 select xabreviatura, xdescripcion_l, cramo from maramos where cramo = 52
 
@@ -72,12 +83,12 @@ where /*e.cramo in (81,82,83) and*/ e.iestado = 'V'
 
 SELECT cramo, RTRIM(xnombrep) reporte, MAX(cplan) cplan, CONCAT( MAX(RTRIM(xdescripcion)), ' (', rtrim(xnombrep), ')') reportedoc, MAX(xdescripcion_l) reporte_l, MAX(RTRIM(xdescripcion)) reporte
 FROM marepteccia 
-WHERE cramo = 20 AND xdpto = 'EMISION'
+WHERE cramo = 6 AND xdpto = 'EMISION'
 AND xnombrep not like 'endoso%'
 AND xnombrep not like 'recibo%'
 GROUP BY cramo, xnombrep
 
-SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos WHERE cramo = 20 and cplan = 'Basico Vid' ORDER BY cproces DESC
+SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos WHERE cramo = 6 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
 declare @cramo int = 20
