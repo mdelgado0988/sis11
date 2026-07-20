@@ -457,7 +457,7 @@
 
     function openEndorsementModal() {
       const formValues = form.getFieldsValue();
-      if (previewNeedsRefresh) {
+      if (previewNeedsRefresh && hasPayPlanChanges(formValues)) {
         message.error(t('Please calculate installments again before executing the endorsement.'));
         return;
       }
@@ -637,13 +637,17 @@
     }
 
     function hasEndorsementChanges(values) {
+      return hasPaymentMethodChanges(values) || hasPayPlanChanges(values);
+    }
+
+    function hasPaymentMethodChanges(values) {
+      return normalizeComparableString(getPaymentMethodCode(policy)) !== normalizeComparableString(values && values.newPaymentMethod);
+    }
+
+    function hasPayPlanChanges(values) {
       const currentRows = getComparablePlanRows(payPlans);
       const newRows = getComparablePlanRows(newPayPlans.length ? newPayPlans : payPlans);
       if (currentRows.length !== newRows.length) {
-        return true;
-      }
-      
-      if (normalizeComparableString(getPaymentMethodCode(policy)) !== normalizeComparableString(values && values.newPaymentMethod)) {
         return true;
       }
 
@@ -940,7 +944,10 @@
           throw new Error(t('The policy information is not available.'));
         }
 
-        if (previewNeedsRefresh) {
+        const currentValues = form.getFieldsValue(true);
+        const paymentMethodOnly = hasPaymentMethodChanges(currentValues) && !hasPayPlanChanges(currentValues);
+
+        if (previewNeedsRefresh && hasPayPlanChanges(currentValues)) {
           throw new Error(t('Please calculate installments again before executing the endorsement.'));
         }
 
@@ -949,14 +956,32 @@
           throw new Error(t('The effective date is invalid.'));
         }
 
-        const editedPayPlan = buildEditedPayPlanPayload();
-        if (!editedPayPlan.length) {
-          throw new Error(t('The edited pay plan is not available.'));
-        }
-
-        const currentValues = form.getFieldsValue(true);
         setLoading(true);
-        const response = await exe('ChangePayPlan', {
+
+        let response;
+        let executeCommand;
+
+        if (paymentMethodOnly) {
+          const newPaymentMethod = safeString(currentValues && currentValues.newPaymentMethod);
+          if (!newPaymentMethod) {
+            throw new Error(t('Please select the new payment method.'));
+          }
+
+          response = await exe('ChangePaymentMethod', {
+            policyId: policy.id,
+            newPaymentMethod: newPaymentMethod,
+            effectiveDate: effectiveDate,
+            note: safeString(values.description),
+            operation: 'ADD'
+          });
+          executeCommand = 'ExeChangePaymentMethod';
+        } else {
+          const editedPayPlan = buildEditedPayPlanPayload();
+          if (!editedPayPlan.length) {
+            throw new Error(t('The edited pay plan is not available.'));
+          }
+
+          response = await exe('ChangePayPlan', {
             policyId: policy.id,
             effectiveDate: effectiveDate,
             operation: 'ADD',
@@ -965,7 +990,9 @@
             changeIdToBeAmended: null,
             jEditedPayPlan: JSON.stringify(editedPayPlan),
             Surcharges: []
-        });
+          });
+          executeCommand = 'ExeChangePayPlan';
+        }
 
         if (!response || !response.ok) {
           throw new Error((response && response.msg) ? response.msg : t('The endorsement could not be executed.'));
@@ -976,11 +1003,14 @@
           throw new Error(t('The endorsement change could not be determined.'));
         }
 
-        await clearChangePaymentPlanFields(changeId, currentValues);
+        if (!paymentMethodOnly) {
+          await clearChangePaymentPlanFields(changeId, currentValues);
+        }
+
         const processId = await getChangeProcessId(changeId, response);
         await approveEndorsementWorkflow(processId);
 
-        const executeResult = await exe('ExeChangePayPlan', {
+        const executeResult = await exe(executeCommand, {
           changeId: changeId,
           operation: 'EXECUTE',
           exeNow: true

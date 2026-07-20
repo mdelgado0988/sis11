@@ -33,6 +33,9 @@ try {
     return { ok: false, msg: "El endoso no contiene plan de pago para reconstruir" };
   }
 
+  const billingData = loadBillingData(change);
+  rebuildPayPlanDetailsByBilling(targetPayPlan, billingData);
+
   const currentPayPlan = loadPolicyPayPlan(change.lifePolicyId);
   rebuildPolicyPayPlan(change, currentPayPlan, targetPayPlan);
   updateChangePayPlan(change.id, targetPayPlan);
@@ -49,6 +52,34 @@ function loadChange(changeId) {
     "id, lifePolicyId, jNewPayPlan, newPaymentMethod, newFrequency",
     `id = ${sqlNumber(changeId)}`
   );
+}
+
+function loadBillingData(change) {
+  const bill = loadOneEntity(
+    "Bill",
+    "id, changeId, anualPremium, tax, anualTotal",
+    `changeId = ${sqlNumber(change.id)}`
+  );
+
+  if (bill) {
+    return {
+      premium: n2(bill.anualPremium),
+      tax: n2(bill.tax),
+      total: n2(bill.anualTotal)
+    };
+  }
+
+  const policy = loadOneEntity(
+    "LifePolicy",
+    "id, anualPremium, tax, anualTotal",
+    `id = ${sqlNumber(change.lifePolicyId)}`
+  );
+
+  return {
+    premium: n2(policy?.anualPremium),
+    tax: n2(policy?.tax),
+    total: n2(policy?.anualTotal)
+  };
 }
 
 function loadPolicyPayPlan(policyId) {
@@ -205,7 +236,82 @@ function syncPayPlanDetails(sqlParts, payPlanId, target, preservePaid) {
   }
 }
 
+function rebuildPayPlanDetailsByBilling(payPlans, billingData) {
+  const premiumTotal = n2(billingData?.premium);
+  const taxTotal = n2(billingData?.tax);
+  const ratioBase = n2(premiumTotal + taxTotal);
+
+  if (!payPlans?.length || Math.abs(ratioBase) <= 0.01) {
+    return;
+  }
+
+  const taxRatio = clampRatio(taxTotal / ratioBase);
+  const editablePayPlans = payPlans.filter(item => n2(item?.minimum) - n2(item?.payed) > 0.01);
+
+  if (!editablePayPlans.length) {
+    return;
+  }
+
+  const pendingTotal = n2(
+    editablePayPlans.reduce((sum, item) => sum + n2(n2(item?.minimum) - n2(item?.payed)), 0)
+  );
+
+  if (Math.abs(pendingTotal) <= 0.01) {
+    return;
+  }
+
+  const pendingTax = n2(pendingTotal * taxRatio);
+  const pendingPremium = n2(pendingTotal - pendingTax);
+  let accumulatedPremium = 0;
+  let accumulatedTax = 0;
+
+  editablePayPlans.forEach((payPlan, index) => {
+    const pendingAmount = n2(n2(payPlan?.minimum) - n2(payPlan?.payed));
+    const isLast = index === editablePayPlans.length - 1;
+    const premium = isLast
+      ? n2(pendingPremium - accumulatedPremium)
+      : n2(pendingAmount * pendingPremium / pendingTotal);
+    const tax = isLast
+      ? n2(pendingTax - accumulatedTax)
+      : n2(pendingAmount * pendingTax / pendingTotal);
+    const normalizedTax = n2(Math.max(0, Math.min(tax, pendingAmount)));
+    const normalizedPremium = n2(pendingAmount - normalizedTax);
+
+    if (!isLast) {
+      accumulatedPremium = n2(accumulatedPremium + normalizedPremium);
+      accumulatedTax = n2(accumulatedTax + normalizedTax);
+    }
+
+    payPlan.PayPlanDetail = [
+      {
+        id: 0,
+        payPlanId: Number(payPlan?.id || 0),
+        amount: normalizedPremium,
+        concept: `Detalle de cuota #${payPlan?.numberInYear || 0}`,
+        detail: "Prima Cobertura",
+        order: 1,
+        paid: 0
+      },
+      {
+        id: 0,
+        payPlanId: Number(payPlan?.id || 0),
+        amount: normalizedTax,
+        concept: `Detalle de cuota #${payPlan?.numberInYear || 0}`,
+        detail: "Impuesto de Seguros",
+        order: 2,
+        paid: 0
+      }
+    ];
+  });
+}
+
 function normalizePayPlanDetailsForTarget(payPlan) {
+  const pendingAmount = n2(n2(payPlan?.minimum) - n2(payPlan?.payed));
+  if (n2(payPlan?.payed) > 0.01 && pendingAmount <= 0.01) {
+    payPlan.PayPlanDetail = [];
+    return;
+  }
+
   const details = Array.isArray(payPlan?.PayPlanDetail) ? payPlan.PayPlanDetail : [];
   if (!details.length) {
     payPlan.PayPlanDetail = buildDefaultPayPlanDetails(payPlan);
@@ -546,6 +652,19 @@ function normalizeDateKey(value) {
 
   const text = String(value);
   return text.length >= 10 ? text.slice(0, 10) : text;
+}
+
+function clampRatio(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number < 0) {
+    return 0;
+  }
+
+  if (number > 1) {
+    return 1;
+  }
+
+  return number;
 }
 
 function isValidPayPlanDetail(detail) {
