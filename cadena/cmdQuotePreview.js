@@ -75,7 +75,7 @@ function executePolicyQuote(policyId) {
       policyId: policyId,
       dbMode: true,
       save: true,
-      action: 'PREQUOTE'
+      action: 'ANNIVERSARY'
     }
   });
 

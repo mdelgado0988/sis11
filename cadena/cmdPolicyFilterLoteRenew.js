@@ -60,17 +60,17 @@ if(row.venceEn && venceEn >= 0){
 cteQuery = `
 WITH BatchCreated AS (
 SELECT 
-  B.id AS batchId,
-  TRY_CAST(JSON_VALUE(J.value, '$[0]') AS INT) AS anniversaryId,
-  TRY_CAST(JSON_VALUE(J.value, '$[3]') AS CHAR(2)) AS renovar
+  MAX(B.id) AS batchId,
+  TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT) AS lifePolicyId,
+  MAX(TRY_CAST(JSON_VALUE(J.value, '$[3]') AS CHAR(2))) AS renovar
 FROM [Batch] AS B
 JOIN [ImportConfig] ic ON b.importConfigId = ic.id
 CROSS APPLY OPENJSON(B.jData) AS J
 WHERE 
     ic.[category] = 'ANNIVERSARYLOTEVIEW'
     AND  ISJSON(B.jData) > 0
-    AND TRY_CAST(JSON_VALUE(J.value, '$[0]') AS INT) IS NOT NULL
-    AND TRY_CAST(JSON_VALUE(J.value, '$[3]') AS CHAR(2)) = 'Si'
+    AND TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT) IS NOT NULL
+GROUP BY TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT)
 )`;
 
 querySql =`
@@ -82,20 +82,21 @@ SELECT
     MONTH(pol.[start]) AS 'mes',
     lob.[name] AS 'ramo',
     pro.[name] AS 'plan',
-    COALESCE(process.[estado],pol.[entityState],'') AS 'estado',
+    CASE WHEN reno.id IS NOT NULL AND reno.activeDate IS NULL THEN 'En Proceso'
+        WHEN reno.id IS NOT NULL AND reno.activeDate IS NOT NULL THEN 'Renovada' ELSE 'Sin Acción' END AS 'estado',
     CASE 
-        WHEN pol.[policyType] = 'I' THEN 'Póliza Individual'
-        WHEN pol.[policyType] = 'G' THEN 'Poliza de Grupo'
+        WHEN pol.[policyType] = 'I' THEN 'Individual'
+        WHEN pol.[policyType] = 'G' THEN 'Grupal'
         ELSE 'Certificado'
     END AS 'tipoPoliza',
     pol.[start] AS 'inicia',
     pol.[end] AS 'vence',
     TRIM(CONCAT_WS(' ', con.[name], con.[surname1], con.[surname2])) AS 'asegurado',
     DATEDIFF(DAY, GETDATE(), pol.[end]) AS 'diasV',
-    '0' AS 'oferta',
+    ISNULL(reno.id,0) AS 'oferta',
     CalculoPago.[pending] AS 'pendiente',
     pol.[created] AS 'fechaCreacion',
-    ani.[id] AS 'aniversarioId',
+    pol.[id] AS 'lifePolicyId',
     COALESCE(btC.[batchId],0) batchId,
     CASE WHEN ISNULL(oa.estadoRenovacion, 'Sin Accion') = 'No Renovar' THEN 0 ELSE 1 END bRenovar
 FROM LifePolicy pol
@@ -103,9 +104,11 @@ JOIN Product pro ON pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]
 JOIN Insured aseg ON pol.[id] = aseg.[lifePolicyId] AND aseg.[role] =0
 JOIN Contact con ON aseg.[contactId] = con.[id]
-JOIN Anniversary ani ON pol.[id] = ani.[lifePolicyId]
-LEFT JOIN BatchCreated btC ON ani.[id] = btC.[anniversaryId]
-LEFT JOIN Proceso process ON pol.[processId] = process.[id]
+OUTER APPLY (SELECT TOP (1) reno.activeDate, reno.id
+             FROM LifePolicy reno 
+             WHERE reno.originalPolicyId = pol.id
+             ORDER BY reno.id DESC) reno
+LEFT JOIN BatchCreated btC ON pol.[id] = btC.[lifePolicyId]
 
 OUTER APPLY (SELECT JSON_VALUE(j.userData, '$[0]') AS estadoRenovacion
             FROM insuredObject io
@@ -126,8 +129,7 @@ CROSS APPLY (
 
 WHERE pol.[entityState] = 'ACTIVE'
 AND pol.[active] = 1
-AND ani.[executionDate] IS NULL
-AND ani.[processId] IS NULL
+AND pol.[activeDate] IS NOT NULL
 ${filtro}
 `;
 
@@ -167,8 +169,6 @@ JOIN Product pro ON pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]
 JOIN Insured aseg ON pol.[id] = aseg.[lifePolicyId] AND aseg.[role] =0
 JOIN Contact con ON aseg.[contactId] = con.[id]
-JOIN Anniversary ani ON pol.[id] = ani.[lifePolicyId]
-LEFT JOIN Proceso process ON pol.[processId] = process.[id]
 CROSS APPLY (
     SELECT SUM(pay.[minimum]) AS [pending]
     FROM PayPlan pay
@@ -179,8 +179,7 @@ CROSS APPLY (
 
 WHERE pol.[entityState] = 'ACTIVE'
 AND pol.[active] = 1
-AND ani.[executionDate] IS NULL
-AND ani.[processId] IS NULL
+AND pol.[activeDate] IS NOT NULL
 ${filtro}
 `;
 

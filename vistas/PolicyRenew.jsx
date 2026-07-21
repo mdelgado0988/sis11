@@ -79,7 +79,8 @@
         .renovacion-view .ant-table-body {
           overflow-x: scroll !important;
           overflow-y: scroll !important;
-          scrollbar-gutter: stable both-edges;
+          scrollbar-gutter: stable;
+          scrollbar-color: #b7b7b7 #f5f5f5;
         }
     
         /* Evita que el header se desalineé cuando aparece el scroll */
@@ -91,6 +92,15 @@
         .renovacion-view .ant-table-body::-webkit-scrollbar {
           width: 12px;
           height: 12px;
+        }
+
+        .renovacion-view .ant-table-body::-webkit-scrollbar-thumb {
+          background: #b7b7b7;
+          border-radius: 6px;
+        }
+
+        .renovacion-view .ant-table-body::-webkit-scrollbar-track {
+          background: #f5f5f5;
         }
 
         .renovacion-warning-button {
@@ -107,6 +117,59 @@
         .renovacion-warning-button:active {
           background-color: #d46b08 !important;
           border-color: #d46b08 !important;
+        }
+
+        .policy-renew-progress .ant-progress-text {
+          padding-right: 8px;
+        }
+
+        .policy-renew-action-group {
+          display: inline-flex;
+          vertical-align: middle;
+          margin-right: 12px;
+          border: 1px solid #d9d9d9;
+          border-radius: 2px;
+          box-shadow: none;
+          overflow: hidden;
+        }
+
+        .policy-renew-action-group > .ant-btn,
+        .policy-renew-action-group .ant-dropdown-button > .ant-btn {
+          height: 36px;
+          border: 0;
+          border-right: 1px solid #d9d9d9;
+          border-radius: 0;
+          background: #fff;
+          color: #262626;
+          box-shadow: none;
+        }
+
+        .policy-renew-action-group > .ant-btn:last-child,
+        .policy-renew-action-group .ant-dropdown-button > .ant-btn:last-child {
+          border-right: 0;
+        }
+
+        .policy-renew-action-group > .ant-btn:hover,
+        .policy-renew-action-group .ant-dropdown-button > .ant-btn:hover {
+          color: #1677ff;
+          background: #f5faff;
+          box-shadow: inset 0 0 0 1px #1677ff;
+          position: relative;
+          z-index: 1;
+        }
+
+        .policy-renew-action-group .policy-renew-quote-button,
+        .policy-renew-action-group .policy-renew-quote-button:hover,
+        .policy-renew-action-group .policy-renew-quote-button:focus {
+          border-right-color: #389e0d;
+          background: #389e0d;
+          color: #fff;
+        }
+
+        .policy-renew-action-group .policy-renew-quote-button:hover,
+        .policy-renew-action-group .policy-renew-quote-button:focus {
+          background: #237804;
+          box-shadow: inset 0 0 0 1px #135200;
         }
         
         .fila-no-renovar td {
@@ -391,7 +454,7 @@
         }
     };
 
-    const PolicyTable = ({ data, loading,searchTotal,handleTableChange,rowSelection }) => {
+    const PolicyTable = ({ data, loading, searchTotal, pagination, handleTableChange, rowSelection }) => {
 
         const columns = [
             { title: 'Id', dataIndex: 'codigo', width: 80, align: 'center' },
@@ -410,11 +473,11 @@
             { title: 'Pendiente', dataIndex: 'pendiente', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
             { title: 'Fecha Creación', dataIndex: 'fechaCreacion', width: 80, render: renderDate, align: 'center' },
             { title: 'Lote', dataIndex: 'batchId', width: 80, align: 'center'}
-            //{ title: 'Aniversario Id', dataIndex: 'aniversarioId', hidden: true, width: 150 }
         ];
 
         return (
             <Table
+            className="renovacion-view"
             rowSelection={rowSelection}
             rowClassName={(record) => {
                 if (Number(record && record.batchId || 0) > 0) {
@@ -429,6 +492,8 @@
             onChange={handleTableChange}
             size="small" // Para que se parezca más a la densidad de la imagen
             pagination={{
+                current: pagination.current,
+                pageSize: pagination.pageSize,
                 total: searchTotal,
                 showSizeChanger: true,
                 showQuickJumper: true,
@@ -437,9 +502,9 @@
                 defaultPageSize: 50
             }}
             // CLAVE PARA RESPONSIVE: Permite scroll horizontal en pantallas pequeñas
-            scroll={{ x: 'max-content', y: 800 }}
+            scroll={{ x: 'max-content', y: 500 }}
             bordered
-            rowKey='aniversarioId'
+            rowKey='lifePolicyId'
             />
         );
     };
@@ -758,6 +823,7 @@
         };
 
         const handleTableChange = (newPagination) => {
+            setPagination(newPagination);
             const params = {
                 pagination: newPagination,
                 loading: true,
@@ -845,7 +911,7 @@
         };
 
         const getSelectedPolicies = () => {
-            return appContext.getTableData().filter(item => appContext.getSelectedRowKeys().includes(item.aniversarioId));
+            return appContext.getTableData().filter(item => appContext.getSelectedRowKeys().includes(item.lifePolicyId));
         }
 
         const getNextPolicyVersion = (policyId) => {
@@ -923,7 +989,7 @@
                 setBatchGenerationProgress(Math.round(((step - 1) / total) * 100));
 
                 const offerPolicyId = await createPolicyOfferVersion(policy);
-                rows.push([policy.aniversarioId, policy.poliza, policy.codigo, "No", offerPolicyId]);
+                rows.push([policy.codigo, policy.poliza, policy.codigo, "No", offerPolicyId]);
 
                 setBatchGenerationProgress(Math.round((step / total) * 100));
             }
@@ -956,6 +1022,27 @@
                 entity:'Batch',
                 entityId: batch.id,
                 fieldValue:`[name]='${batch.name}-${batch.id}'`
+            });
+        }
+
+        const markGeneratedBatchFinished = (batch) => {
+            if (!batch || Number(batch.id || 0) <= 0) {
+                return Promise.reject(new Error('No se recibió un lote válido para actualizar su estado'));
+            }
+
+            // The automatic renewal flow completes the batch intentionally to prevent manual execution.
+            return exe('SetField', {
+                entity: 'Batch',
+                entityId: batch.id,
+                fieldValue: "[status]='FINISHED'"
+            }).then(response => {
+                if (!response || response.ok === false) {
+                    throw new Error(
+                        response && response.msg
+                            ? response.msg
+                            : `No fue posible finalizar el lote ${batch.id}`
+                    );
+                }
             });
         }
 
@@ -993,6 +1080,7 @@
                 }
 
                 await renameGeneratedBatch(batch);
+                await markGeneratedBatchFinished(batch);
                 setBatchGenerationProgress(100);
                 setBatchGenerationText(`Lote ${batch.id} generado correctamente`);
 
@@ -1040,6 +1128,7 @@
                     data={tableData} 
                     loading={loading} 
                     searchTotal={searchTotal} 
+                    pagination={pagination}
                     handleTableChange={handleTableChange}
                     tiempoEjecucion={tiempoEjecucion}
                     rowSelection={rowSelection}
@@ -1110,27 +1199,16 @@
           >
             {/* BOTONES */}
             <Col flex="auto">
-              <Space wrap>
+              <Button.Group className="policy-renew-action-group">
                 <Dropdown overlay={quoteMenu} trigger={['click']}>
-                  <Button type="primary" icon={<CalculatorOutlined />} loading={loading}>
+                  <Button className="policy-renew-quote-button" icon={<CalculatorOutlined />} loading={loading}>
                     Cotizar <ArrowDown />
                   </Button>
                 </Dropdown>
-              </Space>
-        
-              <Divider type="vertical" />
-
-              <Space wrap>
-                <Button type="danger" icon={<DeleteOutlined />} loading={loading} onClick={onExclude}>
+                <Button icon={<DeleteOutlined />} loading={loading} onClick={onExclude}>
                   Excluir
                 </Button>
-              </Space>
-
-              <Divider type="vertical" />
-
-              <Space wrap>
                 <Button
-                  type="primary"
                   icon={<PlusOutlined />}
                   loading={loading}
                   onClick={() => {
@@ -1148,22 +1226,13 @@
                 >
                   Re-Ejecutar
                 </Button>
-              </Space>       
-
-              <Divider type="vertical" />
-
-              <Space wrap>
                 <Button
-                  type="primary"
-                  className="renovacion-warning-button"
                   onClick={() => onViewResults()}
                   icon={<EyeOutlined />}
                 >
                   Ver Errores
                 </Button>
-              </Space>
-
-              <Divider type="vertical" />       
+              </Button.Group>
         
               <Space size="middle" align="center">
                 <Button
@@ -1187,6 +1256,7 @@
             {/* PROGRESS BAR */}
             <Col flex="300px" style={{ marginRight: 25 }}>
               <Progress 
+                className="policy-renew-progress"
                 percent={percent}
                 format={(p) => `${p}% - ${p == 0 ? 'En Espera' : (p == 100 ? "Finalizado": "Cotizando...")}`} 
                 size="small"
@@ -1253,7 +1323,6 @@
     const LoteDetalleTable = ({ tableData, loading, searchTotal, handleTableChange, rowSelection, total, onViewPolicy }) => {
 
         const columns = [
-          //{ title: 'Id', dataIndex: 'anniversaryId', width: 80, align: 'center' },
           {
             title: 'Id Póliza',
             dataIndex: 'newLifePolicyId',
@@ -1337,7 +1406,7 @@
             // CLAVE PARA RESPONSIVE: Permite scroll horizontal en pantallas pequeñas
             scroll={{ x: 'max-content', y: 800 }}
             bordered
-            rowKey='anniversaryId'              
+            rowKey='lifePolicyId'              
             />
           </div>
         );
@@ -1352,7 +1421,7 @@
           onChange: onSelectChange,
           getCheckboxProps: (record) => ({
               //disabled: record.renovar == "No", 
-              name: record.anniversaryId, 
+              name: record.lifePolicyId, 
           }),
         };    
       
@@ -1776,8 +1845,8 @@
           }
 
           return rows
-            .filter(item => Array.isArray(item) && Number(item[0]) > 0)
-            .map(item => String(item[0]));
+            .filter(item => Array.isArray(item) && Number(item[2]) > 0)
+            .map(item => String(item[2]));
         });
       };
 
@@ -1800,9 +1869,9 @@
                 return;
               }
 
-              dameEstadoLote().then(status => {
-              if(status != "FINISHED"){
-                //exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
+              // Quoting remains available after the batch is renewed.
+              // The renewal status validation is kept for exclusion only.
+              //exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
           
                 exe("ExeChain",{
                     chain: "cmdGeneraLoteCotizacionAniversario",
@@ -1825,10 +1894,12 @@
                   }       
                   
                 });
+              /*
               }
               else
                 notification.error({ message: 'Lote renovado', description: 'El lote ya ha sido renovado, no puede cotizar pólizas', duration: 5 });
               });
+              */
             }).catch(error => {
               notification.error({ message: 'Error', description: error.toString(), duration: 10 });
             });
@@ -1868,7 +1939,7 @@
                               JSON_QUERY(
                                   '[' + STRING_AGG(
                                       CASE
-                                          WHEN JSON_VALUE(j.[value], '$[0]') IN (${idAExcluir})
+                                          WHEN JSON_VALUE(j.[value], '$[2]') IN (${idAExcluir})
                                               THEN JSON_MODIFY(j.[value], '$[3]', 'No')
                                           ELSE j.[value]
                                       END,
