@@ -20,34 +20,41 @@
 Name: cmdPolicyFilterLoteRenew
 Category: VIEW
 */
-const { row } = context;
+const row = context && context.row ? context.row : {};
 let filtro = '';
 let querySql = '';
 let cteQuery = '';
-if(row.policyId){
-    filtro += ` AND pol.[id]=${row.policyId}`;
+const policyId = getPositiveInteger(row.policyId);
+const venceEn = getNonNegativeInteger(row.venceEn);
+
+if(row.policyId && policyId <= 0){
+    return buildResult(false, 'El identificador de póliza no es válido');
+}
+
+if(policyId > 0){
+    filtro += ` AND pol.[id]=${policyId}`;
 }
 if(row.ramo){
-    filtro += ` AND pol.[lob]='${row.ramo}'`;
+    filtro += ` AND pol.[lob]=${sqlString(row.ramo)}`;
 }
 if(row.producto){
-    filtro += ` AND pol.[productCode]='${row.producto}'`;
+    filtro += ` AND pol.[productCode]=${sqlString(row.producto)}`;
 }
 if(row.sucursal){
-    filtro += ` AND pol.[branchCode]='${row.sucursal}'`;
+    filtro += ` AND pol.[branchCode]=${sqlString(row.sucursal)}`;
 }
 if(row.tipoPoliza){
-    filtro += ` AND pol.[policyType]  <= '${row.tipoPoliza}'`;
+    filtro += ` AND pol.[policyType]=${sqlString(row.tipoPoliza)}`;
 }
 if(row.venceDesde){
-    filtro += ` AND pol.[end] >= '${row.venceDesde}'`;
+    filtro += ` AND pol.[end] >= ${sqlString(row.venceDesde)}`;
 }
 if(row.venceHasta){
-    filtro += ` AND pol.[end] <= '${row.venceHasta}'`;
+    filtro += ` AND pol.[end] <= ${sqlString(row.venceHasta)}`;
   
 }
-if(row.venceEn){
-  filtro += ` AND CAST(pol.[end] AS DATE) <= DATEADD(DAY, ${row.venceEn}, CAST(GETDATE() AS DATE))`;  
+if(row.venceEn && venceEn >= 0){
+  filtro += ` AND CAST(pol.[end] AS DATE) <= DATEADD(DAY, ${venceEn}, CAST(GETDATE() AS DATE))`;  
 }
 
 cteQuery = `
@@ -145,7 +152,12 @@ doCmd({
     }
 });
 
-let dataPaginada = DoQuery.outData;
+const queryResponse = typeof DoQuery === 'undefined' ? null : DoQuery;
+if (!queryResponse || !queryResponse.ok) {
+    return buildResult(false, queryResponse && queryResponse.msg ? queryResponse.msg : 'No fue posible consultar las pólizas');
+}
+
+let dataPaginada = Array.isArray(queryResponse.outData) ? queryResponse.outData : [];
 
 
 let queryCountSql = `
@@ -155,6 +167,7 @@ JOIN Product pro ON pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]
 JOIN Insured aseg ON pol.[id] = aseg.[lifePolicyId] AND aseg.[role] =0
 JOIN Contact con ON aseg.[contactId] = con.[id]
+JOIN Anniversary ani ON pol.[id] = ani.[lifePolicyId]
 LEFT JOIN Proceso process ON pol.[processId] = process.[id]
 CROSS APPLY (
     SELECT SUM(pay.[minimum]) AS [pending]
@@ -166,6 +179,8 @@ CROSS APPLY (
 
 WHERE pol.[entityState] = 'ACTIVE'
 AND pol.[active] = 1
+AND ani.[executionDate] IS NULL
+AND ani.[processId] IS NULL
 ${filtro}
 `;
 
@@ -176,10 +191,35 @@ doCmd({
         sql: queryCountSql
     }
 });
-let totalDatos = DoQuery.outData[0].total;
+const countResponse = typeof DoQuery === 'undefined' ? null : DoQuery;
+if (!countResponse || !countResponse.ok) {
+    return buildResult(false, countResponse && countResponse.msg ? countResponse.msg : 'No fue posible contar las pólizas');
+}
+
+let totalDatos = Array.isArray(countResponse.outData) && countResponse.outData[0]
+    ? Number(countResponse.outData[0].total || 0)
+    : 0;
 
 return {
     ok: true,
     total: totalDatos,
     data: dataPaginada
+}
+
+function sqlString(value){
+    return `N'${String(value || '').replace(/'/g, "''")}'`;
+}
+
+function getPositiveInteger(value){
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : 0;
+}
+
+function getNonNegativeInteger(value){
+    const number = Number(value);
+    return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function buildResult(ok, msg){
+    return { ok: ok, msg: msg, total: 0, data: [] };
 }

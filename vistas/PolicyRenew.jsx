@@ -192,7 +192,13 @@
             }
             currentValue = newValue;
             const filterPolizas =()=>{
-                const filter = filterType == 0 ? `pol.[code] like N'%${newValue}%'` : `pol.[id] = ${ newValue }`;
+                const searchValue = String(newValue || '').trim();
+                const numericValue = Number(searchValue);
+                const filter = filterType == 0
+                    ? `pol.[code] like N'%${escapeSqlString(searchValue)}%'`
+                    : (Number.isInteger(numericValue) && numericValue > 0
+                        ? `pol.[id] = ${numericValue}`
+                        : '1 = 0');
                 const orderBy = filterType == 0 ? 'code' : 'id';
                 setLoadingPolicy(true);
                 exe('DoQuery', {
@@ -212,6 +218,8 @@
             }
             timeout = setTimeout(filterPolizas, 400);
           }
+
+        const escapeSqlString = (value) => String(value || '').replace(/'/g, "''");
          
 
 
