@@ -42,7 +42,7 @@ SELECT
     CONVERT(VARCHAR,nlp.[start],103) inicio,
     CONVERT(VARCHAR,nlp.[end],103) vence,
     nlp.anualPremium primaCotizada,
-    JSON_VALUE(item.value, '$[3]') AS renovar
+    CASE WHEN nlp.[activeDate] IS NULL THEN 'No' ELSE 'Si' END AS renovar
 FROM [Batch] b
 CROSS APPLY OPENJSON(b.jData) AS item
 INNER JOIN LifePolicy lp ON lp.id = TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)

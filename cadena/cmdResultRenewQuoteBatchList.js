@@ -5,12 +5,12 @@
  * Author: Michael Delgado
  * Email: michael.delgado@axxis-systems.com
  * CreatedDate: 2026-06-12
- * Purpose: Return a formatted list of unattended batch errors for renewal quote processing.
- * Inputs: context.batchId must include the batch process identifier.
+ * Purpose: Return formatted errors for renewal quotation or policy issuance batches.
+ * Inputs: context.loteId is the source renewal batch and context.processBatchId is the optional child batch.
  * Output: { ok, msg, outData? }
  */
 
-let { loteId, currentPage, pageSize } = context;
+let { loteId, processBatchId, processType, currentPage, pageSize } = context;
 
 if (!loteId) {
   return {
@@ -19,7 +19,9 @@ if (!loteId) {
   };
 }
 
-const batchRelatedId = getBatchRelated(loteId);
+const batchRelatedId = Number(processBatchId || 0) > 0
+  ? Number(processBatchId)
+  : getBatchRelated(loteId);
 
 if (!batchRelatedId) {
   return {
@@ -79,7 +81,7 @@ function getBatchErrors(batchId, currentPage, pageSize) {
     var endIndex = startIndex + pageSize;
 
     const errorRows = GetBatchErrors.outData?.errors?.jData ? parseJsonData(GetBatchErrors.outData.errors.jData) : [];
-    const errorList = buildBatchErrorList(loteId, errorRows);
+    const errorList = buildBatchErrorList(loteId, errorRows, processType);
     var paginatedErrors = errorList.slice(startIndex, endIndex);
 
     return {
@@ -101,12 +103,17 @@ function parseJsonData(jsonData) {
     }
 }
 
-function buildBatchErrorList(batchId, errorRows) {
+function buildBatchErrorList(batchId, errorRows, processType) {
   return errorRows.map(function(errorRow) {
+    const policyReference = processType === 'issuance'
+      ? (errorRow && (errorRow[0] || errorRow[1] || ''))
+      : (errorRow && (errorRow[1] || errorRow[0] || ''));
+    const message = errorRow && (errorRow[5] || errorRow[4] || errorRow[3] || '');
+
     return {
       IdProceso: batchId,
-      Poliza: errorRow[1],
-      Mensaje: errorRow[5]
+      Poliza: policyReference,
+      Mensaje: message
     };
   });
 }

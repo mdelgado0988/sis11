@@ -79,14 +79,7 @@
         .renovacion-view .ant-table-body {
           overflow-x: scroll !important;
           overflow-y: scroll !important;
-          scrollbar-gutter: stable;
           scrollbar-color: #b7b7b7 #f5f5f5;
-        }
-    
-        /* Evita que el header se desalineé cuando aparece el scroll */
-        .renovacion-view .ant-table-header,
-        .renovacion-view .ant-table-content {
-          scrollbar-gutter: stable both-edges;
         }
 
         .renovacion-view .ant-table-body::-webkit-scrollbar {
@@ -117,10 +110,6 @@
         .renovacion-warning-button:active {
           background-color: #d46b08 !important;
           border-color: #d46b08 !important;
-        }
-
-        .policy-renew-progress .ant-progress-text {
-          padding-right: 8px;
         }
 
         .policy-renew-action-group {
@@ -170,6 +159,14 @@
         .policy-renew-action-group .policy-renew-quote-button:focus {
           background: #237804;
           box-shadow: inset 0 0 0 1px #135200;
+        }
+
+        .policy-renew-action-group .policy-renew-button,
+        .policy-renew-action-group .policy-renew-button:hover,
+        .policy-renew-action-group .policy-renew-button:focus {
+          background: #1677ff;
+          border-right-color: #0958d9;
+          color: #fff;
         }
         
         .fila-no-renovar td {
@@ -918,7 +915,7 @@
             return exe('RepoLifePolicy', {
                 operation: 'GET',
                 filter: `id = ${policyId}`,
-                fields: 'id,version'
+                fields: 'id,policyVersion'
             }).then(response => {
                 if (!response || !response.ok) {
                     throw new Error(response && response.msg ? response.msg : 'No fue posible recuperar la versión actual de la póliza');
@@ -929,7 +926,7 @@
                     throw new Error(`No se encontró la póliza ${policyId}`);
                 }
 
-                const currentVersion = Number(policy.version || 0);
+                const currentVersion = Number(policy.policyVersion || 0);
                 return currentVersion > 0 ? currentVersion + 1 : 1;
             });
         }
@@ -1183,11 +1180,17 @@
     //Tab 3 de detalle del lote
     /********************************************/
 
-    const ActionToolbarDetail = ({ loading, onCalculate, onRefresh, onExclude, onGenerateExcluded, onViewResults, percent, loteId}) => {
+    const ActionToolbarDetail = ({ loading, processActive, processType, onCalculate, onRenew, onRefresh, onExclude, onViewResults, percent, loteId}) => {
         const quoteMenu = (
           <Menu onClick={(item) => onCalculate(item.key)}>
             <Menu.Item key="selection">Cotizar selección</Menu.Item>
             <Menu.Item key="all">Cotizar todos</Menu.Item>
+          </Menu>
+        );
+        const renewMenu = (
+          <Menu onClick={(item) => onRenew(item.key)}>
+            <Menu.Item key="selection">Renovar seleccionadas</Menu.Item>
+            <Menu.Item key="all">Renovar todas (pendientes)</Menu.Item>
           </Menu>
         );
 
@@ -1201,13 +1204,19 @@
             <Col flex="auto">
               <Button.Group className="policy-renew-action-group">
                 <Dropdown overlay={quoteMenu} trigger={['click']}>
-                  <Button className="policy-renew-quote-button" icon={<CalculatorOutlined />} loading={loading}>
+                  <Button className="policy-renew-quote-button" icon={<CalculatorOutlined />} loading={loading} disabled={processActive}>
                     Cotizar <ArrowDown />
+                  </Button>
+                </Dropdown>
+                <Dropdown overlay={renewMenu} trigger={['click']}>
+                    <Button type="primary" className="policy-renew-button" icon={<PlusOutlined />} loading={loading} disabled={processActive}>
+                    Renovar <ArrowDown />
                   </Button>
                 </Dropdown>
                 <Button icon={<DeleteOutlined />} loading={loading} onClick={onExclude}>
                   Excluir
                 </Button>
+                {/* Re-execution is no longer available from this toolbar.
                 <Button
                   icon={<PlusOutlined />}
                   loading={loading}
@@ -1225,7 +1234,7 @@
                   }}
                 >
                   Re-Ejecutar
-                </Button>
+                </Button> */}
                 <Button
                   onClick={() => onViewResults()}
                   icon={<EyeOutlined />}
@@ -1254,11 +1263,11 @@
             </Col>
 
             {/* PROGRESS BAR */}
-            <Col flex="300px" style={{ marginRight: 25 }}>
+            <Col flex="300px" style={{ marginRight: 25, paddingRight: 25 }}>
               <Progress 
                 className="policy-renew-progress"
                 percent={percent}
-                format={(p) => `${p}% - ${p == 0 ? 'En Espera' : (p == 100 ? "Finalizado": "Cotizando...")}`} 
+                format={(p) => `${p}% - ${p == 0 ? 'En Espera' : (p == 100 ? "Finalizado": (processType === 'issuance' ? "Emitiendo..." : "Cotizando..."))}`}
                 size="small"
                 status={percent === 100 ? 'success' : 'active'}  />
             </Col>
@@ -1367,7 +1376,7 @@
               />
             )
           },
-          { title: '¿Renovar?', dataIndex: 'renovar', width: 90, align: 'center',
+          { title: '¿Renovada?', dataIndex: 'renovar', width: 100, align: 'center',
            render: (text) => {
                if (text === "Si")
                 return (
@@ -1413,8 +1422,8 @@
     };
 
     const TabContent3 = ({loteId, wfId,tableData, loadDataLoteDetalle, searchTotal, handleTableChange, 
-                          loading, handleRefresh, percent, handleCalculate, handleExclude, selectedRowDetailKeys, onSelectChange,
-                          handleGenerateExcludedBatch, handleViewResults, onViewPolicy}) => {
+                          loading, processActive, processType, handleRefresh, percent, handleCalculate, handleRenew, handleExclude, selectedRowDetailKeys, onSelectChange,
+                          handleViewResults, onViewPolicy}) => {
 
          const onRowSelection = {
           selectedRowDetailKeys,
@@ -1430,10 +1439,12 @@
               {/* 2. Barra de Herramientas Reutilizable */}
                 <ActionToolbarDetail
                   loading={loading}
+                  processActive={processActive}
+                  processType={processType}
                   onCalculate={handleCalculate}
+                  onRenew={handleRenew}
                   onRefresh={handleRefresh}
                   onExclude={handleExclude}
-                  onGenerateExcluded={handleGenerateExcludedBatch}
                   onViewResults={handleViewResults}
                   percent={percent}
                   loteId={loteId}
@@ -1549,6 +1560,9 @@
       const [loteId, setLoteId] = useState(0);
       const [percent, setPercent] = useState(0);
       const [intervalId, setIntervalId] = useState(null);
+      const [processActive, setProcessActive] = useState(false);
+      const [processBatchId, setProcessBatchId] = useState(0);
+      const [processType, setProcessType] = useState('');
       const intervaloTiempo= 2;
       const [selectedRowDetailKeys, setSelectedRowDetailKeys] = useState([]);
       const [tableDataResults, setTableDataResults] = useState([]);
@@ -1601,6 +1615,15 @@
 
       const handleViewDetail = (loteId, wfIdParam) => {
         try {
+          if (intervalId) {
+            clearInterval(intervalId);
+          }
+          setIntervalId(null);
+          setProcessActive(false);
+          setProcessBatchId(0);
+          setProcessType('');
+          setPercent(0);
+          setSelectedRowDetailKeys([]);
                    
           setPaginationDetail({ current: 1, pageSize: 25, total: 0 });
           setLoteId(loteId);
@@ -1677,7 +1700,9 @@
           loadResultRenewQuoteBatchList({
               pagination: newPagination,
               loading: true,
-              loteId: loteId
+              loteId: loteId,
+              processBatchId: processBatchId,
+              processType: processType
           });
       }
 
@@ -1692,7 +1717,9 @@
           loadResultRenewQuoteBatchList({
               pagination: newPagination,
               loading: true,
-              loteId: loteId
+              loteId: loteId,
+              processBatchId: processBatchId,
+              processType: processType
           });
       }
 
@@ -1704,7 +1731,10 @@
 
         setLoadingResults(params.loading);
 
-        const context = `{ loteId: ${params.loteId}, currentPage:${params.pagination.current}, pageSize:${params.pagination.pageSize}}`;
+        const processContext = Number(params.processBatchId || 0) > 0
+          ? `, processBatchId:${Number(params.processBatchId)}${params.processType ? `, processType:'${params.processType}'` : ''}`
+          : '';
+        const context = `{ loteId: ${params.loteId}${processContext}, currentPage:${params.pagination.current}, pageSize:${params.pagination.pageSize}}`;
 
         exe("ExeChain",{
             chain: "cmdResultRenewQuoteBatchList",
@@ -1740,7 +1770,10 @@
 
       //Default data to review only first element
       const showErrors = (params = {}) => {
-        const context = `{ loteId: ${params.loteId}, currentPage:1, pageSize:1}`;
+        const processContext = Number(params.processBatchId || 0) > 0
+          ? `, processBatchId:${Number(params.processBatchId)}${params.processType ? `, processType:'${params.processType}'` : ''}`
+          : '';
+        const context = `{ loteId: ${params.loteId}${processContext}, currentPage:1, pageSize:1}`;
 
         exe("ExeChain",{
             chain: "cmdResultRenewQuoteBatchList",
@@ -1756,7 +1789,18 @@
           const resultTotal = Number(outData.total || response.total || resultData.length || 0);
 
           if (response.ok && resultTotal > 0) {
-            notification.warning({ message: "Errores en el proceso de cotización", description: `Se registraron errores relacionado al proceso de cotización, haga clic en Ver Errores para verificar mas detalles.`, duration: 7 });
+            const processName = params.processType === 'issuance' ? 'emisión' : 'cotización';
+            notification.warning({ message: `Errores en el proceso de ${processName}`, description: `Se registraron errores relacionados al proceso de ${processName}; haga clic en Ver Errores para verificar más detalles.`, duration: 7 });
+            const errorPagination = { current: 1, pageSize: paginationResults.pageSize || 25, total: resultTotal };
+            setPaginationResults(errorPagination);
+            setResultsModalVisible(true);
+            loadResultRenewQuoteBatchList({
+              pagination: errorPagination,
+              loading: true,
+              loteId: params.loteId,
+              processBatchId: params.processBatchId,
+              processType: params.processType
+            });
           }
 
         })
@@ -1820,10 +1864,6 @@
       };  
 
       const getAnniversariesForQuote = (mode) => {
-        if (mode !== 'all') {
-          return Promise.resolve((selectedRowDetailKeys || []).map(item => String(item)));
-        }
-
         return exe('LoadEntity', {
           entity: 'Batch',
           fields: 'jData',
@@ -1844,9 +1884,230 @@
             throw new Error('El detalle del lote no tiene una estructura válida.');
           }
 
-          return rows
+          const selectedIds = (selectedRowDetailKeys || []).map(value => String(value));
+          const candidates = rows
             .filter(item => Array.isArray(item) && Number(item[2]) > 0)
-            .map(item => String(item[2]));
+            .map(item => {
+              const sourcePolicyId = Number(item[2]);
+              const offerColumn = typeof item[4] === 'boolean' ? 0 : Number(item[4] || 0);
+              const firstColumn = Number(item[0] || 0);
+              const offerPolicyId = offerColumn > 0
+                ? offerColumn
+                : (firstColumn > 0 && firstColumn !== sourcePolicyId ? firstColumn : sourcePolicyId);
+
+              return {
+                sourcePolicyId: sourcePolicyId,
+                offerPolicyId: offerPolicyId
+              };
+            })
+            .filter(item => mode === 'all'
+              || selectedIds.indexOf(String(item.sourcePolicyId)) >= 0
+              || selectedIds.indexOf(String(item.offerPolicyId)) >= 0);
+
+          const offerIds = candidates
+            .map(item => item.offerPolicyId)
+            .filter((value, index, values) => value > 0 && values.indexOf(value) === index);
+
+          if (!offerIds.length) {
+            return [];
+          }
+
+          return exe('LoadEntities', {
+            entity: 'LifePolicy',
+            fields: 'id,activeDate',
+            filter: 'id in (' + offerIds.join(',') + ')',
+            noTracking: true
+          }).then(policyResponse => {
+            if (!policyResponse || policyResponse.ok === false) {
+              throw new Error(policyResponse && policyResponse.msg
+                ? policyResponse.msg
+                : 'No fue posible validar el estado de las ofertas.');
+            }
+
+            const activeOfferIds = (Array.isArray(policyResponse.outData) ? policyResponse.outData : [])
+              .filter(policy => policy && policy.activeDate !== null && policy.activeDate !== undefined && String(policy.activeDate).trim() !== '')
+              .map(policy => Number(policy.id));
+
+            return candidates
+              .filter(item => activeOfferIds.indexOf(item.offerPolicyId) < 0)
+              .map(item => String(item.sourcePolicyId))
+              .filter((value, index, values) => values.indexOf(value) === index);
+          });
+        });
+      };
+
+      const handleRenew = (mode) => {
+        if (processActive) {
+          return;
+        }
+
+        Modal.confirm({
+          title: 'Renovar pólizas',
+          content: mode === 'all'
+            ? 'Se renovarán todas las pólizas pendientes del lote.'
+            : 'Se renovarán las pólizas seleccionadas.',
+          okText: 'Aceptar',
+          cancelText: 'Cancelar',
+          onOk: () => executeRenewalBatch(mode)
+        });
+      };
+
+      async function executeRenewalBatch(mode) {
+        setProcessActive(true);
+        try {
+          const policyIds = await getRenewalPolicyIds(mode);
+          if (!policyIds.length) {
+            setProcessActive(false);
+            notification.warning({ message: 'Renovar', description: 'No existen pólizas pendientes válidas para renovar.', duration: 5 });
+            return;
+          }
+
+          const userEmail = await getCurrentUserEmail();
+          if (!userEmail) {
+            throw new Error('No fue posible recuperar el correo del usuario actual.');
+          }
+
+          const importConfigId = await getRenewalIssuanceImportConfig();
+          const rows = policyIds.map(policyId => [policyId, loteId, userEmail]);
+          const batch = await createRenewalIssuanceBatch(rows, importConfigId);
+          const batchId = Number(batch && batch.id || 0);
+
+          if (batchId <= 0) {
+            throw new Error('No se recibió un identificador válido para el lote de emisión.');
+          }
+
+          const execution = await exe('DoBatch', { batchId: batchId });
+          if (!execution || execution.ok === false) {
+            throw new Error(execution && execution.msg ? execution.msg : `No fue posible ejecutar el lote ${batchId}.`);
+          }
+
+          beginBatchProgress(batchId, 'issuance');
+          notification.info({
+            message: 'Lote de emisión',
+            description: `Se inició la emisión de ${policyIds.length} póliza(s).`,
+            duration: 5
+          });
+        } catch (error) {
+          setProcessActive(false);
+          notification.error({ message: 'Error', description: error && error.message ? error.message : String(error), duration: 10 });
+        }
+      }
+
+      const getRenewalPolicyIds = (mode) => {
+        return exe('LoadEntity', {
+          entity: 'Batch',
+          fields: 'jData',
+          filter: `id = ${loteId}`
+        }).then(result => {
+          if (!result || !result.ok || !result.outData) {
+            throw new Error(result && result.msg ? result.msg : 'No fue posible cargar el lote de renovación.');
+          }
+
+          let rows;
+          try {
+            rows = JSON.parse(result.outData.jData || '[]');
+          } catch (error) {
+            throw new Error('El lote de renovación contiene un JSON inválido.');
+          }
+
+          if (!Array.isArray(rows)) {
+            throw new Error('El detalle del lote de renovación no tiene un formato válido.');
+          }
+
+          const selectedIds = (selectedRowDetailKeys || []).map(value => String(value));
+          const candidates = rows
+            .filter(row => Array.isArray(row) && Number(row[2]) > 0)
+            .map(row => {
+              const sourcePolicyId = Number(row[2]);
+              const offerColumn = typeof row[4] === 'boolean' ? 0 : Number(row[4] || 0);
+              const firstColumn = Number(row[0] || 0);
+              const offerPolicyId = offerColumn > 0
+                ? offerColumn
+                : (firstColumn > 0 && firstColumn !== sourcePolicyId ? firstColumn : sourcePolicyId);
+
+              return {
+                sourcePolicyId: sourcePolicyId,
+                offerPolicyId: offerPolicyId
+              };
+            })
+            .filter(item => mode === 'all'
+              || selectedIds.indexOf(String(item.sourcePolicyId)) >= 0
+              || selectedIds.indexOf(String(item.offerPolicyId)) >= 0);
+
+          const policyIds = candidates
+            .map(item => item.offerPolicyId)
+            .filter((value, index, values) => value > 0 && values.indexOf(value) === index);
+
+          if (!policyIds.length) {
+            return [];
+          }
+
+          return exe('LoadEntities', {
+            entity: 'LifePolicy',
+            fields: 'id,activeDate',
+            filter: 'id in (' + policyIds.join(',') + ')',
+            noTracking: true
+          }).then(policyResponse => {
+            if (!policyResponse || policyResponse.ok === false) {
+              throw new Error(policyResponse && policyResponse.msg
+                ? policyResponse.msg
+                : 'No fue posible validar el estado de las pólizas de renovación.');
+            }
+
+            const policies = Array.isArray(policyResponse.outData) ? policyResponse.outData : [];
+            return policies
+              .filter(policy => policy && (policy.activeDate === null || policy.activeDate === undefined || String(policy.activeDate).trim() === ''))
+              .map(policy => Number(policy.id))
+              .filter((value, index, values) => value > 0 && values.indexOf(value) === index);
+          });
+        });
+      };
+
+      const getCurrentUserEmail = () => {
+        return exe('GetCurrentUser').then(result => {
+          const source = result && result.outData;
+          const user = Array.isArray(source) ? source[0] : source;
+          return String(user && (user.email || user.Email || user.userEmail) || '').trim();
+        });
+      };
+
+      const getRenewalIssuanceImportConfig = () => {
+        return exe('RepoImportConfig', {
+          operation: 'GET',
+          filter: "name = 'RenewalPolicyIssuance'"
+        }).then(result => {
+          if (!result || result.ok === false) {
+            throw new Error(result && result.msg ? result.msg : 'No fue posible recuperar la configuración de emisión.');
+          }
+
+          const records = Array.isArray(result.outData) ? result.outData : [];
+          const config = records[0] || null;
+          const configId = Number(config && (config.id || config.Id) || 0);
+          if (configId <= 0) {
+            throw new Error('No existe la configuración de importación RenewalPolicyIssuance.');
+          }
+
+          return configId;
+        });
+      };
+
+      const createRenewalIssuanceBatch = (rows, importConfigId) => {
+        return exe('RepoBatch', {
+          operation: 'ADD',
+          entity: {
+            importConfigId: importConfigId,
+            jData: JSON.stringify(rows),
+            name: `RENEWALISSUANCE-${formatDate(new Date())}-${loteId}`,
+            processingType: 0,
+            records: rows.length
+          }
+        }).then(result => {
+          if (!result || result.ok === false) {
+            throw new Error(result && result.msg ? result.msg : 'No fue posible crear el lote de emisión.');
+          }
+
+          const record = Array.isArray(result.outData) ? result.outData[0] : result.outData;
+          return record || null;
         });
       };
 
@@ -1869,6 +2130,8 @@
                 return;
               }
 
+              setProcessActive(true);
+
               // Quoting remains available after the batch is renewed.
               // The renewal status validation is kept for exclusion only.
               //exe("GotoStep",{procesoId: wfId,estado: "_next",userValues: "{}",isNonInterruptingEvent: false,process: null}); // avanza el estado del wf
@@ -1877,22 +2140,31 @@
                     chain: "cmdGeneraLoteCotizacionAniversario",
                     context: `{ loteId: ${loteId}, anniversaries: '${JSON.stringify(anniversaries)}' }`
                 }).then(x => {
+                  const resultado = x && x.outData ? x.outData : x;
+                  if (!resultado || !resultado.ok) {
+                    throw new Error(resultado && resultado.msg ? resultado.msg : 'No fue posible generar el lote de cotización.');
+                  }
 
-                  const resultado = x.outData;
-                  const idLoteQuote = resultado.idLoteQuote
-                  setPercent(0);
-                  startProgress();
-                  notification.info({ message: "Lote de tarificación", description: resultado.msg, duration: 3 });
-                  
-                  if (resultado.ok){
-                    exe("DoBatch", {
-                        "batchId":idLoteQuote
-                      }).then(x => {
-                        if(!x.ok)
-                          notification.warning({ message: "Lote de tarificación fallido", description: `Lote de cotización ${idLoteQuote} no pudo ser programado, contacte a sistemas`, duration: 3 });
-                      }); 
-                  }       
-                  
+                  const idLoteQuote = Number(resultado.idLoteQuote || 0);
+                  if (idLoteQuote <= 0) {
+                    throw new Error('No se recibió un lote válido de cotización.');
+                  }
+
+                  return exe("DoBatch", { batchId: idLoteQuote })
+                    .then(execution => {
+                      if (!execution || execution.ok === false) {
+                        throw new Error(execution && execution.msg
+                          ? execution.msg
+                          : `No fue posible programar el lote de cotización ${idLoteQuote}.`);
+                      }
+
+                      beginBatchProgress(idLoteQuote, 'quotation');
+                      notification.info({ message: "Lote de tarificación", description: resultado.msg, duration: 3 });
+                    });
+                })
+                .catch(error => {
+                  setProcessActive(false);
+                  throw error;
                 });
               /*
               }
@@ -1901,6 +2173,7 @@
               });
               */
             }).catch(error => {
+              setProcessActive(false);
               notification.error({ message: 'Error', description: error.toString(), duration: 10 });
             });
           
@@ -1958,6 +2231,7 @@
         
       }
 
+      /*
       const handleGenerateExcludedBatch = () => {
         try {
 
@@ -2127,6 +2401,7 @@
           loadDataLoteDetalle(params);
       }      
 
+      */
       function dameEstadoLote() {
         return exe("LoadEntity", {
           entity: "Batch",
@@ -2246,62 +2521,91 @@
         });
       }
 
-      function startProgress() {
+      function beginBatchProgress(batchId, processType) {
+        const validBatchId = Number(batchId || 0);
+        if (validBatchId <= 0) {
+          throw new Error('No se recibió un lote válido para monitorear.');
+        }
+
+        if (intervalId) {
+          clearInterval(intervalId);
+        }
+
+        setProcessBatchId(validBatchId);
+        setProcessType(processType);
+        setProcessActive(true);
+        setPercent(0);
+
         let isRunning = false;
-      
         const id = setInterval(() => {
           if (isRunning) return;
           isRunning = true;
-      
-          getBatchProcessed()
+
+          getBatchProcessed(validBatchId)
             .then(current => {
               setPercent(current);
-      
+
               if (current >= 100) {
                 clearInterval(id);
-                notification.info({ message: "Lote de tarificación", description: `Proceso de cotización finalizado, verifique los resultados`, duration: 3 });
+                setIntervalId(null);
+                setProcessActive(false);
+                notification.info({
+                  message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
+                  description: processType === 'issuance'
+                    ? 'Proceso de emisión finalizado, verifique los resultados.'
+                    : 'Proceso de cotización finalizado, verifique los resultados.',
+                  duration: 3
+                });
                 handleRefreshDetail();
-                showErrors({ loteId: loteId });
-                return;
+                showErrors({ loteId: loteId, processBatchId: validBatchId, processType: processType });
               }
-      
-              setPercent(current);
             })
-            .catch(() => {
-              clearInterval(id); // corta en error
+            .catch(error => {
+              clearInterval(id);
+              setIntervalId(null);
+              setProcessActive(false);
+              notification.error({ message: 'Error', description: error && error.message ? error.message : String(error), duration: 10 });
             })
             .finally(() => {
               isRunning = false;
             });
-      
         }, intervaloTiempo * 1000);
-      
+
         setIntervalId(id);
       }
 
-      function getBatchProcessed() {
-        return exe("ExeChain", {
-          chain: "cmdGetQuoteRenovationBatchProgress",
-          context: `{ loteId: ${loteId} }`
-        }).then(resultado => {
+      function getBatchProcessed(batchId) {
+        return exe('SetBatchResults', { batchId: batchId })
+          .then(result => {
+            if (result && result.ok === false) {
+              throw new Error(result.msg || 'No fue posible actualizar el progreso del lote.');
+            }
 
-          if(!resultado || resultado.ok === false) return 0;
-          const r = resultado.outData;
-      
-          if (!r) return 0;
+            return exe('RepoBatch', {
+              operation: 'GET',
+              filter: `id = ${batchId}`
+            });
+          })
+          .then(result => {
+            if (!result || result.ok === false) {
+              throw new Error(result && result.msg ? result.msg : 'No fue posible consultar el progreso del lote.');
+            }
 
-          const records = Number(r.records || 0);
-          const processed = Number(r.processed || 0);
-          const success = Number(r.success || 0);
-          const errors = Number(r.error || 0);
-          const completed = processed || success + errors;
+            const data = Array.isArray(result.outData) ? result.outData[0] : result.outData;
+            if (!data) return 0;
 
-          if (records <= 0) {
-            return String(r.status || '').toUpperCase() === 'FINISHED' ? 100 : 0;
-          }
-      
-          return Math.min(100, Math.round((completed / records) * 100));
-        });
+            const records = Number(data.records || 0);
+            const processed = Number(data.processed || 0);
+            const success = Number(data.success || 0);
+            const errors = Number(data.error || 0);
+            const completed = processed || success + errors;
+
+            if (records <= 0) {
+              return String(data.status || '').toUpperCase() === 'FINISHED' ? 100 : 0;
+            }
+
+            return Math.min(100, Math.round((completed / records) * 100));
+          });
       }
 
       async function reload(){
@@ -2345,13 +2649,15 @@
                                 handleTableChange={handleTableChangeDetail}
                                 paginacion={paginationDetail}
                                 loading={loadingBatch}
+                                processActive={processActive}
+                                processType={processType}
                                 percent={percent}
                                 handleRefresh={handleRefreshDetail}
                                 handleCalculate={handleCalculate}
+                                handleRenew={handleRenew}
                                 handleExclude={handleExclude}
                                 selectedRowDetailKeys={selectedRowDetailKeys}
                                 onSelectChange={onSelectChange}
-                                handleGenerateExcludedBatch={handleGenerateExcludedBatch}
                                 handleViewResults={handleViewResults}
                                 onViewPolicy={handleViewPolicy}
                               />
