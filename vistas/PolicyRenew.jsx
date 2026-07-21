@@ -198,7 +198,7 @@
                 exe('DoQuery', {
                 sql: `SELECT TOP 25 pol.[id],pol.[code]
                         FROM LifePolicy pol
-                        WHERE ${ filter }
+                        WHERE pol.activeDate is not null AND ${ filter }
                         ORDER BY pol.[${orderBy}];`})
                 .then( GetPolicy => {
                     const policyOptions = GetPolicy.outData.map( item => ({ value: item.id, label: item.code }));
