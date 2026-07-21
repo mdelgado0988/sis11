@@ -21,13 +21,13 @@ try {
 
   const policy = loadPolicy(buildPolicyFilter(id, tipo));
   if (!policy) {
-    throw new Error(`No se encontro la poliza relacionada con el identificador ${id}`);
+    throw new Error(`No se encontró la póliza relacionada con el identificador ${id}`);
   }
 
   const titles = {
-    0: 'Emision',
-    1: 'Cancelacion',
-    2: 'Renovacion',
+    0: 'Emisión',
+    1: 'Cancelación',
+    2: 'Renovación',
     3: 'Endoso Suma Asegurada',
     4: 'Endoso Objeto Asegurado',
     5: 'Endoso de Recargo'
@@ -42,53 +42,34 @@ try {
     5: 'EndosoRecargo'
   };
 
-  let primaPorCobrar = 0;
-  let prima = 0;
-  let impuestoPrimasIncendio = 0;
-  let gastoPrimaIncendio = 0;
-  let cancelacion = false;
-  let renovacion = false;
-  let cancellationTax = 0;
-  let nonCancellationTax = 0;
+  const isCancellation = tipo === 1;
+  const isNewOrAnniversary = [0, 2].includes(tipo);
 
   const changes = asArray(policy.Changes);
   const change = findChange(changes, id);
 
-  if ([0, 1, 2].includes(tipo)) {
-    const baseCoverages = safeJson(change && change.jDetail, {});
-    prima = toNumber(baseCoverages.coveragesDif);
+  let amounts;
 
-    const taxRows = asArray(policy.TaxGenerated);
-    cancellationTax = sumTaxRows(taxRows, true);
-    nonCancellationTax = sumTaxRows(taxRows, false);
-    impuestoPrimasIncendio = toDecimal(cancellationTax - nonCancellationTax);
-    gastoPrimaIncendio = toDecimal(prima * 0.02);
-    primaPorCobrar = toDecimal(prima + impuestoPrimasIncendio);
-    cancelacion = tipo === 1;
-    renovacion = tipo === 2;
+  if (isCancellation) {
+    amounts = getCancellationAmounts(policy, change);
+  } else if (isNewOrAnniversary) {
+    amounts = getIssuanceOrRenewalAmounts(policy, tipo);
   } else {
-    if (!change) {
-      throw new Error(`No se encontro el endoso ${id}`);
-    }
-
-    const billDiff = change.BillDiff || null;
-    if (!billDiff) {
-      prima = toNumber(policy.coverages);
-      impuestoPrimasIncendio = sumTaxRows(asArray(policy.TaxGenerated), null);
-      primaPorCobrar = toDecimal(prima + impuestoPrimasIncendio);
-      gastoPrimaIncendio = toDecimal(prima * 0.02);
-    } else {
-      const billCoverages = toNumber(billDiff.coverages);
-      const billTax = toNumber(billDiff.tax);
-      primaPorCobrar = Math.abs(toDecimal(billCoverages + billTax));
-      gastoPrimaIncendio = Math.abs(toDecimal(billDiff.fee));
-      impuestoPrimasIncendio = Math.abs(toDecimal(billTax));
-      prima = Math.abs(toDecimal(billCoverages));
-      cancelacion = billCoverages < 0;
-    }
+    amounts = getEndorsementAmounts(policy, change, id);
   }
 
-  const cessions = getReinsuranceCessions(policy.id, tipo);
+  const {
+    primaPorCobrar,
+    prima,
+    impuestoPrimasIncendio,
+    gastoPrimaIncendio,
+    cancelacion,
+    renovacion,
+    cancellationTax,
+    nonCancellationTax
+  } = amounts;
+
+  const cessions = getReinsuranceCessions(policy.id, tipo, id);
   const reaseguroCedido = toDecimal(
     cessions.reduce((total, item) => total + toNumber(item.premiumRe), 0)
   );
@@ -117,7 +98,7 @@ try {
     reaseguroPorPagar: absoluteAmount(reaseguroPorPagar),
     anioMes: getAnioMes(policy),
     reference: `${title} Incendio # ${id}`,
-    description: `${title} ${productName} Poliza # ${policyCode}`,
+    description: `${title} ${productName} Póliza # ${policyCode}`,
     unique: `TX${cancelacion ? '-R' : ''}# ${id}`,
     code: codes[tipo],
     cancelacion: cancelacion,
@@ -131,13 +112,96 @@ try {
   };
 }
 
+/**
+ * Calculates cancellation amounts from the endorsement detail and tax movements.
+ * Cancellation uses the difference between cancellation and non-cancellation taxes.
+ */
+function getCancellationAmounts(policy, change) {
+  const baseCoverages = safeJson(change && change.jDetail, {});
+  const prima = toNumber(baseCoverages.coveragesDif);
+  const taxRows = asArray(policy.TaxGenerated);
+  const cancellationTax = sumTaxRows(taxRows, true);
+  const nonCancellationTax = sumTaxRows(taxRows, false);
+  const impuestoPrimasIncendio = toDecimal(cancellationTax - nonCancellationTax);
+
+  return {
+    prima: prima,
+    impuestoPrimasIncendio: impuestoPrimasIncendio,
+    gastoPrimaIncendio: toDecimal(prima * 0.02),
+    primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
+    cancelacion: true,
+    renovacion: false,
+    cancellationTax: cancellationTax,
+    nonCancellationTax: nonCancellationTax
+  };
+}
+
+/**
+ * Calculates issuance and renewal amounts from coverage premiums and all taxes.
+ */
+function getIssuanceOrRenewalAmounts(policy, tipo) {
+  const prima = sumCoveragePremiums(policy.Coverages, policy.coverages);
+  const impuestoPrimasIncendio = sumTaxRows(asArray(policy.TaxGenerated), null);
+
+  return {
+    prima: prima,
+    impuestoPrimasIncendio: impuestoPrimasIncendio,
+    gastoPrimaIncendio: toDecimal(prima * 0.02),
+    primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
+    cancelacion: false,
+    renovacion: tipo === 2,
+    cancellationTax: 0,
+    nonCancellationTax: 0
+  };
+}
+
+/**
+ * Calculates endorsement amounts from BillDiff, including negative movements.
+ */
+function getEndorsementAmounts(policy, change, id) {
+  if (!change) {
+    throw new Error(`No se encontró el endoso ${id}`);
+  }
+
+  const billDiff = change.BillDiff || null;
+  if (!billDiff) {
+    const prima = toNumber(policy.coverages);
+    const impuestoPrimasIncendio = sumTaxRows(asArray(policy.TaxGenerated), null);
+
+    return {
+      prima: prima,
+      impuestoPrimasIncendio: impuestoPrimasIncendio,
+      gastoPrimaIncendio: toDecimal(prima * 0.02),
+      primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
+      cancelacion: false,
+      renovacion: false,
+      cancellationTax: 0,
+      nonCancellationTax: 0
+    };
+  }
+
+  const billCoverages = toNumber(billDiff.coverages);
+  const billTax = toNumber(billDiff.tax);
+
+  return {
+    prima: Math.abs(toDecimal(billCoverages)),
+    impuestoPrimasIncendio: Math.abs(toDecimal(billTax)),
+    gastoPrimaIncendio: Math.abs(toDecimal(billDiff.fee)),
+    primaPorCobrar: Math.abs(toDecimal(billCoverages + billTax)),
+    cancelacion: billCoverages < 0,
+    renovacion: false,
+    cancellationTax: 0,
+    nonCancellationTax: 0
+  };
+}
+
 function validateInput(id, tipo) {
   if (id <= 0) {
-    throw new Error('El identificador recibido no es valido');
+    throw new Error('El identificador recibido no es válido');
   }
 
   if (![0, 1, 2, 3, 4, 5].includes(tipo)) {
-    throw new Error('El tipo de contexto no es valido');
+    throw new Error('El tipo de contexto no es válido');
   }
 }
 
@@ -160,7 +224,7 @@ function loadPolicy(filter) {
       operation: 'GET',
       noTracking: true,
       filter: filter,
-      include: ['TaxGenerated', 'Fees', 'Product', 'Changes.BillDiff']
+      include: ['TaxGenerated', 'Fees', 'Product', 'Coverages', 'Changes.BillDiff']
     }
   });
 
@@ -168,19 +232,43 @@ function loadPolicy(filter) {
   if (!response || response.ok === false) {
     throw new Error(response && response.msg
       ? response.msg
-      : 'No fue posible recuperar la poliza');
+      : 'No fue posible recuperar la póliza');
   }
 
   const policies = asArray(response.outData);
   return policies.length > 0 ? policies[0] : null;
 }
 
-function getReinsuranceCessions(policyId, tipo) {
+/**
+ * Retrieves the reinsurance cessions used by the accounting context.
+ *
+ * Types 3 and 5 represent CapitalChange and LoadingChange endorsements. For
+ * these types, all cessions are retrieved directly by changeId, regardless of
+ * their overwritten status. The distribution is then combined with the first
+ * cession found after it for each coverage, regardless of overwritten status.
+ * If no later cession is available, the latest previous cession is used as a
+ * fallback.
+ *
+ * Cancellation reports use a similar combination, but only with overwritten
+ * records whose premium type is CANCELLATION.
+ */
+function getReinsuranceCessions(policyId, tipo, changeId) {
+  const isCancellation = tipo === 1;
+  const isVariation = tipo === 3 || tipo === 5;
+
+  if (isVariation) {
+    const changeCessions = getCessions(`changeId=${changeId}`);
+    const policyCessions = getCessions(`lifePolicyId=${policyId}`);
+    const adjacentCessions = getPreviousCoverageCessions(changeCessions, policyCessions);
+
+    return mergeUniqueCessions(changeCessions.concat(adjacentCessions));
+  }
+
   let cessions = getCessions(`lifePolicyId=${policyId} AND overwritten=0`);
 
   // Cancellation reports combine the active cancellation movement with the
   // overwritten historical reversal to preserve the complete reinsurance amount.
-  if (tipo === 1) {
+  if (isCancellation) {
     const overwrittenCessions = getCessions(
       `lifePolicyId=${policyId} AND overwritten=1 AND premiumType='CANCELLATION'`
     );
@@ -191,6 +279,55 @@ function getReinsuranceCessions(policyId, tipo) {
   }
 
   return cessions;
+}
+
+function getPreviousCoverageCessions(currentCessions, candidateCessions) {
+  const selectedIds = {};
+  const previousCessions = [];
+
+  asArray(currentCessions).forEach(current => {
+    const coverageId = toPositiveInteger(current && current.coverageId);
+    const currentId = toPositiveInteger(current && current.id);
+
+    if (coverageId <= 0 || currentId <= 0 || selectedIds[coverageId]) {
+      return;
+    }
+
+    // Prefer the first distribution after the current one.
+    const next = asArray(candidateCessions)
+      .filter(item => item &&
+        toPositiveInteger(item.coverageId) === coverageId &&
+        toPositiveInteger(item.id) > currentId)
+      .sort((left, right) => toPositiveInteger(left.id) - toPositiveInteger(right.id))[0];
+
+    // Use the latest previous distribution only when no later one exists.
+    const previous = next || asArray(candidateCessions)
+      .filter(item => item &&
+        toPositiveInteger(item.coverageId) === coverageId &&
+        toPositiveInteger(item.id) < currentId)
+      .sort((left, right) => toPositiveInteger(right.id) - toPositiveInteger(left.id))[0];
+
+    if (previous) {
+      previousCessions.push(previous);
+      selectedIds[coverageId] = true;
+    }
+  });
+
+  return previousCessions;
+}
+
+function mergeUniqueCessions(cessions) {
+  const uniqueIds = {};
+
+  return asArray(cessions).filter(item => {
+    const id = toPositiveInteger(item && item.id);
+    if (id <= 0 || uniqueIds[id]) {
+      return false;
+    }
+
+    uniqueIds[id] = true;
+    return true;
+  });
 }
 
 function getCessions(filter) {
@@ -222,6 +359,17 @@ function sumTaxRows(rows, cancellationOnly) {
       (cancellationOnly && row.action === 'ChangeCancellation') ||
       (!cancellationOnly && row.action !== 'ChangeCancellation')))
     .reduce((total, row) => total + toNumber(row.amount), 0);
+}
+
+function sumCoveragePremiums(coverages, fallback) {
+  const rows = asArray(coverages);
+  if (rows.length === 0) {
+    return toDecimal(fallback);
+  }
+
+  return toDecimal(rows.reduce((total, coverage) => {
+    return total + toNumber(coverage && coverage.premium);
+  }, 0));
 }
 
 function safeJson(value, fallback) {
