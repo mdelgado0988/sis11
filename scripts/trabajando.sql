@@ -50,7 +50,7 @@ return;
 --ORDER BY o.cproces DESC
 
 
-declare @ramo int = 81
+declare @ramo int = 6
 select CONCAT(@ramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(@ramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
 		, (SELECT COUNT(1) FROM maplancob c where c.cramo = pl.cramo and c.cplan = pl.cplan) Coberturas
 		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
