@@ -26,7 +26,7 @@ SELECT
         TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)
     ) AS newLifePolicyId,
     ISNULL(lob.name,'') producto,
-    lp.code poliza,
+    nlp.code poliza,
     ISNULL(ep.PrimaPura,0) prima,
     CASE WHEN ISNULL(lp.surcharges,0) = 0 AND ISNULL(ep.extraprima,0) > 0 THEN ISNULL(ep.extraprima,0) ELSE lp.surcharges END recargo,
     CASE WHEN ISNULL(lp.discounts,0) = 0 AND ISNULL(ep.extraprima,0) < 0 THEN ISNULL(ep.extraprima,0) ELSE lp.discounts END descuento,
@@ -39,8 +39,8 @@ SELECT
     CASE WHEN lp.anualTotal = 0 THEN 0 ELSE ISNULL(c.pagado,0) / lp.anualTotal END * 100 porcentajepagado,
     CASE WHEN lp.anualTotal = 0 THEN 0 ELSE ISNULL(c.pendiente,0) / lp.anualTotal END * 100 porcentajependiente,
     ISNULL(s.cantidad,0) siniestros,
-    CONVERT(VARCHAR,lp.[start],103) inicio,
-    CONVERT(VARCHAR,lp.[end],103) vence,
+    CONVERT(VARCHAR,nlp.[start],103) inicio,
+    CONVERT(VARCHAR,nlp.[end],103) vence,
     nlp.anualPremium primaCotizada,
     JSON_VALUE(item.value, '$[3]') AS renovar
 FROM [Batch] b

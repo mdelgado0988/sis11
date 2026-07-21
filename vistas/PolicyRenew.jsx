@@ -869,7 +869,7 @@
             return getNextPolicyVersion(policyId)
                 .then(nextVersion => exe('AddPolicyVersion', {
                     policyVersion: nextVersion,
-                    code: policy.poliza,
+                    code: `${policy.poliza}-${nextVersion}`,
                     policyId: policyId
                 }))
                 .then(response => {
@@ -884,7 +884,22 @@
                         throw new Error(`No se recibió el id de la oferta generada para la póliza ${policy.poliza}`);
                     }
 
-                    return newPolicyId;
+                    setBatchGenerationText(`Actualizando vigencia de la oferta ${policy.poliza}`);
+
+                    return exe("ExeChain", {
+                        chain: "cmdUpdatePolicyRenewalPeriod",
+                        context: `{ policyId: ${newPolicyId} }`
+                    }).then(periodResponse => {
+                        if (!periodResponse || periodResponse.ok === false) {
+                            throw new Error(
+                                periodResponse && periodResponse.msg
+                                    ? periodResponse.msg
+                                    : `No fue posible actualizar la vigencia de la oferta ${policy.poliza}`
+                            );
+                        }
+
+                        return newPolicyId;
+                    });
                 });
         }
 
