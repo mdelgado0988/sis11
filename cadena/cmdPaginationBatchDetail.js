@@ -21,6 +21,10 @@ const sqlCommand = `DECLARE @pagenum  AS INT = ${currentPage}, @pagesize AS INT 
 SELECT 
     JSON_VALUE(item.value, '$[0]') AS anniversaryId,
     JSON_VALUE(item.value, '$[2]') AS lifePolicyId,
+    COALESCE(
+        TRY_CAST(JSON_VALUE(item.value, '$[4]') AS INT),
+        TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)
+    ) AS newLifePolicyId,
     ISNULL(lob.name,'') producto,
     lp.code poliza,
     ISNULL(ep.PrimaPura,0) prima,
@@ -37,11 +41,12 @@ SELECT
     ISNULL(s.cantidad,0) siniestros,
     CONVERT(VARCHAR,lp.[start],103) inicio,
     CONVERT(VARCHAR,lp.[end],103) vence,
-    ISNULL(lp.reAdjustment,0) primaCotizada,
+    nlp.anualPremium primaCotizada,
     JSON_VALUE(item.value, '$[3]') AS renovar
 FROM [Batch] b
 CROSS APPLY OPENJSON(b.jData) AS item
 INNER JOIN LifePolicy lp ON lp.id = TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)
+INNER JOIN LifePolicy nlp ON nlp.id = TRY_CAST(JSON_VALUE(item.value, '$[4]') AS INT)
 LEFT JOIN Lob ON lob.code = lp.lob
 OUTER APPLY (SELECT MAX(c.contractYear) contractYear
              FROM PayPlan c
@@ -71,6 +76,7 @@ doCmd({
 
 const dataPaginada = DoQuery?.outData?.map(x => ({
   lifePolicyId: x.lifePolicyId,
+  newLifePolicyId: x.newLifePolicyId,
   anniversaryId: x.anniversaryId,
   producto: x.producto,
   poliza: x.poliza,
