@@ -884,44 +884,44 @@ function onRowSelected(row) {
   pcp = redondear(pcp * 100,8, true);
   mscp = redondear(mscp,2);
   mpcp = redondear(mpcp,2);
-  mccp = redondear(mccp,2);
-  srcp = redondear(mpcp - mccp,2);
+  mccp = redondear(mccp,2);  
   micp = redondear(micp,2);
   pccp = calcularPorcentaje(mpcp, mccp);
   picp = calcularPorcentaje(mpcp, micp);
+  srcp = redondear(mpcp - mccp - micp,2);
 
   //ex1
   pex1 = normalizarPorcentaje(pex1);
   pex1 = redondear(pex1 * 100,8, true);
   msex1 = redondear(msex1,2);
   mpex1 = redondear(mpex1,2);
-  mcex1 = redondear(mcex1,2);
-  srex1 = redondear(mpex1 - mcex1,2);
+  mcex1 = redondear(mcex1,2);  
   miex1 = redondear(miex1,2);
   pcex1 = calcularPorcentaje(mpex1, mcex1);
   piex1 = calcularPorcentaje(mpex1, miex1);
+  srex1 = redondear(mpex1 - mcex1 - miex1,2);
 
   //fac
   pfp = normalizarPorcentaje(pfp);
   pfp = redondear(pfp * 100,8, true);
   msfp = redondear(msfp,2);
   mpfp = redondear(mpfp,2);
-  mcfp = redondear(mcfp,2);
-  srfp = redondear(mpfp - mcfp,2);
+  mcfp = redondear(mcfp,2);  
   mifp = redondear(mifp,2);
   pcfp = calcularPorcentaje(mpfp, mcfp);  
   pifp = calcularPorcentaje(mpfp, mifp);  
+  srfp = redondear(mpfp - mcfp - mifp,2);
 
   //fro
   pfo = normalizarPorcentaje(pfo);
   pfo = redondear(pfo * 100,8, true);
   msfo = redondear(msfo,2);
   mpfo = redondear(mpfo,2);
-  mcfo = redondear(mcfo,2);
-  srfo = redondear(mpfo - mcfo,2);
+  mcfo = redondear(mcfo,2);  
   mifo = redondear(mifo,2);
   pcfo = calcularPorcentaje(mpfo, mcfo);
   pifo = calcularPorcentaje(mpfo, mifo);
+  srfo = redondear(mpfo - mcfo - mifo,2);
 
   // If the coverage-based non-technical premium differs by up to one cent due to rounding,
   // absorb the delta in the first distribution so the displayed total matches the business total.
