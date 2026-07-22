@@ -38,6 +38,8 @@ try {
     };
   }
 
+  validatePolicyQuotation(policyId);
+
   const processId = getPositiveInteger(policy.processId);
   if (processId <= 0) {
     return {
@@ -104,6 +106,51 @@ function loadPolicy(policyId) {
   }
 
   return LoadEntity.outData || null;
+}
+
+function validatePolicyQuotation(policyId) {
+  const policyEvents = loadEntities(
+    'PolicyEvent',
+    'id,lifePolicyId,name',
+    `lifePolicyId=${policyId} AND name IN ('Quoted','Cotizado')`
+  );
+
+  if (policyEvents.length === 0) {
+    throw new Error(`La póliza ${policyId} debe cotizarse antes de emitirse.`);
+  }
+
+  const payPlans = loadEntities(
+    'PayPlan',
+    'id,lifePolicyId',
+    `lifePolicyId=${policyId}`
+  );
+
+  if (payPlans.length === 0) {
+    throw new Error(`La póliza ${policyId} no tiene plan de pago. Debe cotizarse antes de emitirse.`);
+  }
+}
+
+function loadEntities(entity, fields, filter) {
+  doCmd({
+    cmd: 'LoadEntities',
+    data: {
+      entity: entity,
+      fields: fields,
+      filter: filter,
+      noTracking: true
+    }
+  });
+
+  const response = typeof LoadEntities === 'undefined' ? null : LoadEntities;
+  if (!response || response.ok === false) {
+    throw new Error(
+      response && response.msg
+        ? response.msg
+        : `No fue posible consultar la entidad ${entity}.`
+    );
+  }
+
+  return Array.isArray(response.outData) ? response.outData : [];
 }
 
 function updateProcessUser(processId, userEmail) {
