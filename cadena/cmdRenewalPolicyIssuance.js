@@ -39,6 +39,7 @@ try {
   }
 
   validatePolicyQuotation(policyId);
+  ensurePolicyAccount(policy);
 
   const processId = getPositiveInteger(policy.processId);
   if (processId <= 0) {
@@ -91,7 +92,7 @@ function loadPolicy(policyId) {
     data: {
       entity: "LifePolicy",
       filter: `id=${policyId}`,
-      fields: "id,activeDate,processId",
+      fields: "id,activeDate,processId,holderId,currency",
       noTracking: true
     }
   });
@@ -105,6 +106,95 @@ function loadPolicy(policyId) {
   }
 
   return LoadEntity.outData || null;
+}
+
+function ensurePolicyAccount(policy) {
+  const policyId = getPositiveInteger(policy && policy.id);
+  const holderId = getPositiveInteger(policy && policy.holderId);
+
+  if (policyId <= 0) {
+    throw new Error("No fue posible validar la cuenta porque la póliza no es válida.");
+  }
+
+  if (holderId <= 0) {
+    throw new Error(`La póliza ${policyId} no tiene un titular válido para crear la cuenta.`);
+  }
+
+  const accounts = loadAccounts(`lifePolicyId=${policyId}`);
+  if (accounts.length > 0) {
+    return;
+  }
+
+  const account = buildPolicyAccount(policyId, holderId, policy && policy.currency);
+  addPolicyAccount(account, policyId);
+}
+
+function loadAccounts(filter) {
+  doCmd({
+    cmd: "RepoAccount",
+    data: {
+      operation: "GET",
+      filter: filter,
+      noTracking: true
+    }
+  });
+
+  const response = typeof RepoAccount === "undefined" ? null : RepoAccount;
+  if (!response || response.ok === false) {
+    throw new Error(
+      response && response.msg
+        ? response.msg
+        : "No fue posible consultar las cuentas de la póliza."
+    );
+  }
+
+  return Array.isArray(response.outData) ? response.outData : [];
+}
+
+function buildPolicyAccount(policyId, holderId, currency) {
+  return {
+    id: 0,
+    holderId: holderId,
+    lifePolicyId: policyId,
+    accNo: `TRA${policyId}`,
+    type: "TRANSIT",
+    currency: getTrimmedString(currency) || "USD",
+    investmentPlanCode: null,
+    name: "Cuenta Depósito",
+    contractId: null,
+    code: "TRA",
+    bankAccountOpenDate: null,
+    bankAccountType: null,
+    bankCode: null,
+    openingAmount: 0,
+    iban: null,
+    branchCode: null,
+    catalogAccountCode: null,
+    creditId: null,
+    pensionSchemeId: null,
+    checkBookCode: null,
+    fundId: null,
+    pensionAccountType: null,
+    pensionMemberId: null
+  };
+}
+
+function addPolicyAccount(account, policyId) {
+  doCmd({
+    cmd: "RepoAccount",
+    data: {
+      operation: "ADD",
+      entity: account
+    }
+  });
+
+  if (typeof RepoAccount === "undefined" || !RepoAccount || RepoAccount.ok === false) {
+    throw new Error(
+      RepoAccount && RepoAccount.msg
+        ? RepoAccount.msg
+        : `No fue posible crear la cuenta de la póliza ${policyId}.`
+    );
+  }
 }
 
 function validatePolicyQuotation(policyId) {

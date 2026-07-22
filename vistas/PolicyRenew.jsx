@@ -612,7 +612,8 @@
                 return (
                   <Space size={4}>
 
-                    {/* WORKFLOW */}
+                    {/* Workflow option is intentionally disabled and kept as a future reference. */}
+                    {false && (
                     <Popover
                       trigger="click"
                       placement="bottom"
@@ -685,6 +686,7 @@
                         />
                       </Tooltip>
                     </Popover>
+                    )}
 
                     {/* DETALLE */}
                     <Tooltip title={t('View batch detail')}>
@@ -1174,7 +1176,7 @@
     //Tab 3 de detalle del lote
     /********************************************/
 
-    const ActionToolbarDetail = ({ loading, processActive, processType, onCalculate, onRenew, onRefresh, onExclude, onViewResults, percent, loteId}) => {
+    const ActionToolbarDetail = ({ loading, processActive, processType, onCalculate, onRenew, onRefresh, onViewResults, percent, loteId}) => {
         const quoteMenu = (
           <Menu onClick={(item) => onCalculate(item.key)}>
             <Menu.Item key="selection">Cotizar selección</Menu.Item>
@@ -1207,9 +1209,6 @@
                     Renovar <ArrowDown />
                   </Button>
                 </Dropdown>
-                <Button icon={<DeleteOutlined />} loading={loading} onClick={onExclude}>
-                  Excluir
-                </Button>
                 {/* Re-execution is no longer available from this toolbar.
                 <Button
                   icon={<PlusOutlined />}
@@ -1416,7 +1415,7 @@
     };
 
     const TabContent3 = ({loteId, wfId,tableData, loadDataLoteDetalle, searchTotal, handleTableChange, 
-                          loading, processActive, processType, handleRefresh, percent, handleCalculate, handleRenew, handleExclude, selectedRowDetailKeys, onSelectChange,
+                          loading, processActive, processType, handleRefresh, percent, handleCalculate, handleRenew, selectedRowDetailKeys, onSelectChange,
                           handleViewResults, onViewPolicy}) => {
 
          const onRowSelection = {
@@ -1438,7 +1437,6 @@
                   onCalculate={handleCalculate}
                   onRenew={handleRenew}
                   onRefresh={handleRefresh}
-                  onExclude={handleExclude}
                   onViewResults={handleViewResults}
                   percent={percent}
                   loteId={loteId}
@@ -1986,7 +1984,7 @@
           }
 
           beginBatchProgress(batchId, 'issuance');
-          notification.info({
+          showBatchInfo({
             message: 'Lote de emisión',
             description: `Se inició la emisión de ${policyIds.length} póliza(s).`,
             duration: 5
@@ -2220,7 +2218,7 @@
 
                       beginBatchProgress(idLoteQuote, 'quotation');
                       const quotationMessage = resultado.msg || x.msg || 'Lote de tarificación iniciado correctamente.';
-                      notification.info({
+                      showBatchInfo({
                         message: 'Lote de tarificación',
                         description: quotationMessage,
                         duration: 3
@@ -2247,6 +2245,7 @@
         }        
       };
 
+      /*
       const handleExclude = () => {
        try {
 
@@ -2295,6 +2294,8 @@
         });
         
       }
+
+      */
 
       /*
       const handleGenerateExcludedBatch = () => {
@@ -2467,19 +2468,6 @@
       }      
 
       */
-      function dameEstadoLote() {
-        return exe("LoadEntity", {
-          entity: "Batch",
-          fields: "status",
-          filter: `id=${loteId}`
-        }).then(x => {
-          if (x && x.ok) {
-            return x.outData.status;
-          }
-          return null;
-        });
-      }
-  
       const formatDate = (date) => {
           const yyyy = date.getFullYear();
           const mm = String(date.getMonth() + 1).padStart(2, "0"); // Mes (0–11)
@@ -2586,6 +2574,20 @@
         });
       }
 
+      function showBatchInfo(config) {
+        const input = config || {};
+        const safeDescription = String(input.description || '');
+
+        notification.info({
+          ...input,
+          description: (
+            <div style={{ display: 'block', color: '#595959', whiteSpace: 'normal' }}>
+              {safeDescription}
+            </div>
+          )
+        });
+      }
+
       function beginBatchProgress(batchId, processType) {
         const validBatchId = Number(batchId || 0);
         if (validBatchId <= 0) {
@@ -2633,7 +2635,7 @@
                     const completionMessage = processType === 'issuance'
                       ? 'Proceso de emisión finalizado, verifique los resultados.'
                       : 'Proceso de cotización finalizado, verifique los resultados.';
-                    notification.info({
+                    showBatchInfo({
                       message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
                       description: completionMessage || 'El proceso finalizó correctamente.',
                       duration: 3
@@ -2746,7 +2748,6 @@
                                 handleRefresh={handleRefreshDetail}
                                 handleCalculate={handleCalculate}
                                 handleRenew={handleRenew}
-                                handleExclude={handleExclude}
                                 selectedRowDetailKeys={selectedRowDetailKeys}
                                 onSelectChange={onSelectChange}
                                 handleViewResults={handleViewResults}
