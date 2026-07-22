@@ -24,6 +24,8 @@ try {
     throw new Error(`No se encontró la póliza relacionada con el identificador ${id}`);
   }
 
+  const isPolicyVersionRenewal = tipo === 0 && toPositiveInteger(policy.policyVersion) > 0;
+
   const titles = {
     0: 'Emisión',
     1: 'Cancelación',
@@ -44,7 +46,6 @@ try {
 
   const isCancellation = tipo === 1;
   const isNewOrAnniversary = [0, 2].includes(tipo);
-
   const changes = asArray(policy.Changes);
   const change = findChange(changes, id);
 
@@ -68,6 +69,7 @@ try {
     cancellationTax,
     nonCancellationTax
   } = amounts;
+  const isRenewal = isPolicyVersionRenewal || renovacion;
 
   const cessions = getReinsuranceCessions(policy.id, tipo, id);
   const reaseguroCedido = toDecimal(
@@ -77,7 +79,8 @@ try {
     cessions.reduce((total, item) => total + toNumber(item.comissionCedant), 0)
   );
   const reaseguroPorPagar = toDecimal(reaseguroCedido - reaseguroComision);
-  const title = titles[tipo];
+  const effectiveTipo = isPolicyVersionRenewal ? 2 : tipo;
+  const title = titles[effectiveTipo];
   const productName = policy.Product && policy.Product.name
     ? String(policy.Product.name)
     : '';
@@ -100,9 +103,9 @@ try {
     reference: `${title} Incendio # ${id}`,
     description: `${title} ${productName} Póliza # ${policyCode}`,
     unique: `TX${cancelacion ? '-R' : ''}# ${id}`,
-    code: codes[tipo],
+    code: codes[effectiveTipo],
     cancelacion: cancelacion,
-    renovacion: renovacion,
+    renovacion: isRenewal,
     Policy: policy
   }];
 } catch (error) {
