@@ -98,7 +98,8 @@ SELECT
     pol.[created] AS 'fechaCreacion',
     pol.[id] AS 'lifePolicyId',
     COALESCE(btC.[batchId],0) batchId,
-    CASE WHEN ISNULL(oa.estadoRenovacion, 'Sin Accion') = 'No Renovar' THEN 0 ELSE 1 END bRenovar
+    CASE WHEN ISNULL(oa.estadoRenovacion, 'Sin Accion') = 'No Renovar' THEN 0 ELSE 1 END bRenovar,
+    pol.originalPolicyId
 FROM LifePolicy pol
 JOIN Product pro ON pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]

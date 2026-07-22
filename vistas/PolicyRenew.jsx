@@ -926,15 +926,15 @@
         }
 
         const createPolicyOfferVersion = (policy) => {
-            const policyId = Number(policy.codigo || 0);
+            const policyId = Number(policy.originalPolicyId || policy.codigo || 0);
             if (!policyId) {
                 return Promise.reject(new Error(`La póliza ${policy.poliza || ''} no tiene un id válido`));
             }
 
-            return getNextPolicyVersion(policyId)
+            return getNextPolicyVersion(policy.codigo)
                 .then(nextVersion => exe('AddPolicyVersion', {
                     policyVersion: nextVersion,
-                    code: `${policy.poliza}-${nextVersion}`,
+                    code: policy.poliza,
                     policyId: policyId
                 }))
                 .then(response => {

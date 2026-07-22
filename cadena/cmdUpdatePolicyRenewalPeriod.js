@@ -18,23 +18,13 @@ try {
     throw new Error(`No se encontró la póliza ${policyId}`);
   }
 
-  const originalPolicyId = toPositiveInteger(policy.originalPolicyId);
-  if (originalPolicyId <= 0) {
-    throw new Error(`La póliza ${policyId} no tiene un originalPolicyId válido`);
+  const duration = getDuration(policy);
+  const currentEnd = parseUtcDate(policy.end);
+  if (!currentEnd) {
+    throw new Error('La fecha final de vigencia de la póliza actual no es válida');
   }
 
-  const originalPolicy = loadPolicy(originalPolicyId);
-  if (!originalPolicy) {
-    throw new Error(`No se encontró la póliza original ${originalPolicyId}`);
-  }
-
-  const duration = getDuration(originalPolicy);
-  const originalEnd = parseUtcDate(originalPolicy.end);
-  if (!originalEnd) {
-    throw new Error('La fecha final de vigencia de la póliza original no es válida');
-  }
-
-  const start = addMinutes(originalEnd, 1);
+  const start = addMinutes(currentEnd, 1);
   if (!start) {
     throw new Error('No fue posible calcular la fecha inicial de la nueva vigencia');
   }
@@ -81,7 +71,7 @@ function loadPolicy(policyId) {
     cmd: 'LoadEntities',
     data: {
       entity: 'LifePolicy',
-      fields: 'id,originalPolicyId,[start],[end],duration,durationMonths,durationDays',
+      fields: 'id,[start],[end],duration,durationMonths,durationDays',
       filter: `id = ${policyId}`,
       noTracking: true
     }
