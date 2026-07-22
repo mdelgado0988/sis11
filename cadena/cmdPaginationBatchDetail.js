@@ -11,11 +11,6 @@
 
 const { loteId, currentPage, pageSize } = context;
 
-//Voy a validar el estado del lote, para pasar de pendiente a ejecutado según el proceso
-if(loteId){
-  validaYActualizaEstadoLote(loteId);  
-}
-
 const sqlCommand = `DECLARE @pagenum  AS INT = ${currentPage}, @pagesize AS INT = ${pageSize}, @loteId AS INT = ${loteId};
 
 SELECT 
@@ -119,36 +114,4 @@ return {
     ok: true,
     total: totalDatos,
     data: dataPaginada
-}
-
-function validaYActualizaEstadoLote(loteId) {
-  if(loteId){
-
-    //El lote de renovación...
-    doCmd({
-      cmd: "LoadEntity",
-      data:{
-        entity: "Batch",
-            fields: "status",
-            filter: `id=${loteId}`
-      }
-    })
-  
-    if(LoadEntity.ok){
-      const estado = LoadEntity.outData.status ?? "";
-      if(estado === "PENDING"){
-        doCmd({ cmd: "SetBatchResults", data:{ batchId: loteId } });
-      }
-    }
-
-    //El de tarificación
-    doCmd({"cmd":"LoadEntities","data":{"entity":"Batch","filter":`status = 'PENDING' AND name like 'QUOTELOTE%-${loteId}%'`}});
-    const resultado = LoadEntities.outData ?? [];
-    if(resultado.length > 0){
-      resultado.forEach(x => {
-        doCmd({ cmd: "SetBatchResults", data:{ batchId: x.id } });
-      });      
-    }    
-    
-  }
 }
