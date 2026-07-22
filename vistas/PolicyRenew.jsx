@@ -2630,11 +2630,12 @@
                 finishProcess
                   .then(() => {
                     setProcessActive(false);
+                    const completionMessage = processType === 'issuance'
+                      ? 'Proceso de emisión finalizado, verifique los resultados.'
+                      : 'Proceso de cotización finalizado, verifique los resultados.';
                     notification.info({
                       message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
-                      description: processType === 'issuance'
-                        ? 'Proceso de emisión finalizado, verifique los resultados.'
-                        : 'Proceso de cotización finalizado, verifique los resultados.',
+                      description: completionMessage || 'El proceso finalizó correctamente.',
                       duration: 3
                     });
                     handleRefreshDetail();
