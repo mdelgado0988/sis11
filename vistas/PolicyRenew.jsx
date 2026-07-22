@@ -1924,7 +1924,7 @@
 
             return candidates
               .filter(item => activeOfferIds.indexOf(item.offerPolicyId) < 0)
-              .map(item => String(item.sourcePolicyId))
+              .map(item => String(item.offerPolicyId))
               .filter((value, index, values) => values.indexOf(value) === index);
           });
         });
@@ -2219,7 +2219,12 @@
                       }
 
                       beginBatchProgress(idLoteQuote, 'quotation');
-                      notification.info({ message: "Lote de tarificación", description: resultado.msg, duration: 3 });
+                      const quotationMessage = resultado.msg || x.msg || 'Lote de tarificación iniciado correctamente.';
+                      notification.info({
+                        message: 'Lote de tarificación',
+                        description: quotationMessage,
+                        duration: 3
+                      });
                     });
                 })
                 .catch(error => {

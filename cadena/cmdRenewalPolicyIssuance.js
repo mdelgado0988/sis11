@@ -6,7 +6,7 @@
  * @email michael.delgado@axxis-systems.com
  * @created 2026/07/21
  * @version 1.0
- * @purpose Update the renewal workflow user, approve the workflow, and issue the policy.
+ * @purpose Update the renewal workflow user and issue the policy.
  * @context.row.policyId Policy identifier to issue.
  * @context.row.loteId Renewal batch identifier used to validate the request context.
  * @context.row.userEmail User assigned to the policy workflow process.
@@ -49,7 +49,6 @@ try {
   }
 
   updateProcessUser(processId, userEmail);
-  approveWorkflow(processId);
   issuePolicy(policyId);
 
   return {
@@ -168,24 +167,6 @@ function updateProcessUser(processId, userEmail) {
       SetField && SetField.msg
         ? SetField.msg
         : `No fue posible actualizar el usuario del proceso ${processId}.`
-    );
-  }
-}
-
-function approveWorkflow(processId) {
-  doCmd({
-    cmd: "GotoStep",
-    data: {
-      procesoId: processId,
-      estado: "ACTIVE"
-    }
-  });
-
-  if (typeof GotoStep === "undefined" || !GotoStep || !GotoStep.ok) {
-    throw new Error(
-      GotoStep && GotoStep.msg
-        ? GotoStep.msg
-        : `No fue posible aprobar el workflow ${processId}.`
     );
   }
 }

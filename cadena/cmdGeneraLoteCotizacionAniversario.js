@@ -207,9 +207,9 @@ function buildQuotationRows(rows, selectedPolicyIds, loteId) {
   const selected = selectedPolicyIds.map(value => String(value));
 
   return rows
-    .filter(row => Array.isArray(row) && selected.indexOf(String(row[2])) >= 0)
+    .filter(row => Array.isArray(row) && selected.indexOf(String(row[4])) >= 0)
     .map(row => [
-      row[2],
+      row[4],
       row[1],
       row[4],
       loteId
@@ -246,7 +246,7 @@ function markPoliciesAsRenewal(loteId, selectedPolicyIds) {
       SELECT JSON_QUERY(
         '[' + STRING_AGG(
           CASE
-            WHEN JSON_VALUE(j.[value], '$[2]') IN (${policyIds})
+            WHEN JSON_VALUE(j.[value], '$[4]') IN (${policyIds})
               THEN JSON_MODIFY(j.[value], '$[3]', 'Si')
             ELSE j.[value]
           END,
