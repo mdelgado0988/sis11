@@ -31,6 +31,19 @@ try {
     );
   }
 
+  const pendingIssuanceBatches = getPendingIssuanceBatchCount(input.loteId);
+  if (!pendingIssuanceBatches.ok) {
+    throw new Error(pendingIssuanceBatches.msg);
+  }
+
+  if (pendingIssuanceBatches.count > 0) {
+    return buildResult(
+      false,
+      `Existen ${pendingIssuanceBatches.count} lotes pendientes de emisión para este lote de renovación, espere a que finalice el proceso antes de cotizar nuevamente`,
+      0
+    );
+  }
+
   const sourceBatch = getSourceBatch(input.loteId);
   if (!sourceBatch.ok) {
     throw new Error(sourceBatch.msg);
@@ -124,6 +137,28 @@ function getPendingQuotationBatchCount(loteId) {
         ),
         1
       ) = '${loteId}';`;
+
+  const response = executeDoQuery(sql);
+  if (!response.ok) {
+    return { ok: false, msg: response.msg, count: 0 };
+  }
+
+  const row = getFirstRow(response.outData);
+  return {
+    ok: true,
+    msg: '',
+    count: toNonNegativeInteger(row && row.cantidad)
+  };
+}
+
+function getPendingIssuanceBatchCount(loteId) {
+  const sql = `
+    SELECT COUNT(1) AS cantidad
+    FROM [Batch] AS b
+    JOIN [ImportConfig] AS ic ON b.importConfigId = ic.id
+    WHERE (ic.[name] = 'RenewalPolicyIssuance' OR ic.[category] = 'RenewalPolicyIssuance')
+      AND ISNULL(b.[status], 'PENDING') = 'PENDING'
+      AND b.[name] LIKE N'RENEWALISSUANCE-%-${loteId}';`;
 
   const response = executeDoQuery(sql);
   if (!response.ok) {

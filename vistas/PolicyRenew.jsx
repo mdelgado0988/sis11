@@ -518,9 +518,11 @@
               align: 'left',
               render: (_, record) => {
                 const correctos = Math.max(
-                  Number(record.success || 0) - Number(record.skipped || 0),
+                  Number(record.success || 0),
                   0
                 );
+                const noRenovados = Math.max(Number(record.records || 0) - correctos, 0);
+                record.noRenovados = noRenovados;
 
                 return (
                   <div style={{ lineHeight: '18px', fontSize: 12 }}>
@@ -528,10 +530,10 @@
                       <strong>Total:</strong> {record.records}
                     </div>
                     <div>
-                      <strong>Procesados:</strong> {record.processed}
+                      <strong>Procesados:</strong> {correctos}
                     </div>
                     <div>
-                      <Tooltip title="Registros Correctos">
+                      <Tooltip title="Renovados">
                         <span style={{ color: '#52c41a', cursor: 'help' }}>
                           ✅ {correctos}
                         </span>
@@ -539,17 +541,9 @@
 
                       {' | '}
 
-                      <Tooltip title="Registros con Error">
-                        <span style={{ color: '#ff4d4f', cursor: 'help' }}>
-                          ❌ {record.error}
-                        </span>
-                      </Tooltip>
-
-                      {' | '}
-
                       <Tooltip title="No Renovados">
                         <span style={{ color: '#faad14', cursor: 'help' }}>
-                          🚫 {record.skipped}
+                          🚫 {record.noRenovados == null ? 0 : record.noRenovados}
                         </span>
                       </Tooltip>
                     </div>
@@ -560,9 +554,9 @@
             { title: 'Progreso', dataIndex: 'processed', width: 80, ellipsis: true, align: 'center', 
              render: (_, record) => (
                 <Progress
-                  percent={ Math.round(((record.processed + record.skipped) / record.records) * 100) > 100 ? 100 : Math.round((record.processed + record.skipped / record.records) * 100)}
+                  percent={record.records > 0 ? Math.min(100, Math.round((Number(record.success || 0) / Number(record.records)) * 100)) : 0}
                   size="small"
-                  status={record.processed + record.skipped >= record.records ? 'success' : 'active'}
+                  status={Number(record.processed || 0) >= Number(record.records || 0) ? 'success' : 'active'}
                 />
               )
             },
@@ -1955,6 +1949,11 @@
       async function executeRenewalBatch(mode) {
         setProcessActive(true);
         try {
+          const pendingIssuanceBatch = await hasPendingRenewalIssuanceBatch(loteId);
+          if (pendingIssuanceBatch) {
+            throw new Error('Ya existe un lote de emisión activo para este lote de renovación. Espere a que finalice antes de crear otro.');
+          }
+
           const policyIds = await getRenewalPolicyIds(mode);
           if (!policyIds.length) {
             setProcessActive(false);
@@ -2091,6 +2090,30 @@
         });
       };
 
+      const hasPendingRenewalIssuanceBatch = (renewalBatchId) => {
+        const id = Number(renewalBatchId || 0);
+        if (id <= 0) {
+          return Promise.resolve(false);
+        }
+
+        const sql = `
+          SELECT COUNT(1) AS cantidad
+          FROM [Batch] b
+          JOIN [ImportConfig] ic ON b.importConfigId = ic.id
+          WHERE (ic.[name] = 'RenewalPolicyIssuance' OR ic.[category] = 'RenewalPolicyIssuance')
+            AND ISNULL(b.[status], 'PENDING') = 'PENDING'
+            AND b.[name] LIKE N'RENEWALISSUANCE-%-${id}';`;
+
+        return exe('DoQuery', { sql: sql }).then(result => {
+          if (!result || result.ok === false) {
+            throw new Error(result && result.msg ? result.msg : 'No fue posible validar los lotes de emisión activos.');
+          }
+
+          const rows = Array.isArray(result.outData) ? result.outData : [];
+          return rows.length > 0 && Number(rows[0].cantidad || 0) > 0;
+        });
+      };
+
       const createRenewalIssuanceBatch = (rows, importConfigId) => {
         return exe('RepoBatch', {
           operation: 'ADD',
@@ -2142,7 +2165,15 @@
                 }).then(x => {
                   const resultado = x && x.outData ? x.outData : x;
                   if (!resultado || !resultado.ok) {
-                    throw new Error(resultado && resultado.msg ? resultado.msg : 'No fue posible generar el lote de cotización.');
+                    setProcessActive(false);
+                    notification.error({
+                      message: 'Cotizar',
+                      description: resultado && resultado.msg
+                        ? resultado.msg
+                        : 'No fue posible generar el lote de cotización.',
+                      duration: 8
+                    });
+                    return;
                   }
 
                   const idLoteQuote = Number(resultado.idLoteQuote || 0);
@@ -2431,7 +2462,7 @@
         exe("GetProcesses", {
           filter: `id IN (${WFids})`
         });
-      
+
       const loadDataBatch = (params = {}) => {
           setLoadingBatch(params.loading);
           const context = `{row:{currentPage:${params.pagination.current}, pageSize:${params.pagination.pageSize}, batchCode:'ANNIVERSARYLOTEVIEW'}}`;
@@ -2442,7 +2473,7 @@
           })
           .then(r => {
               if(r.ok){
-                  const polizaPaginada = r.outData.data;
+                  const polizaPaginada = Array.isArray(r.outData.data) ? r.outData.data : [];
                   const listaPoliza = [];
                   let indiceResultado = 0;
 
@@ -2548,16 +2579,41 @@
               if (current >= 100) {
                 clearInterval(id);
                 setIntervalId(null);
-                setProcessActive(false);
-                notification.info({
-                  message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
-                  description: processType === 'issuance'
-                    ? 'Proceso de emisión finalizado, verifique los resultados.'
-                    : 'Proceso de cotización finalizado, verifique los resultados.',
-                  duration: 3
-                });
-                handleRefreshDetail();
-                showErrors({ loteId: loteId, processBatchId: validBatchId, processType: processType });
+                const finishProcess = processType === 'issuance'
+                  ? exe('ExeChain', {
+                      chain: 'cmdUpdateRenewalPolicyIssuanceBatch',
+                      context: '{ loteId: ' + loteId + ' }'
+                    }).then(result => {
+                      const response = result && result.outData ? result.outData : result;
+                      if (!response || response.ok === false) {
+                        throw new Error(response && response.msg
+                          ? response.msg
+                          : 'No fue posible actualizar los resultados del lote de emisión.');
+                      }
+                    })
+                  : Promise.resolve();
+
+                finishProcess
+                  .then(() => {
+                    setProcessActive(false);
+                    notification.info({
+                      message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
+                      description: processType === 'issuance'
+                        ? 'Proceso de emisión finalizado, verifique los resultados.'
+                        : 'Proceso de cotización finalizado, verifique los resultados.',
+                      duration: 3
+                    });
+                    handleRefreshDetail();
+                    showErrors({ loteId: loteId, processBatchId: validBatchId, processType: processType });
+                  })
+                  .catch(error => {
+                    setProcessActive(false);
+                    notification.error({
+                      message: 'Error actualizando el lote',
+                      description: error && error.message ? error.message : String(error),
+                      duration: 10
+                    });
+                  });
               }
             })
             .catch(error => {

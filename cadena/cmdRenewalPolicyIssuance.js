@@ -11,6 +11,8 @@
  * @context.row.loteId Renewal batch identifier used to validate the request context.
  * @context.row.userEmail User assigned to the policy workflow process.
  * @behavior The command does not issue a policy when activeDate is already populated.
+ * @note Batch-level duplicate validation is performed before batch creation. This
+ *       chain runs inside the active issuance batch and must not block itself.
  */
 
 try {
