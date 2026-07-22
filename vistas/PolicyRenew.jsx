@@ -1954,6 +1954,11 @@
             throw new Error('Ya existe un lote de emisión activo para este lote de renovación. Espere a que finalice antes de crear otro.');
           }
 
+          const pendingQuotationBatch = await hasPendingRenewalQuotationBatch(loteId);
+          if (pendingQuotationBatch) {
+            throw new Error('Ya existe un lote de cotización activo para este lote de renovación. Espere a que finalice antes de crear la emisión.');
+          }
+
           const policyIds = await getRenewalPolicyIds(mode);
           if (!policyIds.length) {
             setProcessActive(false);
@@ -2107,6 +2112,30 @@
         return exe('DoQuery', { sql: sql }).then(result => {
           if (!result || result.ok === false) {
             throw new Error(result && result.msg ? result.msg : 'No fue posible validar los lotes de emisión activos.');
+          }
+
+          const rows = Array.isArray(result.outData) ? result.outData : [];
+          return rows.length > 0 && Number(rows[0].cantidad || 0) > 0;
+        });
+      };
+
+      const hasPendingRenewalQuotationBatch = (renewalBatchId) => {
+        const id = Number(renewalBatchId || 0);
+        if (id <= 0) {
+          return Promise.resolve(false);
+        }
+
+        const sql = `
+          SELECT COUNT(1) AS cantidad
+          FROM [Batch] b
+          JOIN [ImportConfig] ic ON b.importConfigId = ic.id
+          WHERE ic.[category] = 'ANNIVERSARYLOTEVIEWQUOTE'
+            AND ISNULL(b.[status], 'PENDING') = 'PENDING'
+            AND b.[name] LIKE N'QUOTELOTE-%-${id}';`;
+
+        return exe('DoQuery', { sql: sql }).then(result => {
+          if (!result || result.ok === false) {
+            throw new Error(result && result.msg ? result.msg : 'No fue posible validar los lotes de cotización activos.');
           }
 
           const rows = Array.isArray(result.outData) ? result.outData : [];
