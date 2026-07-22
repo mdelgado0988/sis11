@@ -230,7 +230,17 @@
     }
 
     function distributeReceiptAmount(installments, receiptAmount) {
-      const rows = Array.isArray(installments) ? installments : [];
+      const sourceRows = Array.isArray(installments) ? installments : [];
+      const rows = sourceRows.filter(installment => {
+        const minimum = Number(installment && installment.minimum);
+        const expected = Number(installment && installment.expected);
+        const baseAmount = Number.isFinite(minimum) && minimum !== 0
+          ? minimum
+          : (Number.isFinite(expected) ? expected : 0);
+        const paid = Number(installment && installment.payed) || 0;
+
+        return !(baseAmount > 0 && paid >= baseAmount);
+      });
 
       if (rows.length === 0) {
         return [];
@@ -239,12 +249,20 @@
       const sourceAmounts = rows.map(installment => {
         const minimum = Number(installment && installment.minimum);
         const expected = Number(installment && installment.expected);
-        return Number.isFinite(minimum) && minimum !== 0
+        const baseAmount = Number.isFinite(minimum) && minimum !== 0
           ? minimum
           : (Number.isFinite(expected) ? expected : 0);
+        const paid = Number(installment && installment.payed) || 0;
+        return Math.max(baseAmount - paid, 0);
       });
       const sourceTotal = sourceAmounts.reduce((total, amount) => total + amount, 0);
-      const targetTotal = Number(receiptAmount) || 0;
+      const paidTotal = sourceRows.reduce((total, installment) => {
+        return total + (Number(installment && installment.payed) || 0);
+      }, 0);
+      const receiptValue = Number(receiptAmount) || 0;
+      const targetTotal = receiptValue < 0
+        ? receiptValue
+        : Math.max(receiptValue - paidTotal, 0);
 
       if (sourceTotal === 0) {
         let distributedWithoutProportion = 0;
@@ -254,9 +272,13 @@
             ? Number((targetTotal - distributedWithoutProportion).toFixed(2))
             : Number((targetTotal / rows.length).toFixed(2));
           distributedWithoutProportion += amount;
+          const paid = Number(installment && installment.payed) || 0;
+          const displayedAmount = paid + amount;
           return {
             ...installment,
-            minimum: installment && installment.cancellationDate ? amount * -1 : amount
+            minimum: installment && installment.cancellationDate
+              ? displayedAmount * -1
+              : displayedAmount
           };
         });
       }
@@ -269,9 +291,13 @@
           : Number((targetTotal * sourceAmounts[index] / sourceTotal).toFixed(2));
 
         distributed += amount;
+        const paid = Number(installment && installment.payed) || 0;
+        const displayedAmount = paid + amount;
         return {
           ...installment,
-          minimum: installment && installment.cancellationDate ? amount * -1 : amount
+          minimum: installment && installment.cancellationDate
+            ? displayedAmount * -1
+            : displayedAmount
         };
       });
     }
