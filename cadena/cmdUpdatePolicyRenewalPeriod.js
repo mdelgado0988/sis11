@@ -12,14 +12,21 @@
 
 try {
   const policyId = getPolicyId(context);
+  const renewalPolicyId = getRenewalPolicyId(context);
   const policy = loadPolicy(policyId);
+  const renewalPolicy = loadPolicy(renewalPolicyId);
 
   if (!policy) {
     throw new Error(`No se encontró la póliza ${policyId}`);
   }
 
-  const duration = getDuration(policy);
-  const currentEnd = parseUtcDate(policy.end);
+  if (!renewalPolicy) {
+    throw new Error(`No se encontrÃ³ la pÃ³liza original ${renewalPolicyId}`);
+  }
+
+  // The renewal period starts from the end of the policy being renewed.
+  const duration = getDuration(renewalPolicy);
+  const currentEnd = parseUtcDate(renewalPolicy.end);
   if (!currentEnd) {
     throw new Error('La fecha final de vigencia de la póliza actual no es válida');
   }
@@ -61,6 +68,15 @@ function getPolicyId(value) {
   const policyId = toPositiveInteger(value && value.policyId);
   if (policyId <= 0) {
     throw new Error('El parámetro policyId es requerido y debe ser válido');
+  }
+
+  return policyId;
+}
+
+function getRenewalPolicyId(value) {
+  const policyId = toPositiveInteger(value && value.renewalPolicyId);
+  if (policyId <= 0) {
+    throw new Error('El parÃ¡metro renewalPolicyId es requerido y debe ser vÃ¡lido');
   }
 
   return policyId;

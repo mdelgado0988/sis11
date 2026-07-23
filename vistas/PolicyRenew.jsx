@@ -729,12 +729,15 @@
                         </Space>
                       }
                     >
+                      {/* More options is intentionally disabled and kept as a future reference. */}
+                      {false && (
                       <Tooltip title={t('More options')}>
                         <Button
                           size="small"
                           icon={<MoreOutlined />}
                         />
                       </Tooltip>
+                      )}
                     </Popover>
 
                   </Space>
@@ -958,7 +961,7 @@
 
                     return exe("ExeChain", {
                         chain: "cmdUpdatePolicyRenewalPeriod",
-                        context: `{ policyId: ${newPolicyId} }`
+                        context: `{ policyId: ${newPolicyId}, renewalPolicyId: ${policy.codigo} }`
                     }).then(periodResponse => {
                         if (!periodResponse || periodResponse.ok === false) {
                             throw new Error(
