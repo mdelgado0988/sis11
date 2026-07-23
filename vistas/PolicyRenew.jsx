@@ -704,6 +704,8 @@
                       content={
                         <Space direction="vertical">
 
+                          {/* Open workflow is intentionally disabled and kept as a future reference. */}
+                          {false && (
                           <a href={`#/activity/${wfId}`}>
                             <Button
                               block
@@ -712,6 +714,7 @@
                               {t('Open workflow')}
                             </Button>
                           </a>
+                          )}
 
                           {actions.length > 0 && (
                             <div>
