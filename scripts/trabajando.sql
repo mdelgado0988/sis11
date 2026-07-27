@@ -1,6 +1,6 @@
 ﻿use GlobalSIS_AG01
 
-select t.cramo, t.cplan, t.ccober, 36 cendoso
+select t.cramo, RTRIM(t.cplan) cplan, RTRIM(t.ccober) ccober, 36 cendoso
 	, REPLACE(tf.formula,'{XMONTH}','XMONTH') as formula
 	, rtrim(REPLACE(REPLACE(REPLACE(REPLACE(tf.mprima,'{XMONTH}','XMONTH'),'{PPRIMAPP}','6.53'),'{XPRIMA}','XPRIMA'),'{CCOBER}','CCOBER')) AS mprima	
 	, rtrim(REPLACE(tf.mdeducible,'{XMONTH}','XMONTH')) AS mdeducible
@@ -13,32 +13,48 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 6
-and t.cplan = 'AULEMEILU$' 
+and t.cplan = 'FERIAMS08' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
 AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 
+DROP TABLE IF EXISTS #Coberturas;
+
 select c.cramo, rtrim(c.cplan) cplan, rtrim(pl.xplan) xplan, rtrim(mc.ccobertura) ccobertura
 		, rtrim(mc.xdescripcion_l) cobertura, rtrim(mc.xdescripcion_c) xdescripcion_c,
-		c.bobligatoria, c.SA, c.CGRUPO, c.CGRUPO1, c.CGRUPO2
-		, c.ccontrea, c.cramorea, qordenimp
+		c.bobligatoria
+		, CASE WHEN ISNULL(pr.ctipo,'') = 'FOR' THEN '-1' ELSE c.SA END SA
+		, c.CGRUPO
+		, c.CGRUPO1, c.CGRUPO2
+		, c.ccontrea, c.cramorea, qordenimp, c.SA SADefault
+INTO #Coberturas
 from macoberturas mc
 inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
+LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
 where c.cramo = 6
 --AND pl.istatplan = 'V'
-and C.cplan = 'AULEMEILU$' 
---AND (ISNULL(c.SA,'-1') <> '-1' OR ISNULL(c.CGRUPO,'-1') <> '-1' OR ISNULL(c.CGRUPO1,'-1') <> '-1' OR ISNULL(c.CGRUPO2,'-1') <> '-1')
+and C.cplan = 'FERIAMS08' 
+
+SELECT * FROM #Coberturas
 order by 1,2,4
 
-select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
+select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo 
+from ccerti_preguntas 
+where cramo = 6 
+AND (cpregunta IN (select SA FROM #Coberturas)
+	OR cpregunta IN (select CGRUPO FROM #Coberturas)
+	OR cpregunta IN (select CGRUPO1 FROM #Coberturas)
+	OR cpregunta IN (select CGRUPO2 FROM #Coberturas)
+	)
+order by cpregunta
 
---SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Dañ08'
+--select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
+
+--SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Dañ09'
 --select * from tarifasvar where variable = 'OptMoPDeducible'
-
-
 
 return;
 
@@ -51,7 +67,10 @@ return;
 
 
 declare @ramo int = 6
-select CONCAT(@ramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(@ramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
+SELECT * 
+FROM (
+select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID,
+		CONCAT(@ramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(@ramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
 		, (SELECT COUNT(1) FROM maplancob c where c.cramo = pl.cramo and c.cplan = pl.cplan) Coberturas
 		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
 		, CASE WHEN EXISTS(SELECT 1 FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) THEN 'Si' ELSE 'No' end TienePolizas
@@ -59,6 +78,8 @@ select CONCAT(@ramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(@ramo,'_'),''),'$'
 from maplanes pl
 where cramo = @ramo 
 --AND pl.istatplan = 'V'
+)  t
+WHERE t.id >= 26
 order by 2
 
 --select CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
