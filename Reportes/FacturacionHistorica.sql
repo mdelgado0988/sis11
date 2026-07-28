@@ -2,11 +2,10 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20260601'
-        ,@fend DATE =  '20260617'
+DECLARE  @fstart DATE = '20260701'
+        ,@fend DATE =  '20260730'
 		,@ramo varchar(50) = null
 		,@producto varchar(50) = null
-
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
@@ -22,13 +21,13 @@ SELECT
         NULLIF(LTRIM(RTRIM(c.surname2)), '')
     ) AS Cliente,
 	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,ISNULL(lp.fiscalNumber,'0')) END AS Recibo,
-	FORMAT(CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
-    CONVERT(VARCHAR, CAST(an.created AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,	
+	FORMAT(CAST(lp.activeDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy HH:mm:ss') AS FechaIngreso,
+    CONVERT(VARCHAR, CAST(lp.activeDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,	
     ISNULL(refe.ReferidoName, '') AS [Referido por],
-    CASE WHEN ISNULL(bu.Usuario,'') <> '' THEN bu.Usuario ELSE ISNULL(prc.usuario, prcp.usuario) END AS Usuario,
+    ISNULL(prcp.usuario, '') AS Usuario,
     CONVERT(VARCHAR, CAST(an.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Desde,
     CONVERT(VARCHAR, CAST(an.[anniversary] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta,
-    CASE WHEN an.contractYear = 1 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
+    CASE WHEN ISNULL(lp.policyVersion,0) = 0 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
 
     ISNULL(pym.name, '') AS recursopago,
     CASE snap.periodicity 
@@ -82,7 +81,7 @@ SELECT
     ISNULL(cc.name, '') AS Canal
 
 FROM lifePolicy lp
-LEFT JOIN Anniversary an ON an.lifePolicyId = lp.id
+LEFT JOIN Anniversary an ON an.lifePolicyId = lp.id AND an.contractYear = 1
 LEFT JOIN [dbo].[FiscalDocGenerated] fr ON fr.policyId = lp.id AND fr.[action] = 'IssuePolicy'
 
 /* información de la póliza según snapshot  */
@@ -162,23 +161,6 @@ OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
 				NULLIF(LTRIM(RTRIM(acre.surname2)), '')
 			), 'No Tiene') AS Acreedor, acre.id) acref
 LEFT JOIN Product prod ON prod.code = lp.productCode
-
-/* Datos Usuario */
-OUTER APPLY (SELECT an1.id
-			 FROM Anniversary an1
-			 WHERE an1.lifePolicyId = lp.id AND an1.contractYear = an.contractYear - 1) anu
-OUTER APPLY (SELECT TOP 1 b.[user] Usuario
-			FROM [Batch] b
-			CROSS APPLY OPENJSON(
-			  CASE
-				WHEN ISJSON(b.jData) = 1 THEN b.jData
-				ELSE '[]'
-			  END
-			) j
-			WHERE ISNULL(an.id,0) <> 0 AND TRY_CAST(JSON_VALUE(j.value, '$[0]') AS INT) = anu.id
-			ORDER BY b.id DESC) bu
-
-LEFT JOIN Proceso prc ON prc.id = an.processId
 LEFT JOIN Proceso prcp ON prcp.id = lp.processId
 LEFT JOIN ChannelCatalog cc ON cc.code = snap.channel
 LEFT JOIN Insured benf ON benf.LifePolicyId = lp.id
@@ -344,7 +326,7 @@ OUTER APPLY (
     WHERE bf.id = lp.cessionBeneficiary
 ) bf
 
-WHERE CAST(an.created AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
+WHERE CAST(lp.activeDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
 
