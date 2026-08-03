@@ -1,4 +1,4 @@
-//block
+﻿//block
 //noreplace
 
 /*
@@ -22,10 +22,27 @@ try {
 
   loadPolicy(policyId);
   const quoteResult = executePolicyQuote(policyId);
+  const documentResult = generateQuotationDocument(policyId);
+
+  if (!documentResult.ok) {
+    return {
+      ok: false,
+      msg: `Póliza ${policyId} cotizada correctamente, pero falló la generación del documento: ${documentResult.msg || 'No fue posible generar el documento de cotización.'}`,
+      outData: quoteResult.outData
+    };
+  }
+
+  if (documentResult.skipped) {
+    return {
+      ok: true,
+      msg: `${quoteResult.msg || `Póliza ${policyId} cotizada correctamente.`} ${documentResult.msg || 'No se generó documento de cotización.'}`,
+      outData: quoteResult.outData
+    };
+  }
 
   return {
     ok: true,
-    msg: quoteResult.msg || `Póliza ${policyId} cotizada correctamente.`,
+    msg: documentResult.msg || quoteResult.msg || `Póliza ${policyId} cotizada correctamente y documento generado.`,
     outData: quoteResult.outData
   };
 } catch (error) {
@@ -83,6 +100,18 @@ function executePolicyQuote(policyId) {
   return QuotePolicy;
 }
 
+function generateQuotationDocument(policyId) {
+  doCmd({
+    cmd: 'ExeChain',
+    data: {
+      chain: 'cmdGenerateQuotationDoc',
+      context: `{id:${policyId}}`
+    }
+  });
+
+  return ExeChain || { ok: false, msg: 'No fue posible generar el documento de cotización.' };
+}
+
 function validateCommandResult(result, defaultMessage) {
   if (!result || result.ok !== true) {
     throw new Error(result && result.msg ? result.msg : defaultMessage);
@@ -96,3 +125,7 @@ function getErrorMessage(error) {
 
   return String(error || 'Error desconocido al cotizar la póliza.');
 }
+
+
+
+
