@@ -19,7 +19,7 @@ const changeMarca = async () => {
   try {
      const Modelo = $("#cmbModelo").val();
      const Marca = $("#cmbMarca").val();
-     await loadDataTableModelo({reference:'#cmbModelo',tableName:'TablaModelos',indexCode:1,indexDisplay:2,indexMarca:0,valMarca:Marca});
+     await loadDataTableModelo({reference:'#cmbModelo',tableName:'tbModelos',indexCode:2,indexDisplay:3,indexMarca:1,valMarca:Marca,indexRamo:0,valRamo:policy.lob});
   } catch (error) {
     console.error(`Error seleccionando la Marca: ${error.toString()}`)
   }   
@@ -212,10 +212,10 @@ const onDocumentReady = async() => {
     $("#cmbMarca").on("change", changeMarca);
     // Keep the certificate field read-only at all times.
     $("#txtCertificado").prop("readonly", true);
-    await loadDataTable({reference:'#cmbMarca',tableName:'TablaMarcas',indexCode:0,indexDisplay:1});
+    await loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2});
     await changeMarca();
-    await loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:1,indexDisplay:2});
-    await loadDataTable({reference:'#cmbUsoAuto',tableName:'tblUsoPorRamo',indexCode:1,indexDisplay:2});
+    await loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob});
+    await loadDataTable({reference:'#cmbUsoAuto',tableName:'tblUsoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob});
     await cargarCobtarDinamico();
     validaInputs();
     injectVINStyle();
@@ -234,12 +234,18 @@ async function loadDataTable ({
     tableName,
     indexCode,
     indexDisplay,
+    filter,
 }) {
     $(reference).empty().append('<option value="">Seleccione una opción</option>');;
     const result = await me.exe("GetFullTable", { table: tableName });
     const data = result.outData && result.outData.length > 0 ? result.outData : [];
     data.splice(0, 1);
-    data.forEach(item => {
+
+    const filteredData = filter === undefined || filter === null || String(filter).trim() === ''
+        ? data
+        : data.filter(item => String(item && item[0] !== undefined ? item[0] : '').trim() === String(filter).trim());
+
+    filteredData.forEach(item => {
         $(reference).append('<option value="' + item[indexCode] + '">' + item[indexDisplay] + '</option>');
     });
 
@@ -247,7 +253,7 @@ async function loadDataTable ({
     if(!!dataValue){
         $(reference).val(String(dataValue).trim()).trigger('change');
     }
-    return data;
+    return filteredData;
 }
 
 async function loadDataTableModelo ({
@@ -256,7 +262,9 @@ async function loadDataTableModelo ({
     indexCode,
     indexDisplay,
     indexMarca,
-    valMarca
+    valMarca,
+    indexRamo,
+    valRamo
 }) {
     $(reference).empty().append('<option value="">Seleccione una opción</option>');;
     const result = await me.exe("GetFullTable", { table: tableName });
@@ -264,7 +272,11 @@ async function loadDataTableModelo ({
   
     data.splice(0, 1);
     data.forEach(item => {
-      if (valMarca == item[indexMarca]){
+      const matchesMarca = String(item && item[indexMarca] !== undefined ? item[indexMarca] : '').trim() === String(valMarca == null ? '' : valMarca).trim();
+      const matchesRamo = valRamo === undefined || valRamo === null || String(valRamo).trim() === ''
+        || String(item && item[indexRamo] !== undefined ? item[indexRamo] : '').trim() === String(valRamo).trim();
+
+      if (matchesMarca && matchesRamo){
         $(reference).append('<option value="' + item[indexCode] + '">' + item[indexDisplay] + '</option>');
       }
     });

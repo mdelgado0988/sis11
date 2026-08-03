@@ -13,7 +13,7 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 6
-and t.cplan = 'IL' 
+and t.cplan = 'TRANS-PES' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -36,7 +36,7 @@ inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
 where c.cramo = 6
 --AND pl.istatplan = 'V'
-and C.cplan = 'IL' 
+and C.cplan = 'TRANS-PES' 
 
 SELECT * FROM #Coberturas
 order by 1,2,4
@@ -53,24 +53,18 @@ order by cpregunta
 
 --select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
---SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'MUERTE_ACCL'
---select * from tarifasvar where variable = 'OptMoPDeducible'
+--SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Les06'
+--select * from tarifasvar where variable = 'modelorec'
 
 return;
-
---SELECT TOP 10 * 
---FROM cobtar t
---inner join ofpolizas o ON o.cproces = t.cproces
---WHERE t.cendoso = 36
---AND o.cramo = 96 AND o.cplan = 'CAR'
---ORDER BY o.cproces DESC
-
 
 declare @ramo int = 6
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
-		CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan
+		CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador
+		,CONCAT('R-', cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) ContadorReclamo
+		, RTRIM(cplan) cplan, xplan, istatplan
 		, (SELECT COUNT(1) FROM maplancob c where c.cramo = pl.cramo and c.cplan = pl.cplan) Coberturas
 		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
 		, CASE WHEN EXISTS(SELECT 1 FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) THEN 'Si' ELSE 'No' end TienePolizas
@@ -79,7 +73,7 @@ from maplanes pl
 where cramo = @ramo 
 --AND pl.istatplan = 'V'
 )  t
-WHERE t.id >= 26
+WHERE t.id >= 49
 order by 2
 
 --select CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan

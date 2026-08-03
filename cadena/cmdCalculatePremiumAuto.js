@@ -16,6 +16,7 @@ const objectDefinitionCode = "DTAUT";
 let tarifas;
 let tbTarConfig = [];
 let vwGetConfigTar = [];
+let tbModelos = [];
 let oaUserData;
 let resultCoverages = [];
 const tarifaAuto = [
@@ -36,6 +37,9 @@ try {
 
   // log("Calculando objeto asegurado");
   oaUserData = getInsuredObject();
+
+  // Load models once and reuse the filtered list for each coverage quotation object.
+  tbModelos = getModelos();
 
   // log("Estableciendo coberturas");
   resultCoverages = getResultCoverages();
@@ -222,6 +226,13 @@ function getQuotationObject(coverageCode) {
   });*/
 
   obj.ANIOAUTO = aniosAuto ?? 0;
+  obj.productCode = poliza?.productCode ?? '';
+
+  // Keep only models matching the policy line and the insured object's brand.
+  obj.modelorec = tbModelos
+    .filter(item => normalizeComparable(item?.cmarca) === normalizeComparable(obj?.cmbMarca))
+    .map(item => item?.cmodelo)
+    .filter(value => value !== null && value !== undefined && String(value).trim() !== '');
 
   //Normalizamos nombres de los campos del DT para evitar problemas con caracteres especiales.
   const keys = Object.keys(obj);
@@ -277,6 +288,22 @@ function getVwGetConfigTarTable() {
   }
 
   return mapTableByHeaders(GetFullTable.outData);
+}
+
+function getModelos() {
+  doCmd({ cmd: "GetFullTable", data: { table: "tbModelos" } });
+
+  if (!GetFullTable || !GetFullTable.ok || !Array.isArray(GetFullTable.outData)) {
+    throw new Error("No fue posible leer la tabla tbModelos.");
+  }
+
+  const rows = mapTableByHeaders(GetFullTable.outData);
+  const policyLob = normalizeComparable(poliza?.lob);
+
+  return rows.filter(item =>
+    normalizeComparable(item?.cramo) === policyLob &&
+    normalizeComparable(item?.ccategoria) === '1'
+  );
 }
 
 function getPPrima(table, cober, obj) {
@@ -476,7 +503,7 @@ function mapearTablaConfig(data) {
   const contador = {};
 
   headersOriginal.forEach(h => {
-    const key = h.trim();
+    const key = String(h ?? '').trim();
 
     if (contador[key]) {
       contador[key]++;
