@@ -1,6 +1,6 @@
 //block
 /**
- * Name: documentIncendio
+ * Name: documentsIncendio
  * Description: Obtains information in order to print report ofertaincendio.docx
  * Author: Ernesto Garcia
 					  
@@ -17,6 +17,7 @@ try {
   const policyId = Number(row.policyId || 0);
   const action = String(row.action || '');
   const tipoDoc = String(row.tipo || '');
+  const contextFiscalNumber = safeString(row.fiscalNumber || context?.fiscalNumber || "").trim();
 
   if (!policyId || Number.isNaN(policyId)) {
     return { ok: false, msg: "Debe indicar una póliza válida." };
@@ -107,7 +108,7 @@ try {
     }
   }
       
-  const vfieldsCotizacion = "lob,productCode,code,id,[start],[end],anualPremium,tax,anualTotal,description,insuredSum,paymentMethod,periodicity,holderId,payerId,cessionBeneficiary, sellerId";
+  const vfieldsCotizacion = "lob,productCode,code,id,[start],[end],anualPremium,tax,anualTotal,description,insuredSum,paymentMethod,periodicity,holderId,payerId,cessionBeneficiary,sellerId,policyVersion,fiscalNumber";
   const vfieldsCotizacionAsegurados = "lifePolicyId,contactId";
   
   const vfieldsCoberturas = "lifePolicyId,code,name,description,limit,deductible,basePremium, number";
@@ -123,6 +124,7 @@ try {
   }
   cplan = dataCotizacion.productCode;
   cramo = safeNumber(dataCotizacion.lob, 0);
+  const fiscalNumber = contextFiscalNumber || safeString(dataCotizacion.fiscalNumber, "").trim();
 
   setDeduciblesCatalog();
   setLimiteCobertura();
@@ -437,7 +439,9 @@ try {
   //Cotización - LifePolicy
   Cotizacion.code = dataCotizacion.code;
   Cotizacion.NumeroOferta = dataCotizacion.id;
-  Cotizacion.TipoOperacion = "Nueva"; //Pendiente
+  Cotizacion.fiscalNumber = fiscalNumber;
+  Cotizacion.NumeroRecibo = fiscalNumber;
+  Cotizacion.TipoOperacion = safeNumber(dataCotizacion.policyVersion, 0) > 0 ? "Renovación" : "Nueva";
   Cotizacion.Estado = "Vigente"; //Pendiente
   //Cotizacion.FechaInicioVigencia = dataCotizacion.start;
   Cotizacion.FechaInicioVigencia = safeDateText(dataCotizacion.start);
