@@ -10,13 +10,12 @@ DECLARE  @Fecha DATE = '20260730'
 SELECT 
 
     ROW_NUMBER() OVER (ORDER BY p.code) AS Id,
-	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,'0') END AS Recibo,
+	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,ISNULL(p.fiscalNumber,'0')) END AS Recibo,
     p.code AS [Póliza],
     0 AS Ref_Banco,
     pr.name AS Ramo,
     p.commercial AS [Plan],
-    CASE WHEN ISNULL(an.contractYear,0) = 1 THEN CONVERT(VARCHAR,an.executionDate,103) else CONVERT(VARCHAR,p.created,103) END AS [F. Ingreso],
-
+    FORMAT(CAST(p.activeDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy') AS [F. Ingreso],
 	FORMAT(CAST(fechas.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy') AS Desde,
 	FORMAT(CAST(fechas.[end] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 'dd/MM/yyyy') AS Hasta,
 
@@ -80,7 +79,7 @@ SELECT
     0 AS Descuento
 
 FROM LifePolicy p
-LEFT JOIN Anniversary an on an.lifePolicyId = p.id AND (an.entityState = 'EXECUTED' OR an.contractYear <= 1)
+LEFT JOIN Anniversary an on an.lifePolicyId = p.id AND an.contractYear = 1
 OUTER APPLY (SELECT CASE WHEN an.[start] IS NOT NULL THEN an.[start] ELSE p.[start] END AS [start]
 				, CASE WHEN an.anniversary IS NOT NULL THEN an.anniversary ELSE p.[end] END AS [end]) fechas
 
@@ -90,20 +89,6 @@ INNER JOIN Product pr ON pr.code = p.productCode
 INNER JOIN Contact c  ON c.id = p.holderId
 LEFT JOIN Contact ac ON ac.id = p.cessionBeneficiary
 LEFT JOIN Contact sl ON sl.id = p.sellerId
-
-/*OUTER APPLY (
-    SELECT
-        CONCAT_WS('/',
-            (SELECT TOP (1) pp2.numberInYear
-             FROM PayPlan pp2
-             WHERE pp2.lifePolicyId = p.id
-               AND pp2.dueDate <= @Fecha
-             ORDER BY pp2.dueDate DESC, pp2.id DESC),
-            CAST((SELECT COUNT(1)
-                  FROM PayPlan pp3
-                  WHERE pp3.lifePolicyId = p.id) AS VARCHAR(10))
-        ) AS Cuotas
-) AS [cuota]*/
 
 OUTER APPLY (SELECT TOP (1) 1 Tiene
 			 FROM PayPlan pl
