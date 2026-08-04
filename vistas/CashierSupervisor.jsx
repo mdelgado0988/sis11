@@ -7,8 +7,10 @@
     Descriptions,
     Drawer: Panel,
     Form,
+    Dropdown,
     Layout,
     InputNumber,
+    Menu,
     Row,
     Select,
     Space,
@@ -20,6 +22,25 @@
   const { TabPane } = Tabs;
   const { Option } = Select;
 
+  const tabIconStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '1em',
+    height: '1em',
+    marginRight: 6,
+    flex: 'none',
+    verticalAlign: 'middle',
+    lineHeight: 1,
+    color: 'inherit'
+  };
+
+  const TabIcon = ({ label, children }) => (
+    <span role="img" aria-label={label} className="anticon" style={tabIconStyle}>
+      {children}
+    </span>
+  );
+
   const SearchIcon = () => (
     <span role="img" aria-label="search" className="anticon anticon-search">
       <svg viewBox="64 64 896 896" focusable="false" data-icon="search" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -28,19 +49,49 @@
     </span>
   );
 
-  const ExportIcon = () => (
-    <span role="img" aria-label="file-excel" className="anticon anticon-file-excel">
-      <svg viewBox="64 64 896 896" focusable="false" data-icon="file-excel" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-        <path d="M854.6 288.7L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.6zM790.2 326H602V137.8L790.2 326zM792 888H232V136h302v216c0 23.2 18.8 42 42 42h216v494z"></path>
-        <path d="M514.1 586.2l85.9-122.8c4.1-5.9-.1-14-7.3-14h-56.8c-2.9 0-5.6 1.4-7.3 3.8l-45.6 65.2-45.6-65.2a8.8 8.8 0 0 0-7.3-3.8h-56.8c-7.2 0-11.4 8.1-7.3 14l85.9 122.8-87 124.4c-4.1 5.9.1 14 7.3 14h56.8c2.9 0 5.6-1.4 7.3-3.8l46.7-66.8 46.7 66.8a8.8 8.8 0 0 0 7.3 3.8h56.8c7.2 0 11.4-8.1 7.3-14l-87-124.4z"></path>
+  const CashierIcon = () => (
+    <TabIcon label="cash desks">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M768 160H256c-53 0-96 43-96 96v416c0 53 43 96 96 96h512c53 0 96-43 96-96V256c0-53-43-96-96-96zm-16 112v80H240v-80h512zm0 128v272H240V400h512z"></path>
+        <path d="M304 456h176v72H304zm240 0h112v72H544zM304 576h112v72H304zm160 0h192v72H464z"></path>
       </svg>
-    </span>
+    </TabIcon>
   );
 
-  const CashierIcon = () => <i className="bi bi-cash-stack" aria-hidden="true" />;
-  const SummaryIcon = () => <i className="bi bi-card-checklist" aria-hidden="true" />;
-  const PremiumIcon = () => <i className="bi bi-receipt" aria-hidden="true" />;
-  const DepositIcon = () => <i className="bi bi-bank" aria-hidden="true" />;
+  const SummaryIcon = () => (
+    <TabIcon label="cash desk details">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 80c203.9 0 368 164.1 368 368S715.9 880 512 880 144 715.9 144 512 308.1 144 512 144z"></path>
+        <path d="M512 272a56 56 0 1 0 0 112 56 56 0 0 0 0-112zm-48 176h96v272h-96z"></path>
+      </svg>
+    </TabIcon>
+  );
+
+  const PremiumIcon = () => (
+    <TabIcon label="paid premiums">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 128c-211.7 0-384 172.3-384 384s172.3 384 384 384 384-172.3 384-384S723.7 128 512 128zm0 80c167.7 0 304 136.3 304 304S679.7 816 512 816 208 679.7 208 512 344.3 208 512 208z"></path>
+        <path d="M464 336h96l-24 256h-48zM424 624h176v64H424z"></path>
+      </svg>
+    </TabIcon>
+  );
+
+  const DepositIcon = () => (
+    <TabIcon label="premium deposits">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 144L320 336h112v224h160V336h112L512 144z"></path>
+        <path d="M256 688h512v80H256z"></path>
+      </svg>
+    </TabIcon>
+  );
+
+  const ReportIcon = () => (
+    <TabIcon label="reports">
+      <svg viewBox="64 64 896 896" width="1.15em" height="1.15em" fill="currentColor" aria-hidden="true">
+        <path d="M240 160h320c8.5 0 16.6 3.4 22.6 9.4l160 160c6 6 9.4 14.1 9.4 22.6v448c0 17.7-14.3 32-32 32H240c-17.7 0-32-14.3-32-32V192c0-17.7 14.3-32 32-32zm320 44.1V352h147.9L560 204.1zM304 448h352v56H304zm0 112h352v56H304zm0 112h224v56H304z"></path>
+      </svg>
+    </TabIcon>
+  );
 
   const [form] = Form.useForm();
   const [searchVisible, setSearchVisible] = React.useState(false);
@@ -51,6 +102,7 @@
   const [transferRows, setTransferRows] = React.useState([]);
   const [transferLoading, setTransferLoading] = React.useState(false);
   const [transferPagination, setTransferPagination] = React.useState({ current: 1, pageSize: 25 });
+  const [transferTotal, setTransferTotal] = React.useState(0);
   const [transferScrollY, setTransferScrollY] = React.useState(420);
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
@@ -327,12 +379,16 @@
 
   function formatDate(value) {
     if (!value) return '-';
-    const text = String(value);
-    const parts = text.substring(0, 10).split('-');
-    if (parts.length === 3) {
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
     }
-    return text;
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    return `${day}-${month}-${year}`;
   }
 
   function formatDateTime(value) {
@@ -500,6 +556,20 @@
     return [];
   }
 
+  function getResponseTotal(response, rows) {
+    const directTotal = Number(response && response.total);
+    if (Number.isFinite(directTotal) && directTotal >= 0) {
+      return directTotal;
+    }
+
+    const nestedTotal = Number(response && response.outData && response.outData.total);
+    if (Number.isFinite(nestedTotal) && nestedTotal >= 0) {
+      return nestedTotal;
+    }
+
+    return Array.isArray(rows) ? rows.length : 0;
+  }
+
   function buildTransferWorkspaceFilter(values) {
     const filters = [];
     const branchCode = getTrimmedString(values && values.branch);
@@ -540,7 +610,11 @@
 
   function loadTransferWorkspaces(params = {}) {
     const values = params.values || form.getFieldsValue();
+    const pagination = params.pagination || transferPagination;
     const filter = buildTransferWorkspaceFilter(values);
+    const pageSize = Number(pagination && pagination.pageSize) || 25;
+    const currentPage = Number(pagination && pagination.current) || 1;
+    const backendPage = Math.max(currentPage - 1, 0);
 
     setTransferLoading(true);
 
@@ -548,8 +622,8 @@
       operation: 'GET',
       include: ['Branch'],
       filter: filter || null,
-      size: 0,
-      page: 0
+      size: pageSize,
+      page: backendPage
     })
       .then(response => {
         if (!response || response.ok === false) {
@@ -557,11 +631,13 @@
         }
 
         const rows = normalizeRows(response);
+        const total = getResponseTotal(response, rows);
         setTransferRows(rows);
-        setTransferPagination(prev => ({
-          current: 1,
-          pageSize: prev.pageSize || 25
-        }));
+        setTransferTotal(total);
+        setTransferPagination({
+          current: currentPage,
+          pageSize: pageSize
+        });
 
         if (rows.length > 0) {
           const selected = selectedCashierRow && rows.find(item => Number(item && item.id) === Number(selectedCashierRow && selectedCashierRow.id));
@@ -582,28 +658,57 @@
 
   function handleSearchTransfers() {
     setSearchVisible(false);
-    setTransferPagination(prev => ({ ...prev, current: 1 }));
     loadTransferWorkspaces({
       pagination: { current: 1, pageSize: transferPagination.pageSize },
       values: form.getFieldsValue()
     });
   }
 
+  function handleClearTransfers() {
+    form.resetFields();
+    applyCurrentMonthDefaults();
+    setSearchVisible(false);
+  }
+
+  function handleOpenCashDeskAudit() {
+    if (!selectedCashierRow || !selectedCashierRow.id) {
+      message.warning(t('Please select a cash desk first'));
+      return;
+    }
+
+    const workspaceId = selectedCashierRow.id;
+    const url = `${window.location.origin}/#/reportview/rptArqueoDeCajaDetallado/workspaceId=${workspaceId}&transferId=0`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleOpenCashDeskDetailedBreakdown() {
+    if (!selectedCashierRow || !selectedCashierRow.id) {
+      message.warning(t('Please select a cash desk first'));
+      return;
+    }
+
+    const workspaceId = selectedCashierRow.id;
+    const url = `${window.location.origin}/#/reportview/ReporteDeIngresosCaja/workspaceId=${workspaceId}&transferId=0`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   function handleTableChange(pagination) {
-    setTransferPagination({
-      current: pagination.current,
-      pageSize: pagination.pageSize
+    loadTransferWorkspaces({
+      pagination: {
+        current: pagination.current,
+        pageSize: pagination.pageSize
+      },
+      values: form.getFieldsValue()
     });
   }
 
   const cashierColumns = [
-    { title: t('Cash desk id'), dataIndex: 'id', key: 'id', width: 110, align: 'center', sorter: (a, b) => Number(a && a.id || 0) - Number(b && b.id || 0) },
+    { title: t('Cash desk id'), dataIndex: 'id', key: 'id', width: 110, align: 'center' },
     {
       title: t('Branch'),
       dataIndex: 'branchCode',
       key: 'branchCode',
       width: 180,
-      sorter: (a, b) => getBranchLabel(a).localeCompare(getBranchLabel(b)),
       render: (_, record) => getBranchLabel(record)
     },
     {
@@ -611,7 +716,6 @@
       dataIndex: 'user',
       key: 'user',
       width: 280,
-      sorter: (a, b) => getCashierLabel(a).localeCompare(getCashierLabel(b)),
       render: (_, record) => getCashierLabel(record)
     },
     {
@@ -620,8 +724,7 @@
       key: 'date',
       width: 170,
       align: 'center',
-      sorter: (a, b) => new Date(a && a.date || 0).getTime() - new Date(b && b.date || 0).getTime(),
-      render: value => formatDateTime(value)
+      render: value => formatDate(value)
     },
     {
       title: t('Status'),
@@ -629,7 +732,6 @@
       key: 'status',
       width: 110,
       align: 'center',
-      sorter: (a, b) => Number(Boolean(a && a.closed)) - Number(Boolean(b && b.closed)),
       render: (_, record) => {
         const status = record && record.closed ? 'Closed' : 'Open';
         return (
@@ -719,9 +821,23 @@
                     <Button type="primary" onClick={() => setSearchVisible(true)}>
                       <SearchIcon /> {t('Search')}
                     </Button>
-                    <Button>
-                      <ExportIcon /> {t('Export')}
-                    </Button>
+                    <Dropdown
+                      overlay={(
+                        <Menu>
+                          <Menu.Item key="cash-desk-audit" onClick={handleOpenCashDeskAudit}>
+                            {t('Cash Desk Audit')}
+                          </Menu.Item>
+                          <Menu.Item key="cash-desk-detailed-breakdown" onClick={handleOpenCashDeskDetailedBreakdown}>
+                            {t('Cash Desk Detailed Breakdown')}
+                          </Menu.Item>
+                        </Menu>
+                      )}
+                      trigger={['click']}
+                    >
+                      <Button>
+                        <ReportIcon /> {t('Reports')}
+                      </Button>
+                    </Dropdown>
                   </Space>
                 </div>
 
@@ -736,7 +852,7 @@
                   pagination={{
                     current: transferPagination.current,
                     pageSize: transferPagination.pageSize,
-                    total: transferRows.length,
+                    total: transferTotal,
                     showSizeChanger: true,
                     pageSizeOptions: ['10', '25', '50', '100']
                   }}
@@ -878,9 +994,12 @@
               </Col>
             </Row>
 
-            <Space direction="vertical" style={{ display: 'flex' }}>
-              <Button type="primary" block onClick={handleSearchTransfers}>
+            <Space style={{ display: 'flex', width: '100%' }}>
+              <Button type="primary" onClick={handleSearchTransfers}>
                 <SearchIcon /> {t('Search')}
+              </Button>
+              <Button onClick={handleClearTransfers}>
+                {t('Clear')}
               </Button>
             </Space>
           </Form>

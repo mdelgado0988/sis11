@@ -94,7 +94,8 @@ return;
 select distinct e.cramo, ra.xdescripcion_l ramo, e.cendoso, e.xdescripcion  endoso
 from maendosos e
 inner join maramos ra on ra.cramo = e.cramo
-where /*e.cramo in (81,82,83) and*/ e.iestado = 'V'
+where e.cramo in (0,1) and e.iestado = 'V'
+AND e.cendoso in (select cendoso from adendoso)
 
 SELECT cramo, RTRIM(xnombrep) reporte, MAX(cplan) cplan, CONCAT( MAX(RTRIM(xdescripcion)), ' (', rtrim(xnombrep), ')') reportedoc, MAX(xdescripcion_l) reporte_l, MAX(RTRIM(xdescripcion)) reporte
 FROM marepteccia 
@@ -106,7 +107,7 @@ GROUP BY cramo, xnombrep
 SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos WHERE cramo = 6 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 20
+declare @cramo int = 1
 declare @cplan varchar(15) = 'vid-desemp';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
@@ -122,7 +123,8 @@ select c.crecibo, c.ccober, c.isuma, c.msumaaseg, c.mprimabruta, p.cproces, p.cn
 from polizas
 inner join adpoliza p on p.cpoliza = polizas.cpoliza AND p.fanopol = polizas.fanopol and p.fmespol = polizas.fmespol
 inner join adpolcob c on p.cpoliza = c.cpoliza and p.fanopol = c.fanopol and p.fmespol = c.fmespol
-where p.cramo = @cramo and p.cplan = @cplan 
+where p.cramo = @cramo 
+--and p.cplan = @cplan 
 --and p.cendoso = 36;
 
 select * from rea_ces where crecibo = 792901
