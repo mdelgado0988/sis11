@@ -12,8 +12,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 6
-and t.cplan = 'TRANS-PES' 
+where t.cramo = 1
+and t.cplan = '1_17' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -34,16 +34,16 @@ from macoberturas mc
 inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
-where c.cramo = 6
+where c.cramo = 1
 --AND pl.istatplan = 'V'
-and C.cplan = 'TRANS-PES' 
+and C.cplan = '1_17' 
 
 SELECT * FROM #Coberturas
 order by 1,2,4
 
 select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo 
 from ccerti_preguntas 
-where cramo = 6 
+where cramo = 1 
 AND (cpregunta IN (select SA FROM #Coberturas)
 	OR cpregunta IN (select CGRUPO FROM #Coberturas)
 	OR cpregunta IN (select CGRUPO1 FROM #Coberturas)
@@ -58,7 +58,7 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 6
+declare @ramo int = 1
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -73,7 +73,7 @@ from maplanes pl
 where cramo = @ramo 
 --AND pl.istatplan = 'V'
 )  t
-WHERE t.id >= 49
+--WHERE t.id >= 49
 order by 2
 
 --select CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador, RTRIM(cplan) cplan, xplan, istatplan

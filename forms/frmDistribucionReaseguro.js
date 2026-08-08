@@ -1634,12 +1634,16 @@ function renderReaseguradores() {
     val = parseFloat(val) || 0;
 
     const oldValue = reaseguradoresData[index][key] || 0;
+    const totalBase = dameTotalBase();
 
-    // ===== VALIDACIÓN SPLIT =====
-    if (key === "split") {
+    // ===== VALIDACIÓN SPLIT / SUMA =====
+    if (key === "split" || key === "sumInsured") {
+      const nextSplit = key === "split"
+        ? val
+        : (totalBase.sumInsured === 0 ? 0 : (val / totalBase.sumInsured) * 100);
 
       const totalSplit = reaseguradoresData.reduce((acc, r, i) => {
-        return acc + (i === index ? val : (r.split || 0));
+        return acc + (i === index ? nextSplit : (r.split || 0));
       }, 0);
 
       if (totalSplit > 100) {
@@ -1651,14 +1655,18 @@ function renderReaseguradores() {
 
     // guardar valor
     reaseguradoresData[index][key] = val;
+    reaseguradoresData[index]._lastEditedField = key;
 
     // ===== RECÁLCULO AUTOMÁTICO =====
-    if (key === "split") {
+    if (key === "split" || key === "sumInsured") {
 
-      const totalBase = dameTotalBase();
-      const factor = val / 100;
+      const factor = key === "split"
+        ? (val / 100)
+        : (totalBase.sumInsured === 0 ? 0 : (val / totalBase.sumInsured));
+
       const row = reaseguradoresData[index];
 
+      row.split = factor * 100;
       row.sumInsured = formatearRedondeado(totalBase.sumInsured * factor);
       const mpremium = redondear(totalBase.premium * factor);
       const mcomi = redondear(totalBase.commission * factor);
@@ -1692,6 +1700,11 @@ function renderReaseguradores() {
     const key = keys[colIndex];
 
     let val = reaseguradoresData[index][key] || 0;
+
+    if (key === "split") {
+      input.value = formatearRedondeado(val,8);
+      return;
+    }
 
     if (["sumInsured","premium","commission","tax"].includes(key)) {
       input.value = formatearRedondeado(val);
