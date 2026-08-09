@@ -2,6 +2,7 @@
   const {
     Button,
     Card,
+    Checkbox,
     DatePicker,
     Drawer,
     Dropdown,
@@ -9,6 +10,7 @@
     Input,
     Layout,
     Modal,
+    Popconfirm,
     Radio,
     Select,
     Space,
@@ -72,6 +74,15 @@
     </TabIcon>
   );
 
+  const MovementIcon = () => (
+    <TabIcon label="movements">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M128 192h768v96H128zm0 272h768v96H128zm0 272h768v96H128z"></path>
+        <path d="M224 128h96v672h-96zm480 0h96v672h-96z"></path>
+      </svg>
+    </TabIcon>
+  );
+
   const [selectedCashierRow, setSelectedCashierRow] = React.useState(null);
   const [transferRows, setTransferRows] = React.useState([]);
   const [transferLoading, setTransferLoading] = React.useState(false);
@@ -85,6 +96,11 @@
   const [newCashDeskForm] = Form.useForm();
   const [newIncomeForm] = Form.useForm();
   const [activeTab, setActiveTab] = React.useState('cash-desks');
+  const [movementRows, setMovementRows] = React.useState([]);
+  const [movementLoading, setMovementLoading] = React.useState(false);
+  const [movementPagination, setMovementPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [movementTotal, setMovementTotal] = React.useState(0);
+  const [movementActionId, setMovementActionId] = React.useState(0);
   const [collectionRows, setCollectionRows] = React.useState([]);
   const [collectionLoading, setCollectionLoading] = React.useState(false);
   const [collectionPagination, setCollectionPagination] = React.useState({ current: 1, pageSize: 15 });
@@ -107,7 +123,9 @@
     { key: 1, methodCode: undefined, amount: '' }
   ]);
   const [newIncomeDynamicForms, setNewIncomeDynamicForms] = React.useState({});
+  const [newIncomeTypeDynamicForm, setNewIncomeTypeDynamicForm] = React.useState(null);
   const newIncomeFormRefs = React.useRef({});
+  const newIncomeTypeFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
 
@@ -313,6 +331,13 @@
         border-color: #d9d9d9;
       }
 
+      .cashier-supervisor-tab:disabled {
+        color: #bfbfbf;
+        cursor: not-allowed;
+        background: #fafafa;
+        border-color: transparent;
+      }
+
       .cashier-supervisor-tab-content {
         flex: 1 1 auto;
         min-height: 0;
@@ -388,6 +413,10 @@
         padding: 2px 6px !important;
         font-size: 11px;
         line-height: 14px;
+      }
+
+      .cashier-supervisor-movement-table .ant-table-tbody > tr > td {
+        white-space: pre-line;
       }
 
       .cashier-supervisor-new-income-card {
@@ -487,6 +516,7 @@
           max-width: 100%;
           min-width: 0;
         }
+
       }
 
       .cashier-supervisor-section-title {
@@ -793,11 +823,13 @@
         })).filter(item => item.value));
         setIncomeTypeOptions(getRows(incomeResponse).map(item => ({
           value: item && item.code,
-          label: getTrimmedString(item && item.name)
+          label: getTrimmedString(item && item.name),
+          formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
         })).filter(item => item.value));
         setExternalSourceOptions(getRows(sourceResponse).map(item => ({
           value: item && item.code,
-          label: getTrimmedString(item && item.name)
+          label: getTrimmedString(item && item.name),
+          destinationAccNo: getTrimmedString(item && item.destinationAccNo)
         })).filter(item => item.value));
       })
       .catch(error => message.error(error && error.message ? error.message : String(error)));
@@ -815,6 +847,11 @@
 
   function getPaymentFormId(methodCode) {
     const option = paymentMethodOptions.find(item => item && item.value === methodCode);
+    return option && Number(option.formId) > 0 ? Number(option.formId) : 0;
+  }
+
+  function getIncomeTypeFormId(incomeTypeCode) {
+    const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
     return option && Number(option.formId) > 0 ? Number(option.formId) : 0;
   }
 
@@ -870,6 +907,40 @@
     });
   }
 
+  function updateNewIncomeType(value) {
+    const formId = getIncomeTypeFormId(value);
+
+    if (formId > 0) {
+      setNewIncomeTypeDynamicForm({ formId: formId, form: null, loading: true, error: '' });
+
+      exe('GetForms', { filter: `id=${formId}` })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('The income type form could not be loaded.'));
+          }
+
+          const form = getRows(response)[0];
+          if (!form) {
+            throw new Error(t('The income type form was not found.'));
+          }
+
+          setNewIncomeTypeDynamicForm({ formId: formId, form: form, loading: false, error: '' });
+        })
+        .catch(error => {
+          setNewIncomeTypeDynamicForm({
+            formId: formId,
+            form: null,
+            loading: false,
+            error: error && error.message ? error.message : String(error)
+          });
+          message.error(error && error.message ? error.message : String(error));
+        });
+      return;
+    }
+
+    setNewIncomeTypeDynamicForm(null);
+  }
+
   function updateNewIncomePayment(key, field, value) {
     setNewIncomePayments(rows => rows.map(row => row.key === key
       ? { ...row, [field]: value }
@@ -897,6 +968,7 @@
     newIncomeForm.resetFields();
     setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: '' }]);
     setNewIncomeDynamicForms({});
+    setNewIncomeTypeDynamicForm(null);
   }
 
   function evalNewIncomeFormLogic(source, contextValue) {
@@ -907,6 +979,32 @@
   }
 
   function validateDynamicIncomeForms() {
+    if (newIncomeTypeDynamicForm) {
+      if (newIncomeTypeDynamicForm.loading) {
+        message.warning(t('Please wait until the income type form finishes loading.'));
+        return false;
+      }
+
+      const typeContainer = document.getElementById('cashier-income-type-form')
+        || newIncomeTypeFormRef.current;
+      if (newIncomeTypeDynamicForm.error) {
+        message.error(newIncomeTypeDynamicForm.error);
+        return false;
+      }
+
+      if (typeContainer) {
+        const requiredControls = typeContainer.querySelectorAll('[required]');
+        for (const control of requiredControls) {
+          const value = control && control.value !== undefined ? String(control.value).trim() : '';
+          if (!value || (typeof control.checkValidity === 'function' && !control.checkValidity())) {
+            if (typeof control.focus === 'function') control.focus();
+            message.error(t('Complete the required fields in the income type form.'));
+            return false;
+          }
+        }
+      }
+    }
+
     for (const payment of newIncomePayments) {
       const config = newIncomeDynamicForms[payment.key];
       if (!config) continue;
@@ -916,7 +1014,8 @@
         return false;
       }
 
-      const container = newIncomeFormRefs.current[payment.key];
+      const container = document.getElementById(`cashier-payment-form-${payment.key}`)
+        || newIncomeFormRefs.current[payment.key];
       if (!container) continue;
 
       const requiredControls = container.querySelectorAll('[required]');
@@ -933,29 +1032,225 @@
     return true;
   }
 
+  function getDynamicIncomeFormValues(paymentKey) {
+    const container = document.getElementById(`cashier-payment-form-${paymentKey}`)
+      || newIncomeFormRefs.current[paymentKey];
+    return getDynamicFormValues(container);
+  }
+
+  function getDynamicFormValues(container) {
+    const values = {};
+    if (!container) return values;
+
+    container.querySelectorAll('[name]').forEach(control => {
+      const name = control.getAttribute('name');
+      if (!name) return;
+
+      if (control.type === 'checkbox') {
+        values[name] = Boolean(control.checked);
+      } else if (control.type === 'radio') {
+        if (control.checked) values[name] = control.value;
+      } else {
+        values[name] = control.value;
+      }
+    });
+
+    return values;
+  }
+
+  function getDynamicFormDefinition(form) {
+    if (!form) return null;
+
+    let definition = form.json;
+    if (typeof definition === 'string') {
+      try {
+        definition = JSON.parse(definition);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    return Array.isArray(definition) ? definition : null;
+  }
+
+  function getDynamicIncomeFormJson(paymentKey) {
+    const config = newIncomeDynamicForms[paymentKey];
+    const container = document.getElementById(`cashier-payment-form-${paymentKey}`)
+      || newIncomeFormRefs.current[paymentKey];
+    return getDynamicFormJson(config, container);
+  }
+
+  function getIncomeTypeFormJson() {
+    const container = document.getElementById('cashier-income-type-form')
+      || newIncomeTypeFormRef.current;
+    return getDynamicFormJson(newIncomeTypeDynamicForm, container);
+  }
+
+  function getDynamicFormJson(config, container) {
+    if (!config || !config.form) return null;
+
+    const definition = getDynamicFormDefinition(config.form);
+    if (!definition) return null;
+
+    const values = getDynamicFormValues(container);
+    const updatedDefinition = definition.map(field => {
+      const name = field && field.name;
+      if (!name || !Object.prototype.hasOwnProperty.call(values, name)) return field;
+
+      const value = values[name];
+      const userData = Array.isArray(value) ? value : [value];
+      const updatedField = {
+        ...field,
+        userData: userData.map(item => String(item === undefined || item === null ? '' : item))
+      };
+
+      if (Array.isArray(field.values)) {
+        const selectedValues = Array.isArray(value) ? value.map(item => String(item)) : [String(value)];
+        updatedField.values = field.values.map(option => ({
+          ...option,
+          selected: selectedValues.indexOf(String(option && option.value)) >= 0
+        }));
+      }
+
+      return updatedField;
+    });
+
+    return JSON.stringify(updatedDefinition);
+  }
+
+  function getNewIncomeTransferEntity(formValues, destinationAccountId) {
+    const currency = getTrimmedString(formValues.currency);
+    const sourceExternal = getTrimmedString(formValues.destination);
+    const incomeType = getTrimmedString(formValues.incomeType);
+
+    return {
+      currency: currency,
+      amount: getNewIncomeTotal(),
+      SplitPayments: newIncomePayments.map(payment => {
+        const paymentOption = paymentMethodOptions.find(item => item && item.value === payment.methodCode);
+        const formId = getPaymentFormId(payment.methodCode);
+        const dynamicFormJson = formId > 0 ? getDynamicIncomeFormJson(payment.key) : null;
+
+        return {
+          paymentMethod: payment.methodCode,
+          formId: formId,
+          paymentMethodName: paymentOption && paymentOption.label ? paymentOption.label : payment.methodCode,
+          amount: parseIncomeAmount(payment.amount),
+          id: 0,
+          transferId: 0,
+          concept: null,
+          conversion: false,
+          currency: currency,
+          exchangeRate: 0,
+          amountEx: 0,
+          jValues: dynamicFormJson,
+          depositId: null,
+          disputeStart: null,
+          disputeEnd: null,
+          disputeStatus: 0
+        };
+      }),
+      incomeType: incomeType,
+      sourceExternal: sourceExternal,
+      destinationAccountId: destinationAccountId,
+      jIncomeTypeForm: getIncomeTypeFormJson(),
+      isExternal: true,
+      concept: 'IW',
+      transferWorkspaceId: Number(selectedCashierRow && selectedCashierRow.id),
+      user: currentUserEmail
+    };
+  }
+
+  function resolveNewIncomeDestinationAccount(formValues) {
+    const sourceOption = externalSourceOptions.find(item => item && item.value === formValues.destination);
+    const accountNo = getTrimmedString(sourceOption && sourceOption.destinationAccNo);
+    if (!accountNo) {
+      return Promise.reject(new Error(t('The destination account is not configured.')));
+    }
+
+    return exe('RepoAccount', {
+      operation: 'GET',
+      filter: `accNo = '${escapeSqlString(accountNo)}'`,
+      size: 1,
+      page: 0
+    }).then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The destination account could not be loaded.'));
+      }
+
+      const account = getRows(response)[0];
+      const accountId = Number(account && account.id);
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        throw new Error(t('The destination account could not be identified.'));
+      }
+
+      return accountId;
+    });
+  }
+
   async function handleNewIncomeExecute() {
     if (!validateDynamicIncomeForms()) return;
 
     try {
-      await newIncomeForm.validateFields();
-      message.info(t('Payment execution is ready.'));
+      const formValues = await newIncomeForm.validateFields();
+      if (!getTrimmedString(formValues.incomeType)) {
+        message.error(t('Select an income type.'));
+        return;
+      }
+
+      if (!getTrimmedString(currentUserEmail)) {
+        message.error(t('The current user could not be identified.'));
+        return;
+      }
+
+      if (getNewIncomeTotal() <= 0) {
+        message.error(t('Enter at least one payment amount greater than zero.'));
+        return;
+      }
+
+      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
+        message.error(t('Complete the payment method and amount for every payment.'));
+        return;
+      }
+
+      const destinationAccountId = await resolveNewIncomeDestinationAccount(formValues);
+      const entity = getNewIncomeTransferEntity(formValues, destinationAccountId);
+      const response = await exe('RepoTransfer', {
+        operation: 'ADD',
+        entity: entity,
+        otherReceivables: [],
+        execute: false
+      });
+
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The income could not be created.'));
+      }
+
+      message.success(t('Income created successfully.'));
+      clearNewIncomeForm();
+      setActiveTab('cash-desks');
+      loadTransferWorkspaces({ pagination: { current: 1, pageSize: transferPagination.pageSize } });
     } catch (error) {
-      message.error(t('Complete the required fields.'));
+      message.error(error && error.message ? error.message : t('The income could not be created.'));
     }
   }
 
   React.useEffect(() => {
     Object.keys(newIncomeDynamicForms).forEach(paymentKey => {
       const config = newIncomeDynamicForms[paymentKey];
-      const container = newIncomeFormRefs.current[paymentKey];
+      const container = document.getElementById(`cashier-payment-form-${paymentKey}`)
+        || newIncomeFormRefs.current[paymentKey];
 
       if (!config || config.loading || !config.form || !container) return;
       if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') {
         return;
       }
 
+      const formData = getDynamicFormDefinition(config.form);
+      if (!formData) return;
+
       container.innerHTML = '';
-      $(container).formRender({ formData: config.form.json });
+      $(container).formRender({ formData: formData });
 
       try {
         evalNewIncomeFormLogic(config.form.logic, { exe: exe });
@@ -964,6 +1259,27 @@
       }
     });
   }, [newIncomeDynamicForms]);
+
+  React.useEffect(() => {
+    const config = newIncomeTypeDynamicForm;
+    const container = document.getElementById('cashier-income-type-form')
+      || newIncomeTypeFormRef.current;
+
+    if (!config || config.loading || !config.form || !container) return;
+    if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return;
+
+    const formData = getDynamicFormDefinition(config.form);
+    if (!formData) return;
+
+    container.innerHTML = '';
+    $(container).formRender({ formData: formData });
+
+    try {
+      evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    }
+  }, [newIncomeTypeDynamicForm]);
 
   function searchPayers(value) {
     const text = getTrimmedString(value);
@@ -1221,7 +1537,335 @@
   }
 
   function handleTabChange(key) {
+    if (key !== 'cash-desks' && !selectedCashierRow) return;
+
     setActiveTab(key);
+    if (key === 'movements' && selectedCashierRow && selectedCashierRow.id) {
+      loadMovements({
+        pagination: {
+          current: 1,
+          pageSize: movementPagination.pageSize
+        }
+      });
+    }
+  }
+
+  function selectCashDesk(record) {
+    setSelectedCashierRow(record || null);
+    if (!record) {
+      setActiveTab('cash-desks');
+    }
+  }
+
+  React.useEffect(() => {
+    if (!selectedCashierRow && activeTab !== 'cash-desks') {
+      setActiveTab('cash-desks');
+    }
+  }, [selectedCashierRow, activeTab]);
+
+  function getMovementChildren(group) {
+    if (Array.isArray(group && group.AllocationMovements)) {
+      return group.AllocationMovements.filter(item => item);
+    }
+
+    return group ? [group] : [];
+  }
+
+  function hasMovementDetails(group) {
+    return Boolean(group && Array.isArray(group.AllocationMovements) && group.AllocationMovements.length > 0);
+  }
+
+  function getMovementFirst(group) {
+    return getMovementChildren(group)[0] || {};
+  }
+
+  function getMovementValues(group, field) {
+    return getMovementChildren(group)
+      .map(item => item && item[field])
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .map(value => String(value));
+  }
+
+  function getPolicyValues(group) {
+    const directValues = getMovementValues(group, 'lifePolicyId');
+    const installmentValues = [];
+
+    const collectInstallmentPolicies = item => {
+      const installments = item && item.Allocation && Array.isArray(item.Allocation.InstallmentPremiums)
+        ? item.Allocation.InstallmentPremiums
+        : [];
+
+      installments.forEach(installment => {
+        if (installment && installment.lifePolicyId !== undefined && installment.lifePolicyId !== null) {
+          installmentValues.push(String(installment.lifePolicyId));
+        }
+      });
+    };
+
+    collectInstallmentPolicies(group);
+    getMovementChildren(group).forEach(collectInstallmentPolicies);
+
+    return Array.from(new Set(directValues.concat(installmentValues)));
+  }
+
+  function getMovementDetailRows(group) {
+    const installments = group && group.Allocation && Array.isArray(group.Allocation.InstallmentPremiums)
+      ? group.Allocation.InstallmentPremiums
+      : [];
+
+    return getMovementChildren(group).map(item => {
+      const concept = String(item && item.concept || '');
+      const referenceMatch = concept.match(/REF\s+(\d+)/i);
+      const payPlanId = referenceMatch ? Number(referenceMatch[1]) : 0;
+      const installment = installments.find(row => Number(row && row.payPlanId) === payPlanId);
+
+      return {
+        ...item,
+        lifePolicyId: item && item.lifePolicyId
+          ? item.lifePolicyId
+          : installment && installment.lifePolicyId
+      };
+    });
+  }
+
+  function renderMovementStatus(group) {
+    const movements = getMovementChildren(group);
+    const isReverted = [group].concat(movements).some(item => Boolean(item && (
+      item.reverted ||
+      item.reversalDate ||
+      (item.Allocation && (item.Allocation.reverted || item.Allocation.reversalDate))
+    )));
+
+    if (isReverted) {
+      return <Tag color="red">{t('Reverted')}</Tag>;
+    }
+
+    return getMovementFirst(group).status
+      ? <Tag color="green">{t('Executed')}</Tag>
+      : <Tag>{t('Pending')}</Tag>;
+  }
+
+  function isMovementReverted(group) {
+    return [group].concat(getMovementChildren(group)).some(item => Boolean(item && (
+      item.reverted ||
+      item.reversalDate ||
+      (item.Allocation && (item.Allocation.reverted || item.Allocation.reversalDate))
+    )));
+  }
+
+  function renderMovementActions(group) {
+    const first = getMovementFirst(group);
+    const transferId = Number(group && group.id || first.id || 0);
+    const reverted = isMovementReverted(group);
+    const executed = Boolean(first.executed || first.status);
+
+    return (
+      <Space size={4}>
+        <Popconfirm
+          title={t('Are you sure?')}
+          placement="top"
+          okText={t('Yes')}
+          cancelText={t('No')}
+          onConfirm={() => executeMovement(group)}
+        >
+          <Button
+            type="link"
+            size="small"
+            loading={movementActionId === transferId}
+            disabled={executed || reverted}
+          >
+            {t('Execute')}
+          </Button>
+        </Popconfirm>
+        <Button type="link" size="small" disabled={!executed || reverted}>{t('Revert')}</Button>
+      </Space>
+    );
+  }
+
+  function renderMovementValues(group, field, color) {
+    const values = getMovementValues(group, field);
+    if (values.length === 0) return '-';
+
+    return values.map((item, index) => (
+      <div key={`${item}-${index}`} style={color ? { color: color } : undefined}>
+        {item}
+      </div>
+    ));
+  }
+
+  function getMovementDestinationValues(group) {
+    const values = [group].concat(getMovementChildren(group))
+      .map(item => item && item.DestinationAccount && item.DestinationAccount.accNo)
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .map(value => String(value));
+
+    return Array.from(new Set(values));
+  }
+
+  function getMovementIncomeTypeValues(group) {
+    const values = [group].concat(getMovementChildren(group))
+      .map(item => item && item.IncomeType && item.IncomeType.name)
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .map(value => String(value));
+
+    return Array.from(new Set(values));
+  }
+
+  function renderMovementIncomeType(group) {
+    const values = getMovementIncomeTypeValues(group);
+    if (values.length === 0) return '-';
+
+    return values.map((item, index) => <div key={`${item}-${index}`}>{item}</div>);
+  }
+
+  function renderMovementDestination(group) {
+    const values = getMovementDestinationValues(group);
+    if (values.length === 0) return '-';
+
+    return values.map((item, index) => (
+      <div key={`${item}-${index}`} style={{ color: '#1677ff' }}>{item}</div>
+    ));
+  }
+
+  function getMovementPaymentMethodValues(group) {
+    const values = [];
+    const items = [group].concat(getMovementChildren(group));
+
+    items.forEach(item => {
+      const splitPayments = item && Array.isArray(item.SplitPayments) ? item.SplitPayments : [];
+      splitPayments.forEach(payment => {
+        const name = payment && (payment.paymentMethodName || (payment.PaymentMethod && payment.PaymentMethod.name));
+        if (name) values.push(String(name));
+      });
+
+      const directName = item && item.PaymentMethod && item.PaymentMethod.name;
+      if (directName) values.push(String(directName));
+    });
+
+    return Array.from(new Set(values));
+  }
+
+  function renderMovementPaymentMethods(group) {
+    const values = getMovementPaymentMethodValues(group);
+    if (values.length === 0) return '-';
+
+    return values.map((item, index) => <div key={`${item}-${index}`}>{item}</div>);
+  }
+
+  function renderMovementOrigin(group) {
+    const values = [group].concat(getMovementChildren(group))
+      .map(item => item && item.sourceExternal)
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .map(value => String(value));
+    const uniqueValues = Array.from(new Set(values));
+
+    if (uniqueValues.length === 0) return '-';
+    return uniqueValues.map((item, index) => <div key={`${item}-${index}`}>{item}</div>);
+  }
+
+  function loadMovements(params = {}) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      setMovementRows([]);
+      setMovementTotal(0);
+      return;
+    }
+
+    const pagination = params.pagination || movementPagination;
+    const pageSize = Number(pagination && pagination.pageSize) || 15;
+    const currentPage = Number(pagination && pagination.current) || 1;
+
+    setMovementLoading(true);
+    exe('FilterTransfer', {
+      workspaceId: workspaceId,
+      groupByAllocation: true,
+      size: pageSize,
+      page: Math.max(currentPage - 1, 0),
+      currency: null,
+      allocated: null,
+      external: null,
+      executed: null,
+      concept: null,
+      minAmount: null,
+      maxAmount: null,
+      month: null,
+      claimPaymentId: null,
+      allocationId: null,
+      fromDate: null,
+      toDate: null,
+      id: null,
+      paymentMethod: null,
+      incomeType: null
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
+        }
+
+        const groups = getRows(response);
+        const rows = groups.map((group, index) => {
+          const children = getMovementChildren(group);
+          const first = children[0] || {};
+          const policyValues = getPolicyValues(group);
+          const policies = policyValues.join('\n');
+
+          return {
+            ...first,
+            ...group,
+            id: group.id || first.id || `allocation-${index}`,
+            amount: Number(group.amount !== undefined && group.amount !== null ? group.amount : first.amount || 0),
+            lifePolicyId: policies
+          };
+        });
+        setMovementRows(rows);
+        setMovementTotal(getResponseTotal(response, groups));
+        setMovementPagination({ current: currentPage, pageSize: pageSize });
+      })
+      .catch(error => {
+        setMovementRows([]);
+        setMovementTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => {
+        setMovementLoading(false);
+      });
+  }
+
+  function handleMovementTableChange(pagination) {
+    loadMovements({
+      pagination: {
+        current: pagination.current,
+        pageSize: pagination.pageSize
+      }
+    });
+  }
+
+  function executeMovement(group) {
+    const transferId = Number(group && group.id);
+    if (!Number.isFinite(transferId) || transferId <= 0) {
+      message.error(t('The movement identifier is invalid.'));
+      return;
+    }
+
+    setMovementActionId(transferId);
+    exe('DoTransfer', {
+      transferId: transferId,
+      transfer: null
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The movement could not be executed.'));
+        }
+
+        message.success(t('Movement executed successfully.'));
+        loadMovements({ pagination: movementPagination });
+      })
+      .catch(error => {
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => {
+        setMovementActionId(0);
+      });
   }
 
   function handleCollectionTableChange(pagination) {
@@ -1266,14 +1910,14 @@
 
         if (rows.length > 0) {
           const selected = selectedCashierRow && rows.find(item => Number(item && item.id) === Number(selectedCashierRow && selectedCashierRow.id));
-          setSelectedCashierRow(selected || null);
+          selectCashDesk(selected || null);
         } else {
-          setSelectedCashierRow(null);
+          selectCashDesk(null);
         }
       })
       .catch(error => {
         setTransferRows([]);
-        setSelectedCashierRow(null);
+        selectCashDesk(null);
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => {
@@ -1312,9 +1956,9 @@
         >
           <Radio
             checked={Boolean(selectedCashierRow && selectedCashierRow.id === record.id)}
-            onChange={() => setSelectedCashierRow(record)}
+            onChange={() => selectCashDesk(record)}
           />
-          <Button type="link" size="small" onClick={() => setSelectedCashierRow(record)}>
+          <Button type="link" size="small" onClick={() => selectCashDesk(record)}>
             {t('Select')}
           </Button>
         </span>
@@ -1429,6 +2073,51 @@
     { title: t('Pending'), dataIndex: 'pendingAmount', key: 'pendingAmount', width: 110, align: 'right', render: formatMoney }
   ];
 
+  const movementColumns = [
+    { title: t('Select'), key: 'select', width: 55, align: 'center', render: () => <Checkbox /> },
+    { title: t('ID'), key: 'id', width: 125, align: 'center', render: (value, group) => (
+      <div style={{ whiteSpace: 'nowrap' }}>
+        <span>{group.id || getMovementFirst(group).id || '-'}</span>
+        {' '}
+        <Button type="link" size="small">{t('View')}</Button>
+      </div>
+    ) },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 125, render: formatDateIso },
+    { title: t('Status'), key: 'status', width: 105, render: (_, group) => renderMovementStatus(group) },
+    { title: t('Origin'), key: 'sourceExternal', width: 135, render: (_, group) => renderMovementOrigin(group) },
+    { title: t('Destination'), key: 'destinationAccount', width: 145, render: (_, group) => renderMovementDestination(group) },
+    { title: t('Reference'), dataIndex: 'concept', key: 'concept', width: 135 },
+    { title: t('Received'), dataIndex: 'amount', key: 'received', width: 110, align: 'right', render: formatMoney },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
+    { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
+    { title: t('Payment method'), key: 'paymentMethod', width: 125, render: (_, group) => renderMovementPaymentMethods(group) },
+    { title: t('Type'), key: 'incomeType', width: 190, render: (_, group) => renderMovementIncomeType(group) },
+    { title: t('Policy'), key: 'lifePolicyId', width: 120, align: 'center', render: (value, record) => {
+      const values = getPolicyValues(record);
+      return values.length > 0
+        ? values.map((item, index) => <div key={`${item}-${index}`} style={{ color: '#1677ff' }}>{item}</div>)
+        : '-';
+    } },
+    { title: t('Executed'), dataIndex: 'executed', key: 'executed', width: 85, align: 'center', render: value => value ? '✓' : '-' },
+    { title: t('Cashier ID'), dataIndex: 'transferWorkspaceId', key: 'transferWorkspaceId', width: 95, align: 'center' },
+    { title: t('User'), dataIndex: 'user', key: 'user', width: 220 },
+    { title: t('Allocation'), dataIndex: 'allocationId', key: 'allocationId', width: 95, align: 'center' },
+    { title: t('Linked'), key: 'linked', width: 80, align: 'center', render: () => '-' },
+    { title: t('Workflow'), key: 'workflow', width: 125, render: () => <Tag>{t('No workflow')}</Tag> },
+    { title: t('Actions'), key: 'actions', width: 180, render: (_, group) => renderMovementActions(group) }
+  ];
+
+  const movementDetailColumns = movementColumns
+    .filter(column => column.key !== 'actions' && column.key !== 'workflow')
+    .map(column => {
+    if (column.key !== 'id') return column;
+
+    return {
+      ...column,
+      render: (_, group) => group.id || getMovementFirst(group).id || '-'
+    };
+    });
+
   function renderSelectedCashDeskHeader() {
     const row = selectedCashierRow || {};
     const status = selectedCashierRow ? (selectedCashierRow.closed ? 'Closed' : 'Open') : '-';
@@ -1494,7 +2183,7 @@
         scroll={{ x: 900, y: transferScrollY }}
         rowClassName={record => selectedCashierRow && selectedCashierRow.id === record.id ? 'cashier-supervisor-selected-row' : ''}
         onRow={record => ({
-          onClick: () => setSelectedCashierRow(record)
+          onClick: () => selectCashDesk(record)
         })}
       />
     </Card>
@@ -1524,6 +2213,51 @@
         }}
         onChange={handleCollectionTableChange}
         scroll={{ x: 1500, y: transferScrollY }}
+      />
+    </Card>
+  );
+
+  const movementsTabContent = (
+    <Card size="small">
+      <div className="cashier-supervisor-toolbar">
+        <Button
+          onClick={() => loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } })}
+          loading={movementLoading}
+          disabled={!selectedCashierRow}
+        >
+          {t('Refresh')}
+        </Button>
+      </div>
+      <Table
+        rowKey="id"
+        columns={movementColumns}
+        dataSource={movementRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-movement-table cashier-supervisor-table"
+        loading={movementLoading}
+        pagination={{
+          current: movementPagination.current,
+          pageSize: movementPagination.pageSize,
+          total: movementTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100']
+        }}
+        onChange={handleMovementTableChange}
+        scroll={{ x: 2600, y: transferScrollY }}
+        expandable={{
+          rowExpandable: record => hasMovementDetails(record),
+          expandedRowRender: record => (
+            <Table
+              rowKey="id"
+              columns={movementDetailColumns}
+              dataSource={getMovementDetailRows(record)}
+              size="small"
+              pagination={false}
+              className="cashier-supervisor-installment-menu-table"
+            />
+          )
+        }}
       />
     </Card>
   );
@@ -1565,9 +2299,13 @@
         ))}
 
         <div className="cashier-supervisor-section-title">{t('Internal account information')}</div>
-        <Form form={newIncomeForm} layout="vertical" initialValues={{ currency: 'USD' }}>
-          <Form.Item label={t('Income type')} name="incomeType">
-            <Select style={{ width: '100%' }} options={incomeTypeOptions} />
+          <Form form={newIncomeForm} layout="vertical" initialValues={{ currency: 'USD' }}>
+            <Form.Item label={t('Income type')} name="incomeType">
+            <Select
+              style={{ width: '100%' }}
+              options={incomeTypeOptions}
+              onChange={updateNewIncomeType}
+            />
           </Form.Item>
           <Form.Item
             label={t('Destination')}
@@ -1599,6 +2337,9 @@
         </Form>
         </div>
         <div className="cashier-supervisor-new-income-dynamic-panel">
+          <div className="cashier-supervisor-section-title">
+            {t('Payment method form')}
+          </div>
           <Tabs
             items={newIncomePayments
               .filter(payment => Boolean(newIncomeDynamicForms[payment.key]))
@@ -1614,12 +2355,10 @@
                   label: tabLabel,
                   children: (
                     <div className="cashier-supervisor-dynamic-form-card">
-                      <div className="cashier-supervisor-section-title">
-                        {t('Payment method form')}
-                      </div>
                       {dynamicForm.loading && <div>{t('Loading form...')}</div>}
                       {dynamicForm.error && <div className="cashier-supervisor-dynamic-form-error">{dynamicForm.error}</div>}
-                      <div
+                      <form
+                        id={`cashier-payment-form-${payment.key}`}
                         ref={element => {
                           if (element) newIncomeFormRefs.current[payment.key] = element;
                           else delete newIncomeFormRefs.current[payment.key];
@@ -1631,6 +2370,22 @@
               })}
             destroyInactiveTabPane={false}
           />
+          {newIncomeTypeDynamicForm && (
+            <>
+              <div className="cashier-supervisor-section-title">
+                {t('Income type form')}
+              </div>
+              <div className="cashier-supervisor-dynamic-form-card">
+                {newIncomeTypeDynamicForm.loading && <div>{t('Loading form...')}</div>}
+                {newIncomeTypeDynamicForm.error && (
+                  <div className="cashier-supervisor-dynamic-form-error">
+                    {newIncomeTypeDynamicForm.error}
+                  </div>
+                )}
+                <form id="cashier-income-type-form" ref={newIncomeTypeFormRef} />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </Card>
@@ -1659,6 +2414,7 @@
               type="button"
               role="tab"
               aria-selected={activeTab === 'premiums'}
+              disabled={!selectedCashierRow}
               className={`cashier-supervisor-tab${activeTab === 'premiums' ? ' active' : ''}`}
               onClick={() => handleTabChange('premiums')}
             >
@@ -1668,10 +2424,21 @@
               type="button"
               role="tab"
               aria-selected={activeTab === 'new-income'}
+              disabled={!selectedCashierRow}
               className={`cashier-supervisor-tab${activeTab === 'new-income' ? ' active' : ''}`}
               onClick={() => handleTabChange('new-income')}
             >
               {t('New income')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'movements'}
+              disabled={!selectedCashierRow}
+              className={`cashier-supervisor-tab${activeTab === 'movements' ? ' active' : ''}`}
+              onClick={() => handleTabChange('movements')}
+            >
+              <MovementIcon /> {t('Movements')}
             </button>
           </div>
           <div className="cashier-supervisor-tab-content" role="tabpanel">
@@ -1679,7 +2446,9 @@
               ? premiumCollectionTabContent
               : activeTab === 'new-income'
                 ? newIncomeTabContent
-                : cashDeskTabContent}
+                : activeTab === 'movements'
+                  ? movementsTabContent
+                  : cashDeskTabContent}
           </div>
             </div>
           </div>
