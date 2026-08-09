@@ -502,6 +502,14 @@
         white-space: pre-line;
       }
 
+      .cashier-supervisor-shell .ant-checkbox-inner {
+        border-color: #5b6573;
+      }
+
+      .cashier-supervisor-shell .ant-checkbox:hover .ant-checkbox-inner {
+        border-color: #1f2937;
+      }
+
       .cashier-supervisor-new-income-card {
         width: 100%;
         max-width: none;
@@ -1471,13 +1479,61 @@
         throw new Error(response && response.msg ? response.msg : t('The income could not be created.'));
       }
 
-      message.success(t('Income created successfully.'));
+      const createdTransfer = getRows(response)[0] || {};
+      const transferId = Number(createdTransfer.id || createdTransfer.transferId || 0);
+      if (!Number.isFinite(transferId) || transferId <= 0) {
+        throw new Error(t('The payment was created, but its movement identifier could not be identified.'));
+      }
+
+      const paymentAmount = getNewIncomeTotal();
+      const paymentConcept = getTrimmedString(createdTransfer.concept || entity.concept || 'IW');
       clearNewIncomeForm();
-      setActiveTab('cash-desks');
-      loadTransferWorkspaces({ pagination: { current: 1, pageSize: transferPagination.pageSize } });
+      showNewIncomeExecutionConfirm({
+        id: transferId,
+        amount: paymentAmount,
+        concept: paymentConcept
+      });
     } catch (error) {
       message.error(error && error.message ? error.message : t('The income could not be created.'));
     }
+  }
+
+  function showNewIncomeExecutionConfirm(payment) {
+    const transferId = Number(payment && payment.id);
+    if (!Number.isFinite(transferId) || transferId <= 0) {
+      message.error(t('The movement identifier is invalid.'));
+      return;
+    }
+
+    const openMovements = () => {
+      setActiveTab('movements');
+      loadMovements({
+        pagination: {
+          current: 1,
+          pageSize: movementPagination.pageSize
+        }
+      });
+    };
+
+    Modal.confirm({
+      title: t('Payment created'),
+      content: (
+        <div>
+          <div>{t('The payment was created successfully.')}</div>
+          <div><strong>{t('ID')}:</strong> {transferId}</div>
+          <div><strong>{t('Amount')}:</strong> {formatMoney(payment.amount)}</div>
+          <div><strong>{t('Concept')}:</strong> {payment.concept || '-'}</div>
+          <div style={{ marginTop: 8 }}>{t('Do you want to execute this payment now?')}</div>
+        </div>
+      ),
+      okText: t('Yes'),
+      cancelText: t('No'),
+      onOk: () => {
+        openMovements();
+        executeMovement({ id: transferId });
+      },
+      onCancel: openMovements
+    });
   }
 
   React.useEffect(() => {
@@ -1950,6 +2006,7 @@
               size="small"
               aria-label={t('Delete movement')}
               loading={movementActionId === transferId}
+              disabled={executed || reverted}
               icon={<DeleteMovementIcon />}
             />
           </Tooltip>
@@ -2190,6 +2247,13 @@
       return;
     }
 
+    const reverted = isMovementReverted(group);
+    const executed = Boolean(first.executed || first.status);
+    if (executed || reverted) {
+      message.warning(t('Executed or reverted movements cannot be deleted.'));
+      return;
+    }
+
     setMovementActionId(transferId);
     exe('RepoTransfer', {
       operation: 'DELETE',
@@ -2417,7 +2481,13 @@
   ];
 
   const movementColumns = [
-    { title: t('Select'), key: 'select', width: 85, align: 'center', render: () => <Checkbox /> },
+    {
+      title: t(''),
+      key: 'select',
+      width: 50,
+      align: 'center',
+      render: () => <Checkbox />
+    },
     { title: t('Actions'), key: 'actions', width: 130, align: 'center', render: (_, group) => renderMovementActions(group) },
     { title: t('ID'), key: 'id', width: 125, align: 'center', render: (value, group) => (
       <div style={{ whiteSpace: 'nowrap' }}>
