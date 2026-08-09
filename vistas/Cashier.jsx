@@ -1,6 +1,7 @@
 () => {
   const {
     Button,
+    Checkbox,
     Card,
     DatePicker,
     Drawer,
@@ -34,17 +35,16 @@
     color: 'inherit'
   };
 
-  const TabIcon = ({ label, children }) => (
-    <span role="img" aria-label={label} className="anticon" style={tabIconStyle}>
+  const TabIcon = ({ label, iconClass, children }) => (
+    <span role="img" aria-label={label} className={`anticon ${iconClass || ''}`} style={tabIconStyle}>
       {children}
     </span>
   );
 
   const CashierIcon = () => (
-    <TabIcon label="cash desks">
+    <TabIcon label="bank" iconClass="anticon-bank">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-        <path d="M768 160H256c-53 0-96 43-96 96v416c0 53 43 96 96 96h512c53 0 96-43 96-96V256c0-53-43-96-96-96zm-16 112v80H240v-80h512zm0 128v272H240V400h512z"></path>
-        <path d="M304 456h176v72H304zm240 0h112v72H544zM304 576h112v72H304zm160 0h192v72H464z"></path>
+        <path d="M128 384L512 96l384 288v80H128v-80zm80 128h608v320h80v80H128v-80h80V512zm80 0v320h96V512h-96zm176 0v320h96V512h-96zm176 0v320h96V512h-96z"></path>
       </svg>
     </TabIcon>
   );
@@ -92,19 +92,27 @@
   );
 
   const PremiumIcon = () => (
-    <TabIcon label="paid premiums">
+    <TabIcon label="dollar-circle" iconClass="anticon-dollar-circle">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
         <path d="M512 128c-211.7 0-384 172.3-384 384s172.3 384 384 384 384-172.3 384-384S723.7 128 512 128zm0 80c167.7 0 304 136.3 304 304S679.7 816 512 816 208 679.7 208 512 344.3 208 512 208z"></path>
-        <path d="M464 336h96l-24 256h-48zM424 624h176v64H424z"></path>
+        <path d="M560 328h-96v48h-48v80h48v32h-48v80h48v48h96v-48h48v-80h-48v-32h48v-80h-48v-48zm-96 128h96v32h-96v-32zm0 112h96v32h-96v-32z"></path>
+      </svg>
+    </TabIcon>
+  );
+
+  const NewIncomeIcon = () => (
+    <TabIcon label="plus-circle" iconClass="anticon-plus-circle">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 816c-203.9 0-368-164.1-368-368s164.1-368 368-368 368 164.1 368 368-164.1 368-368 368z"></path>
+        <path d="M480 288h64v192h192v64H544v192h-64V544H288v-64h192z"></path>
       </svg>
     </TabIcon>
   );
 
   const MovementIcon = () => (
-    <TabIcon label="movements">
+    <TabIcon label="unordered-list" iconClass="anticon-unordered-list">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
-        <path d="M128 192h768v96H128zm0 272h768v96H128zm0 272h768v96H128z"></path>
-        <path d="M224 128h96v672h-96zm480 0h96v672h-96z"></path>
+        <path d="M128 224h96v96h-96zm192 0h576v96H320zm-192 240h96v96h-96zm192 0h576v96H320zm-192 240h96v96h-96zm192 0h576v96H320z"></path>
       </svg>
     </TabIcon>
   );
@@ -170,6 +178,7 @@
   const [currentUserEmail, setCurrentUserEmail] = React.useState('');
   const [newCashDeskVisible, setNewCashDeskVisible] = React.useState(false);
   const [newCashDeskLoading, setNewCashDeskLoading] = React.useState(false);
+  const [closeCashDeskLoading, setCloseCashDeskLoading] = React.useState(false);
   const [newCashDeskForm] = Form.useForm();
   const [newIncomeForm] = Form.useForm();
   const [activeTab, setActiveTab] = React.useState('cash-desks');
@@ -181,7 +190,19 @@
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
   const [movementViewVisible, setMovementViewVisible] = React.useState(false);
   const [movementViewRecord, setMovementViewRecord] = React.useState(null);
+  const [reversalVisible, setReversalVisible] = React.useState(false);
+  const [reversalCatalogLoading, setReversalCatalogLoading] = React.useState(false);
+  const [reversalLoading, setReversalLoading] = React.useState(false);
+  const [reversalCauses, setReversalCauses] = React.useState([]);
+  const [reversalSubcauses, setReversalSubcauses] = React.useState([]);
+  const [reversalRecord, setReversalRecord] = React.useState(null);
+  const [reversalCause, setReversalCause] = React.useState(undefined);
+  const [reversalSubcause, setReversalSubcause] = React.useState(undefined);
+  const [reversalCreditFunds, setReversalCreditFunds] = React.useState(false);
   const [cashierReports, setCashierReports] = React.useState([]);
+  const [cashDeskAuditVisible, setCashDeskAuditVisible] = React.useState(false);
+  const [cashDeskAuditLoading, setCashDeskAuditLoading] = React.useState(false);
+  const [cashDeskAudit, setCashDeskAudit] = React.useState(null);
   const [collectionRows, setCollectionRows] = React.useState([]);
   const [collectionLoading, setCollectionLoading] = React.useState(false);
   const [collectionPagination, setCollectionPagination] = React.useState({ current: 1, pageSize: 15 });
@@ -320,6 +341,44 @@
         font-size: 12px;
         color: #8c8c8c;
         margin-top: 2px;
+      }
+
+      .cashier-supervisor-audit-summary {
+        border: 1px solid #91caff;
+        background: #fff;
+        padding: 10px;
+        color: #262626;
+      }
+
+      .cashier-supervisor-audit-currency {
+        text-align: right;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .cashier-supervisor-audit-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        line-height: 1.35;
+      }
+
+      .cashier-supervisor-audit-row strong {
+        min-width: 90px;
+        text-align: right;
+        font-weight: 400;
+      }
+
+      .cashier-supervisor-audit-total {
+        font-weight: 600;
+      }
+
+      .cashier-supervisor-audit-total strong {
+        font-weight: 600;
+      }
+
+      .cashier-supervisor-audit-spacer {
+        height: 10px;
       }
 
       .cashier-supervisor-view .cashier-supervisor-table .ant-table-thead > tr > th,
@@ -2061,6 +2120,147 @@
       .finally(() => setNewCashDeskLoading(false));
   }
 
+  function closeCashDesk() {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('Select an open cash desk before closing it.'));
+      return;
+    }
+
+    if (selectedCashierRow && selectedCashierRow.closed) {
+      message.warning(t('The selected cash desk is already closed.'));
+      return;
+    }
+
+    setCloseCashDeskLoading(true);
+    exe('CloseTransferWorkspace', { workspaceId: workspaceId })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg
+            ? response.msg
+            : t('The cash desk could not be closed.'));
+        }
+
+        message.success(response.msg || t('Cash desk closed successfully.'));
+        handleReloadCashDesks();
+      })
+      .catch(error => {
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setCloseCashDeskLoading(false));
+  }
+
+  function getAuditNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+
+  function getAuditPaymentMethod(item) {
+    const splitPayments = item && Array.isArray(item.SplitPayments) ? item.SplitPayments : [];
+    const splitMethod = splitPayments[0] && (
+      splitPayments[0].paymentMethodName ||
+      splitPayments[0].paymentMethod ||
+      splitPayments[0].PaymentMethod && splitPayments[0].PaymentMethod.name
+    );
+    return getTrimmedString(
+      splitMethod ||
+      item && item.paymentMethodName ||
+      item && item.paymentMethod ||
+      item && item.PaymentMethod && item.PaymentMethod.name
+    ).toUpperCase();
+  }
+
+  function buildCashDeskAudit(rows, response) {
+    const values = { cash: 0, cheque: 0, card: 0, other: 0, deposits: 0 };
+
+    rows.forEach(row => {
+      const items = Array.isArray(row && row.SplitPayments) && row.SplitPayments.length > 0
+        ? row.SplitPayments
+        : [row];
+
+      items.forEach(item => {
+        const amount = getAuditNumber(item && (item.amount !== undefined ? item.amount : row && row.amount));
+        const method = getAuditPaymentMethod(item && item !== row ? item : row);
+
+        if (method.indexOf('EFECT') >= 0 || method === 'EFE') values.cash += amount;
+        else if (method.indexOf('CHEQ') >= 0 || method === 'CHE') values.cheque += amount;
+        else if (method.indexOf('TARJ') >= 0 || method.indexOf('CRED') >= 0 || method === 'TC') values.card += amount;
+        else values.other += amount;
+
+        const concept = getTrimmedString(row && (row.concept || row.reference));
+        if (/deposit|depósito|deposito/i.test(concept)) values.deposits += amount;
+      });
+    });
+
+    const total = values.cash + values.cheque + values.card + values.other;
+    const workspace = selectedCashierRow || {};
+    const deposits = getAuditNumber(
+      workspace.deposits !== undefined ? workspace.deposits :
+        workspace.depositAmount !== undefined ? workspace.depositAmount : values.deposits
+    );
+    const endBalance = getAuditNumber(
+      workspace.endBalance !== undefined ? workspace.endBalance :
+        workspace.balance !== undefined ? workspace.balance : total - deposits
+    );
+
+    return {
+      cash: values.cash,
+      cheque: values.cheque,
+      card: values.card,
+      other: values.other,
+      total: getAuditNumber(workspace.totalCash !== undefined ? workspace.totalCash : total),
+      deposits: deposits,
+      netIncome: total - deposits,
+      endBalance: endBalance,
+      currency: getTrimmedString(workspace.currency || response && response.currency || 'USD') || 'USD'
+    };
+  }
+
+  function openCashDeskAudit() {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('Select a cash desk first.'));
+      return;
+    }
+
+    setCashDeskAuditVisible(true);
+    setCashDeskAuditLoading(true);
+    exe('FilterTransfer', {
+      workspaceId: workspaceId,
+      groupByAllocation: false,
+      size: 0,
+      page: 0,
+      executed: true,
+      currency: null,
+      allocated: null,
+      external: null,
+      concept: null,
+      minAmount: null,
+      maxAmount: null,
+      month: null,
+      claimPaymentId: null,
+      allocationId: null,
+      fromDate: null,
+      toDate: null,
+      id: null,
+      paymentMethod: null,
+      incomeType: null
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Cash desk audit could not be loaded.'));
+        }
+
+        setCashDeskAudit(buildCashDeskAudit(getRows(response), response));
+      })
+      .catch(error => {
+        setCashDeskAudit(null);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setCashDeskAuditLoading(false));
+  }
+
   function loadCashierReports() {
     exe('RepoConfigProfile', {
       operation: 'GET',
@@ -2858,6 +3058,7 @@
             size="small"
             aria-label={t('Revert movement')}
             disabled={!executed || reverted}
+            onClick={() => openReversalModal(group)}
             icon={<RevertMovementIcon />}
           />
         </Tooltip>
@@ -3131,6 +3332,139 @@
       });
   }
 
+  function getMovementAllocationId(group) {
+    const first = getMovementFirst(group);
+    const candidates = [
+      group && group.allocationId,
+      group && group.Allocation && group.Allocation.id,
+      first && first.allocationId,
+      first && first.Allocation && first.Allocation.id
+    ];
+    const allocationId = candidates
+      .map(value => Number(value))
+      .find(value => Number.isFinite(value) && value > 0);
+
+    return allocationId || 0;
+  }
+
+  function loadReversalCatalogs() {
+    setReversalCatalogLoading(true);
+    return Promise.all([
+      exe('RepoTransferReversalCause', {
+        operation: 'GET',
+        entity: null,
+        bulkJson: null,
+        filter: null,
+        include: null,
+        size: 0,
+        page: 0,
+        showColumnsIfEmpty: false
+      }),
+      exe('RepoTransferReversalSubcause', {
+        operation: 'GET',
+        entity: null,
+        bulkJson: null,
+        filter: null,
+        include: null,
+        size: 0,
+        page: 0,
+        showColumnsIfEmpty: false
+      })
+    ])
+      .then(results => {
+        results.forEach(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Reversal options could not be loaded.'));
+          }
+        });
+
+        setReversalCauses(getRows(results[0]));
+        setReversalSubcauses(getRows(results[1]));
+      })
+      .finally(() => setReversalCatalogLoading(false));
+  }
+
+  function openReversalModal(group) {
+    const first = getMovementFirst(group);
+    const executed = Boolean(first.executed || first.status);
+    if (!executed || isMovementReverted(group)) {
+      message.warning(t('Only executed and non-reverted movements can be reverted.'));
+      return;
+    }
+
+    const allocationId = getMovementAllocationId(group);
+    if (allocationId <= 0) {
+      message.error(t('The allocation identifier is invalid.'));
+      return;
+    }
+
+    setReversalRecord({ group: group, allocationId: allocationId });
+    setReversalCause(undefined);
+    setReversalSubcause(undefined);
+    setReversalCreditFunds(false);
+    setReversalVisible(true);
+    loadReversalCatalogs().catch(error => {
+      setReversalVisible(false);
+      message.error(error && error.message ? error.message : String(error));
+    });
+  }
+
+  function executeReversal() {
+    const allocationId = Number(reversalRecord && reversalRecord.allocationId);
+    const cause = getTrimmedString(reversalCause);
+    const subcause = getTrimmedString(reversalSubcause);
+
+    if (!Number.isFinite(allocationId) || allocationId <= 0) {
+      message.error(t('The allocation identifier is invalid.'));
+      return;
+    }
+
+    if (!cause) {
+      message.warning(t('Select a reversal cause.'));
+      return;
+    }
+
+    if (!subcause) {
+      message.warning(t('Select a reversal subcause.'));
+      return;
+    }
+
+    const accountId = Number(
+      reversalRecord && reversalRecord.group && (
+        reversalRecord.group.creditFundsToAccountId ||
+        reversalRecord.group.accountId ||
+        reversalRecord.group.Account && reversalRecord.group.Account.id
+      )
+    );
+
+    if (reversalCreditFunds && (!Number.isFinite(accountId) || accountId <= 0)) {
+      message.warning(t('The account to credit could not be identified.'));
+      return;
+    }
+
+    setReversalLoading(true);
+    exe('UnDoPaymentAllocation', {
+      allocationId: allocationId,
+      reversalCause: cause,
+      reversalSubcause: subcause,
+      jReversalFormValues: null,
+      creditFundsToAccountId: reversalCreditFunds ? accountId : null,
+      workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The payment could not be reverted.'));
+        }
+
+        message.success(response.msg || t('Payment reverted successfully.'));
+        setReversalVisible(false);
+        setReversalRecord(null);
+        loadMovements({ pagination: movementPagination });
+      })
+      .catch(error => message.error(error && error.message ? error.message : String(error)))
+      .finally(() => setReversalLoading(false));
+  }
+
   function deleteMovement(group) {
     const first = getMovementFirst(group);
     const transferId = Number(group && group.id || first.id || 0);
@@ -3394,7 +3728,8 @@
     { title: t('Policy'), key: 'lifePolicyId', width: 120, align: 'center', render: (value, record) => {
       const values = getPolicyValues(record);
       return values.length > 0
-        ? values.map((item, index) => {
+        ? <div style={{ fontSize: 11, lineHeight: 1.2 }}>
+          {values.map((item, index) => {
           const policyId = Number(item);
           return (
             <div key={`${item}-${index}`}>
@@ -3403,7 +3738,7 @@
                   <Button
                     type="link"
                     size="small"
-                    style={{ padding: 0, height: 'auto' }}
+                    style={{ padding: 0, height: 'auto', fontSize: 11, lineHeight: 1.2 }}
                     onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
                   >
                     {item}
@@ -3412,7 +3747,8 @@
                 : item}
             </div>
           );
-        })
+          })}
+        </div>
         : '-';
     } },
     { title: t('Executed'), dataIndex: 'executed', key: 'executed', width: 85, align: 'center', render: value => value ? '✓' : '-' },
@@ -3483,6 +3819,14 @@
               </div>
             </div>
           </div>
+          <Button
+            type="primary"
+            icon={<FileTextOutlined />}
+            disabled={!selectedCashierRow}
+            onClick={openCashDeskAudit}
+          >
+            {t('View cash desk audit')}
+          </Button>
         </div>
       </Card>
     );
@@ -3494,9 +3838,22 @@
         <Button type="primary" icon={<NewIcon />} onClick={openNewCashDeskModal}>
           {t('New')}
         </Button>
-        <Button icon={<LockOutlined />} disabled={!selectedCashierRow}>
-          {t('Close')}
-        </Button>
+        <Popconfirm
+          title={t('Close cash desk')}
+          description={t('Are you sure you want to close the selected cash desk?')}
+          okText={t('Yes')}
+          cancelText={t('No')}
+          onConfirm={closeCashDesk}
+          disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed) || closeCashDeskLoading}
+        >
+          <Button
+            icon={<LockOutlined />}
+            loading={closeCashDeskLoading}
+            disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed)}
+          >
+            {t('Close')}
+          </Button>
+        </Popconfirm>
         <Button icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
           {t('Cash count')}
         </Button>
@@ -4035,7 +4392,7 @@
               className={`cashier-supervisor-tab${activeTab === 'new-income' ? ' active' : ''}`}
               onClick={() => handleTabChange('new-income')}
             >
-              {t('New income')}
+              <NewIncomeIcon /> {t('New income')}
             </button>
             <button
               type="button"
@@ -4060,6 +4417,87 @@
             </div>
           </div>
         </Layout>
+
+        <Drawer
+          title={t('Cash desk audit')}
+          placement="right"
+          width={360}
+          open={cashDeskAuditVisible}
+          onClose={() => setCashDeskAuditVisible(false)}
+          destroyOnClose={false}
+        >
+          {cashDeskAuditLoading ? (
+            <div style={{ padding: 24, textAlign: 'center' }}>{t('Loading...')}</div>
+          ) : cashDeskAudit ? (
+            <div className="cashier-supervisor-audit-summary">
+              <div className="cashier-supervisor-audit-currency">{cashDeskAudit.currency}</div>
+              <div className="cashier-supervisor-audit-row"><span>{t('Cash')}</span><strong>{formatMoney(cashDeskAudit.cash)}</strong></div>
+              <div className="cashier-supervisor-audit-row"><span>{t('Cheque')}</span><strong>{formatMoney(cashDeskAudit.cheque)}</strong></div>
+              <div className="cashier-supervisor-audit-row"><span>{t('Card')}</span><strong>{formatMoney(cashDeskAudit.card)}</strong></div>
+              <div className="cashier-supervisor-audit-row"><span>{t('Other')}</span><strong>{formatMoney(cashDeskAudit.other)}</strong></div>
+              <div className="cashier-supervisor-audit-row cashier-supervisor-audit-total"><span>{t('Cash desk total')}</span><strong>{formatMoney(cashDeskAudit.total)}</strong></div>
+              <div className="cashier-supervisor-audit-spacer"></div>
+              <div className="cashier-supervisor-audit-row"><span>{t('Deposits')}</span><strong>{formatMoney(cashDeskAudit.deposits)}</strong></div>
+              <div className="cashier-supervisor-audit-row"><span>{t('Net income')}</span><strong>{formatMoney(cashDeskAudit.netIncome)}</strong></div>
+              <div className="cashier-supervisor-audit-row cashier-supervisor-audit-total"><span>{t('End balance')}</span><strong>{formatMoney(cashDeskAudit.endBalance)}</strong></div>
+            </div>
+          ) : (
+            <div style={{ padding: 12 }}>{t('No audit information available.')}</div>
+          )}
+        </Drawer>
+
+        <Modal
+          title={t('Reversal details')}
+          open={reversalVisible}
+          onCancel={() => setReversalVisible(false)}
+          onOk={executeReversal}
+          okText={t('Reverse')}
+          cancelText={t('Cancel')}
+          okButtonProps={{ danger: true, loading: reversalLoading }}
+          confirmLoading={reversalLoading || reversalCatalogLoading}
+          destroyOnClose={false}
+        >
+          <Form layout="vertical">
+            <Form.Item label={t('Cause')} required>
+              <Select
+                value={reversalCause}
+                loading={reversalCatalogLoading}
+                placeholder={t('Please select the reversal cause')}
+                options={reversalCauses.map(cause => ({
+                  value: cause && cause.code,
+                  label: cause && cause.name
+                }))}
+                onChange={value => {
+                  setReversalCause(value);
+                  setReversalSubcause(undefined);
+                }}
+              />
+            </Form.Item>
+            <Form.Item label={t('Subcause')} required>
+              <Select
+                value={reversalSubcause}
+                disabled={!reversalCause}
+                loading={reversalCatalogLoading}
+                placeholder={t('Please select the reversal subcause')}
+                options={reversalSubcauses
+                  .filter(item => getTrimmedString(item && item.causeCode) === getTrimmedString(reversalCause))
+                  .map(item => ({
+                    value: item && item.code,
+                    label: item && item.name
+                  }))}
+                onChange={setReversalSubcause}
+              />
+            </Form.Item>
+            <Form.Item label={t('Options')}>
+              <Checkbox
+                checked={reversalCreditFunds}
+                onChange={event => setReversalCreditFunds(Boolean(event.target.checked))}
+              >
+                {t('Credit funds to the account')}
+              </Checkbox>
+            </Form.Item>
+          </Form>
+        </Modal>
 
         <Modal
           title={t('New cash desk')}
