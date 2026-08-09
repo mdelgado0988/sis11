@@ -199,6 +199,10 @@
   const [reversalCause, setReversalCause] = React.useState(undefined);
   const [reversalSubcause, setReversalSubcause] = React.useState(undefined);
   const [reversalCreditFunds, setReversalCreditFunds] = React.useState(false);
+  const [reversalAccountId, setReversalAccountId] = React.useState(undefined);
+  const [reversalAccountOptions, setReversalAccountOptions] = React.useState([]);
+  const [reversalAccountLoading, setReversalAccountLoading] = React.useState(false);
+  const [reversalFormConfig, setReversalFormConfig] = React.useState(null);
   const [cashierReports, setCashierReports] = React.useState([]);
   const [cashDeskAuditVisible, setCashDeskAuditVisible] = React.useState(false);
   const [cashDeskAuditLoading, setCashDeskAuditLoading] = React.useState(false);
@@ -241,6 +245,7 @@
   const [newIncomeActiveFormKey, setNewIncomeActiveFormKey] = React.useState(null);
   const newIncomeFormRefs = React.useRef({});
   const newIncomeTypeFormRef = React.useRef(null);
+  const reversalFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
 
@@ -1858,6 +1863,31 @@
     }
   }, [newIncomeTypeDynamicForm]);
 
+  React.useEffect(() => {
+    const config = reversalFormConfig;
+    const container = document.getElementById('cashier-reversal-form') || reversalFormRef.current;
+
+    if (!config || config.loading || !config.form || !container) return;
+    if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return;
+
+    const formData = getDynamicFormDefinition(config.form);
+    if (!formData) return;
+
+    container.innerHTML = '';
+    $(container).formRender({ formData: formData });
+    applyDynamicFormLayout(container);
+
+    try {
+      evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+    } catch (error) {
+      const messageText = error && error.message ? error.message : String(error);
+      setReversalFormConfig(current => current
+        ? { ...current, error: messageText, loading: false }
+        : current);
+      message.error(messageText);
+    }
+  }, [reversalFormConfig]);
+
   function searchPayers(value) {
     const text = getTrimmedString(value);
     const isNumericId = /^\d+$/.test(text);
@@ -3384,6 +3414,72 @@
       .finally(() => setReversalCatalogLoading(false));
   }
 
+  function loadReversalCauseForm(causeCode) {
+    const cause = reversalCauses.find(item => getTrimmedString(item && item.code) === getTrimmedString(causeCode));
+    const formId = Number(cause && cause.formId);
+
+    if (!Number.isFinite(formId) || formId <= 0) {
+      setReversalFormConfig(null);
+      return;
+    }
+
+    setReversalFormConfig({ formId: formId, form: null, loading: true, error: '' });
+    exe('GetForms', { filter: `id=${formId}` })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The reversal form could not be loaded.'));
+        }
+
+        const form = getRows(response)[0];
+        if (!form) {
+          throw new Error(t('The reversal form was not found.'));
+        }
+
+        setReversalFormConfig({ formId: formId, form: form, loading: false, error: '' });
+      })
+      .catch(error => {
+        const messageText = error && error.message ? error.message : String(error);
+        setReversalFormConfig({ formId: formId, form: null, loading: false, error: messageText });
+        message.error(messageText);
+      });
+  }
+
+  function searchReversalAccounts(value) {
+    const text = getTrimmedString(value);
+    if (!text) {
+      setReversalAccountOptions([]);
+      return;
+    }
+
+    setReversalAccountLoading(true);
+    exe('RepoAccount', {
+      operation: 'GET',
+      filter: `accNo LIKE N'%${escapeSqlString(text)}%'`,
+      size: 10,
+      page: 0
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
+        }
+
+        setReversalAccountOptions(getRows(response).map(account => {
+          const id = Number(account && account.id);
+          const accNo = getTrimmedString(account && account.accNo);
+          const name = getTrimmedString(account && account.name);
+          return {
+            value: id,
+            label: name ? `${accNo} - ${name}` : accNo
+          };
+        }).filter(option => Number.isFinite(option.value) && option.value > 0));
+      })
+      .catch(error => {
+        setReversalAccountOptions([]);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setReversalAccountLoading(false));
+  }
+
   function openReversalModal(group) {
     const first = getMovementFirst(group);
     const executed = Boolean(first.executed || first.status);
@@ -3402,6 +3498,9 @@
     setReversalCause(undefined);
     setReversalSubcause(undefined);
     setReversalCreditFunds(false);
+    setReversalAccountId(undefined);
+    setReversalAccountOptions([]);
+    setReversalFormConfig(null);
     setReversalVisible(true);
     loadReversalCatalogs().catch(error => {
       setReversalVisible(false);
@@ -3429,16 +3528,39 @@
       return;
     }
 
-    const accountId = Number(
-      reversalRecord && reversalRecord.group && (
-        reversalRecord.group.creditFundsToAccountId ||
-        reversalRecord.group.accountId ||
-        reversalRecord.group.Account && reversalRecord.group.Account.id
-      )
-    );
+    if (reversalFormConfig) {
+      if (reversalFormConfig.loading) {
+        message.warning(t('Please wait until the reversal form finishes loading.'));
+        return;
+      }
 
+      if (reversalFormConfig.error) {
+        message.error(reversalFormConfig.error);
+        return;
+      }
+
+      const formDefinition = getDynamicFormDefinition(reversalFormConfig.form);
+      const requiredFields = Array.isArray(formDefinition)
+        ? formDefinition.filter(field => field && field.required && field.name)
+        : [];
+      const formContainer = document.getElementById('cashier-reversal-form') || reversalFormRef.current;
+      const formValues = getDynamicFormValues(formContainer);
+      const missingField = requiredFields.some(field => {
+        const value = formValues[field.name];
+        if (field.type === 'checkbox') return value !== true;
+        if (Array.isArray(value)) return value.length === 0;
+        return String(value === undefined || value === null ? '' : value).trim() === '';
+      });
+
+      if (missingField) {
+        message.error(t('Complete the required fields in the reversal form.'));
+        return;
+      }
+    }
+
+    const accountId = Number(reversalAccountId);
     if (reversalCreditFunds && (!Number.isFinite(accountId) || accountId <= 0)) {
-      message.warning(t('The account to credit could not be identified.'));
+      message.warning(t('Select the account to credit.'));
       return;
     }
 
@@ -3447,7 +3569,9 @@
       allocationId: allocationId,
       reversalCause: cause,
       reversalSubcause: subcause,
-      jReversalFormValues: null,
+      jReversalFormValues: reversalFormConfig
+        ? getDynamicFormJson(reversalFormConfig, document.getElementById('cashier-reversal-form') || reversalFormRef.current)
+        : null,
       creditFundsToAccountId: reversalCreditFunds ? accountId : null,
       workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
     })
@@ -4470,6 +4594,7 @@
                 onChange={value => {
                   setReversalCause(value);
                   setReversalSubcause(undefined);
+                  loadReversalCauseForm(value);
                 }}
               />
             </Form.Item>
@@ -4488,14 +4613,48 @@
                 onChange={setReversalSubcause}
               />
             </Form.Item>
+            {reversalFormConfig && (
+              <div className="cashier-supervisor-dynamic-form-card">
+                {reversalFormConfig.loading && <div>{t('Loading form...')}</div>}
+                {reversalFormConfig.error && (
+                  <div className="cashier-supervisor-dynamic-form-error">
+                    {reversalFormConfig.error}
+                  </div>
+                )}
+                <form id="cashier-reversal-form" ref={reversalFormRef} />
+              </div>
+            )}
             <Form.Item label={t('Options')}>
               <Checkbox
                 checked={reversalCreditFunds}
-                onChange={event => setReversalCreditFunds(Boolean(event.target.checked))}
+                onChange={event => {
+                  const checked = Boolean(event.target.checked);
+                  setReversalCreditFunds(checked);
+                  if (!checked) {
+                    setReversalAccountId(undefined);
+                    setReversalAccountOptions([]);
+                  }
+                }}
               >
                 {t('Credit funds to the account')}
               </Checkbox>
             </Form.Item>
+            {reversalCreditFunds && (
+              <Form.Item label={t('Account')} required>
+                <Select
+                  showSearch
+                  allowClear
+                  filterOption={false}
+                  value={reversalAccountId}
+                  options={reversalAccountOptions}
+                  loading={reversalAccountLoading}
+                  placeholder={t('Type to search account')}
+                  onSearch={searchReversalAccounts}
+                  onChange={setReversalAccountId}
+                  notFoundContent={t('No accounts found')}
+                />
+              </Form.Item>
+            )}
           </Form>
         </Modal>
 
