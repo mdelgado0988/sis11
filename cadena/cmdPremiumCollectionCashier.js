@@ -31,7 +31,7 @@ try {
   const policyFilter = buildPolicyFilter(input);
 
   const dataQuery = `
-WITH PendingInstallments AS (
+WITH AllInstallments AS (
     SELECT
         pp.[id],
         pp.[lifePolicyId],
@@ -54,7 +54,10 @@ WITH PendingInstallments AS (
         ISNULL(pp.[minimum], 0) - ISNULL(pp.[payed], 0) AS [pendingAmount]
     FROM [PayPlan] pp
     WHERE pp.[cancellationDate] IS NULL
-      AND ISNULL(pp.[minimum], 0) - ISNULL(pp.[payed], 0) <> 0
+), PendingInstallments AS (
+    SELECT *
+    FROM AllInstallments
+    WHERE [pendingAmount] <> 0
 ), PolicyCollection AS (
     SELECT
         pol.[id] AS [lifePolicyId],
@@ -67,9 +70,21 @@ WITH PendingInstallments AS (
         insured.[insured] AS [insured],
         pol.[activeDate] AS [issuanceDate],
         MAX(pi.[currency]) AS [currency],
-        SUM(ISNULL(pi.[minimum], 0)) AS [billed],
-        SUM(ISNULL(pi.[payed], 0)) AS [payed],
-        SUM(ISNULL(pi.[overdueAmount], 0)) AS [overdue],
+        (
+            SELECT SUM(ISNULL(allInstallments.[minimum], 0))
+            FROM AllInstallments allInstallments
+            WHERE allInstallments.[lifePolicyId] = pol.[id]
+        ) AS [billed],
+        (
+            SELECT SUM(ISNULL(allInstallments.[payed], 0))
+            FROM AllInstallments allInstallments
+            WHERE allInstallments.[lifePolicyId] = pol.[id]
+        ) AS [payed],
+        (
+            SELECT SUM(ISNULL(allInstallments.[overdueAmount], 0))
+            FROM AllInstallments allInstallments
+            WHERE allInstallments.[lifePolicyId] = pol.[id]
+        ) AS [overdue],
         SUM(ISNULL(pi.[pendingAmount], 0)) AS [pending],
         (
             SELECT

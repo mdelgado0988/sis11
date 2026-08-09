@@ -824,6 +824,7 @@
         min-height: 24px;
         height: 24px;
         text-align: right;
+        padding-right: 24px !important;
       }
 
       .cashier-supervisor-collection-supplementary-table {
