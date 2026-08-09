@@ -17,6 +17,7 @@
     Table,
     Tag,
     Tabs,
+    Tooltip,
     message
   } = A;
   const tabIconStyle = {
@@ -61,6 +62,30 @@
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
         <path d="M240 160h320c8.5 0 16.6 3.4 22.6 9.4l160 160c6 6 9.4 14.1 9.4 22.6v448c0 17.7-14.3 32-32 32H240c-17.7 0-32-14.3-32-32V192c0-17.7 14.3-32 32-32zm320 44.1V352h147.9L560 204.1z"></path>
         <path d="M448 448h64v80h80v64h-80v80h-64v-80h-80v-64h80z"></path>
+      </svg>
+    </span>
+  );
+
+  const ExecuteMovementIcon = () => (
+    <span role="img" aria-label="caret-right" className="anticon anticon-caret-right">
+      <svg viewBox="0 0 1024 1024" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M715.8 493.5L335 165.1c-14.2-12.2-35-1.2-35 18.5v656.8c0 19.7 20.8 30.7 35 18.5l380.8-328.4c10.9-9.4 10.9-27.6 0-37z"></path>
+      </svg>
+    </span>
+  );
+
+  const RevertMovementIcon = () => (
+    <span role="img" aria-label="undo" className="anticon anticon-undo">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M511.4 124C290.5 124.3 112 303 112 523.9c0 128 60.2 242 153.8 315.2l-37.5 48c-4.1 5.3-.3 13 6.3 12.9l167-.8c5.2 0 9-4.9 7.7-9.9L369.8 727a8 8 0 00-14.1-3L315 776.1c-10.2-8-20-16.7-29.3-26a318.64 318.64 0 01-68.6-101.7C200.4 609 192 567.1 192 523.9s8.4-85.1 25.1-124.5c16.1-38.1 39.2-72.3 68.6-101.7 29.4-29.4 63.6-52.5 101.7-68.6C426.9 212.4 468.8 204 512 204s85.1 8.4 124.5 25.1c38.1 16.1 72.3 39.2 101.7 68.6 29.4 29.4 52.5 63.6 68.6 101.7 16.7 39.4 25.1 81.3 25.1 124.5s-8.4 85.1-25.1 124.5a318.64 318.64 0 01-68.6 101.7c-7.5 7.5-15.3 14.5-23.4 21.2a7.93 7.93 0 00-1.2 11.1l39.4 50.5c2.8 3.5 7.9 4.1 11.4 1.3C854.5 760.8 912 649.1 912 523.9c0-221.1-179.4-400.2-400.6-399.9z"></path>
+      </svg>
+    </span>
+  );
+
+  const DeleteMovementIcon = () => (
+    <span role="img" aria-label="delete" className="anticon anticon-delete">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"></path>
       </svg>
     </span>
   );
@@ -419,6 +444,58 @@
         padding: 2px 6px !important;
         font-size: 11px;
         line-height: 14px;
+      }
+
+      .cashier-supervisor-payment-methods {
+        font-size: 11px;
+        line-height: 1.2;
+        white-space: normal;
+        word-break: break-word;
+        cursor: pointer;
+        color: #1677ff;
+      }
+
+      .cashier-supervisor-user-email {
+        color: #1677ff;
+        cursor: pointer;
+        white-space: normal;
+      }
+
+      .cashier-supervisor-movement-actions {
+        justify-content: center;
+      }
+
+      .cashier-supervisor-movement-actions .ant-btn {
+        font-size: 21px;
+        padding: 1px 4px;
+      }
+
+      .cashier-supervisor-movement-actions .ant-btn-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        line-height: 1;
+        overflow: visible;
+      }
+
+      .cashier-supervisor-movement-actions .anticon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        font-size: 18px;
+        line-height: 1;
+        overflow: visible;
+      }
+
+      .cashier-supervisor-movement-actions .anticon svg {
+        display: block;
+        width: 1em;
+        height: 1em;
+        overflow: visible;
       }
 
       .cashier-supervisor-movement-table .ant-table-tbody > tr > td {
@@ -892,11 +969,15 @@
           label: getTrimmedString(item && item.name),
           formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
         })).filter(item => item.value));
-        setExternalSourceOptions(getRows(sourceResponse).map(item => ({
+        const sourceOptions = getRows(sourceResponse).map(item => ({
           value: item && item.code,
           label: getTrimmedString(item && item.name),
           destinationAccNo: getTrimmedString(item && item.destinationAccNo)
-        })).filter(item => item.value));
+        })).filter(item => item.value);
+        setExternalSourceOptions(sourceOptions);
+        if (sourceOptions.length === 1) {
+          newIncomeForm.setFieldsValue({ destination: sourceOptions[0].value });
+        }
       })
       .catch(error => message.error(error && error.message ? error.message : String(error)));
   }
@@ -1046,6 +1127,9 @@
     setNewIncomeDynamicForms({});
     setNewIncomeTypeDynamicForm(null);
     setNewIncomeActiveFormKey(null);
+    if (externalSourceOptions.length === 1) {
+      newIncomeForm.setFieldsValue({ destination: externalSourceOptions[0].value });
+    }
   }
 
   function evalNewIncomeFormLogic(source, contextValue) {
@@ -1825,7 +1909,7 @@
     const executed = Boolean(first.executed || first.status);
 
     return (
-      <Space size={4}>
+      <Space size={4} className="cashier-supervisor-movement-actions">
         <Popconfirm
           title={t('Are you sure?')}
           placement="top"
@@ -1833,16 +1917,43 @@
           cancelText={t('No')}
           onConfirm={() => executeMovement(group)}
         >
+          <Tooltip title={t('Execute movement')}>
+            <Button
+              type="link"
+              size="small"
+              aria-label={t('Execute movement')}
+              loading={movementActionId === transferId}
+              disabled={executed || reverted}
+              icon={<ExecuteMovementIcon />}
+            />
+          </Tooltip>
+        </Popconfirm>
+        <Tooltip title={t('Revert movement')}>
           <Button
             type="link"
             size="small"
-            loading={movementActionId === transferId}
-            disabled={executed || reverted}
-          >
-            {t('Execute')}
-          </Button>
+            aria-label={t('Revert movement')}
+            disabled={!executed || reverted}
+            icon={<RevertMovementIcon />}
+          />
+        </Tooltip>
+        <Popconfirm
+          title={t('Are you sure you want to delete this movement?')}
+          placement="top"
+          okText={t('Yes')}
+          cancelText={t('No')}
+          onConfirm={() => deleteMovement(group)}
+        >
+          <Tooltip title={t('Delete movement')}>
+            <Button
+              type="link"
+              size="small"
+              aria-label={t('Delete movement')}
+              loading={movementActionId === transferId}
+              icon={<DeleteMovementIcon />}
+            />
+          </Tooltip>
         </Popconfirm>
-        <Button type="link" size="small" disabled={!executed || reverted}>{t('Revert')}</Button>
       </Space>
     );
   }
@@ -1914,7 +2025,45 @@
     const values = getMovementPaymentMethodValues(group);
     if (values.length === 0) return '-';
 
-    return values.map((item, index) => <div key={`${item}-${index}`}>{item}</div>);
+    const abbreviations = values.map(getPaymentMethodAbbreviation);
+
+    return (
+      <Tooltip trigger={['click']} title={values.join(', ')}>
+        <span className="cashier-supervisor-payment-methods">
+          {abbreviations.join(', ')}
+        </span>
+      </Tooltip>
+    );
+  }
+
+  function getPaymentMethodAbbreviation(value) {
+    const normalized = getTrimmedString(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+
+    if (normalized === 'CHEQUE') return 'CHE';
+    if (normalized === 'TARJETA DE CREDITO') return 'TC';
+    if (normalized === 'EFECTIVO') return 'EFE';
+
+    return normalized.replace(/[^A-Z0-9]/g, '').slice(0, 3) || '-';
+  }
+
+  function renderMovementUser(group) {
+    const values = [group].concat(getMovementChildren(group))
+      .map(item => getTrimmedString(item && item.user))
+      .filter(value => value);
+    const uniqueValues = Array.from(new Set(values));
+    if (uniqueValues.length === 0) return '-';
+
+    const displayValues = uniqueValues.map(value => value.split('@')[0]);
+    return (
+      <Tooltip trigger={['click']} title={uniqueValues.join(', ')}>
+        <span className="cashier-supervisor-user-email">
+          {displayValues.join(', ')}
+        </span>
+      </Tooltip>
+    );
   }
 
   function renderMovementOrigin(group) {
@@ -2023,6 +2172,35 @@
         }
 
         message.success(t('Movement executed successfully.'));
+        loadMovements({ pagination: movementPagination });
+      })
+      .catch(error => {
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => {
+        setMovementActionId(0);
+      });
+  }
+
+  function deleteMovement(group) {
+    const first = getMovementFirst(group);
+    const transferId = Number(group && group.id || first.id || 0);
+    if (!Number.isFinite(transferId) || transferId <= 0) {
+      message.error(t('The movement identifier is invalid.'));
+      return;
+    }
+
+    setMovementActionId(transferId);
+    exe('RepoTransfer', {
+      operation: 'DELETE',
+      entity: { id: transferId }
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The movement could not be deleted.'));
+        }
+
+        message.success(t('Movement deleted successfully.'));
         loadMovements({ pagination: movementPagination });
       })
       .catch(error => {
@@ -2239,7 +2417,8 @@
   ];
 
   const movementColumns = [
-    { title: t('Select'), key: 'select', width: 55, align: 'center', render: () => <Checkbox /> },
+    { title: t('Select'), key: 'select', width: 85, align: 'center', render: () => <Checkbox /> },
+    { title: t('Actions'), key: 'actions', width: 130, align: 'center', render: (_, group) => renderMovementActions(group) },
     { title: t('ID'), key: 'id', width: 125, align: 'center', render: (value, group) => (
       <div style={{ whiteSpace: 'nowrap' }}>
         <span>{group.id || getMovementFirst(group).id || '-'}</span>
@@ -2255,7 +2434,7 @@
     { title: t('Received'), dataIndex: 'amount', key: 'received', width: 110, align: 'right', render: formatMoney },
     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
-    { title: t('Payment method'), key: 'paymentMethod', width: 125, render: (_, group) => renderMovementPaymentMethods(group) },
+    { title: t('Payment method'), key: 'paymentMethod', width: 100, render: (_, group) => renderMovementPaymentMethods(group) },
     { title: t('Type'), key: 'incomeType', width: 190, render: (_, group) => renderMovementIncomeType(group) },
     { title: t('Policy'), key: 'lifePolicyId', width: 120, align: 'center', render: (value, record) => {
       const values = getPolicyValues(record);
@@ -2265,11 +2444,10 @@
     } },
     { title: t('Executed'), dataIndex: 'executed', key: 'executed', width: 85, align: 'center', render: value => value ? '✓' : '-' },
     { title: t('Cashier ID'), dataIndex: 'transferWorkspaceId', key: 'transferWorkspaceId', width: 95, align: 'center' },
-    { title: t('User'), dataIndex: 'user', key: 'user', width: 220 },
+    { title: t('User'), dataIndex: 'user', key: 'user', width: 150, render: (_, group) => renderMovementUser(group) },
     { title: t('Allocation'), dataIndex: 'allocationId', key: 'allocationId', width: 95, align: 'center' },
     { title: t('Linked'), key: 'linked', width: 80, align: 'center', render: () => '-' },
-    { title: t('Workflow'), key: 'workflow', width: 125, render: () => <Tag>{t('No workflow')}</Tag> },
-    { title: t('Actions'), key: 'actions', width: 180, render: (_, group) => renderMovementActions(group) }
+    { title: t('Workflow'), key: 'workflow', width: 125, render: () => <Tag>{t('No workflow')}</Tag> }
   ];
 
   const movementDetailColumns = movementColumns
