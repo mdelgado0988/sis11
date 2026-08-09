@@ -184,9 +184,11 @@ FROM (
 
 function mapPolicyCollection(row) {
   const item = row || {};
+  const policyId = getNonNegativeInteger(item.lifePolicyId || item.policyId || item.LifePolicyId);
 
   return {
-    lifePolicyId: getNonNegativeInteger(item.lifePolicyId),
+    lifePolicyId: policyId,
+    policyId: policyId,
     poliza: item.policy || '',
     holderId: getNonNegativeInteger(item.holderId),
     anio: getNonNegativeInteger(item.year),

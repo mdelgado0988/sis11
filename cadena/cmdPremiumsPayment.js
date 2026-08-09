@@ -12,12 +12,15 @@
  *   workspaceId: number,
  *   currency?: string,
  *   amount?: number,
- *   payments: [{ policyId: number, amount: number }]
+ *   payments: [{ policyId: number, amount: number }],
+ *   supplementaryPayments?: [{ policyId: number, amount: number }],
+ *   transferEntity?: object
  * }
  * @notes:
  *   - The payment is distributed by policy without validating a payer or fiscal receipt.
  *   - Each policy amount is applied to its pending installments in due-date order.
- *   - Any excess is registered as a supplementary amount in the policy transit account.
+ *   - Supplementary payments are registered directly in the selected policy transit account.
+ *   - The transfer entity can be provided by the payment form to preserve split-payment details.
  */
 
 const commandContext = context || {};
@@ -28,8 +31,12 @@ try {
 
   const workspaceId = getPositiveInteger(input.workspaceId);
   const payments = getPaymentRows(input);
+  const supplementaryPayments = getSupplementaryPaymentRows(input);
   const requestedAmount = getMoney(input.amount);
-  const calculatedAmount = roundMoney(payments.reduce((total, item) => total + item.amount, 0));
+  const calculatedAmount = roundMoney(
+    payments.reduce((total, item) => total + item.amount, 0)
+    + supplementaryPayments.reduce((total, item) => total + item.amount, 0)
+  );
   const totalAmount = requestedAmount > 0 ? requestedAmount : calculatedAmount;
 
   if (Math.abs(totalAmount - calculatedAmount) > 0.01) {
@@ -50,6 +57,20 @@ try {
       policy: policy,
       amount: payment.amount,
       allocation: allocation
+    });
+  }
+
+  for (const supplementaryPayment of supplementaryPayments) {
+    const policy = loadPolicy(supplementaryPayment.policyId);
+    ensureTransitAccount(policy);
+    details.push({
+      policy: policy,
+      amount: supplementaryPayment.amount,
+      allocation: {
+        installments: [],
+        appliedAmount: 0,
+        transitAmount: supplementaryPayment.amount
+      }
     });
   }
 
@@ -105,7 +126,8 @@ function validateInput(input) {
   }
 
   const payments = getPaymentRows(input);
-  if (payments.length === 0) {
+  const supplementaryPayments = getSupplementaryPaymentRows(input);
+  if (payments.length === 0 && supplementaryPayments.length === 0) {
     throw new Error('Debe indicar al menos una póliza para realizar el cobro.');
   }
 
@@ -125,6 +147,19 @@ function validateInput(input) {
 
     policyIds.add(item.policyId);
   });
+
+  const supplementaryIds = new Set();
+  supplementaryPayments.forEach(item => {
+    if (getPositiveInteger(item.policyId) <= 0 || item.amount <= 0) {
+      throw new Error('La prima complementaria debe tener una póliza válida y un monto mayor que cero.');
+    }
+
+    if (supplementaryIds.has(item.policyId)) {
+      throw new Error(`La póliza ${item.policyId} fue enviada mÃ¡s de una vez en primas complementarias.`);
+    }
+
+    supplementaryIds.add(item.policyId);
+  });
 }
 
 function getPaymentRows(input) {
@@ -135,6 +170,19 @@ function getPaymentRows(input) {
       : Array.isArray(input.rows)
         ? input.rows
         : [];
+
+  return source.map(item => ({
+    policyId: getPositiveInteger(item && (item.policyId || item.lifePolicyId)),
+    amount: roundMoney(getMoney(item && item.amount))
+  }));
+}
+
+function getSupplementaryPaymentRows(input) {
+  const source = Array.isArray(input && input.supplementaryPayments)
+    ? input.supplementaryPayments
+    : Array.isArray(input && input.complementaryPayments)
+      ? input.complementaryPayments
+      : [];
 
   return source.map(item => ({
     policyId: getPositiveInteger(item && (item.policyId || item.lifePolicyId)),
@@ -273,12 +321,18 @@ function validateTotals(totalAmount, totals) {
 function createTransfer(input, workspaceId, amount) {
   const currency = getTrimmedString(input.currency) || 'USD';
   const paymentMethod = getTrimmedString(input.paymentMethod) || 'ACH';
-
-  doCmd({
-    cmd: 'RepoTransfer',
-    data: {
-      operation: 'ADD',
-      entity: {
+  const sourceEntity = input && input.transferEntity && typeof input.transferEntity === 'object'
+    && !Array.isArray(input.transferEntity)
+    ? input.transferEntity
+    : null;
+  const entity = sourceEntity
+    ? {
+        ...sourceEntity,
+        currency: sourceEntity.currency || currency,
+        amount: amount,
+        transferWorkspaceId: workspaceId
+      }
+    : {
         currency: currency,
         amount: amount,
         SplitPayments: [{
@@ -292,7 +346,13 @@ function createTransfer(input, workspaceId, amount) {
         isExternal: true,
         concept: getTrimmedString(input.concept) || 'IW',
         transferWorkspaceId: workspaceId
-      },
+      };
+
+  doCmd({
+    cmd: 'RepoTransfer',
+    data: {
+      operation: 'ADD',
+      entity: entity,
       otherReceivables: []
     }
   });
