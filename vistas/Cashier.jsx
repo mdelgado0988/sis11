@@ -124,6 +124,7 @@
   ]);
   const [newIncomeDynamicForms, setNewIncomeDynamicForms] = React.useState({});
   const [newIncomeTypeDynamicForm, setNewIncomeTypeDynamicForm] = React.useState(null);
+  const [newIncomeActiveFormKey, setNewIncomeActiveFormKey] = React.useState(null);
   const newIncomeFormRefs = React.useRef({});
   const newIncomeTypeFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
@@ -131,7 +132,8 @@
 
   React.useEffect(() => {
     const styleId = 'cashier-supervisor-style';
-    if (document.getElementById(styleId)) return;
+    const previousStyle = document.getElementById(styleId);
+    if (previousStyle) previousStyle.remove();
 
     const style = document.createElement('style');
     style.id = styleId;
@@ -372,6 +374,10 @@
         min-height: 0;
       }
 
+      .cashier-supervisor-view .ant-tabs-tabpane.ant-tabs-tabpane-hidden {
+        display: none;
+      }
+
       .cashier-supervisor-view .ant-tabs-tabpane > .ant-card {
         flex: 1 1 auto;
         min-height: 0;
@@ -473,11 +479,64 @@
       }
 
       .cashier-supervisor-dynamic-form-card {
-        border: 1px solid #e6eaf0;
-        border-radius: 8px;
-        padding: 8px 12px;
-        background: #fff;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        background: transparent;
         margin-bottom: 12px;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        margin: 0 -6px;
+        width: 100%;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form > .rendered-form,
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .rendered-form > .row {
+        width: 100%;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form > .rendered-form > .row {
+        display: flex;
+        flex-wrap: wrap;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-form-field {
+        box-sizing: border-box;
+        flex: 0 0 100%;
+        max-width: 100%;
+        padding: 0 6px;
+        margin-bottom: 12px;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-4 {
+        flex-basis: 33.333333%;
+        max-width: 33.333333%;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-6 {
+        flex-basis: 50%;
+        max-width: 50%;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-8 {
+        flex-basis: 66.666667%;
+        max-width: 66.666667%;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-12 {
+        flex-basis: 100%;
+        max-width: 100%;
+      }
+
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-form-field input,
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-form-field select,
+      .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-form-field textarea {
+        width: 100%;
+        box-sizing: border-box;
       }
 
       .cashier-supervisor-dynamic-form-error {
@@ -515,6 +574,13 @@
           flex: 1 1 100%;
           max-width: 100%;
           min-width: 0;
+        }
+
+        .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-4,
+        .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-6,
+        .cashier-supervisor-dynamic-form-card > form.cashier-dynamic-rendered-form .cashier-dynamic-col-8 {
+          flex-basis: 100% !important;
+          max-width: 100% !important;
         }
 
       }
@@ -855,6 +921,13 @@
     return option && Number(option.formId) > 0 ? Number(option.formId) : 0;
   }
 
+  function activateNewIncomePaymentForm(paymentKey, control) {
+    setNewIncomeActiveFormKey(String(paymentKey));
+    if (control && typeof control.focus === 'function') {
+      setTimeout(() => control.focus(), 0);
+    }
+  }
+
   function loadNewIncomeDynamicForm(paymentKey, formId) {
     if (!formId) return;
 
@@ -957,6 +1030,9 @@
 
   function removeNewIncomePayment(key) {
     setNewIncomePayments(rows => rows.length > 1 ? rows.filter(row => row.key !== key) : rows);
+    if (newIncomeActiveFormKey === String(key)) {
+      setNewIncomeActiveFormKey(null);
+    }
     setNewIncomeDynamicForms(forms => {
       const nextForms = { ...forms };
       delete nextForms[key];
@@ -969,6 +1045,7 @@
     setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: '' }]);
     setNewIncomeDynamicForms({});
     setNewIncomeTypeDynamicForm(null);
+    setNewIncomeActiveFormKey(null);
   }
 
   function evalNewIncomeFormLogic(source, contextValue) {
@@ -1010,19 +1087,53 @@
       if (!config) continue;
 
       if (config.loading) {
+        activateNewIncomePaymentForm(payment.key);
         message.warning(t('Please wait until the payment form finishes loading.'));
+        return false;
+      }
+
+      if (config.error) {
+        activateNewIncomePaymentForm(payment.key);
+        message.error(config.error);
         return false;
       }
 
       const container = document.getElementById(`cashier-payment-form-${payment.key}`)
         || newIncomeFormRefs.current[payment.key];
+      const definition = getDynamicFormDefinition(config.form);
+      const requiredFields = Array.isArray(definition)
+        ? definition.filter(field => field && field.required && field.name)
+        : [];
+
+      if (!container && requiredFields.length > 0) {
+        activateNewIncomePaymentForm(payment.key);
+        message.error(t('Complete the required fields in the payment form.'));
+        return false;
+      }
+
+      if (requiredFields.length > 0) {
+        const values = getDynamicFormValues(container);
+        const missingField = requiredFields.some(field => {
+          const value = values[field.name];
+          if (field.type === 'checkbox') return value !== true;
+          if (Array.isArray(value)) return value.length === 0;
+          return String(value === undefined || value === null ? '' : value).trim() === '';
+        });
+
+        if (missingField) {
+          activateNewIncomePaymentForm(payment.key);
+          message.error(t('Complete the required fields in the payment form.'));
+          return false;
+        }
+      }
+
       if (!container) continue;
 
       const requiredControls = container.querySelectorAll('[required]');
       for (const control of requiredControls) {
         const value = control && control.value !== undefined ? String(control.value).trim() : '';
         if (!value || (typeof control.checkValidity === 'function' && !control.checkValidity())) {
-          if (typeof control.focus === 'function') control.focus();
+          activateNewIncomePaymentForm(payment.key, control);
           message.error(t('Complete the required fields in the payment form.'));
           return false;
         }
@@ -1058,6 +1169,21 @@
     return values;
   }
 
+  function getStoredDynamicFormValues(form) {
+    const definition = getDynamicFormDefinition(form);
+    const values = {};
+    if (!definition) return values;
+
+    definition.forEach(field => {
+      if (!field || !field.name || !Array.isArray(field.userData)) return;
+      values[field.name] = field.userData.length === 1
+        ? field.userData[0]
+        : field.userData;
+    });
+
+    return values;
+  }
+
   function getDynamicFormDefinition(form) {
     if (!form) return null;
 
@@ -1071,6 +1197,39 @@
     }
 
     return Array.isArray(definition) ? definition : null;
+  }
+
+  function applyDynamicFormLayout(container) {
+    if (!container) return;
+
+    container.classList.add('cashier-dynamic-rendered-form');
+    container.querySelectorAll('.rendered-form > .row').forEach(row => {
+      row.style.display = 'flex';
+      row.style.flexWrap = 'wrap';
+      row.style.width = '100%';
+    });
+    const controls = container.querySelectorAll('[class*="col-md-"]');
+
+    controls.forEach(control => {
+      const field = control.closest('.form-group') || control.parentElement;
+      if (!field || field === container) return;
+
+      field.classList.add('cashier-dynamic-form-field');
+      field.style.boxSizing = 'border-box';
+      field.style.paddingLeft = '6px';
+      field.style.paddingRight = '6px';
+      field.style.marginBottom = '12px';
+      const className = String(control.className || '');
+      const match = className.match(/\bcol-md-(4|6|8|12)\b/);
+      const columnUnits = match ? Number(match[1]) : 12;
+      const columnSize = (columnUnits / 12) * 100;
+      field.classList.add(`cashier-dynamic-col-${columnUnits}`);
+      field.style.flex = `0 0 ${columnSize}%`;
+      field.style.maxWidth = `${columnSize}%`;
+      control.style.width = '100%';
+      control.style.maxWidth = '100%';
+      control.style.boxSizing = 'border-box';
+    });
   }
 
   function getDynamicIncomeFormJson(paymentKey) {
@@ -1092,7 +1251,9 @@
     const definition = getDynamicFormDefinition(config.form);
     if (!definition) return null;
 
-    const values = getDynamicFormValues(container);
+    const values = container
+      ? getDynamicFormValues(container)
+      : getStoredDynamicFormValues(config.form);
     const updatedDefinition = definition.map(field => {
       const name = field && field.name;
       if (!name || !Object.prototype.hasOwnProperty.call(values, name)) return field;
@@ -1242,15 +1403,18 @@
         || newIncomeFormRefs.current[paymentKey];
 
       if (!config || config.loading || !config.form || !container) return;
-      if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') {
-        return;
-      }
+      if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return;
 
       const formData = getDynamicFormDefinition(config.form);
       if (!formData) return;
 
+      const formSignature = JSON.stringify(formData);
+      if (container.dataset.formSignature === formSignature) return;
+
       container.innerHTML = '';
       $(container).formRender({ formData: formData });
+      applyDynamicFormLayout(container);
+      container.dataset.formSignature = formSignature;
 
       try {
         evalNewIncomeFormLogic(config.form.logic, { exe: exe });
@@ -1273,6 +1437,7 @@
 
     container.innerHTML = '';
     $(container).formRender({ formData: formData });
+    applyDynamicFormLayout(container);
 
     try {
       evalNewIncomeFormLogic(config.form.logic, { exe: exe });
@@ -2351,8 +2516,9 @@
                   : `${t('Payment method')} ${index + 1}`;
 
                 return {
-                  key: payment.key,
+                  key: String(payment.key),
                   label: tabLabel,
+                  forceRender: true,
                   children: (
                     <div className="cashier-supervisor-dynamic-form-card">
                       {dynamicForm.loading && <div>{t('Loading form...')}</div>}
@@ -2368,6 +2534,8 @@
                   )
                 };
               })}
+            activeKey={newIncomeActiveFormKey !== null ? String(newIncomeActiveFormKey) : undefined}
+            onChange={key => setNewIncomeActiveFormKey(String(key))}
             destroyInactiveTabPane={false}
           />
           {newIncomeTypeDynamicForm && (
