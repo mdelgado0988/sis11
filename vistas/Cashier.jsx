@@ -2,7 +2,6 @@
   const {
     Button,
     Card,
-    Checkbox,
     DatePicker,
     Drawer,
     Dropdown,
@@ -118,6 +117,49 @@
     </span>
   );
 
+  const FileTextOutlined = () => (
+    <span role="img" aria-label="file-text" className="anticon anticon-file-text">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M832 64H192c-35.3 0-64 28.7-64 64v768c0 35.3 28.7 64 64 64h640c35.3 0 64-28.7 64-64V128c0-35.3-28.7-64-64-64zm-32 800H224V160h576v704z"></path>
+        <path d="M288 288h448v64H288zm0 144h448v64H288zm0 144h288v64H288z"></path>
+      </svg>
+    </span>
+  );
+
+  const FilterOutlined = () => (
+    <span role="img" aria-label="filter" className="anticon anticon-filter">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M904 160H120c-4.4 0-8 3.6-8 8v72c0 2.2.9 4.2 2.5 5.7L416 546.2V808c0 2.8 1.5 5.4 3.9 6.8l128 72c5.3 3 12.1-.8 12.1-6.8V546.2l301.5-300.5A8 8 0 00864 240v-72c0-4.4-3.6-8-8-8z"></path>
+      </svg>
+    </span>
+  );
+
+  const ReloadOutlined = () => (
+    <span role="img" aria-label="reload" className="anticon anticon-reload">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M909.1 209.3l-56.4 44.1C775.8 155.1 656.2 92 521.9 92 290 92 102.3 279.5 102 511.5 101.7 743.7 289.8 932 521.9 932c181.3 0 335.8-115 394.6-276.1 1.8-5-.9-10.5-5.9-12.2l-56.7-19.5c-4.2-1.4-8.9.7-10.3 4.9-1.8 5-3.8 10-5.9 14.9-17.3 41-42.1 77.8-73.7 109.4A344.77 344.77 0 01655.9 829c-42.3 17.9-87.4 27-133.8 27-46.5 0-91.5-9.1-133.8-27A341.5 341.5 0 01279 755.2a342.16 342.16 0 01-73.7-109.4c-17.9-42.4-27-87.4-27-133.9s9.1-91.5 27-133.9c17.3-41 42.1-77.8 73.7-109.4 31.6-31.6 68.4-56.4 109.3-73.8 42.3-17.9 87.4-27 133.8-27 46.5 0 91.5 9.1 133.8 27a341.5 341.5 0 01109.3 73.8c9.9 9.9 19.2 20.4 27.8 31.4l-60.2 47a8 8 0 003 14.1l175.6 43c5 1.2 9.9-2.6 9.9-7.7l.8-180.9c-.1-6.6-7.8-8.9-13-6.2z"></path>
+      </svg>
+    </span>
+  );
+
+  const ClearOutlined = () => (
+    <span role="img" aria-label="clear" className="anticon anticon-close-circle">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 816c-203.9 0-368-164.1-368-368s164.1-368 368-368 368 164.1 368 368-164.1 368-368 368z"></path>
+        <path d="M646.4 377.6L512 512 377.6 377.6l-56.6 56.6L455.4 568l-134.4 134.4 56.6 56.6L512 624.6l134.4 134.4 56.6-56.6L568.6 568 703 433.6z"></path>
+      </svg>
+    </span>
+  );
+
+  const LockOutlined = () => (
+    <span role="img" aria-label="lock" className="anticon anticon-lock">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M832 384h-56V256C776 114.6 661.4 0 520 0h-16C362.6 0 248 114.6 248 256v128h-56c-17.7 0-32 14.3-32 32v512c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V416c0-17.7-14.3-32-32-32zM328 256c0-97.2 78.8-176 176-176h16c97.2 0 176 78.8 176 176v128H328V256zm464 624H232V464h560v416z"></path>
+        <path d="M512 560c-44.2 0-80 35.8-80 80 0 29.6 16.1 55.4 40 69.3V784h80v-74.7c23.9-13.9 40-39.7 40-69.3 0-44.2-35.8-80-80-80z"></path>
+      </svg>
+    </span>
+  );
+
   const [selectedCashierRow, setSelectedCashierRow] = React.useState(null);
   const [transferRows, setTransferRows] = React.useState([]);
   const [transferLoading, setTransferLoading] = React.useState(false);
@@ -136,6 +178,10 @@
   const [movementPagination, setMovementPagination] = React.useState({ current: 1, pageSize: 15 });
   const [movementTotal, setMovementTotal] = React.useState(0);
   const [movementActionId, setMovementActionId] = React.useState(0);
+  const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
+  const [movementViewVisible, setMovementViewVisible] = React.useState(false);
+  const [movementViewRecord, setMovementViewRecord] = React.useState(null);
+  const [cashierReports, setCashierReports] = React.useState([]);
   const [collectionRows, setCollectionRows] = React.useState([]);
   const [collectionLoading, setCollectionLoading] = React.useState(false);
   const [collectionPagination, setCollectionPagination] = React.useState({ current: 1, pageSize: 15 });
@@ -845,6 +891,25 @@
 
       .cashier-supervisor-collection-allocation-error {
         color: #cf1322;
+      }
+
+      .cashier-supervisor-readonly-field {
+        margin-bottom: 10px;
+      }
+
+      .cashier-supervisor-readonly-field label {
+        display: block;
+        margin-bottom: 4px;
+        color: #1f1f1f;
+      }
+
+      .cashier-supervisor-movement-view-content .ant-input[disabled] {
+        color: #595959;
+        background: #fff;
+        border-color: #d9d9d9;
+        cursor: default;
+        opacity: 1;
+        -webkit-text-fill-color: #595959;
       }
     `;
     document.head.appendChild(style);
@@ -1996,6 +2061,57 @@
       .finally(() => setNewCashDeskLoading(false));
   }
 
+  function loadCashierReports() {
+    exe('RepoConfigProfile', {
+      operation: 'GET',
+      filter: null,
+      size: 0,
+      page: 0
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Reports could not be loaded.'));
+        }
+
+        const profile = getRows(response)[0] || {};
+        let config = profile.configJson || profile.config || {};
+        if (typeof config === 'string') {
+          try {
+            config = JSON.parse(config);
+          } catch (error) {
+            config = {};
+          }
+        }
+
+        const reports = config && config.Cashier && Array.isArray(config.Cashier.reports)
+          ? config.Cashier.reports
+          : [];
+
+        setCashierReports(reports.filter(report => report && report.name && report.report));
+      })
+      .catch(error => {
+        setCashierReports([]);
+        message.error(error && error.message ? error.message : String(error));
+      });
+  }
+
+  function openCashierReport(report) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const reportName = getTrimmedString(report && report.report);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0 || !reportName) return;
+
+    const transferIds = movementSelectedRowKeys
+      .map(value => Number(value))
+      .filter(value => Number.isFinite(value) && value > 0);
+    const transferId = transferIds.length > 0 ? `[${transferIds.join(',')}]` : '0';
+
+    window.open(
+      `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }
+
   function loadCollection(params = {}) {
     const pagination = params.pagination || collectionPagination;
     const currentPage = Number(pagination && pagination.current) || 1;
@@ -2442,6 +2558,10 @@
     }
   }, [selectedCashierRow, activeTab]);
 
+  React.useEffect(() => {
+    loadCashierReports();
+  }, []);
+
   function getMovementChildren(group) {
     if (Array.isArray(group && group.AllocationMovements)) {
       return group.AllocationMovements.filter(item => item);
@@ -2456,6 +2576,180 @@
 
   function getMovementFirst(group) {
     return getMovementChildren(group)[0] || {};
+  }
+
+  function openMovementView(group) {
+    setMovementViewRecord(group || null);
+    setMovementViewVisible(Boolean(group));
+  }
+
+  function getMovementPaymentRows(group) {
+    const rows = [];
+    const items = [group].concat(getMovementChildren(group));
+
+    items.forEach(item => {
+      const splitPayments = item && Array.isArray(item.SplitPayments) ? item.SplitPayments : [];
+      splitPayments.forEach(payment => {
+        rows.push({
+          method: getTrimmedString(payment && (payment.paymentMethodName
+            || (payment.PaymentMethod && payment.PaymentMethod.name)
+            || payment.paymentMethod)),
+          amount: Number(payment && payment.amount) || 0,
+          currency: getTrimmedString(payment && payment.currency),
+          form: payment && (payment.jValues || payment.jValue || payment.formValues)
+        });
+      });
+    });
+
+    return rows.filter((row, index, values) => values.findIndex(item =>
+      item.method === row.method
+      && item.amount === row.amount
+      && item.currency === row.currency
+      && String(item.form || '') === String(row.form || '')
+    ) === index);
+  }
+
+  function getMovementFormFields(form) {
+    if (!form) return [];
+
+    let parsed = form;
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch (error) {
+        return [];
+      }
+    }
+
+    const fields = Array.isArray(parsed)
+      ? parsed
+      : (parsed && Array.isArray(parsed.fields) ? parsed.fields : []);
+
+    return fields
+      .filter(field => field
+        && field.name
+        && !String(field.name).toLowerCase().startsWith('hidden'))
+      .map(field => ({
+        label: getTrimmedString(field.label || field.name),
+        value: Array.isArray(field.userData) ? field.userData.join(', ') : getTrimmedString(field.userData)
+      }));
+  }
+
+  function getMovementViewValue(group, field) {
+    const first = getMovementFirst(group);
+    return group && group[field] !== undefined && group[field] !== null
+      ? group[field]
+      : first && first[field];
+  }
+
+  function renderMovementViewContent(group) {
+    if (!group) return null;
+
+    const paymentRows = getMovementPaymentRows(group);
+    const incomeType = getMovementIncomeTypeValues(group).join(', ');
+    const destination = getMovementDestinationValues(group).map(item => item.accNo || item.id).join(', ');
+    const currency = getTrimmedString(getMovementViewValue(group, 'currency'));
+    const amount = Number(getMovementViewValue(group, 'amount')) || 0;
+    const concept = getTrimmedString(getMovementViewValue(group, 'concept'));
+    const sourceExternal = getTrimmedString(getMovementViewValue(group, 'sourceExternal'));
+    const incomeTypeForm = getMovementViewValue(group, 'jIncomeTypeForm');
+    const dynamicFormItems = paymentRows
+      .map((payment, index) => ({
+        payment: payment,
+        fields: getMovementFormFields(payment.form),
+        index: index
+      }))
+      .filter(item => item.fields.length > 0)
+      .map(item => ({
+        key: `payment-form-${item.index}`,
+        label: item.payment.method || `${t('Payment method')} ${item.index + 1}`,
+        children: (
+          <div className="cashier-supervisor-dynamic-form-card">
+            {item.fields.map(field => (
+              <div key={field.label} className="cashier-supervisor-readonly-field">
+                <label>{field.label}</label>
+                <Input disabled value={field.value || '-'} />
+              </div>
+            ))}
+          </div>
+        )
+      }));
+    const incomeTypeFields = getMovementFormFields(incomeTypeForm);
+
+    if (incomeTypeFields.length > 0) {
+      dynamicFormItems.push({
+        key: 'income-type-form',
+        label: t('Income type'),
+        children: (
+          <div className="cashier-supervisor-dynamic-form-card">
+            {incomeTypeFields.map(field => (
+              <div key={field.label} className="cashier-supervisor-readonly-field">
+                <label>{field.label}</label>
+                <Input disabled value={field.value || '-'} />
+              </div>
+            ))}
+          </div>
+        )
+      });
+    }
+
+    return (
+      <div className="cashier-supervisor-new-income-columns cashier-supervisor-movement-view-content">
+        <div className="cashier-supervisor-new-income-form">
+          <div className="cashier-supervisor-section-title">{t('Payment method(s)')}</div>
+          {paymentRows.length > 0
+            ? paymentRows.map((payment, index) => (
+              <div key={`${payment.method}-${index}`} className="cashier-supervisor-payment-entry">
+                <div className="cashier-supervisor-payment-method-row">
+                  <Input disabled value={payment.method || '-'} />
+                  <Input disabled value={formatMoney(payment.amount)} prefix={payment.currency || currency || '$'} />
+                </div>
+              </div>
+            ))
+            : <Input disabled value="-" />}
+
+          <div className="cashier-supervisor-section-title">{t('Internal account information')}</div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('Income type')}</label>
+            <Input disabled value={incomeType || '-'} />
+          </div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('Destination')}</label>
+            <Input disabled value={destination || '-'} />
+          </div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('Currency')}</label>
+            <Input disabled value={currency || '-'} />
+          </div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('Amount to pay')}</label>
+            <Input disabled value={formatMoney(amount)} />
+          </div>
+        </div>
+
+        <div className="cashier-supervisor-new-income-dynamic-panel">
+          <div className="cashier-supervisor-section-title">{t('Payment details')}</div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('Source')}</label>
+            <Input disabled value={sourceExternal || '-'} />
+          </div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('Concept')}</label>
+            <Input disabled value={concept || '-'} />
+          </div>
+          <div className="cashier-supervisor-readonly-field">
+            <label>{t('User')}</label>
+            <Input disabled value={getTrimmedString(getMovementViewValue(group, 'user')) || '-'} />
+          </div>
+          {dynamicFormItems.length > 0 && (
+            <>
+              <div className="cashier-supervisor-section-title">{t('Aditional Data')}</div>
+              <Tabs items={dynamicFormItems} />
+            </>
+          )}
+        </div>
+      </div>
+    );
   }
 
   function getMovementValues(group, field) {
@@ -2602,11 +2896,20 @@
 
   function getMovementDestinationValues(group) {
     const values = [group].concat(getMovementChildren(group))
-      .map(item => item && item.DestinationAccount && item.DestinationAccount.accNo)
-      .filter(value => value !== undefined && value !== null && String(value) !== '')
-      .map(value => String(value));
+      .map(item => {
+        const account = item && item.DestinationAccount;
+        return account
+          ? {
+              id: Number(account.id || account.accountId || (item && item.destinationAccountId) || 0),
+              accNo: getTrimmedString(account.accNo)
+            }
+          : null;
+      })
+      .filter(value => value && (value.accNo || value.id > 0));
 
-    return Array.from(new Set(values));
+    return values.filter((value, index, items) => items.findIndex(item =>
+      (value.id > 0 && item.id === value.id) || (value.id <= 0 && item.accNo === value.accNo)
+    ) === index);
   }
 
   function getMovementIncomeTypeValues(group) {
@@ -2630,7 +2933,20 @@
     if (values.length === 0) return '-';
 
     return values.map((item, index) => (
-      <div key={`${item}-${index}`} style={{ color: '#1677ff' }}>{item}</div>
+      <div key={`${item.id || item.accNo}-${index}`}>
+        {item.id > 0
+          ? (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => window.open(`#/account/${item.id}`, '_blank', 'noopener,noreferrer')}
+            >
+              {item.accNo || item.id}
+            </Button>
+          )
+          : item.accNo}
+      </div>
     ));
   }
 
@@ -2763,11 +3079,13 @@
           };
         });
         setMovementRows(rows);
+        setMovementSelectedRowKeys([]);
         setMovementTotal(getResponseTotal(response, groups));
         setMovementPagination({ current: currentPage, pageSize: pageSize });
       })
       .catch(error => {
         setMovementRows([]);
+        setMovementSelectedRowKeys([]);
         setMovementTotal(0);
         message.error(error && error.message ? error.message : String(error));
       })
@@ -3055,19 +3373,12 @@
   ];
 
   const movementColumns = [
-    {
-      title: t(''),
-      key: 'select',
-      width: 50,
-      align: 'center',
-      render: () => <Checkbox />
-    },
     { title: t('Actions'), key: 'actions', width: 130, align: 'center', render: (_, group) => renderMovementActions(group) },
     { title: t('ID'), key: 'id', width: 125, align: 'center', render: (value, group) => (
       <div style={{ whiteSpace: 'nowrap' }}>
         <span>{group.id || getMovementFirst(group).id || '-'}</span>
         {' '}
-        <Button type="link" size="small">{t('View')}</Button>
+        <Button type="link" size="small" onClick={() => openMovementView(group)}>{t('View')}</Button>
       </div>
     ) },
     { title: t('Date'), dataIndex: 'date', key: 'date', width: 125, render: formatDateIso },
@@ -3083,13 +3394,52 @@
     { title: t('Policy'), key: 'lifePolicyId', width: 120, align: 'center', render: (value, record) => {
       const values = getPolicyValues(record);
       return values.length > 0
-        ? values.map((item, index) => <div key={`${item}-${index}`} style={{ color: '#1677ff' }}>{item}</div>)
+        ? values.map((item, index) => {
+          const policyId = Number(item);
+          return (
+            <div key={`${item}-${index}`}>
+              {Number.isFinite(policyId) && policyId > 0
+                ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, height: 'auto' }}
+                    onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+                  >
+                    {item}
+                  </Button>
+                )
+                : item}
+            </div>
+          );
+        })
         : '-';
     } },
     { title: t('Executed'), dataIndex: 'executed', key: 'executed', width: 85, align: 'center', render: value => value ? '✓' : '-' },
     { title: t('Cashier ID'), dataIndex: 'transferWorkspaceId', key: 'transferWorkspaceId', width: 95, align: 'center' },
     { title: t('User'), dataIndex: 'user', key: 'user', width: 150, render: (_, group) => renderMovementUser(group) },
-    { title: t('Allocation'), dataIndex: 'allocationId', key: 'allocationId', width: 95, align: 'center' },
+    {
+      title: t('Allocation'),
+      dataIndex: 'allocationId',
+      key: 'allocationId',
+      width: 95,
+      align: 'center',
+      render: value => {
+        const allocationId = Number(value);
+        return Number.isFinite(allocationId) && allocationId > 0
+          ? (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => window.open(`#/allocation?id=${allocationId}`, '_blank', 'noopener,noreferrer')}
+            >
+              {allocationId}
+            </Button>
+          )
+          : '-';
+      }
+    },
     { title: t('Linked'), key: 'linked', width: 80, align: 'center', render: () => '-' },
     { title: t('Workflow'), key: 'workflow', width: 125, render: () => <Tag>{t('No workflow')}</Tag> }
   ];
@@ -3141,13 +3491,13 @@
   const cashDeskTabContent = (
     <Card size="small">
       <div className="cashier-supervisor-toolbar">
-        <Button type="primary" onClick={openNewCashDeskModal}>
-          <NewIcon /> {t('New')}
+        <Button type="primary" icon={<NewIcon />} onClick={openNewCashDeskModal}>
+          {t('New')}
         </Button>
-        <Button disabled={!selectedCashierRow}>
+        <Button icon={<LockOutlined />} disabled={!selectedCashierRow}>
           {t('Close')}
         </Button>
-        <Button disabled={!selectedCashierRow}>
+        <Button icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
           {t('Cash count')}
         </Button>
       </div>
@@ -3179,7 +3529,7 @@
   const premiumCollectionTabContent = (
     <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar">
-        <Button type="primary" onClick={() => setCollectionFilterVisible(true)}>
+        <Button type="primary" icon={<FilterOutlined />} onClick={() => setCollectionFilterVisible(true)}>
           {t('Filter')}
         </Button>
         <Button
@@ -3231,7 +3581,23 @@
   const movementsTabContent = (
     <Card size="small">
       <div className="cashier-supervisor-toolbar">
+        <Dropdown
+          trigger={['click']}
+          placement="bottomLeft"
+          menu={{
+            items: cashierReports.map((report, index) => ({
+              key: `${report.report}-${index}`,
+              label: t(report.name),
+              onClick: () => openCashierReport(report)
+            }))
+          }}
+        >
+          <Button type="link" icon={<FileTextOutlined />} disabled={!selectedCashierRow || cashierReports.length === 0}>
+            {t('Reports')}
+          </Button>
+        </Dropdown>
         <Button
+          icon={<ReloadOutlined />}
           onClick={() => loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } })}
           loading={movementLoading}
           disabled={!selectedCashierRow}
@@ -3247,6 +3613,10 @@
         bordered
         className="cashier-supervisor-movement-table cashier-supervisor-table"
         loading={movementLoading}
+        rowSelection={{
+          selectedRowKeys: movementSelectedRowKeys,
+          onChange: keys => setMovementSelectedRowKeys(keys)
+        }}
         pagination={{
           current: movementPagination.current,
           pageSize: movementPagination.pageSize,
@@ -3488,12 +3858,13 @@
       <div className="cashier-supervisor-new-income-actions">
         <Button
           type="primary"
+          icon={<ExecuteMovementIcon />}
           onClick={collectionMode ? handleCollectionNext : handleNewIncomeExecute}
         >
           {t(collectionMode ? 'Next' : 'Execute')}
         </Button>
         {!collectionMode && (
-          <Button type="link" onClick={clearNewIncomeForm}>
+          <Button type="link" icon={<ClearOutlined />} onClick={clearNewIncomeForm}>
             {t('Clear')}
           </Button>
         )}
@@ -3718,6 +4089,20 @@
               />
             </Form.Item>
           </Form>
+        </Modal>
+
+        <Modal
+          title={t('Payment details')}
+          open={movementViewVisible}
+          onCancel={() => {
+            setMovementViewVisible(false);
+            setMovementViewRecord(null);
+          }}
+          footer={null}
+          width={1000}
+          destroyOnClose
+        >
+          {renderMovementViewContent(movementViewRecord)}
         </Modal>
 
         <Modal
