@@ -3381,18 +3381,40 @@
 
     return values.map((item, index) => (
       <div key={`${item.id || item.accNo}-${index}`}>
-        {item.id > 0
-          ? (
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0, height: 'auto' }}
-              onClick={() => window.open(`#/account/${item.id}`, '_blank', 'noopener,noreferrer')}
-            >
-              {item.accNo || item.id}
-            </Button>
-          )
-          : item.accNo}
+        <Tooltip title={item.accNo || item.id}>
+          {item.id > 0
+            ? (
+              <Button
+                type="link"
+                size="small"
+                style={{
+                  padding: 0,
+                  height: 'auto',
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  display: 'inline-block',
+                  verticalAlign: 'bottom'
+                }}
+                onClick={() => window.open(`#/account/${item.id}`, '_blank', 'noopener,noreferrer')}
+              >
+                {item.accNo || item.id}
+              </Button>
+            )
+            : (
+              <span style={{
+                display: 'inline-block',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                verticalAlign: 'bottom'
+              }}>
+                {item.accNo}
+              </span>
+            )}
+        </Tooltip>
       </div>
     ));
   }
@@ -4074,8 +4096,8 @@
     { title: t('Date'), dataIndex: 'date', key: 'date', width: 125, render: formatDateIso },
     { title: t('Status'), key: 'status', width: 105, render: (_, group) => renderMovementStatus(group) },
     { title: t('Origin'), key: 'sourceExternal', width: 135, render: (_, group) => renderMovementOrigin(group) },
-    { title: t('Destination'), key: 'destinationAccount', width: 145, render: (_, group) => renderMovementDestination(group) },
-    { title: t('Reference'), dataIndex: 'concept', key: 'concept', width: 135 },
+    { title: t('Destination'), key: 'destinationAccount', width: 190, render: (_, group) => renderMovementDestination(group) },
+    { title: t('Reference'), dataIndex: 'concept', key: 'concept', width: 120 },
     { title: t('Received'), dataIndex: 'amount', key: 'received', width: 110, align: 'right', render: formatMoney },
     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
