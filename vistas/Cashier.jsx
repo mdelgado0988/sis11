@@ -11,6 +11,7 @@
     Layout,
     Modal,
     Popconfirm,
+    Popover,
     Radio,
     Select,
     Space,
@@ -18,6 +19,7 @@
     Tag,
     Tabs,
     Tooltip,
+    InputNumber,
     message
   } = A;
   const tabIconStyle = {
@@ -108,6 +110,14 @@
     </TabIcon>
   );
 
+  const InstallmentsIcon = () => (
+    <span role="img" aria-label="installments" className="anticon anticon-search">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M637 566.7h-30.8l-11-10.6C643.9 507.2 672 436.1 672 359.5 672 187.5 532.5 48 360.5 48S49 187.5 49 359.5 188.5 671 360.5 671c76.6 0 147.7-28.1 196.6-76.8l10.6 11v30.8l214.3 214.3 63.7-63.7L637 566.7zM360.5 585C235.9 585 135 484.1 135 359.5S235.9 134 360.5 134 586 234.9 586 359.5 485.1 585 360.5 585z"></path>
+      </svg>
+    </span>
+  );
+
   const [selectedCashierRow, setSelectedCashierRow] = React.useState(null);
   const [transferRows, setTransferRows] = React.useState([]);
   const [transferLoading, setTransferLoading] = React.useState(false);
@@ -132,6 +142,17 @@
   const [collectionTotal, setCollectionTotal] = React.useState(0);
   const [collectionFilters, setCollectionFilters] = React.useState({});
   const [collectionFilterVisible, setCollectionFilterVisible] = React.useState(false);
+  const [collectionSelectedRowKeys, setCollectionSelectedRowKeys] = React.useState([]);
+  const [collectionChargeVisible, setCollectionChargeVisible] = React.useState(false);
+  const [collectionExpectedAmount, setCollectionExpectedAmount] = React.useState(0);
+  const [collectionChargeStep, setCollectionChargeStep] = React.useState('payment');
+  const [collectionPolicyRows, setCollectionPolicyRows] = React.useState([]);
+  const [collectionSupplementaryRows, setCollectionSupplementaryRows] = React.useState([]);
+  const [collectionExternalPolicyVisible, setCollectionExternalPolicyVisible] = React.useState(false);
+  const [collectionExternalPolicyOptions, setCollectionExternalPolicyOptions] = React.useState([]);
+  const [collectionExternalPolicyLoading, setCollectionExternalPolicyLoading] = React.useState(false);
+  const [collectionExternalPolicyTargetKey, setCollectionExternalPolicyTargetKey] = React.useState(null);
+  const collectionExternalPolicySearchTimer = React.useRef(null);
   const [collectionFilterForm] = Form.useForm();
   const [collectionLobOptions, setCollectionLobOptions] = React.useState([]);
   const [payerOptions, setPayerOptions] = React.useState([]);
@@ -169,6 +190,36 @@
         border-radius: 6px;
         padding: 10px 12px;
         margin-bottom: 14px;
+      }
+
+      .cashier-supervisor-premium-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 0;
+      }
+
+      .cashier-supervisor-premium-toolbar .ant-btn {
+        min-width: 96px;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .cashier-supervisor-premium-toolbar .ant-btn:first-child {
+        border-radius: 0;
+        color: #1677ff;
+        background: transparent;
+        border-color: #1677ff;
+      }
+
+      .cashier-supervisor-premium-toolbar .ant-btn:first-child:hover,
+      .cashier-supervisor-premium-toolbar .ant-btn:first-child:focus {
+        color: #4096ff;
+        background: #e6f4ff;
+        border-color: #4096ff;
+      }
+
+      .cashier-supervisor-premium-toolbar .ant-btn:last-child {
+        border-radius: 0;
       }
 
       .cashier-supervisor-selection-card {
@@ -714,6 +765,83 @@
         gap: 3px;
         margin: 2px 0 10px;
       }
+
+      .cashier-supervisor-collection-allocation-card {
+        width: 100%;
+        max-height: calc(100vh - 150px);
+        overflow-y: auto;
+      }
+
+      .cashier-supervisor-collection-allocation-actions {
+        display: flex;
+        justify-content: flex-start;
+        margin-bottom: 10px;
+      }
+
+      .cashier-supervisor-collection-allocation-card .ant-table-cell {
+        vertical-align: middle;
+      }
+
+      .cashier-supervisor-collection-installments {
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-installments-popup {
+        max-height: 220px;
+        min-width: 190px;
+        overflow-y: auto;
+        font-size: 12px;
+        line-height: 20px;
+      }
+
+      .cashier-supervisor-collection-policy-table .ant-btn {
+        font-size: 18px;
+        padding: 0 4px;
+      }
+
+      .cashier-supervisor-collection-policy-table,
+      .cashier-supervisor-collection-supplementary-table {
+        height: 240px;
+        overflow: auto;
+      }
+
+      .cashier-supervisor-collection-policy-table .ant-table-thead > tr > th,
+      .cashier-supervisor-collection-policy-table .ant-table-tbody > tr > td,
+      .cashier-supervisor-collection-supplementary-table .ant-table-thead > tr > th,
+      .cashier-supervisor-collection-supplementary-table .ant-table-tbody > tr > td {
+        padding: 2px 6px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-collection-policy-table .ant-input-number,
+      .cashier-supervisor-collection-supplementary-table .ant-input-number,
+      .cashier-supervisor-collection-policy-table .ant-input-number-input,
+      .cashier-supervisor-collection-supplementary-table .ant-input-number-input {
+        min-height: 24px;
+        height: 24px;
+      }
+
+      .cashier-supervisor-collection-supplementary-table {
+        height: 120px;
+      }
+
+      .cashier-supervisor-collection-allocation-summary {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px 20px;
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid #f0f0f0;
+        border-radius: 6px;
+        background: #fafafa;
+      }
+
+      .cashier-supervisor-collection-allocation-error {
+        color: #cf1322;
+      }
     `;
     document.head.appendChild(style);
 
@@ -975,7 +1103,8 @@
         setIncomeTypeOptions(getRows(incomeResponse).map(item => ({
           value: item && item.code,
           label: getTrimmedString(item && item.name),
-          formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
+          formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0,
+          internalType: getTrimmedString(item && item.internalType)
         })).filter(item => item.value));
         const sourceOptions = getRows(sourceResponse).map(item => ({
           value: item && item.code,
@@ -998,6 +1127,11 @@
 
   function getNewIncomeTotal() {
     return newIncomePayments.reduce((total, payment) => total + parseIncomeAmount(payment.amount), 0);
+  }
+
+  function getNewIncomeDifference() {
+    if (!collectionChargeVisible) return getNewIncomeTotal();
+    return getNewIncomeTotal() - collectionExpectedAmount;
   }
 
   function getPaymentFormId(methodCode) {
@@ -1132,6 +1266,7 @@
   function clearNewIncomeForm() {
     newIncomeForm.resetFields();
     setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: '' }]);
+    setCollectionExpectedAmount(0);
     setNewIncomeDynamicForms({});
     setNewIncomeTypeDynamicForm(null);
     setNewIncomeActiveFormKey(null);
@@ -1451,6 +1586,14 @@
         return;
       }
 
+      const selectedIncomeType = incomeTypeOptions.find(item => item && item.value === formValues.incomeType);
+      const isPremiumIncomeType = getTrimmedString(selectedIncomeType && selectedIncomeType.internalType)
+        .toUpperCase() === 'PREMIUM';
+      if (isPremiumIncomeType && !collectionChargeVisible) {
+        message.error(t('Premium collections must be created from the Collect action.'));
+        return;
+      }
+
       if (!getTrimmedString(currentUserEmail)) {
         message.error(t('The current user could not be identified.'));
         return;
@@ -1488,6 +1631,7 @@
       const paymentAmount = getNewIncomeTotal();
       const paymentConcept = getTrimmedString(createdTransfer.concept || entity.concept || 'IW');
       clearNewIncomeForm();
+      setCollectionChargeVisible(false);
       showNewIncomeExecutionConfirm({
         id: transferId,
         amount: paymentAmount,
@@ -1712,6 +1856,91 @@
     }, 400);
   }
 
+  function searchCollectionExternalPolicies(value) {
+    const text = getTrimmedString(value);
+
+    if (collectionExternalPolicySearchTimer.current) {
+      clearTimeout(collectionExternalPolicySearchTimer.current);
+      collectionExternalPolicySearchTimer.current = null;
+    }
+
+    if (!text) {
+      setCollectionExternalPolicyOptions([]);
+      setCollectionExternalPolicyLoading(false);
+      return;
+    }
+
+    collectionExternalPolicySearchTimer.current = setTimeout(() => {
+      const escaped = escapeSqlString(text);
+      const isNumeric = /^\d+$/.test(text);
+      const listedPolicyIds = collectionPolicyRows
+        .map(row => Number(row && row.policyId))
+        .filter(policyId => Number.isFinite(policyId) && policyId > 0);
+      const excludedPolicyFilter = listedPolicyIds.length > 0
+        ? ` AND [id] NOT IN (${listedPolicyIds.join(',')})`
+        : '';
+      const filter = isNumeric
+        ? `[activeDate] IS NOT NULL AND [id] = ${Number(text)}${excludedPolicyFilter}`
+        : `[activeDate] IS NOT NULL AND [code] LIKE N'%${escaped}%'${excludedPolicyFilter}`;
+
+      setCollectionExternalPolicyLoading(true);
+      exe('RepoLifePolicy', {
+        operation: 'GET',
+        filter: filter,
+        fields: 'id,code,start,end',
+        size: 15
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Policies could not be loaded.'));
+          }
+
+          setCollectionExternalPolicyOptions(getRows(response).map(policy => ({
+              policyId: Number(policy && policy.id),
+              policyCode: getTrimmedString(policy && policy.code),
+              start: policy && policy.start,
+              end: policy && policy.end
+            }))
+            .filter(item => item.policyId > 0)
+            .filter((item, index, options) => options.findIndex(option => option.policyId === item.policyId) === index));
+        })
+        .catch(error => {
+          setCollectionExternalPolicyOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setCollectionExternalPolicyLoading(false));
+    }, 400);
+  }
+
+  function openCollectionExternalPolicySearch(key) {
+    setCollectionExternalPolicyTargetKey(key || null);
+    setCollectionExternalPolicyOptions([]);
+    setCollectionExternalPolicyVisible(true);
+  }
+
+  function selectCollectionExternalPolicy(policy) {
+    const policyId = Number(policy && policy.policyId);
+    if (!Number.isFinite(policyId) || policyId <= 0) return;
+
+    const targetKey = collectionExternalPolicyTargetKey;
+    const currentRow = collectionSupplementaryRows.find(row => String(row.key) === String(targetKey));
+    if (currentRow) {
+      setCollectionSupplementaryRows(rows => rows.map(row => String(row.key) === String(targetKey)
+        ? { ...row, policyId: policyId, policy: policy.policyCode }
+        : row));
+    } else {
+      setCollectionSupplementaryRows(rows => rows.concat({
+        key: `supplementary-${Date.now()}-${rows.length}`,
+        policyId: policyId,
+        policy: policy.policyCode,
+        amount: 0
+      }));
+    }
+
+    setCollectionExternalPolicyVisible(false);
+    setCollectionExternalPolicyTargetKey(null);
+  }
+
   function openNewCashDeskModal() {
     const date = getCurrentUtcDateTime();
     newCashDeskForm.setFieldsValue({
@@ -1837,8 +2066,218 @@
     setCollectionFilters({});
     setCollectionRows([]);
     setCollectionTotal(0);
+    setCollectionSelectedRowKeys([]);
     setCollectionPagination({ current: 1, pageSize: collectionPagination.pageSize });
     setCollectionFilterVisible(false);
+  }
+
+  function getCollectionRowKey(record) {
+    const policyId = Number(record && record.lifePolicyId);
+    return Number.isFinite(policyId) && policyId > 0
+      ? String(policyId)
+      : String(record && record.poliza ? record.poliza : '');
+  }
+
+  function getSelectedCollectionRows() {
+    const selectedKeys = collectionSelectedRowKeys.map(key => String(key));
+    return collectionRows.filter(row => selectedKeys.indexOf(getCollectionRowKey(row)) >= 0);
+  }
+
+  function openCollectionCharge() {
+    const selectedRows = getSelectedCollectionRows();
+    if (selectedRows.length === 0) {
+      message.warning(t('Select at least one policy to collect.'));
+      return;
+    }
+
+    const selectedHolderIds = selectedRows.map(row => Number(row && row.holderId));
+    const holderIds = Array.from(new Set(selectedHolderIds));
+
+    if (selectedHolderIds.some(holderId => !Number.isFinite(holderId) || holderId <= 0)) {
+      message.error(t('The selected policies do not have a valid payer.'));
+      return;
+    }
+
+    if (holderIds.length !== 1) {
+      message.error(t('Select policies with the same payer.'));
+      return;
+    }
+
+    const amount = selectedRows.reduce((total, row) => {
+      const overdue = Number(row && row.vencido || 0);
+      return total + (Number.isFinite(overdue) ? overdue : 0);
+    }, 0);
+    const expectedAmount = Math.max(amount, 0);
+
+    clearNewIncomeForm();
+    setCollectionChargeStep('payment');
+    setCollectionPolicyRows([]);
+    setCollectionSupplementaryRows([]);
+    setCollectionExpectedAmount(expectedAmount);
+    setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: expectedAmount.toFixed(2) }]);
+
+    const premiumIncomeType = incomeTypeOptions.find(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'PREMIUM'
+    );
+    if (!premiumIncomeType) {
+      message.error(t('The premium collection income type is not configured.'));
+      return;
+    }
+
+    newIncomeForm.setFieldsValue({ incomeType: premiumIncomeType.value });
+    updateNewIncomeType(premiumIncomeType.value);
+    setCollectionChargeVisible(true);
+  }
+
+  function getCollectionPaymentAmount() {
+    return Number(getNewIncomeTotal().toFixed(2));
+  }
+
+  function getCollectionPolicyPending(row) {
+    const pending = Number(row && row.pendiente);
+    return Number.isFinite(pending) && pending > 0 ? Number(pending.toFixed(2)) : 0;
+  }
+
+  function getCollectionPolicyIdentifier(row) {
+    const policyId = Number(row && (row.lifePolicyId || row.policyId));
+    if (Number.isFinite(policyId) && policyId > 0) return policyId;
+    return getTrimmedString(row && (row.policy || row.poliza));
+  }
+
+  function buildCollectionAllocationPreview() {
+    const selectedRows = getSelectedCollectionRows();
+    let remainingAmount = getCollectionPaymentAmount();
+
+    const policyRows = selectedRows.map(row => {
+      const pendingAmount = getCollectionPolicyPending(row);
+      const amount = Math.min(pendingAmount, Math.max(remainingAmount, 0));
+      remainingAmount = Number((remainingAmount - amount).toFixed(2));
+
+      return {
+        key: getCollectionRowKey(row),
+        policyId: getCollectionPolicyIdentifier(row),
+        policy: getTrimmedString(row && row.poliza),
+        pendingAmount: pendingAmount,
+        amount: Number(amount.toFixed(2)),
+        installments: Array.isArray(row && row.Cuotas) ? row.Cuotas : []
+      };
+    });
+
+    const excessAmount = Number(Math.max(remainingAmount, 0).toFixed(2));
+    const firstPolicy = policyRows[0];
+    const supplementaryRows = excessAmount > 0 && firstPolicy
+      ? [{
+          key: `supplementary-${Date.now()}`,
+          policyId: firstPolicy.policyId,
+          policy: firstPolicy.policy,
+          amount: excessAmount
+        }]
+      : [];
+
+    setCollectionPolicyRows(policyRows);
+    setCollectionSupplementaryRows(supplementaryRows);
+    setCollectionChargeStep('allocation');
+  }
+
+  async function handleCollectionNext() {
+    if (!validateDynamicIncomeForms()) return;
+
+    try {
+      const formValues = await newIncomeForm.validateFields();
+      if (!getTrimmedString(formValues && formValues.incomeType)) {
+        message.error(t('Select an income type.'));
+        return;
+      }
+
+      if (getNewIncomeTotal() <= 0) {
+        message.error(t('Enter at least one payment amount greater than zero.'));
+        return;
+      }
+
+      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
+        message.error(t('Complete the payment method and amount for every payment.'));
+        return;
+      }
+
+      buildCollectionAllocationPreview();
+    } catch (error) {
+      message.error(error && error.message ? error.message : t('Complete the payment information.'));
+    }
+  }
+
+  function updateCollectionPolicyAmount(key, value) {
+    setCollectionPolicyRows(rows => rows.map(row => {
+      if (String(row.key) !== String(key)) return row;
+      const amount = Number(value);
+      const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+      return {
+        ...row,
+        amount: Number(Math.min(safeAmount, row.pendingAmount).toFixed(2))
+      };
+    }));
+  }
+
+  function getCollectionPolicyTotal() {
+    return Number(collectionPolicyRows
+      .reduce((total, row) => total + (Number(row && row.amount) || 0), 0)
+      .toFixed(2));
+  }
+
+  function getCollectionSupplementaryExpected() {
+    return Number(Math.max(getCollectionPaymentAmount() - getCollectionPolicyTotal(), 0).toFixed(2));
+  }
+
+  function getCollectionSupplementaryTotal() {
+    return Number(collectionSupplementaryRows
+      .reduce((total, row) => total + (Number(row && row.amount) || 0), 0)
+      .toFixed(2));
+  }
+
+  function updateCollectionSupplementaryAmount(key, value) {
+    const expected = getCollectionSupplementaryExpected();
+    setCollectionSupplementaryRows(rows => rows.map(row => {
+      if (String(row.key) !== String(key)) return row;
+      const amount = Number(value);
+      const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+      return {
+        ...row,
+        amount: Number(Math.min(safeAmount, expected).toFixed(2))
+      };
+    }));
+  }
+
+  function updateCollectionSupplementaryPolicy(key, policyId) {
+    const selectedPolicy = collectionPolicyRows.find(row => String(row && row.policyId) === String(policyId));
+    const externalPolicy = collectionExternalPolicyOptions.find(row => String(row && row.policyId) === String(policyId));
+    if (!selectedPolicy && !externalPolicy) return;
+
+    const nextPolicyId = selectedPolicy
+      ? selectedPolicy.policyId
+      : Number(externalPolicy.policyId);
+    const nextPolicy = selectedPolicy
+      ? getTrimmedString(selectedPolicy.poliza)
+      : getTrimmedString(externalPolicy.policyCode);
+
+    setCollectionSupplementaryRows(rows => rows.map(row => String(row.key) === String(key)
+      ? { ...row, policyId: nextPolicyId, policy: nextPolicy }
+      : row));
+  }
+
+  function addCollectionSupplementaryRow() {
+    const availablePolicy = collectionPolicyRows.find(policy => !collectionSupplementaryRows.some(row =>
+      String(row && row.policyId) === String(policy && policy.policyId)
+    ));
+
+    setCollectionSupplementaryRows(rows => rows.concat({
+      key: `supplementary-${Date.now()}-${rows.length}`,
+      policyId: availablePolicy ? availablePolicy.policyId : 0,
+      policy: availablePolicy ? getTrimmedString(availablePolicy.policy) : '',
+      amount: 0
+    }));
+  }
+
+  function removeCollectionSupplementaryRow(key) {
+    setCollectionSupplementaryRows(rows => rows.filter(row => String(row.key) !== String(key)));
   }
 
   function handleTabChange(key) {
@@ -2604,19 +3043,30 @@
 
   const premiumCollectionTabContent = (
     <Card size="small">
-      <div className="cashier-supervisor-toolbar">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar">
         <Button type="primary" onClick={() => setCollectionFilterVisible(true)}>
           {t('Filter')}
         </Button>
+        <Button
+          type="primary"
+          onClick={openCollectionCharge}
+          disabled={collectionSelectedRowKeys.length === 0}
+        >
+          {t('Collect')}
+        </Button>
       </div>
       <Table
-        rowKey={record => record && record.lifePolicyId ? record.lifePolicyId : record.poliza}
+        rowKey={getCollectionRowKey}
         columns={premiumColumns}
         dataSource={collectionRows}
         size="small"
         bordered
         className="cashier-supervisor-table"
         loading={collectionLoading}
+        rowSelection={{
+          selectedRowKeys: collectionSelectedRowKeys,
+          onChange: keys => setCollectionSelectedRowKeys(keys)
+        }}
         pagination={{
           current: collectionPagination.current,
           pageSize: collectionPagination.pageSize,
@@ -2675,13 +3125,195 @@
     </Card>
   );
 
-  const newIncomeTabContent = (
+  const renderCollectionAllocationContent = () => {
+    const paymentTotal = getCollectionPaymentAmount();
+    const policyTotal = getCollectionPolicyTotal();
+    const expectedSupplementary = getCollectionSupplementaryExpected();
+    const supplementaryTotal = getCollectionSupplementaryTotal();
+    const difference = Number((expectedSupplementary - supplementaryTotal).toFixed(2));
+    const policyOptions = collectionPolicyRows.map(row => ({
+      value: row && row.policyId,
+      label: getTrimmedString(row && row.policy)
+    })).filter(option => option.value !== '' && option.value !== null && option.value !== undefined && option.value !== 0);
+    const externalPolicyOptions = collectionExternalPolicyOptions.map(policy => ({
+      value: policy.policyId,
+      label: policy.policyCode || String(policy.policyId)
+    }));
+    const supplementaryPolicyOptions = policyOptions.concat(externalPolicyOptions)
+      .filter((option, index, options) => options.findIndex(item => item.value === option.value) === index);
+
+    const policyColumns = [
+      {
+        title: t('Policy'),
+        dataIndex: 'policy',
+        key: 'policy'
+      },
+      {
+        title: t('Pending'),
+        dataIndex: 'pendingAmount',
+        key: 'pendingAmount',
+        align: 'right',
+        render: value => formatMoney(value)
+      },
+      {
+        title: t('Amount to apply'),
+        dataIndex: 'amount',
+        key: 'amount',
+        align: 'right',
+        render: (value, record) => (
+          <InputNumber
+            min={0}
+            max={record.pendingAmount}
+            precision={2}
+            value={value}
+            onChange={nextValue => updateCollectionPolicyAmount(record.key, nextValue)}
+            style={{ width: '100%' }}
+          />
+        )
+      },
+      {
+        title: t('Installments'),
+        key: 'installments',
+        align: 'center',
+        render: (_, record) => (
+          <Popover
+            title={t('Installment details')}
+            trigger="click"
+            content={(
+              <div className="cashier-supervisor-installments-popup">
+                {record.installments.length === 0
+                  ? t('No pending installments.')
+                  : record.installments.map(item => (
+                    <div key={item.id || `${record.key}-${item.numberInYear}`}>
+                      <strong>{`${t('Installment')} ${item.numberInYear || '-'}`}</strong>
+                      {`: ${formatMoney(item.pendingAmount)}`}
+                    </div>
+                  ))}
+              </div>
+            )}
+          >
+            <Button type="link" title={t('View installments')}>
+              <InstallmentsIcon />
+            </Button>
+          </Popover>
+        )
+      }
+    ];
+
+    const supplementaryColumns = [
+      {
+        title: t('Policy'),
+        dataIndex: 'policy',
+        key: 'policy',
+        render: (value, record) => (
+          <div style={{ display: 'flex', gap: 4, width: '100%' }}>
+            <Select
+              value={record.policyId}
+              options={supplementaryPolicyOptions}
+              onChange={nextValue => updateCollectionSupplementaryPolicy(record.key, nextValue)}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <Button
+              type="link"
+              onClick={() => openCollectionExternalPolicySearch(record.key)}
+              title={t('Search policy')}
+            >
+              {t('Search')}
+            </Button>
+          </div>
+        )
+      },
+      {
+        title: t('Amount to apply'),
+        dataIndex: 'amount',
+        key: 'amount',
+        align: 'right',
+        render: (value, record) => (
+          <InputNumber
+            min={0}
+            max={expectedSupplementary}
+            precision={2}
+            value={value}
+            onChange={nextValue => updateCollectionSupplementaryAmount(record.key, nextValue)}
+            style={{ width: '100%' }}
+          />
+        )
+      },
+      {
+        title: t('Actions'),
+        key: 'actions',
+        width: 80,
+        render: (_, record) => (
+          <Button type="link" onClick={() => removeCollectionSupplementaryRow(record.key)}>
+            {t('Remove')}
+          </Button>
+        )
+      }
+    ];
+
+    return (
+      <Card size="small" className="cashier-supervisor-collection-allocation-card">
+        <div className="cashier-supervisor-collection-allocation-actions">
+          <Button onClick={() => setCollectionChargeStep('payment')}>{t('Back')}</Button>
+        </div>
+        <div className="cashier-supervisor-section-title">{t('Premium to apply')}</div>
+        <div className="cashier-supervisor-collection-policy-table">
+          <Table
+            rowKey="key"
+            columns={policyColumns}
+            dataSource={collectionPolicyRows}
+            size="small"
+            pagination={false}
+            bordered
+          />
+        </div>
+        <div className="cashier-supervisor-section-title">{t('Complementary premiums')}</div>
+        {expectedSupplementary > 0 ? (
+          <>
+            <div className="cashier-supervisor-collection-supplementary-table">
+              <Table
+                rowKey="key"
+                columns={supplementaryColumns}
+                dataSource={collectionSupplementaryRows}
+                size="small"
+                pagination={false}
+                bordered
+              />
+            </div>
+            <Button type="link" onClick={addCollectionSupplementaryRow}>
+              + {t('Add row')}
+            </Button>
+          </>
+        ) : (
+          <div>{t('There is no complementary premium to distribute.')}</div>
+        )}
+        <div className="cashier-supervisor-collection-allocation-summary">
+          <div><strong>{t('Payment total')}:</strong> {formatMoney(paymentTotal)}</div>
+          <div><strong>{t('Premiums')}:</strong> {formatMoney(policyTotal)}</div>
+          <div><strong>{t('Complementary expected')}:</strong> {formatMoney(expectedSupplementary)}</div>
+          <div><strong>{t('Complementary assigned')}:</strong> {formatMoney(supplementaryTotal)}</div>
+          <div className={difference === 0 ? '' : 'cashier-supervisor-collection-allocation-error'}>
+            <strong>{t('Difference')}:</strong> {formatMoney(difference)}
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
+  const renderNewIncomeContent = (collectionMode) => (
     <Card size="small" className="cashier-supervisor-new-income-card">
       <div className="cashier-supervisor-new-income-actions">
-        <Button type="primary" onClick={handleNewIncomeExecute}>{t('Execute')}</Button>
-        <Button type="link" onClick={clearNewIncomeForm}>
-          {t('Clear')}
+        <Button
+          type="primary"
+          onClick={collectionMode ? handleCollectionNext : handleNewIncomeExecute}
+        >
+          {t(collectionMode ? 'Next' : 'Execute')}
         </Button>
+        {!collectionMode && (
+          <Button type="link" onClick={clearNewIncomeForm}>
+            {t('Clear')}
+          </Button>
+        )}
       </div>
 
       <div className="cashier-supervisor-new-income-columns">
@@ -2716,7 +3348,12 @@
             <Form.Item label={t('Income type')} name="incomeType">
             <Select
               style={{ width: '100%' }}
-              options={incomeTypeOptions}
+              options={collectionChargeVisible
+                ? incomeTypeOptions
+                : incomeTypeOptions.filter(item =>
+                  getTrimmedString(item && item.internalType).toUpperCase() !== 'PREMIUM'
+                )}
+              disabled={collectionChargeVisible}
               onChange={updateNewIncomeType}
             />
           </Form.Item>
@@ -2745,7 +3382,7 @@
           </Form.Item>
           <div className="cashier-supervisor-new-income-difference">
             <div>{t('Difference')}</div>
-            <strong>${formatMoney(getNewIncomeTotal())}</strong>
+            <strong>${formatMoney(getNewIncomeDifference())}</strong>
           </div>
         </Form>
         </div>
@@ -2861,7 +3498,7 @@
             {activeTab === 'premiums'
               ? premiumCollectionTabContent
               : activeTab === 'new-income'
-                ? newIncomeTabContent
+                ? renderNewIncomeContent()
                 : activeTab === 'movements'
                   ? movementsTabContent
                   : cashDeskTabContent}
@@ -2898,6 +3535,95 @@
               />
             </Form.Item>
           </Form>
+        </Modal>
+
+        <Modal
+          title={t('Collect premiums')}
+          open={collectionChargeVisible}
+          onCancel={() => {
+            setCollectionChargeVisible(false);
+            setCollectionChargeStep('payment');
+            setCollectionPolicyRows([]);
+            setCollectionSupplementaryRows([]);
+            clearNewIncomeForm();
+          }}
+          footer={null}
+          width={1100}
+          destroyOnClose={false}
+        >
+          <Tabs
+            activeKey={collectionChargeStep}
+            onChange={key => setCollectionChargeStep(key)}
+            items={[
+              {
+                key: 'payment',
+                label: t('Payment information'),
+                children: renderNewIncomeContent(true)
+              },
+              {
+                key: 'allocation',
+                label: t('Payment allocation'),
+                disabled: collectionChargeStep !== 'allocation',
+                children: renderCollectionAllocationContent()
+              }
+            ]}
+          />
+        </Modal>
+
+        <Modal
+          title={t('Search policy')}
+          open={collectionExternalPolicyVisible}
+          onCancel={() => {
+            setCollectionExternalPolicyVisible(false);
+            setCollectionExternalPolicyTargetKey(null);
+          }}
+          footer={null}
+          width={720}
+          destroyOnClose={false}
+        >
+          <Input.Search
+            allowClear
+            autoFocus
+            placeholder={t('Search by policy number or code')}
+            onChange={event => searchCollectionExternalPolicies(event && event.target ? event.target.value : '')}
+            onSearch={searchCollectionExternalPolicies}
+            loading={collectionExternalPolicyLoading}
+          />
+          <Table
+            rowKey="policyId"
+            size="small"
+            bordered
+            loading={collectionExternalPolicyLoading}
+            pagination={{ pageSize: 10, hideOnSinglePage: true }}
+            dataSource={collectionExternalPolicyOptions}
+            columns={[
+              {
+                title: t('Policy'),
+                dataIndex: 'policyCode',
+                key: 'policyCode'
+              },
+              {
+                title: t('Validity'),
+                key: 'validity',
+                render: (_, record) => `${formatDate(record.start)} - ${formatDate(record.end)}`
+              },
+              {
+                title: t('ID'),
+                dataIndex: 'policyId',
+                key: 'policyId'
+              },
+              {
+                title: t('Actions'),
+                key: 'actions',
+                width: 100,
+                render: (_, record) => (
+                  <Button type="link" onClick={() => selectCollectionExternalPolicy(record)}>
+                    {t('Select')}
+                  </Button>
+                )
+              }
+            ]}
+          />
         </Modal>
 
         <Drawer

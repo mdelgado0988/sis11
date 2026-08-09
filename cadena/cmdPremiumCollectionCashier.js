@@ -58,6 +58,7 @@ WITH PendingInstallments AS (
 ), PolicyCollection AS (
     SELECT
         pol.[id] AS [lifePolicyId],
+        pol.[holderId] AS [holderId],
         pol.[code] AS [policy],
         YEAR(MIN(pi.[dueDate])) AS [year],
         MONTH(MIN(pi.[dueDate])) AS [month],
@@ -112,6 +113,7 @@ WITH PendingInstallments AS (
     ${policyFilter}
     GROUP BY
         pol.[id],
+        pol.[holderId],
         pol.[code],
         lob.[name],
         payer.[payer],
@@ -120,6 +122,7 @@ WITH PendingInstallments AS (
 )
 SELECT
     [lifePolicyId],
+    [holderId],
     [policy],
     [year],
     [month],
@@ -183,7 +186,9 @@ function mapPolicyCollection(row) {
   const item = row || {};
 
   return {
+    lifePolicyId: getNonNegativeInteger(item.lifePolicyId),
     poliza: item.policy || '',
+    holderId: getNonNegativeInteger(item.holderId),
     anio: getNonNegativeInteger(item.year),
     mes: getNonNegativeInteger(item.month),
     ramo: item.lob || '',
