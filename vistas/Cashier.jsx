@@ -117,6 +117,14 @@
     </TabIcon>
   );
 
+  const BalanceIcon = () => (
+    <TabIcon label="bar-chart" iconClass="anticon-bar-chart">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M128 768h768v96H128zM224 416h112v304H224zm232-176h112v480H456zm232 96h112v384H688z"></path>
+      </svg>
+    </TabIcon>
+  );
+
   const InstallmentsIcon = () => (
     <span role="img" aria-label="installments" className="anticon anticon-search">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -180,6 +188,9 @@
   const [newCashDeskLoading, setNewCashDeskLoading] = React.useState(false);
   const [closeCashDeskLoading, setCloseCashDeskLoading] = React.useState(false);
   const [newCashDeskForm] = Form.useForm();
+  const [depositVisible, setDepositVisible] = React.useState(false);
+  const [depositForm] = Form.useForm();
+  const [depositExpectedAmount, setDepositExpectedAmount] = React.useState(0);
   const [newIncomeForm] = Form.useForm();
   const [activeTab, setActiveTab] = React.useState('cash-desks');
   const [movementRows, setMovementRows] = React.useState([]);
@@ -190,6 +201,8 @@
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
   const [movementViewVisible, setMovementViewVisible] = React.useState(false);
   const [movementViewRecord, setMovementViewRecord] = React.useState(null);
+  const [balanceRows, setBalanceRows] = React.useState([]);
+  const [balanceLoading, setBalanceLoading] = React.useState(false);
   const [reversalVisible, setReversalVisible] = React.useState(false);
   const [reversalCatalogLoading, setReversalCatalogLoading] = React.useState(false);
   const [reversalLoading, setReversalLoading] = React.useState(false);
@@ -237,6 +250,7 @@
   const [paymentMethodOptions, setPaymentMethodOptions] = React.useState([]);
   const [incomeTypeOptions, setIncomeTypeOptions] = React.useState([]);
   const [externalSourceOptions, setExternalSourceOptions] = React.useState([]);
+  const [depositAccountOptions, setDepositAccountOptions] = React.useState([]);
   const [newIncomePayments, setNewIncomePayments] = React.useState([
     { key: 1, methodCode: undefined, amount: '' }
   ]);
@@ -1203,13 +1217,15 @@
       exe('RepoCurrency', { operation: 'GET', filter: 'enabled = 1' }),
       exe('RepoPaymentMethodCatalog', { operation: 'GET' }),
       exe('RepoIncomeTypeCatalog', { operation: 'GET' }),
-      exe('RepoExternalSourceCatalog', { operation: 'GET' })
+      exe('RepoExternalSourceCatalog', { operation: 'GET' }),
+      exe('RepoAccountGroup', { operation: 'GET', filter: "[group]='DEPOSITS'" })
     ])
       .then(responses => {
         const currencyResponse = responses[0];
         const paymentResponse = responses[1];
         const incomeResponse = responses[2];
         const sourceResponse = responses[3];
+        const depositAccountResponse = responses[4];
 
         if (!currencyResponse || currencyResponse.ok === false) {
           throw new Error(currencyResponse && currencyResponse.msg ? currencyResponse.msg : t('Currencies could not be loaded.'));
@@ -1222,6 +1238,11 @@
         }
         if (!sourceResponse || sourceResponse.ok === false) {
           throw new Error(sourceResponse && sourceResponse.msg ? sourceResponse.msg : t('External sources could not be loaded.'));
+        }
+        if (!depositAccountResponse || depositAccountResponse.ok === false) {
+          throw new Error(depositAccountResponse && depositAccountResponse.msg
+            ? depositAccountResponse.msg
+            : t('Deposit accounts could not be loaded.'));
         }
 
         setCurrencyOptions(getRows(currencyResponse).map(item => ({
@@ -1245,6 +1266,12 @@
           destinationAccNo: getTrimmedString(item && item.destinationAccNo)
         })).filter(item => item.value);
         setExternalSourceOptions(sourceOptions);
+        setDepositAccountOptions(getRows(depositAccountResponse).map(item => ({
+          value: Number(item && item.accountId),
+          label: getTrimmedString(item && item.name),
+          code: getTrimmedString(item && item.code),
+          currency: getTrimmedString(item && item.currency)
+        })).filter(item => Number.isFinite(item.value) && item.value > 0));
         if (sourceOptions.length === 1) {
           newIncomeForm.setFieldsValue({ destination: sourceOptions[0].value });
         }
@@ -2150,6 +2177,127 @@
       .finally(() => setNewCashDeskLoading(false));
   }
 
+  function getDepositExpectedAmount(paymentMethod, currency) {
+    const method = getTrimmedString(paymentMethod).toUpperCase();
+    const selectedCurrency = getTrimmedString(currency).toUpperCase();
+    const row = balanceRows.find(item =>
+      (
+        getTrimmedString(item && item.paymentMethodCode).toUpperCase() === method
+        || getTrimmedString(item && item.paymentMethod).toUpperCase() === method
+      )
+      && getTrimmedString(item && item.currency).toUpperCase() === selectedCurrency
+    );
+
+    if (!row) return 0;
+
+    const amount = getAuditNumber(row.amount);
+    const deposit = getAuditNumber(row.deposit);
+    const cashFund = getAuditNumber(row.assignedFund);
+
+    // Deposits are returned with their accounting sign, so the available balance
+    // must include the previous deposit and the assigned cash fund.
+    return Math.max(0, amount + deposit + cashFund);
+  }
+
+  function openNewDepositModal() {
+    const firstCurrency = currencyOptions[0] && currencyOptions[0].value;
+
+    depositForm.setFieldsValue({
+      paymentMethod: undefined,
+      currency: firstCurrency,
+      amount: undefined,
+      cutoff: 0,
+      expectedAmount: 0,
+      difference: 0,
+      destination: undefined,
+      reference: ''
+    });
+    setDepositExpectedAmount(0);
+    setDepositVisible(true);
+  }
+
+  function handleDepositValuesChange(changedValues, allValues) {
+    const expectedAmount = getDepositExpectedAmount(allValues && allValues.paymentMethod, allValues && allValues.currency);
+    const depositedAmount = getAuditNumber(allValues && allValues.amount);
+    setDepositExpectedAmount(expectedAmount);
+    depositForm.setFieldsValue({
+      expectedAmount: expectedAmount,
+      difference: expectedAmount - depositedAmount
+    });
+  }
+
+  function updateDepositDifference(value) {
+    const expectedAmount = getAuditNumber(depositForm.getFieldValue('expectedAmount'));
+    depositForm.setFieldsValue({
+      difference: expectedAmount - getAuditNumber(value)
+    });
+  }
+
+  function closeNewDepositModal() {
+    setDepositVisible(false);
+    depositForm.resetFields();
+    setDepositExpectedAmount(0);
+  }
+
+  async function createDeposit(values) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const amount = getAuditNumber(values && values.amount);
+
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('Select a cash desk first.'));
+      return;
+    }
+
+    if (amount <= 0) {
+      message.warning(t('Enter a deposited amount greater than zero.'));
+      return;
+    }
+
+    const expectedAmount = getAuditNumber(values && values.expectedAmount);
+    if (amount > expectedAmount + 0.01) {
+      message.warning(t('The deposited amount cannot exceed the expected amount.'));
+      return;
+    }
+
+    try {
+      const destinationAccountId = Number(values && values.destination);
+      if (!Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
+        message.warning(t('Select a destination account.'));
+        return;
+      }
+
+      const difference = getAuditNumber(values && values.difference);
+      const response = await exe('DepositCashierPayments', {
+        workspaceId: workspaceId,
+        paymentMethod: getTrimmedString(values && values.paymentMethod),
+        currency: getTrimmedString(values && values.currency),
+        amountAtSight: amount,
+        amount: amount,
+        dif: difference,
+        destinationAccountId: destinationAccountId,
+        concept: getTrimmedString(values && values.reference),
+        externalSource: null
+      });
+
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The deposit could not be created.'));
+      }
+
+      message.success(response.msg || t('Deposit created successfully.'));
+      closeNewDepositModal();
+      loadMovements({
+        pagination: {
+          current: 1,
+          pageSize: movementPagination.pageSize
+        }
+      });
+      loadCashDeskBalances();
+      if (cashDeskAuditVisible) openCashDeskAudit();
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    }
+  }
+
   function closeCashDesk() {
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
 
@@ -2247,6 +2395,40 @@
     };
   }
 
+  function buildCashDeskAuditFromSummary(summary) {
+    const values = { cash: 0, cheque: 0, card: 0, other: 0 };
+    let total = 0;
+    let deposits = 0;
+    let cashFund = 0;
+    let currency = 'USD';
+
+    (Array.isArray(summary) ? summary : []).forEach(row => {
+      const amount = getAuditNumber(row && row.amount);
+      const method = getTrimmedString(row && (row.paymentMethodName || row.paymentMethod)).toUpperCase();
+      currency = getTrimmedString(row && row.currency) || currency;
+      total += amount;
+      deposits += getAuditNumber(row && row.deposit);
+      cashFund += getAuditNumber(row && row.cashFund);
+
+      if (method.indexOf('EFECT') >= 0 || method === 'EFE') values.cash += amount;
+      else if (method.indexOf('CHEQ') >= 0 || method === 'CHE') values.cheque += amount;
+      else if (method.indexOf('TARJ') >= 0 || method.indexOf('CRED') >= 0 || method === 'TC') values.card += amount;
+      else values.other += amount;
+    });
+
+    return {
+      cash: values.cash,
+      cheque: values.cheque,
+      card: values.card,
+      other: values.other,
+      total: total,
+      deposits: deposits,
+      netIncome: total + deposits,
+      endBalance: total + deposits + cashFund,
+      currency: currency
+    };
+  }
+
   function openCashDeskAudit() {
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
     if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
@@ -2256,39 +2438,68 @@
 
     setCashDeskAuditVisible(true);
     setCashDeskAuditLoading(true);
-    exe('FilterTransfer', {
-      workspaceId: workspaceId,
-      groupByAllocation: false,
-      size: 0,
-      page: 0,
-      executed: true,
-      currency: null,
-      allocated: null,
-      external: null,
-      concept: null,
-      minAmount: null,
-      maxAmount: null,
-      month: null,
-      claimPaymentId: null,
-      allocationId: null,
-      fromDate: null,
-      toDate: null,
-      id: null,
-      paymentMethod: null,
-      incomeType: null
-    })
+    exe('GetCashierIncomeSummary', { workspaceId: workspaceId })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('Cash desk audit could not be loaded.'));
         }
 
-        setCashDeskAudit(buildCashDeskAudit(getRows(response), response));
+        const summary = response.outData && Array.isArray(response.outData.summary)
+          ? response.outData.summary
+          : [];
+        setCashDeskAudit(buildCashDeskAuditFromSummary(summary));
       })
       .catch(error => {
         setCashDeskAudit(null);
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setCashDeskAuditLoading(false));
+  }
+
+  function getBalancePaymentMethod(item) {
+    const splitPayments = item && Array.isArray(item.SplitPayments) ? item.SplitPayments : [];
+    const payment = splitPayments[0] || item || {};
+    return getTrimmedString(
+      payment.paymentMethodName ||
+      payment.paymentMethod ||
+      payment.PaymentMethod && payment.PaymentMethod.name
+    ).toUpperCase() || t('Other').toUpperCase();
+  }
+
+  function loadCashDeskBalances() {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      setBalanceRows([]);
+      return;
+    }
+
+    setBalanceLoading(true);
+    exe('GetCashierIncomeSummary', { workspaceId: workspaceId })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Balances could not be loaded.'));
+        }
+
+        const summary = response.outData && Array.isArray(response.outData.summary)
+          ? response.outData.summary
+          : [];
+
+        setBalanceRows(summary.map((item, index) => ({
+          key: getTrimmedString(item && item.code) || `balance-${index}`,
+          paymentMethodCode: getTrimmedString(item && item.paymentMethod),
+          paymentMethod: getTrimmedString(item && item.paymentMethodName) || getBalancePaymentMethod(item),
+          currency: getTrimmedString(item && item.currency) || 'USD',
+          assignedFund: getAuditNumber(item && item.cashFund),
+          amount: getAuditNumber(item && item.amount),
+          deposit: getAuditNumber(item && item.deposit),
+          difference: getAuditNumber(item && item.dif)
+        })));
+      })
+      .catch(error => {
+        setBalanceRows([]);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setBalanceLoading(false));
   }
 
   function loadCashierReports() {
@@ -2773,12 +2984,17 @@
         }
       });
     }
+
+    if (key === 'balances' && selectedCashierRow && selectedCashierRow.id) {
+      loadCashDeskBalances();
+    }
   }
 
   function selectCashDesk(record) {
     setSelectedCashierRow(record || null);
     if (!record) {
       setActiveTab('cash-desks');
+      setBalanceRows([]);
     }
   }
 
@@ -3830,6 +4046,22 @@
     { title: t('Pending'), dataIndex: 'pendingAmount', key: 'pendingAmount', width: 110, align: 'right', render: formatMoney }
   ];
 
+  const balanceColumns = [
+    { title: t('Payment method'), dataIndex: 'paymentMethod', key: 'paymentMethod', width: 180 },
+    { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' },
+    { title: t('Assigned fund'), dataIndex: 'assignedFund', key: 'assignedFund', width: 130, align: 'right', render: formatMoney },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: formatMoney },
+    { title: t('Deposit'), dataIndex: 'deposit', key: 'deposit', width: 120, align: 'right', render: formatMoney },
+    {
+      title: t('Difference'),
+      dataIndex: 'difference',
+      key: 'difference',
+      width: 130,
+      align: 'right',
+      render: value => <span style={{ color: Number(value) < 0 ? '#ff4d4f' : undefined }}>{formatMoney(value)}</span>
+    }
+  ];
+
   const movementColumns = [
     { title: t('Actions'), key: 'actions', width: 130, align: 'center', render: (_, group) => renderMovementActions(group) },
     { title: t('ID'), key: 'id', width: 125, align: 'center', render: (value, group) => (
@@ -4003,6 +4235,40 @@
         onRow={record => ({
           onClick: () => selectCashDesk(record)
         })}
+      />
+    </Card>
+  );
+
+  const balancesTabContent = (
+    <Card size="small">
+      <div className="cashier-supervisor-toolbar">
+        <Button
+          type="primary"
+          icon={<NewIcon />}
+          disabled={!selectedCashierRow}
+          onClick={openNewDepositModal}
+        >
+          {t('New deposit')}
+        </Button>
+        <Button
+          icon={<ReloadOutlined />}
+          loading={balanceLoading}
+          disabled={!selectedCashierRow}
+          onClick={loadCashDeskBalances}
+        >
+          {t('Refresh')}
+        </Button>
+      </div>
+      <Table
+        rowKey="key"
+        columns={balanceColumns}
+        dataSource={balanceRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table"
+        loading={balanceLoading}
+        pagination={false}
+        scroll={{ x: 780, y: 420 }}
       />
     </Card>
   );
@@ -4528,6 +4794,16 @@
             >
               <MovementIcon /> {t('Movements')}
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'balances'}
+              disabled={!selectedCashierRow}
+              className={`cashier-supervisor-tab${activeTab === 'balances' ? ' active' : ''}`}
+              onClick={() => handleTabChange('balances')}
+            >
+              <BalanceIcon /> {t('Balances')}
+            </button>
           </div>
           <div className="cashier-supervisor-tab-content" role="tabpanel">
             {activeTab === 'premiums'
@@ -4536,7 +4812,9 @@
                 ? renderNewIncomeContent()
                 : activeTab === 'movements'
                   ? movementsTabContent
-                  : cashDeskTabContent}
+                  : activeTab === 'balances'
+                    ? balancesTabContent
+                    : cashDeskTabContent}
           </div>
             </div>
           </div>
@@ -4684,6 +4962,101 @@
                 placeholder={t('Select a branch')}
                 options={branches}
               />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={t('Deposit')}
+          open={depositVisible}
+          onCancel={closeNewDepositModal}
+          onOk={() => depositForm.submit()}
+          okText={t('Deposit')}
+          cancelText={t('Cancel')}
+          destroyOnClose={false}
+        >
+          <Form
+            form={depositForm}
+            layout="vertical"
+            onValuesChange={handleDepositValuesChange}
+            onFinish={createDeposit}
+          >
+            <Form.Item
+              label={t('Payment method')}
+              name="paymentMethod"
+              rules={[{ required: true, message: t('Select a payment method.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('Payment method')}
+                options={paymentMethodOptions}
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={t('Currency')}
+              name="currency"
+              rules={[{ required: true, message: t('Select a currency.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('Currency')}
+                options={currencyOptions}
+              />
+            </Form.Item>
+
+            <Space size={12} style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <Form.Item
+                label={t('Deposited amount')}
+                name="amount"
+                rules={[{ required: true, message: t('Enter the deposited amount.') }]}
+                style={{ flex: 1, marginBottom: 0 }}
+              >
+                <InputNumber
+                  min={0}
+                  max={depositExpectedAmount}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  onChange={updateDepositDifference}
+                />
+              </Form.Item>
+              <Form.Item label={t('Cutoff')} name="cutoff" style={{ flex: 1, marginBottom: 0 }}>
+                <InputNumber disabled precision={2} style={{ width: '100%' }} />
+              </Form.Item>
+            </Space>
+
+            <Form.Item label={t('Expected amount')} name="expectedAmount">
+              <InputNumber disabled precision={2} style={{ width: '100%' }} />
+            </Form.Item>
+
+            <Form.Item label={t('Difference')} name="difference">
+              <InputNumber
+                disabled
+                precision={2}
+                style={{
+                  width: '100%',
+                  color: Math.abs(getAuditNumber(depositForm.getFieldValue('difference'))) < 0.01 ? '#52c41a' : undefined
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={t('Destination')}
+              name="destination"
+              rules={[{ required: true, message: t('Select a destination.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('Select an account')}
+                options={depositAccountOptions}
+              />
+            </Form.Item>
+
+            <Form.Item label={t('Reference')} name="reference">
+              <Input />
             </Form.Item>
           </Form>
         </Modal>
