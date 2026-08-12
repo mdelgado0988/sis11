@@ -208,6 +208,7 @@
   const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 15 });
   const [transitAccountTotal, setTransitAccountTotal] = React.useState(0);
   const [transitAccountFilters, setTransitAccountFilters] = React.useState({});
+  const [transitHasSearched, setTransitHasSearched] = React.useState(false);
   const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
   const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
   const [transitFilterForm] = Form.useForm();
@@ -694,8 +695,13 @@
       }
 
       .cashier-supervisor-transit-detail {
-        padding: 8px 16px;
+        padding: 8px 16px 16px;
         background: #fafafa;
+        overflow: visible;
+      }
+
+      .cashier-supervisor-transit-detail .ant-table-pagination {
+        margin-bottom: 4px !important;
       }
 
       .cashier-supervisor-shell .ant-checkbox-inner {
@@ -1169,40 +1175,6 @@
     return 'closed=0';
   }
 
-  function buildTransitAccountFilter(filters) {
-    const conditions = [
-      "type = 'TRANSIT'",
-      "EXISTS (SELECT 1 FROM AccountMov am WHERE am.accountId = account.id AND ISNULL(am.transactionCode, '') <> 'PREMIUMPAY')"
-    ];
-    const source = filters || {};
-    const contact = escapeSqlString(source.contact);
-    const policy = escapeSqlString(source.policy);
-    const name = escapeSqlString(source.name);
-
-    if (contact) {
-      const contactId = Number(source.contact);
-      const contactIdCondition = Number.isFinite(contactId) && contactId > 0
-        ? ` OR id = ${contactId}`
-        : '';
-      conditions.push(`holderId IN (SELECT id FROM Contact WHERE cnp LIKE N'%${contact}%' OR nif LIKE N'%${contact}%' OR (RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) LIKE N'%${contact}%'${contactIdCondition})`);
-    }
-
-    if (policy) {
-      const policyId = Number(source.policy);
-      if (Number.isFinite(policyId) && policyId > 0) {
-        conditions.push(`lifePolicyId = ${policyId}`);
-      } else {
-        conditions.push(`lifePolicyId IN (SELECT id FROM LifePolicy WHERE code LIKE N'${policy}%')`);
-      }
-    }
-
-    if (name) {
-      conditions.push("holderId IN (SELECT id FROM Contact WHERE (RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) LIKE N'%" + name + "%')");
-    }
-
-    return conditions.join(' AND ');
-  }
-
   function loadTransitAccounts(params = {}) {
     const pagination = params.pagination || transitAccountPagination;
     const filters = params.filters || transitAccountFilters;
@@ -1210,21 +1182,31 @@
     const currentPage = Number(pagination && pagination.current) || 1;
 
     setTransitAccountLoading(true);
-    exe('RepoAccount', {
-      operation: 'GET',
-      include: ['Movements', 'Holder', 'LifePolicy'],
-      filter: buildTransitAccountFilter(filters),
-      size: pageSize,
-      page: Math.max(currentPage - 1, 0)
+    exe('ExeChain', {
+      chain: 'cmdGetTransitMovs',
+      context: JSON.stringify({
+        page: currentPage,
+        size: pageSize,
+        holderId: filters && filters.holderId !== undefined && filters.holderId !== null
+          ? filters.holderId
+          : '',
+        policy: getTrimmedString(filters && filters.policy),
+        name: getTrimmedString(filters && filters.name),
+        cancellations: filters && filters.cancellations === true,
+        onlyWithBalance: filters && filters.onlyWithBalance === true
+      })
     })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('Transit accounts could not be loaded.'));
         }
 
-        const rows = getRows(response);
+        const payload = response.outData && typeof response.outData === 'object'
+          ? response.outData
+          : {};
+        const rows = Array.isArray(payload.data) ? payload.data : [];
         setTransitAccountRows(rows);
-        setTransitAccountTotal(getResponseTotal(response, rows));
+        setTransitAccountTotal(Number(payload.total) || 0);
         setTransitAccountPagination({ current: currentPage, pageSize });
       })
       .catch(error => {
@@ -1236,26 +1218,31 @@
   }
 
   function getTransitMovements(account) {
-    return getRows({ outData: account && account.Movements })
-      .filter(item => getTrimmedString(item && item.transactionCode).toUpperCase() !== 'PREMIUMPAY');
+    const movements = getRows({ outData: account && account.Movements });
+    if (transitAccountFilters && transitAccountFilters.cancellations === true) {
+      return movements.filter(item => getTrimmedString(item && item.transaction) === 'Cancellation');
+    }
+
+    return movements.filter(item => getTrimmedString(item && item.transactionCode).toUpperCase() !== 'PREMIUMPAY');
   }
 
   function getTransitAccountLabel(account) {
-    const policy = account && (account.LifePolicy || account.lifePolicy);
-    const holder = account && (account.Holder || account.holder);
     return {
-      policy: getTrimmedString(policy && (policy.code || policy.id || account.lifePolicyId)) || '-',
-      contact: getTrimmedString(holder && (holder.name || holder.email || holder.cnp || holder.nif)) || getTrimmedString(account && account.holderId) || '-'
+      policy: getTrimmedString(account && (account.policyCode || account.lifePolicyCode || account.lifePolicyId)) || '-',
+      contact: getTrimmedString(account && (account.contactName || account.holderName || account.holderId)) || '-'
     };
   }
 
   function applyTransitFilters(values) {
     const nextFilters = {
-      contact: getTrimmedString(values && values.contact),
+      holderId: values && values.contact !== undefined && values.contact !== null ? values.contact : '',
       policy: getTrimmedString(values && values.policy),
-      name: getTrimmedString(values && values.name)
+      name: getTrimmedString(values && values.name),
+      cancellations: values && values.cancellations === true,
+      onlyWithBalance: values && values.onlyWithBalance === true
     };
     setTransitAccountFilters(nextFilters);
+    setTransitHasSearched(true);
     setTransitFilterVisible(false);
     loadTransitAccounts({
       filters: nextFilters,
@@ -1265,7 +1252,11 @@
 
   function clearTransitFilters() {
     transitFilterForm.resetFields();
-    applyTransitFilters({});
+    setTransitAccountFilters({});
+    setTransitHasSearched(false);
+    setTransitAccountRows([]);
+    setTransitAccountTotal(0);
+    setTransitFilterVisible(false);
   }
 
   function handleTransitTableChange(pagination) {
@@ -3127,12 +3118,6 @@
       loadCashDeskBalances();
     }
 
-    if (key === 'transit-premiums' && selectedCashierRow && selectedCashierRow.id) {
-      loadTransitAccounts({
-        filters: transitAccountFilters,
-        pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
-      });
-    }
   }
 
   function selectCashDesk(record) {
@@ -4472,9 +4457,9 @@
       key: 'balance',
       width: 130,
       align: 'right',
-      render: (_, record) => formatMoney(record && record.currentAmountBalance !== undefined && record.currentAmountBalance !== null
-        ? record.currentAmountBalance
-        : (record && record.currentBalance !== undefined && record.currentBalance !== null ? record.currentBalance : 0))
+      render: (_, record) => formatMoney(record && record.movementBalance !== undefined && record.movementBalance !== null
+        ? record.movementBalance
+        : 0)
     },
     {
       title: t('Movements'),
@@ -4494,6 +4479,7 @@
         <Button
           icon={<ReloadOutlined />}
           loading={transitAccountLoading}
+          disabled={!transitHasSearched}
           onClick={() => loadTransitAccounts({
             filters: transitAccountFilters,
             pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
@@ -5549,13 +5535,39 @@
             onFinish={applyTransitFilters}
           >
             <Form.Item label={t('Contact')} name="contact">
-              <Input allowClear placeholder={t('Search by contact or identification')} />
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                options={payerOptions}
+                loading={payerLoading}
+                onSearch={searchPayers}
+                optionLabelProp="name"
+                placeholder={t('Type at least 3 characters')}
+                notFoundContent={t('No payers found')}
+              />
             </Form.Item>
             <Form.Item label={t('Policy')} name="policy">
-              <Input allowClear placeholder={t('Search by policy id or code')} />
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                options={policyOptions}
+                loading={policyLoading}
+                onSearch={searchPolicies}
+                optionLabelProp="policyCode"
+                placeholder={t('Type policy id or code')}
+                notFoundContent={t('No policies found')}
+              />
             </Form.Item>
-            <Form.Item label={t('Name')} name="name">
-              <Input allowClear placeholder={t('Search by contact name')} />
+            <Form.Item label={t('Transaction')} name="name">
+              <Input allowClear placeholder={t('Search by transaction')} />
+            </Form.Item>
+            <Form.Item name="cancellations" valuePropName="checked">
+              <Checkbox>{t('Search cancellations')}</Checkbox>
+            </Form.Item>
+            <Form.Item name="onlyWithBalance" valuePropName="checked">
+              <Checkbox>{t('Only accounts with balance')}</Checkbox>
             </Form.Item>
           </Form>
         </Drawer>
