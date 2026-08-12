@@ -80,30 +80,43 @@ try {
   );
   const reaseguroPorPagar = toDecimal(reaseguroCedido - reaseguroComision);
   const effectiveTipo = isPolicyVersionRenewal ? 2 : tipo;
-  const title = titles[effectiveTipo];
+  const isLoadingChange = tipo === 5;
+  const isLoadingDiscount = isLoadingChange && toNumber(prima) < 0;
+  const title = isLoadingChange
+    ? (isLoadingDiscount ? 'Endoso de Descuento' : 'Endoso de Recargo')
+    : titles[effectiveTipo];
+  const referenceTitle = isLoadingChange
+    ? (isLoadingDiscount ? 'Endoso Descuento' : 'Endoso Recargo')
+    : title;
+  const descriptionTitle = isLoadingChange
+    ? (isLoadingDiscount ? 'Endoso de Descuento' : 'Endoso de Recargo')
+    : title;
+  const effectiveCode = isLoadingChange
+    ? (isLoadingDiscount ? 'EndosoDescuento' : 'EndosoRecargo')
+    : codes[effectiveTipo];
   const productName = policy.Product && policy.Product.name
     ? String(policy.Product.name)
     : '';
   const policyCode = String(policy.code || '');
 
   return [{
-    primaPorCobrar: absoluteAmount(primaPorCobrar),
-    prima: absoluteAmount(prima),
-    impuestoPrimasIncendio: absoluteAmount(impuestoPrimasIncendio),
-    gastoPrimaIncendio: absoluteAmount(gastoPrimaIncendio),
-    cancellationTax: absoluteAmount(cancellationTax),
-    nonCancellationTax: absoluteAmount(nonCancellationTax),
-    daniosPorPagar: absoluteAmount(gastoPrimaIncendio),
-    commisiones: absoluteAmount(policy.commissions),
-    reservasPorPagar: absoluteAmount(policy.commissions),
-    reaseguroCedido: absoluteAmount(reaseguroCedido),
-    reaseguroComision: absoluteAmount(reaseguroComision),
-    reaseguroPorPagar: absoluteAmount(reaseguroPorPagar),
+    primaPorCobrar: toDecimal(primaPorCobrar),
+    prima: toDecimal(prima),
+    impuestoPrimasIncendio: toDecimal(impuestoPrimasIncendio),
+    gastoPrimaIncendio: toDecimal(gastoPrimaIncendio),
+    cancellationTax: toDecimal(cancellationTax),
+    nonCancellationTax: toDecimal(nonCancellationTax),
+    daniosPorPagar: toDecimal(gastoPrimaIncendio),
+    commisiones: toDecimal(policy.commissions),
+    reservasPorPagar: toDecimal(policy.commissions),
+    reaseguroCedido: toDecimal(reaseguroCedido),
+    reaseguroComision: toDecimal(reaseguroComision),
+    reaseguroPorPagar: toDecimal(reaseguroPorPagar),
     anioMes: getAnioMes(policy),
-    reference: `${title} Incendio # ${id}`,
+    reference: `${referenceTitle} Incendio # ${id}`,
     description: `${title} ${productName} Póliza # ${policyCode}`,
     unique: `TX${cancelacion ? '-R' : ''}# ${id}`,
-    code: codes[effectiveTipo],
+    code: effectiveCode,
     cancelacion: cancelacion,
     renovacion: isRenewal,
     Policy: policy
@@ -125,7 +138,7 @@ function getCancellationAmounts(policy, change) {
   const taxRows = asArray(policy.TaxGenerated);
   const cancellationTax = sumTaxRows(taxRows, true);
   const nonCancellationTax = sumTaxRows(taxRows, false);
-  const impuestoPrimasIncendio = toDecimal(cancellationTax - nonCancellationTax);
+  const impuestoPrimasIncendio = toDecimal(baseCoverages.taxDif);
 
   return {
     prima: prima,
@@ -144,7 +157,7 @@ function getCancellationAmounts(policy, change) {
  */
 function getIssuanceOrRenewalAmounts(policy, tipo) {
   const prima = sumCoveragePremiums(policy.Coverages, policy.coverages);
-  const impuestoPrimasIncendio = sumTaxRows(asArray(policy.TaxGenerated), null);
+  const impuestoPrimasIncendio = getLatestQuoteTax(asArray(policy.TaxGenerated));
 
   return {
     prima: prima,
@@ -159,7 +172,20 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
 }
 
 /**
+ * Returns the tax from the latest quotation-related tax movement.
+ * Only QUOTE and PREQUOTE actions are valid for issuance and renewal.
+ */
+function getLatestQuoteTax(rows) {
+  const quotationRows = asArray(rows)
+    .filter(row => row && ['QUOTE', 'PREQUOTE'].includes(String(row.action || '').toUpperCase()))
+    .sort((left, right) => toPositiveInteger(right.id) - toPositiveInteger(left.id));
+
+  return quotationRows.length > 0 ? toNumber(quotationRows[0].amount) : 0;
+}
+
+/**
  * Calculates endorsement amounts from BillDiff, including negative movements.
+ * The fire expense is always calculated as 2% of the endorsement premium.
  */
 function getEndorsementAmounts(policy, change, id) {
   if (!change) {
@@ -187,10 +213,10 @@ function getEndorsementAmounts(policy, change, id) {
   const billTax = toNumber(billDiff.tax);
 
   return {
-    prima: Math.abs(toDecimal(billCoverages)),
-    impuestoPrimasIncendio: Math.abs(toDecimal(billTax)),
-    gastoPrimaIncendio: Math.abs(toDecimal(billDiff.fee)),
-    primaPorCobrar: Math.abs(toDecimal(billCoverages + billTax)),
+    prima: toDecimal(billCoverages),
+    impuestoPrimasIncendio: toDecimal(billTax),
+    gastoPrimaIncendio: toDecimal(billCoverages * 0.02),
+    primaPorCobrar: toDecimal(billCoverages + billTax),
     cancelacion: billCoverages < 0,
     renovacion: false,
     cancellationTax: 0,
@@ -247,10 +273,9 @@ function loadPolicy(filter) {
  *
  * Types 3 and 5 represent CapitalChange and LoadingChange endorsements. For
  * these types, all cessions are retrieved directly by changeId, regardless of
- * their overwritten status. The distribution is then combined with the first
- * cession found after it for each coverage, regardless of overwritten status.
- * If no later cession is available, the latest previous cession is used as a
- * fallback.
+ * their overwritten status. The distribution is combined with the first
+ * posterior cession for the same coverage and reinsurance line. If none is
+ * available, the latest previous cession is used as a fallback.
  *
  * Cancellation reports use a similar combination, but only with overwritten
  * records whose premium type is CANCELLATION.
@@ -289,34 +314,52 @@ function getPreviousCoverageCessions(currentCessions, candidateCessions) {
   const previousCessions = [];
 
   asArray(currentCessions).forEach(current => {
-    const coverageId = toPositiveInteger(current && current.coverageId);
     const currentId = toPositiveInteger(current && current.id);
+    const coverageKey = getCoverageKey(current);
+    const lineKey = normalizeKey(current && current.lineId);
+    const matchKey = `${coverageKey}|${lineKey}`;
 
-    if (coverageId <= 0 || currentId <= 0 || selectedIds[coverageId]) {
+    if (!coverageKey || !lineKey || currentId <= 0 || selectedIds[matchKey]) {
       return;
     }
 
-    // Prefer the first distribution after the current one.
+    // Prefer the first posterior distribution for the same coverage and line.
     const next = asArray(candidateCessions)
       .filter(item => item &&
-        toPositiveInteger(item.coverageId) === coverageId &&
+        getCoverageKey(item) === coverageKey &&
+        normalizeKey(item.lineId) === lineKey &&
         toPositiveInteger(item.id) > currentId)
       .sort((left, right) => toPositiveInteger(left.id) - toPositiveInteger(right.id))[0];
 
-    // Use the latest previous distribution only when no later one exists.
+    // If there is no posterior distribution, use the latest previous one.
     const previous = next || asArray(candidateCessions)
       .filter(item => item &&
-        toPositiveInteger(item.coverageId) === coverageId &&
+        getCoverageKey(item) === coverageKey &&
+        normalizeKey(item.lineId) === lineKey &&
         toPositiveInteger(item.id) < currentId)
       .sort((left, right) => toPositiveInteger(right.id) - toPositiveInteger(left.id))[0];
 
     if (previous) {
       previousCessions.push(previous);
-      selectedIds[coverageId] = true;
+      selectedIds[matchKey] = true;
     }
   });
 
   return previousCessions;
+}
+
+function getCoverageKey(item) {
+  const coverageId = toPositiveInteger(item && item.coverageId);
+  if (coverageId > 0) {
+    return `id:${coverageId}`;
+  }
+
+  const coverageName = normalizeKey(item && (item.coverageCode || item.cover));
+  return coverageName ? `name:${coverageName}` : '';
+}
+
+function normalizeKey(value) {
+  return String(value === undefined || value === null ? '' : value).trim().toUpperCase();
 }
 
 function mergeUniqueCessions(cessions) {
@@ -410,10 +453,6 @@ function toNumber(value) {
 
 function toDecimal(value) {
   return Number((Math.round((toNumber(value) + Number.EPSILON) * 100) / 100).toFixed(2));
-}
-
-function absoluteAmount(value) {
-  return Math.abs(toDecimal(value));
 }
 
 function toPositiveInteger(value) {
