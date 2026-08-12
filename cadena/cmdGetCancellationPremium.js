@@ -18,6 +18,7 @@ try {
   const input = normalizeInput(context);
   const policy = loadPolicy(input.pol);
   const movementsData = loadMovements(policy.id);
+  const payPlans = loadPolicyPayPlan(policy.id);
   const cancellationDate = input.changeDate;
 
   const movements = [];
@@ -38,14 +39,22 @@ try {
   const primasCanceladas = sumMovementValues(movements, "primaNoDevengada");
   const impuestosCancelados = sumMovementValues(movements, "impuestoNoDevengado");
   const totalCancelado = round2(primasCanceladas + impuestosCancelados);
+  const totalPagado = getPaidAmount(payPlans);
+  const issuanceSource = getOriginalIssuanceSource(movementsData.anniversaries, policy);
 
   const primaActual = round2(toNumber(policy?.annualPremium ?? policy?.anualPremium ?? 0));
   const impuestoActual = round2(toNumber(policy?.tax ?? 0));
   const totalActual = round2(toNumber(policy?.annualTotal ?? policy?.anualTotal ?? 0));
+  const paidAmounts = calculatePaidByIssuanceProportion(
+    totalPagado,
+    issuanceSource,
+    primaActual,
+    totalActual
+  );
 
-  const primaFinal = round2(primaActual - primasCanceladas);
-  const impuestoFinal = round2(impuestoActual - impuestosCancelados);
-  const totalFinal = round2(totalActual - totalCancelado);
+  const primaFinal = round2(primaActual - primasCanceladas - paidAmounts.prima);
+  const impuestoFinal = round2(impuestoActual - impuestosCancelados - paidAmounts.impuesto);
+  const totalFinal = round2(totalActual - totalCancelado - totalPagado);
 
   return {
     prima: primaFinal,
@@ -56,6 +65,9 @@ try {
     totalCancelado: totalCancelado,
     primaNoDevengada: round2(primasCanceladas),
     impuestoNoDevengado: round2(impuestosCancelados),
+    pagado: totalPagado,
+    pagadoPrima: paidAmounts.prima,
+    pagadoImpuesto: paidAmounts.impuesto,
     primaActual: primaActual,
     impuestoActual: impuestoActual,
     totalActual: totalActual,
@@ -130,6 +142,24 @@ function loadMovements(policyId) {
   }));
 
   return { anniversaries, changes };
+}
+
+function loadPolicyPayPlan(policyId) {
+  doCmd({
+    cmd: "LoadEntities",
+    data: {
+      entity: "PayPlan",
+      fields: "id, lifePolicyId, contractYear, minimum, payed, payedDate, cancellationDate",
+      filter: `lifePolicyId = ${policyId}`,
+      noTracking: true
+    }
+  });
+
+  if (!LoadEntities?.ok) {
+    throw new Error(LoadEntities?.msg || "No fue posible recuperar los pagos de la poliza");
+  }
+
+  return asArray(LoadEntities?.outData);
 }
 
 function loadAnniversaries(policyId) {
@@ -315,6 +345,42 @@ function getFinancialSource(source) {
   }
 
   return source || null;
+}
+
+function getOriginalIssuanceSource(anniversaries, policy) {
+  const issuance = asArray(anniversaries)
+    .filter(item => isExecuted(item))
+    .sort((a, b) => compareDatesAsc(a?.executionDate ?? a?.start, b?.executionDate ?? b?.start))[0]
+    || asArray(anniversaries)[0]
+    || null;
+
+  return getFinancialSource(issuance || policy) || policy;
+}
+
+function calculatePaidByIssuanceProportion(totalPaid, issuanceSource, policyPremium, policyTotal) {
+  const issuancePremium = firstMoneyValue(issuanceSource, ["annualPremium", "anualPremium", "premium"]);
+  const issuanceTax = firstMoneyValue(issuanceSource, ["tax", "impuesto"]);
+  const issuanceTotal = firstMoneyValue(issuanceSource, ["annualTotal", "anualTotal", "total"])
+    || round2(issuancePremium + issuanceTax);
+  const paid = round2(totalPaid);
+
+  if (Math.abs(issuanceTotal) <= 0.01) {
+    const fallbackTotal = round2(policyTotal);
+    if (Math.abs(fallbackTotal) <= 0.01) {
+      return { prima: paid, impuesto: 0 };
+    }
+
+    const fallbackPremium = round2(paid * (policyPremium / fallbackTotal));
+    return {
+      prima: fallbackPremium,
+      impuesto: round2(paid - fallbackPremium)
+    };
+  }
+
+  return {
+    prima: round2(paid * (issuancePremium / issuanceTotal)),
+    impuesto: round2(paid * (issuanceTax / issuanceTotal))
+  };
 }
 
 function hasAnyMoneyValue(source) {
@@ -518,6 +584,11 @@ function pad2(value) {
 
 function sumMovementValues(rows, key) {
   return asArray(rows).reduce((sum, row) => sum + Number(row?.[key] ?? 0), 0);
+}
+
+function getPaidAmount(payPlans) {
+  return round2(asArray(payPlans)
+    .reduce((sum, item) => sum + toNumber(item?.payed ?? 0), 0));
 }
 
 /*

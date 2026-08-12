@@ -203,6 +203,14 @@
   const [movementViewRecord, setMovementViewRecord] = React.useState(null);
   const [balanceRows, setBalanceRows] = React.useState([]);
   const [balanceLoading, setBalanceLoading] = React.useState(false);
+  const [transitAccountRows, setTransitAccountRows] = React.useState([]);
+  const [transitAccountLoading, setTransitAccountLoading] = React.useState(false);
+  const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [transitAccountTotal, setTransitAccountTotal] = React.useState(0);
+  const [transitAccountFilters, setTransitAccountFilters] = React.useState({});
+  const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
+  const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
+  const [transitFilterForm] = Form.useForm();
   const [reversalVisible, setReversalVisible] = React.useState(false);
   const [reversalCatalogLoading, setReversalCatalogLoading] = React.useState(false);
   const [reversalLoading, setReversalLoading] = React.useState(false);
@@ -678,6 +686,18 @@
         white-space: pre-line;
       }
 
+      .cashier-supervisor-transit-detail .ant-table-thead > tr > th,
+      .cashier-supervisor-transit-detail .ant-table-tbody > tr > td {
+        padding: 3px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-transit-detail {
+        padding: 8px 16px;
+        background: #fafafa;
+      }
+
       .cashier-supervisor-shell .ant-checkbox-inner {
         border-color: #5b6573;
       }
@@ -1147,6 +1167,124 @@
   function buildTransferWorkspaceFilter() {
     // Load every open cash desk; the grid remains remotely paginated.
     return 'closed=0';
+  }
+
+  function buildTransitAccountFilter(filters) {
+    const conditions = [
+      "type = 'TRANSIT'",
+      "EXISTS (SELECT 1 FROM AccountMov am WHERE am.accountId = account.id AND ISNULL(am.transactionCode, '') <> 'PREMIUMPAY')"
+    ];
+    const source = filters || {};
+    const contact = escapeSqlString(source.contact);
+    const policy = escapeSqlString(source.policy);
+    const name = escapeSqlString(source.name);
+
+    if (contact) {
+      const contactId = Number(source.contact);
+      const contactIdCondition = Number.isFinite(contactId) && contactId > 0
+        ? ` OR id = ${contactId}`
+        : '';
+      conditions.push(`holderId IN (SELECT id FROM Contact WHERE cnp LIKE N'%${contact}%' OR nif LIKE N'%${contact}%' OR (RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) LIKE N'%${contact}%'${contactIdCondition})`);
+    }
+
+    if (policy) {
+      const policyId = Number(source.policy);
+      if (Number.isFinite(policyId) && policyId > 0) {
+        conditions.push(`lifePolicyId = ${policyId}`);
+      } else {
+        conditions.push(`lifePolicyId IN (SELECT id FROM LifePolicy WHERE code LIKE N'${policy}%')`);
+      }
+    }
+
+    if (name) {
+      conditions.push("holderId IN (SELECT id FROM Contact WHERE (RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))) LIKE N'%" + name + "%')");
+    }
+
+    return conditions.join(' AND ');
+  }
+
+  function loadTransitAccounts(params = {}) {
+    const pagination = params.pagination || transitAccountPagination;
+    const filters = params.filters || transitAccountFilters;
+    const pageSize = Number(pagination && pagination.pageSize) || 15;
+    const currentPage = Number(pagination && pagination.current) || 1;
+
+    setTransitAccountLoading(true);
+    exe('RepoAccount', {
+      operation: 'GET',
+      include: ['Movements', 'Holder', 'LifePolicy'],
+      filter: buildTransitAccountFilter(filters),
+      size: pageSize,
+      page: Math.max(currentPage - 1, 0)
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Transit accounts could not be loaded.'));
+        }
+
+        const rows = getRows(response);
+        setTransitAccountRows(rows);
+        setTransitAccountTotal(getResponseTotal(response, rows));
+        setTransitAccountPagination({ current: currentPage, pageSize });
+      })
+      .catch(error => {
+        setTransitAccountRows([]);
+        setTransitAccountTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setTransitAccountLoading(false));
+  }
+
+  function getTransitMovements(account) {
+    return getRows({ outData: account && account.Movements })
+      .filter(item => getTrimmedString(item && item.transactionCode).toUpperCase() !== 'PREMIUMPAY');
+  }
+
+  function getTransitAccountLabel(account) {
+    const policy = account && (account.LifePolicy || account.lifePolicy);
+    const holder = account && (account.Holder || account.holder);
+    return {
+      policy: getTrimmedString(policy && (policy.code || policy.id || account.lifePolicyId)) || '-',
+      contact: getTrimmedString(holder && (holder.name || holder.email || holder.cnp || holder.nif)) || getTrimmedString(account && account.holderId) || '-'
+    };
+  }
+
+  function applyTransitFilters(values) {
+    const nextFilters = {
+      contact: getTrimmedString(values && values.contact),
+      policy: getTrimmedString(values && values.policy),
+      name: getTrimmedString(values && values.name)
+    };
+    setTransitAccountFilters(nextFilters);
+    setTransitFilterVisible(false);
+    loadTransitAccounts({
+      filters: nextFilters,
+      pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
+    });
+  }
+
+  function clearTransitFilters() {
+    transitFilterForm.resetFields();
+    applyTransitFilters({});
+  }
+
+  function handleTransitTableChange(pagination) {
+    loadTransitAccounts({
+      filters: transitAccountFilters,
+      pagination: { current: pagination.current, pageSize: pagination.pageSize }
+    });
+  }
+
+  function getTransitDetailPage(accountId, total) {
+    const page = transitDetailPagination[accountId] || { current: 1, pageSize: 10 };
+    return { ...page, total };
+  }
+
+  function setTransitDetailPage(accountId, pagination) {
+    setTransitDetailPagination(current => ({
+      ...current,
+      [accountId]: { current: pagination.current, pageSize: pagination.pageSize }
+    }));
   }
 
   function getCurrentUtcDateTime() {
@@ -2988,6 +3126,13 @@
     if (key === 'balances' && selectedCashierRow && selectedCashierRow.id) {
       loadCashDeskBalances();
     }
+
+    if (key === 'transit-premiums' && selectedCashierRow && selectedCashierRow.id) {
+      loadTransitAccounts({
+        filters: transitAccountFilters,
+        pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
+      });
+    }
   }
 
   function selectCashDesk(record) {
@@ -4295,6 +4440,125 @@
     </Card>
   );
 
+  const transitAccountColumns = [
+    {
+      title: t('Account'),
+      dataIndex: 'accNo',
+      key: 'accNo',
+      width: 150,
+      render: value => getTrimmedString(value) || '-'
+    },
+    {
+      title: t('Policy'),
+      key: 'policy',
+      width: 150,
+      render: (_, record) => getTransitAccountLabel(record).policy
+    },
+    {
+      title: t('Contact'),
+      key: 'contact',
+      width: 220,
+      render: (_, record) => getTransitAccountLabel(record).contact
+    },
+    {
+      title: t('Currency'),
+      dataIndex: 'currency',
+      key: 'currency',
+      width: 100,
+      align: 'center'
+    },
+    {
+      title: t('Balance'),
+      key: 'balance',
+      width: 130,
+      align: 'right',
+      render: (_, record) => formatMoney(record && record.currentAmountBalance !== undefined && record.currentAmountBalance !== null
+        ? record.currentAmountBalance
+        : (record && record.currentBalance !== undefined && record.currentBalance !== null ? record.currentBalance : 0))
+    },
+    {
+      title: t('Movements'),
+      key: 'movementCount',
+      width: 110,
+      align: 'center',
+      render: (_, record) => getTransitMovements(record).length
+    }
+  ];
+
+  const transitPremiumsTabContent = (
+    <Card size="small">
+      <div className="cashier-supervisor-toolbar">
+        <Button type="primary" icon={<FilterOutlined />} onClick={() => setTransitFilterVisible(true)}>
+          {t('Filter')}
+        </Button>
+        <Button
+          icon={<ReloadOutlined />}
+          loading={transitAccountLoading}
+          onClick={() => loadTransitAccounts({
+            filters: transitAccountFilters,
+            pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
+          })}
+        >
+          {t('Refresh')}
+        </Button>
+      </div>
+      <Table
+        rowKey={record => String(record && record.id)}
+        columns={transitAccountColumns}
+        dataSource={transitAccountRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table"
+        loading={transitAccountLoading}
+        pagination={{
+          current: transitAccountPagination.current,
+          pageSize: transitAccountPagination.pageSize,
+          total: transitAccountTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100']
+        }}
+        onChange={handleTransitTableChange}
+        scroll={{ x: 900, y: transferScrollY }}
+        expandable={{
+          rowExpandable: record => getTransitMovements(record).length > 0,
+          expandedRowRender: record => {
+            const movements = getTransitMovements(record);
+            const accountId = Number(record && record.id) || 0;
+            const page = getTransitDetailPage(accountId, movements.length);
+            const start = (page.current - 1) * page.pageSize;
+            const detailRows = movements.slice(start, start + page.pageSize);
+
+            return (
+              <div className="cashier-supervisor-transit-detail">
+                <Table
+                  rowKey={item => String(item && item.id)}
+                  size="small"
+                  bordered
+                  pagination={{
+                    current: page.current,
+                    pageSize: page.pageSize,
+                    total: page.total,
+                    showSizeChanger: false,
+                    onChange: nextPage => setTransitDetailPage(accountId, nextPage)
+                  }}
+                  columns={[
+                    { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 100 },
+                    { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, render: value => formatDate(value) },
+                    { title: t('Transaction'), dataIndex: 'transaction', key: 'transaction' },
+                    { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 160 },
+                    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: value => formatMoney(value) }
+                  ]}
+                  dataSource={detailRows}
+                  className="cashier-supervisor-transit-detail"
+                />
+              </div>
+            );
+          }
+        }}
+      />
+    </Card>
+  );
+
   const premiumCollectionTabContent = (
     <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar">
@@ -4826,6 +5090,16 @@
             >
               <BalanceIcon /> {t('Balances')}
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'transit-premiums'}
+              disabled={!selectedCashierRow}
+              className={`cashier-supervisor-tab${activeTab === 'transit-premiums' ? ' active' : ''}`}
+              onClick={() => handleTabChange('transit-premiums')}
+            >
+              <PremiumIcon /> {t('Transit premiums')}
+            </button>
           </div>
           <div className="cashier-supervisor-tab-content" role="tabpanel">
             {activeTab === 'premiums'
@@ -4836,6 +5110,8 @@
                   ? movementsTabContent
                   : activeTab === 'balances'
                     ? balancesTabContent
+                    : activeTab === 'transit-premiums'
+                      ? transitPremiumsTabContent
                     : cashDeskTabContent}
           </div>
             </div>
@@ -5249,6 +5525,37 @@
 
             <Form.Item label={t('Issuance date to')} name="issuanceTo">
               <DatePicker format="YYYY-MM-DD" style={{ width: '100%' }} />
+            </Form.Item>
+          </Form>
+        </Drawer>
+
+        <Drawer
+          title={t('Transit premium filters')}
+          placement="right"
+          width={360}
+          open={transitFilterVisible}
+          onClose={() => setTransitFilterVisible(false)}
+          destroyOnClose={false}
+          footer={(
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={clearTransitFilters}>{t('Clear')}</Button>
+              <Button type="primary" onClick={() => transitFilterForm.submit()}>{t('Apply')}</Button>
+            </div>
+          )}
+        >
+          <Form
+            form={transitFilterForm}
+            layout="vertical"
+            onFinish={applyTransitFilters}
+          >
+            <Form.Item label={t('Contact')} name="contact">
+              <Input allowClear placeholder={t('Search by contact or identification')} />
+            </Form.Item>
+            <Form.Item label={t('Policy')} name="policy">
+              <Input allowClear placeholder={t('Search by policy id or code')} />
+            </Form.Item>
+            <Form.Item label={t('Name')} name="name">
+              <Input allowClear placeholder={t('Search by contact name')} />
             </Form.Item>
           </Form>
         </Drawer>
