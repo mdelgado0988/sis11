@@ -132,6 +132,8 @@
                         (amount / basePremium) * 100;
                 }
 
+                validateDiscountPercentage(loadingPercent);
+
                 const newLoading = selected
                     ? {
                         ...selected,
@@ -192,6 +194,8 @@
                                 basePremium > 0
                                     ? (loadingToApply.fixedAmount / basePremium) * 100
                                     : 0;
+
+                            validateDiscountPercentage(loadingToApply.loading);
                         }
 
                         cov.Loadings = [
@@ -268,7 +272,6 @@
                 setCoverages(Coverages.filter( cov => cov.basePremium > 0))
                 setisActive(active);
                 setPolicyStart(start || null);
-                showSuccess('Poliza Cargada');
             } catch (error) {
                 showError(error);
             } finally{
@@ -713,7 +716,7 @@
      * @returns {JSX.Element}
      */
     function LoadingForm(){
-        const { form, riskTypes, onAddLoading, hideLoadingForm, selected, removeLoading } = useAppContext();
+        const { form, riskTypes, onAddLoading, hideLoadingForm, selected, selectedCov, removeLoading } = useAppContext();
         useEffect(()=>{
             if(!selected){
                 form.resetFields();
@@ -760,12 +763,21 @@
                     <Form.Item
                         noStyle
                         shouldUpdate={function(prev, curr){
-                            return prev.byAmount !== curr.byAmount;
+                            return prev.byAmount !== curr.byAmount
+                                || prev.loading !== curr.loading
+                                || prev.fixedAmount !== curr.fixedAmount;
                         }}
                     >
                         {function({ getFieldValue }){
 
                             const byAmount = getFieldValue('byAmount');
+                            const fieldValue = getFieldValue(byAmount ? 'fixedAmount' : 'loading');
+                            const basePremium = Number(selectedCov && selectedCov.basePremium || 0);
+                            const fieldPercentage = byAmount
+                                ? (basePremium > 0 ? (Number(fieldValue || 0) / basePremium) * 100 : 0)
+                                : Number(fieldValue || 0);
+                            const hasInvalidDiscount = Number.isFinite(fieldPercentage)
+                                && fieldPercentage <= -100;
 
                             return (
                                 <Form.Item
@@ -781,9 +793,15 @@
                                             ? 'Monto obligatorio'
                                             : 'Porcentaje obligatorio'
                                     }]}
+                                    validateStatus={hasInvalidDiscount ? 'error' : ''}
+                                    help={hasInvalidDiscount
+                                        ? 'El descuento no puede ser mayor o igual al 100%.'
+                                        : undefined}
                                 >
                                     <InputNumber
                                         style={{ width:'100%' }}
+                                        precision={4}
+                                        step={0.0001}
                                     />
                                 </Form.Item>
                             );
@@ -830,6 +848,13 @@
      */
     function getTotalLoading(Loadings){
         return (Loadings || []).map(load => load.loading).reduce((a,b) => a + (Number(b) || 0), 0)
+    }
+
+    function validateDiscountPercentage(value) {
+        const percentage = Number(value);
+        if (Number.isFinite(percentage) && percentage <= -100) {
+            throw new Error('El descuento no puede ser mayor o igual al 100%.');
+        }
     }
     /**
      * @function renderNumber
@@ -890,8 +915,25 @@
         notification.success({description: msg, placement: 'top', duration: 2 })
     }
     function showError(error){
-        const msg = error instanceof Error ? error.message : String(error);
-        notification.error({description: msg, placement: 'top', duration: 2 })
+        const validationMessage = error && Array.isArray(error.errorFields)
+            ? error.errorFields
+                .flatMap(function(field){
+                    return Array.isArray(field.errors) ? field.errors : [];
+                })
+                .map(function(item){ return String(item || '').trim(); })
+                .find(function(item){ return item; })
+            : '';
+        const msg = validationMessage || (error instanceof Error
+            ? String(error.message || '').trim()
+            : typeof error === 'string'
+                ? error.trim()
+                : '');
+
+        notification.error({
+            description: msg || 'Ocurrió un error inesperado.',
+            placement: 'top',
+            duration: 2
+        })
     }
 
 }
