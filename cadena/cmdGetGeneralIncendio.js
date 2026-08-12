@@ -72,7 +72,14 @@ try {
     let deductibleReturn = 0;
     let limitReturn = 0;
     let descriptionReturn = '';
-    const isCapitalChange = endoso && safeAction === 'ChangePolicyCapital';
+    const isInformativeChange = endoso && getChangeInformative(extra);
+
+    // Capital and insured-object changes preserve the existing coverage
+    // premium and prorate only the premium difference, unless informative.
+    const isCapitalOrObjectChange = endoso && !isInformativeChange && [
+      'ChangePolicyCapital',
+      'ChangeInsuredObject'
+    ].includes(safeAction);
     const oldCapital = Number(policyGet?.poliza?.insuredSum || 0);
     const newCapital = Number(extra?.data?.newCapital || extra?.newCapital || 0);
 
@@ -115,8 +122,9 @@ try {
 
       const effectiveDate = extra?.data?.effectiveDate ?? extra?.effectiveDate;
 
-    if (isCapitalChange) {
-        // GLOB-925. For capital changes we validate the prorate from the effective date
+    if (isCapitalOrObjectChange) {
+        // GLOB-925. For capital and insured-object changes we validate the
+        // prorate from the effective date
         // because the proration calculated by the endorsement flow can differ from the
         // business date that should drive the final premium. We keep the date-based
         // calculation as the source of truth for this scenario.
@@ -340,10 +348,10 @@ try {
         const primaSinProrrata = premiumReturn;
         const primaExistenteCobertura = Number(covItem?.premium || covItem?.basePremium || 0);
 
-        // GLOB-925. For ChangePolicyCapital we keep the current coverage premium as the base,
-        // calculate the premium delta produced by the capital increase, prorate only that delta
-        // when the tariff allows it, and then add the prorated delta back to the existing coverage premium.
-        if (isCapitalChange) {
+        // GLOB-925. For capital and insured-object changes we keep the current
+        // coverage premium as the base, prorate only the calculated premium
+        // difference when the tariff allows it, and add that difference back.
+        if (isCapitalOrObjectChange) {
             if (rowtarifas.usaProrrata === true && prorate > 0) {
                 const deltaPrima = primaSinProrrata - primaExistenteCobertura;
                 const deltaProrrateado = deltaPrima * prorate;
@@ -508,6 +516,30 @@ function getChangeInsuredObjectChangeUserData(extra) {
 
   return result;
   
+}
+
+function getChangeInformative(extra) {
+  const directValue = extra?.informative ?? extra?.data?.informative;
+  if (directValue !== undefined && directValue !== null) {
+    return Boolean(directValue);
+  }
+
+  const changeId = Number(extra?.id ?? extra?.data?.id ?? extra?.changeId ?? extra?.data?.changeId);
+  if (!Number.isFinite(changeId) || changeId <= 0) {
+    return false;
+  }
+
+  doCmd({
+    cmd: "LoadEntity",
+    data: {
+      entity: "Change",
+      fields: "informative",
+      filter: `id = ${changeId}`,
+      noTracking: true
+    }
+  });
+
+  return Boolean(LoadEntity.outData?.informative);
 }
 
 function safeJson(value, fallback) {
