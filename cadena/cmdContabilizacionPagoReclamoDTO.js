@@ -83,21 +83,27 @@ try {
     throw new Error('No se recuperó el nombre del ramo de la póliza');
   }
 
+  const tipoPago = getTrimmedString(payout.reserveType) === 'IN'
+    ? 'PagoReclamo'
+    : 'GastoReclamo';
+  const conceptoPago = tipoPago === 'GastoReclamo' ? 'Gasto' : 'Pago';
+  const codigoPago = tipoPago === 'GastoReclamo'
+    ? 'GastosSiniestros'
+    : 'PagosSiniestros';
+
   return [{
     monto: Math.abs(toNumber(payment.total)),
     reaseguroCedido: reinsuranceAmount,
     aceptantes: acceptants,
     cuentaBancaria: getTrimmedString(account.catalogAccountCode),
     reclamoId: getPositiveInteger(payment.claimId),
-    code: 'PagosSiniestros',
+    code: codigoPago,
     lob: getTrimmedString(policy.lob),
     referencia: `Liquidación Reclamo # ${payment.claimId} Solicitud # ${paymentId}`,
-    description: `Pago de reclamo ${payment.claimId} Póliza ${getTrimmedString(policy.code)} Solicitud ${paymentId}`,
+    description: `${conceptoPago} de reclamo ${payment.claimId} Póliza ${getTrimmedString(policy.code)} Solicitud ${paymentId}`,
     unique: `TX-R#${payment.claimId}-S#${paymentId}`,
     ramo: getTrimmedString(lob.name),
-    tipoPago: getTrimmedString(payout.reserveType) === 'IN'
-      ? 'PagoReclamo'
-      : 'GastoReclamo',
+    tipoPago: tipoPago,
     id: paymentId
   }];
 } catch (error) {

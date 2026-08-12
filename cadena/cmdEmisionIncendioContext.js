@@ -157,7 +157,10 @@ function getCancellationAmounts(policy, change) {
  */
 function getIssuanceOrRenewalAmounts(policy, tipo) {
   const prima = sumCoveragePremiums(policy.Coverages, policy.coverages);
-  const impuestoPrimasIncendio = getLatestQuoteTax(asArray(policy.TaxGenerated));
+  const taxRows = asArray(policy.TaxGenerated);
+  const impuestoPrimasIncendio = taxRows.length > 0
+    ? getLatestQuoteTax(taxRows)
+    : toDecimal(policy.tax);
 
   return {
     prima: prima,
@@ -172,12 +175,12 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
 }
 
 /**
- * Returns the tax from the latest quotation-related tax movement.
- * Only QUOTE and PREQUOTE actions are valid for issuance and renewal.
+ * Returns the tax from the latest issuance or renewal tax movement.
+ * QUOTE and PREQUOTE apply to issuance; ANNIVERSARY applies to renewals.
  */
 function getLatestQuoteTax(rows) {
   const quotationRows = asArray(rows)
-    .filter(row => row && ['QUOTE', 'PREQUOTE'].includes(String(row.action || '').toUpperCase()))
+    .filter(row => row && ['QUOTE', 'PREQUOTE', 'ANNIVERSARY'].includes(String(row.action || '').toUpperCase()))
     .sort((left, right) => toPositiveInteger(right.id) - toPositiveInteger(left.id));
 
   return quotationRows.length > 0 ? toNumber(quotationRows[0].amount) : 0;
