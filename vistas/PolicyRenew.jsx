@@ -1954,6 +1954,14 @@
       const [tableDataResults, setTableDataResults] = useState([]);
       const [loadingResults, setLoadingResults] = useState(false);
       const [resultsModalVisible, setResultsModalVisible] = useState(false);
+
+      useEffect(() => {
+        // A detail selection belongs only to the currently opened renewal batch.
+        setSelectedRowDetailKeys([]);
+        setTableDataDetail([]);
+        setSearchTotalDetail(0);
+        setPaginationDetail({ current: 1, pageSize: 15, total: 0 });
+      }, [loteId]);
           
       const [modalState, setModalState] = useState({
         modalFormVisible: false,
@@ -2015,7 +2023,9 @@
           setProcessType('');
           setPercent(0);
           setSelectedRowDetailKeys([]);
-                   
+          setTableDataDetail([]);
+          setSearchTotalDetail(0);
+
           setPaginationDetail({ current: 1, pageSize: 25, total: 0 });
           setLoteId(loteId);
           setWfId(wfIdParam);

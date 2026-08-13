@@ -14,4 +14,4 @@ delete from LifePolicy where id in (@polizaId);
 delete from batch where id = @loteId;
 
 return
-select id, code, originalPolicyId, version, policyVersion, originalPolicyId, originalStart from LifePolicy where code = 'IN-GL-000722'
+select id, code, originalPolicyId, version, policyVersion, originalPolicyId, originalStart,[start], [end] from LifePolicy where code = 'IN-MUL-CONT-002152'

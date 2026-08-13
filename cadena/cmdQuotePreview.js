@@ -73,7 +73,10 @@ function getUserEmail(commandContext) {
 function updateQuotationEventUser(policyId, userEmail) {
   const sql = `
     UPDATE eventRow
-    SET [user] = '${escapeSqlString(userEmail)}'
+    SET
+      [user] = '${escapeSqlString(userEmail)}',
+      [name] = 'Cotizado',
+      [type] = 'Cotizado'
     FROM [PolicyEvent] eventRow
     INNER JOIN (
       SELECT TOP (1) id AS eventId
@@ -162,5 +165,3 @@ function getErrorMessage(error) {
 
   return String(error || 'Error desconocido al cotizar la póliza.');
 }
-
-

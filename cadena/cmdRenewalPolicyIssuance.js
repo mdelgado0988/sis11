@@ -283,7 +283,10 @@ function issuePolicy(policyId) {
 function updateIssuanceEventUser(policyId, userEmail) {
   const sql = `
     UPDATE eventRow
-    SET [user] = '${escapeSqlString(userEmail)}'
+    SET
+      [user] = '${escapeSqlString(userEmail)}',
+      [name] = 'Renovación ejecutada',
+      [type] = 'anniversary'
     FROM [PolicyEvent] eventRow
     INNER JOIN (
       SELECT TOP (1) id AS eventId
