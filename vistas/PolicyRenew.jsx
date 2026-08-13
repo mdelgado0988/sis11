@@ -2370,7 +2370,7 @@
             throw new Error(execution && execution.msg ? execution.msg : `No fue posible ejecutar el lote ${batchId}.`);
           }
 
-          beginBatchProgress(batchId, 'issuance');
+          beginBatchProgress(batchId, 'issuance', userEmail);
           showBatchInfo({
             message: 'Lote de emisión',
             description: `Se inició la emisión de ${policyIds.length} póliza(s).`,
@@ -2610,7 +2610,7 @@
                       }
 
                       return getCurrentUserEmail().then(userEmail => {
-                        beginBatchProgress(idLoteQuote, 'quotation', userEmail);
+                        beginBatchProgress(idLoteQuote, 'quotation');
                         const quotationMessage = resultado.msg || x.msg || 'Lote de tarificación iniciado correctamente.';
                         showBatchInfo({
                           message: 'Lote de tarificación',
@@ -2988,9 +2988,22 @@
                           ? response.msg
                           : 'No fue posible actualizar los resultados del lote de emisión.');
                       }
+                    }).then(() => exe('ExeChain', {
+                      chain: 'cmdUpdateRenewalPolicyEventUser',
+                      context: JSON.stringify({
+                        processBatchId: validBatchId,
+                        userEmail: processUserEmail || ''
+                      })
+                    })).then(result => {
+                      const response = result && result.outData ? result.outData : result;
+                      if (!response || response.ok === false) {
+                        throw new Error(response && response.msg
+                          ? response.msg
+                          : 'No fue posible actualizar el usuario de las actividades de emisión.');
+                      }
                     })
-                  : exe('ExeChain', {
-                      chain: 'cmdUpdateQuotationPolicyEventUser',
+                  : Promise.resolve(); /*
+                      // Quotation event user is updated inside cmdQuotePreview.
                       context: JSON.stringify({
                         processBatchId: validBatchId,
                         userEmail: processUserEmail || ''
@@ -3002,7 +3015,7 @@
                           ? response.msg
                           : 'No fue posible actualizar el usuario de los eventos de cotización.');
                       }
-                    });
+                    }); */
 
                 finishProcess
                   .then(() => {

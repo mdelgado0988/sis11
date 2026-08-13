@@ -13,6 +13,11 @@
 try {
   const input = validateInput(context);
   const selectedPolicyIds = parseSelectedPolicyIds(input.anniversaries);
+  const userEmail = getCurrentUserEmail();
+
+  if (!userEmail) {
+    throw new Error('No fue posible recuperar el usuario que ejecutó la cotización');
+  }
 
   if (selectedPolicyIds.length === 0) {
     return buildResult(false, 'Debe seleccionar al menos una póliza para cotizar', 0);
@@ -49,7 +54,7 @@ try {
     throw new Error(sourceBatch.msg);
   }
 
-  const policies = buildQuotationRows(sourceBatch.rows, selectedPolicyIds, input.loteId);
+  const policies = buildQuotationRows(sourceBatch.rows, selectedPolicyIds, input.loteId, userEmail);
   if (policies.length === 0) {
     return buildResult(false, 'No se encontraron pólizas válidas en el lote seleccionado', 0);
   }
@@ -203,7 +208,7 @@ function getSourceBatch(loteId) {
   return { ok: true, msg: '', rows: rows };
 }
 
-function buildQuotationRows(rows, selectedPolicyIds, loteId) {
+function buildQuotationRows(rows, selectedPolicyIds, loteId, userEmail) {
   const selected = selectedPolicyIds.map(value => String(value));
 
   return rows
@@ -212,8 +217,21 @@ function buildQuotationRows(rows, selectedPolicyIds, loteId) {
       row[4],
       row[1],
       row[4],
-      loteId
+      loteId,
+      userEmail
     ]);
+}
+
+function getCurrentUserEmail() {
+  doCmd({ cmd: 'GetCurrentUser', data: {} });
+
+  if (typeof GetCurrentUser === 'undefined' || !GetCurrentUser || GetCurrentUser.ok === false) {
+    return '';
+  }
+
+  const source = GetCurrentUser.outData;
+  const user = Array.isArray(source) ? source[0] : source;
+  return String(user && (user.email || user.Email || user.userEmail) || '').trim();
 }
 
 function getQuotationImportConfig() {

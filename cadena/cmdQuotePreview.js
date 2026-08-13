@@ -14,6 +14,7 @@
  */
 
 const policyId = getPolicyId(context);
+const userEmail = getUserEmail(context);
 
 if (!policyId) {
   throw new Error('Debe informar un lifePolicyId válido para cotizar la póliza.');
@@ -21,6 +22,7 @@ if (!policyId) {
 
 loadPolicy(policyId);
 const quoteResult = executePolicyQuote(policyId);
+updateQuotationEventUser(policyId, userEmail);
 const documentResult = generateQuotationDocument(policyId);
 
 if (!documentResult.ok) {
@@ -51,8 +53,48 @@ function getPolicyId(commandContext) {
     ? commandContext.row
     : commandContext || {};
 
-  const policyId = Number(source.lifePolicyId || 0);
+  const policyId = Number(source.lifePolicyId || source[0] || 0);
   return Number.isInteger(policyId) && policyId > 0 ? policyId : 0;
+}
+
+function getUserEmail(commandContext) {
+  const source = commandContext && commandContext.row
+    ? commandContext.row
+    : commandContext || {};
+  const value = String(source.userEmail || source[4] || '').trim();
+
+  if (!value) {
+    throw new Error('Debe informar un userEmail válido para actualizar el evento de cotización.');
+  }
+
+  return value;
+}
+
+function updateQuotationEventUser(policyId, userEmail) {
+  const sql = `
+    UPDATE eventRow
+    SET [user] = '${escapeSqlString(userEmail)}'
+    FROM [PolicyEvent] eventRow
+    INNER JOIN (
+      SELECT TOP (1) id AS eventId
+      FROM [PolicyEvent]
+      WHERE lifePolicyId = ${policyId}
+        AND [type] = 'ACTION'
+        AND [name] IN ('Quoted', 'Cotizado')
+      ORDER BY id DESC
+    ) latestEvent ON latestEvent.eventId = eventRow.id;`;
+
+  doCmd({ cmd: 'DoQuery', data: { sql: sql } });
+
+  if (typeof DoQuery === 'undefined' || !DoQuery || DoQuery.ok === false) {
+    throw new Error(DoQuery && DoQuery.msg
+      ? DoQuery.msg
+      : `No fue posible actualizar el usuario del evento de cotización de la póliza ${policyId}.`);
+  }
+}
+
+function escapeSqlString(value) {
+  return String(value || '').replace(/'/g, "''");
 }
 
 function loadPolicy(policyId) {
@@ -120,7 +162,5 @@ function getErrorMessage(error) {
 
   return String(error || 'Error desconocido al cotizar la póliza.');
 }
-
-
 
 
