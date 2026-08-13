@@ -67,7 +67,7 @@
     );
 
     const renderDate = (value) => {
-        if(!value) return ' - ';
+        if (!value) return ' - ';
         return new Date(value).toLocaleDateString('es-ES');
     }
 
@@ -76,24 +76,40 @@
       const style = document.createElement("style");
       style.innerHTML = `
         /* Fuerza que el scrollbar horizontal siempre esté reservado */
-        .renovacion-view .ant-table-body {
-          overflow-x: scroll !important;
-          overflow-y: scroll !important;
+        .renovacion-shell .ant-table-body {
+          overflow: auto !important;
+          height: clamp(160px, calc(100dvh - 570px), 520px) !important;
+          max-height: clamp(160px, calc(100dvh - 570px), 520px) !important;
+          scrollbar-gutter: stable;
           scrollbar-color: #b7b7b7 #f5f5f5;
         }
 
-        .renovacion-view .ant-table-body::-webkit-scrollbar {
+        .renovacion-shell .ant-table-body::-webkit-scrollbar {
           width: 12px;
           height: 12px;
         }
 
-        .renovacion-view .ant-table-body::-webkit-scrollbar-thumb {
+        .renovacion-shell .ant-table-body::-webkit-scrollbar-thumb {
           background: #b7b7b7;
           border-radius: 6px;
         }
 
-        .renovacion-view .ant-table-body::-webkit-scrollbar-track {
+        .renovacion-shell .ant-table-body::-webkit-scrollbar-track {
           background: #f5f5f5;
+        }
+
+        @media (max-height: 900px) {
+          .renovacion-shell .ant-table-body {
+            height: clamp(120px, calc(100dvh - 500px), 260px) !important;
+            max-height: clamp(120px, calc(100dvh - 500px), 260px) !important;
+            overflow-y: scroll !important;
+            scrollbar-gutter: stable;
+          }
+
+          .renovacion-tab-content:has(.renovacion-filter-collapse .ant-collapse-content-hidden) .ant-table-body {
+            height: clamp(140px, calc(100dvh - 300px), 360px) !important;
+            max-height: clamp(140px, calc(100dvh - 300px), 360px) !important;
+          }
         }
 
         .renovacion-warning-button {
@@ -168,6 +184,246 @@
           border-right-color: #0958d9;
           color: #fff;
         }
+
+        .renovacion-view .ant-checkbox-inner {
+          border-color: #5b6573;
+        }
+
+        .renovacion-view .ant-checkbox:hover .ant-checkbox-inner {
+          border-color: #1f2937;
+        }
+
+        .renovacion-shell {
+          height: 100dvh;
+          width: 100%;
+          min-height: 0;
+          overflow: hidden;
+          padding: 4px 8px 8px;
+          box-sizing: border-box;
+        }
+
+        .renovacion-shell .renovacion-layout {
+          height: 100%;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: transparent;
+        }
+
+        .renovacion-shell .ant-layout-content {
+          height: 100%;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .renovacion-shell .renovacion-card {
+          height: 100%;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .renovacion-shell .renovacion-card > .ant-card-body {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          padding: 0;
+        }
+
+        .renovacion-shell .ant-tabs {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .renovacion-shell .ant-tabs-content-holder,
+        .renovacion-shell .ant-tabs-content,
+        .renovacion-shell .ant-tabs-tabpane {
+          min-height: 0;
+        }
+
+        .renovacion-shell .ant-tabs-content-holder,
+        .renovacion-shell .ant-tabs-content {
+          flex: 1 1 auto;
+          height: 100%;
+        }
+
+        .renovacion-shell .ant-tabs-tabpane {
+          height: 100%;
+          overflow: hidden;
+          min-height: 0;
+        }
+
+        .renovacion-shell .ant-tabs-tabpane:not(.ant-tabs-tabpane-hidden) {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .renovacion-shell .ant-tabs-tabpane-hidden {
+          display: none !important;
+        }
+
+        .renovacion-shell .ant-tabs-tabpane:not(.ant-tabs-tabpane-hidden) > div {
+          flex: 1 1 auto;
+          min-height: 0;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .renovacion-shell .ant-table-wrapper,
+        .renovacion-shell .ant-table-container,
+        .renovacion-shell .ant-table-content {
+          min-height: 0;
+        }
+
+        .renovacion-shell .ant-table-wrapper {
+          max-height: 100%;
+          overflow: hidden;
+        }
+
+        .renovacion-shell .ant-table-container {
+          min-width: 0;
+        }
+
+        .renovacion-tab-content {
+          flex: 1 1 auto;
+          min-height: 0;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .renovacion-tab-content > div[style*="margin-top"] {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .renovacion-tab-content > .renovacion-view {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        /* Give the grid the space released when the filters are collapsed. */
+        .renovacion-tab-content:has(.renovacion-filter-collapse .ant-collapse-content-hidden) .ant-table-body {
+          height: clamp(220px, calc(100dvh - 370px), 680px) !important;
+          max-height: clamp(220px, calc(100dvh - 370px), 680px) !important;
+        }
+
+        .renovacion-batch-content > div {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          margin-top: 0 !important;
+        }
+
+        .renovacion-batch-table {
+          flex: 0 1 auto;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .renovacion-batch-table .ant-table-wrapper,
+        .renovacion-batch-table .ant-spin-nested-loading,
+        .renovacion-batch-table .ant-spin-container,
+        .renovacion-batch-table .ant-table {
+          height: 100%;
+          min-height: 0;
+        }
+
+        .renovacion-batch-table .ant-table-container {
+          height: 100%;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .renovacion-batch-table .ant-table-body {
+          flex: 0 1 auto;
+          height: clamp(260px, calc(100dvh - 350px), 560px) !important;
+          max-height: clamp(260px, calc(100dvh - 350px), 560px) !important;
+          overflow-y: auto !important;
+        }
+
+        .renovacion-batch-table .ant-table-wrapper {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+
+        .renovacion-batch-table .ant-spin-nested-loading,
+        .renovacion-batch-table .ant-spin-container {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+
+        .renovacion-batch-table .ant-table {
+          height: auto !important;
+        }
+
+        .renovacion-batch-table .ant-pagination {
+          margin-bottom: 8px;
+        }
+
+        .renovacion-detail-table {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .renovacion-detail-table .ant-table-body {
+          height: clamp(260px, calc(100dvh - 350px), 560px) !important;
+          max-height: clamp(260px, calc(100dvh - 350px), 560px) !important;
+          overflow-y: auto !important;
+        }
+
+        .renovacion-detail-table .ant-pagination {
+          margin-bottom: 8px;
+        }
+
+        .renovacion-filter-collapse {
+          margin: 0 !important;
+        }
+
+        .renovacion-filter-collapse .ant-collapse-item {
+          border: 0 !important;
+        }
+
+        .renovacion-filter-collapse .ant-collapse-header {
+          padding: 6px 16px !important;
+          min-height: 32px;
+          align-items: center !important;
+        }
+
+        .renovacion-filter-collapse .ant-collapse-content-box {
+          padding: 2px 16px 0 !important;
+        }
+
+        .renovacion-filter-card .ant-card-body {
+          padding: 0 !important;
+        }
+
+        .renovacion-filter-form .ant-form-item {
+          margin-bottom: 6px;
+        }
+
+        .renovacion-filter-form .ant-form-item-label {
+          padding: 0 0 2px !important;
+        }
         
         .fila-no-renovar td {
           color: red;
@@ -182,6 +438,33 @@
       `;
       document.head.appendChild(style);
       return () => document.head.removeChild(style);
+    }, []);
+
+    // Keep the page fixed while allowing the renewal grids to scroll internally.
+    useEffect(() => {
+      const shell = document.querySelector('.renovacion-shell');
+      const layoutContent = shell
+        ? shell.closest('.ant-layout-content')
+        : document.querySelector('.ant-layout-content');
+      const layoutRoot = layoutContent
+        ? layoutContent.closest('.ant-layout')
+        : document.querySelector('.ant-layout');
+      const previousBodyOverflow = document.body.style.overflow;
+      const previousHtmlOverflow = document.documentElement.style.overflow;
+      const previousContentOverflow = layoutContent ? layoutContent.style.overflow : '';
+      const previousRootOverflow = layoutRoot ? layoutRoot.style.overflow : '';
+
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      if (layoutContent) layoutContent.style.overflow = 'hidden';
+      if (layoutRoot) layoutRoot.style.overflow = 'hidden';
+
+      return () => {
+        document.body.style.overflow = previousBodyOverflow;
+        document.documentElement.style.overflow = previousHtmlOverflow;
+        if (layoutContent) layoutContent.style.overflow = previousContentOverflow;
+        if (layoutRoot) layoutRoot.style.overflow = previousRootOverflow;
+      };
     }, []);
     
     const FilterSection = ({ form}) => {
@@ -301,27 +584,27 @@
             const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
             if (datePart) {
                 const parts = datePart[0].split('-');
-                return `${parts[2]}-${parts[1]}-${parts[0]}`;
+             return `${parts[2]}-${parts[1]}-${parts[0]}`;
             }
 
-            const date = new Date(raw);
-            if (Number.isNaN(date.getTime())) return raw;
+             const date = new Date(raw);
+             if (Number.isNaN(date.getTime())) return raw;
 
-            return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
-        }
+             return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
+         }
 
         const escapeSqlString = (value) => String(value || '').replace(/'/g, "''");
          
 
 
         return (
-            <Collapse defaultActiveKey={['1']} ghost>
+            <Collapse className="renovacion-filter-collapse" defaultActiveKey={['1']} ghost>
             <Panel header="Filtros" key="1" style={{ fontWeight: 600 }}>
-                <Card size="small" bordered={false} bodyStyle={{ padding: '10px 0' }}>
+                <Card className="renovacion-filter-card" size="small" bordered={false} bodyStyle={{ padding: 0 }}>
                 <Form
                     form={form}
                     name="advanced_search"
-                    className="ant-advanced-search-form"
+                    className="renovacion-filter-form ant-advanced-search-form"
                     //onFinish={handleFinish}
                     layout="vertical" // Layout vertical funciona mejor en responsivo
                 >
@@ -538,7 +821,7 @@
         );
     };
     
-    const BatchTable = ({ data, loading,searchTotal,handleTableChange, handleViewDetail, reloadData, onOpenModal }) => {
+    const BatchTable = ({ data, loading,searchTotal, pagination, handleTableChange, handleViewDetail, reloadData, onOpenModal }) => {
 
         const columns = [
             { title: 'Id', dataIndex: 'id', width: 60 },
@@ -546,7 +829,7 @@
             { title: 'Creacion', dataIndex: 'created', width: 80,render: renderDate },
             {
               title: 'Resultado',
-              width: 130,
+              width: 200,
               align: 'left',
               render: (_, record) => {
                 const correctos = Math.max(
@@ -557,11 +840,10 @@
                 record.noRenovados = noRenovados;
 
                 return (
-                  <div style={{ lineHeight: '18px', fontSize: 12 }}>
+                  <div style={{ lineHeight: '16px', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <div>
                       <strong>Total:</strong> {record.records}
-                    </div>
-                    <div>
+                      {' | '}
                       <strong>Procesados:</strong> {correctos}
                     </div>
                     <div>
@@ -780,7 +1062,7 @@
         ];
               
         return (
-          <div className="renovacion-view">
+          <div className="renovacion-view renovacion-batch-table">
             <Table
             //rowSelection={rowSelection}
             columns={columns}
@@ -789,6 +1071,8 @@
             onChange={handleTableChange}
             size="small" // Para que se parezca más a la densidad de la imagen
             pagination={{
+                current: pagination && pagination.current ? pagination.current : 1,
+                pageSize: pagination && pagination.pageSize ? pagination.pageSize : 25,
                 total: searchTotal,
                 showSizeChanger: true,
                 showQuickJumper: true,
@@ -832,12 +1116,29 @@
             }),
         };
 
-        const formatDateYMD = (date) => {
-            const yyyy = date.getFullYear();
-            const mm = String(date.getMonth() + 1).padStart(2, "0");
-            const dd = String(date.getDate()).padStart(2, "0");
+        // DatePicker values represent a Panama calendar date. Convert that
+        // calendar date to an explicit UTC boundary before querying SQL.
+        const formatPanamaUtcBoundary = (date, addDay) => {
+            if (!date || typeof date.format !== 'function') {
+                return '';
+            }
 
-            return `${yyyy}${mm}${dd}`;
+            const parts = date.format('YYYY-MM-DD').split('-').map(Number);
+            if (parts.length !== 3 || parts.some(value => !Number.isInteger(value))) {
+                return '';
+            }
+
+            const utcDate = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 5, 0, 0, 0));
+            if (addDay) {
+                utcDate.setUTCDate(utcDate.getUTCDate() + 1);
+            }
+
+            const yyyy = utcDate.getUTCFullYear();
+            const mm = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(utcDate.getUTCDate()).padStart(2, '0');
+            const hh = String(utcDate.getUTCHours()).padStart(2, '0');
+
+            return `${yyyy}-${mm}-${dd} ${hh}:00:00.000`;
         }
 
         const handleSearch = () => {
@@ -875,8 +1176,16 @@
             if(form.plan) extraParametros += `, producto:'${form.plan}'`;
             if(form.sucursal) extraParametros += `, sucursal:'${form.sucursal}'`;
             if(form.tipoPoliza) extraParametros += `, tipoPoliza:'${form.tipoPoliza}'`;
-            if(form.venceDesde) extraParametros += `, venceDesde:'${form.venceDesde.format('YYYYMMDD')}'`;
-            if(form.venceHasta) extraParametros += `, venceHasta:'${form.venceHasta.format('YYYYMMDD')}'`;
+            if(form.venceDesde) {
+                const venceDesdeUtc = formatPanamaUtcBoundary(form.venceDesde, false);
+                if (venceDesdeUtc) extraParametros += `, venceDesde:'${venceDesdeUtc}'`;
+            }
+            if(form.venceHasta) {
+                const venceHastaUtc = formatPanamaUtcBoundary(form.venceHasta, false);
+                const venceHastaExclusiveUtc = formatPanamaUtcBoundary(form.venceHasta, true);
+                if (venceHastaUtc) extraParametros += `, venceHasta:'${venceHastaUtc}'`;
+                if (venceHastaExclusiveUtc) extraParametros += `, venceHastaExclusive:'${venceHastaExclusiveUtc}'`;
+            }
             if(form.venceEn) extraParametros += `, venceEn:${form.venceEn}`;
 
             setSearchTotal(0);
@@ -974,12 +1283,13 @@
                 return Promise.reject(new Error(`La póliza ${policy.poliza || ''} no tiene un id válido`));
             }
 
-            return exe('AddPolicyVersion', {
+            return validatePolicyRenewalAvailability(sourcePolicyId, policy.poliza)
+                .then(() => exe('AddPolicyVersion', {
                     // Each renewal starts a new policy version at version 1.
                     policyVersion: 1,
                     code: policy.poliza,
                     policyId: sourcePolicyId
-                })
+                }))
                 .then(response => {
                     if (!response || !response.ok) {
                         throw new Error(response && response.msg ? response.msg : `No fue posible generar la oferta de la póliza ${policy.poliza}`);
@@ -1009,6 +1319,38 @@
                         return newPolicyId;
                     });
                 });
+        }
+
+        const validatePolicyRenewalAvailability = (policyId, policyCode) => {
+            const safePolicyCode = String(policyCode || '').replace(/'/g, "''");
+            const codeCondition = safePolicyCode
+                ? ` OR ([code] = N'${safePolicyCode}' AND id <> ${policyId})`
+                : '';
+
+            return exe('DoQuery', {
+                sql: `SELECT TOP 1 id
+                      FROM LifePolicy
+                      WHERE originalPolicyId = ${policyId}${codeCondition}
+                      ORDER BY id DESC;`
+            }).then(response => {
+                if (!response || response.ok === false) {
+                    throw new Error(
+                        response && response.msg
+                            ? response.msg
+                            : `No fue posible validar si la póliza ${policyCode || policyId} ya fue renovada.`
+                    );
+                }
+
+                const rows = Array.isArray(response.outData) ? response.outData : [];
+                if (rows.length > 0) {
+                    const renewalId = Number(rows[0] && rows[0].id || 0);
+                    throw new Error(
+                        renewalId > 0
+                            ? `La póliza ${policyCode || policyId} ya tiene una renovación registrada (${renewalId}).`
+                            : `La póliza ${policyCode || policyId} ya tiene una renovación registrada.`
+                    );
+                }
+            });
         }
 
         async function buildBatchRowsWithOffers(policies) {
@@ -1124,7 +1466,13 @@
                 handleSearchBatch();
                 handleSearch();
             } catch (error) {
-                notification.error({ message: 'Error', description: error && error.message ? error.message : String(error), duration: 10 });
+                const description = error && error.message ? error.message : String(error);
+                const isRenewalWarning = /ya tiene una renov/i.test(description);
+                (isRenewalWarning ? notification.warning : notification.error)({
+                    message: isRenewalWarning ? 'Advertencia' : 'Error',
+                    description: description,
+                    duration: 10
+                });
             } finally {
                 setLoading(false);
                 setTimeout(() => {
@@ -1142,7 +1490,7 @@
         };
 
         return (
-            <div style={{ padding: '20px', backgroundColor: '#fff' }}>
+            <div className="renovacion-tab-content renovacion-batch-content" style={{ padding: '20px', backgroundColor: '#fff' }}>
             {/* 1. Sección de Filtros Reutilizable */}
             <FilterSection form={form}/>
 
@@ -1184,10 +1532,10 @@
         );
     };
 
-    const TabContent2 = ({ tableDataBatch,loadingBatch,searchTotalBatch,handleTableChangeBatch,handleSearchBatch, handleViewDetail, onOpenModal }) => {      
+    const TabContent2 = ({ tableDataBatch,loadingBatch,searchTotalBatch,paginationBatch,handleTableChangeBatch,handleSearchBatch, handleViewDetail, onOpenModal }) => {
 
         return (
-            <div style={{ padding: '20px', backgroundColor: '#fff' }}>
+            <div className="renovacion-tab-content" style={{ padding: '20px', backgroundColor: '#fff' }}>
             {/* 1. Sección de Filtros Reutilizable */}
             <div style={{ marginTop: '20px' }}>
                 {/* 2. Barra de Herramientas Reutilizable */}
@@ -1203,6 +1551,7 @@
                     data={tableDataBatch} 
                     loading={loadingBatch} 
                     searchTotal={searchTotalBatch} 
+                    pagination={paginationBatch}
                     handleTableChange={handleTableChangeBatch}
                     handleViewDetail={handleViewDetail}
                     reloadData={handleSearchBatch}
@@ -1363,7 +1712,7 @@
         );
     };
 
-    const LoteDetalleTable = ({ tableData, loading, searchTotal, handleTableChange, rowSelection, total, onViewPolicy }) => {
+    const LoteDetalleTable = ({ tableData, loading, searchTotal, pagination, handleTableChange, rowSelection, total, onViewPolicy }) => {
 
         const columns = [
           {
@@ -1431,7 +1780,7 @@
         ];
 
         return (
-          <div className="renovacion-view">
+          <div className="renovacion-view renovacion-detail-table">
             <Table
             rowSelection={rowSelection}
             columns={columns}
@@ -1440,11 +1789,14 @@
             onChange={handleTableChange}
             size="small" // Para que se parezca más a la densidad de la imagen
             pagination={{
+                current: pagination && pagination.current ? pagination.current : 1,
+                pageSize: pagination && pagination.pageSize ? pagination.pageSize : 25,
                 total: total,
                 showSizeChanger: true,
                 showQuickJumper: true,
                 pageSizeOptions: ['10','25','50', '100' , '200'],
-                defaultPageSize: 15
+                defaultPageSize: 25,
+                showTotal: (value, range) => `Mostrando ${range[0]}-${range[1]} de ${total}`
             }}
             // CLAVE PARA RESPONSIVE: Permite scroll horizontal en pantallas pequeñas
             scroll={{ x: 'max-content', y: 800 }}
@@ -1456,7 +1808,7 @@
     };
 
     const TabContent3 = ({loteId, wfId,tableData, loadDataLoteDetalle, searchTotal, handleTableChange, 
-                          loading, processActive, processType, handleRefresh, percent, handleCalculate, handleRenew, selectedRowDetailKeys, onSelectChange,
+                           loading, processActive, processType, handleRefresh, percent, handleCalculate, handleRenew, selectedRowDetailKeys, onSelectChange, pagination,
                           handleViewResults, onViewPolicy}) => {
 
          const onRowSelection = {
@@ -1469,7 +1821,7 @@
         };    
       
         return (
-            <div style={{ padding: '20px', backgroundColor: '#fff' }}>                      
+            <div className="renovacion-tab-content renovacion-detail-content" style={{ padding: '20px', backgroundColor: '#fff' }}>
               {/* 2. Barra de Herramientas Reutilizable */}
                 <ActionToolbarDetail
                   loading={loading}
@@ -1488,6 +1840,7 @@
                   <LoteDetalleTable 
                       tableData ={tableData} 
                       searchTotal={searchTotal} 
+                      pagination={pagination}
                       handleTableChange={handleTableChange}
                       rowSelection={onRowSelection}
                       total={searchTotal}
@@ -1616,7 +1969,7 @@
             data: tableDataBatch,
         };
         //load(params);
-        loadDataBatch(params);
+        loadDataBatch(params.pagination);
       }, []);
 
       const handleSearchBatch = () => {
@@ -1629,17 +1982,22 @@
               total: 0,
               data: tableDataBatch,
           };
-          loadDataBatch(params);
+          loadDataBatch(params.pagination);
       };
 
-      const handleTableChangeBatch = (newPagination) => {          
-          const params = {
-              pagination: newPagination,
-              loading: true,
-              data: tableData,
-              formulario: form.getFieldsValue(),
+      const handleTableChangeBatch = (newPagination) => {
+          const nextPagination = {
+              current: Number(newPagination && newPagination.current) > 0
+                  ? Number(newPagination.current)
+                  : 1,
+              pageSize: Number(newPagination && newPagination.pageSize) > 0
+                  ? Number(newPagination.pageSize)
+                  : 25,
+              total: searchTotalBatch
           };
-          loadDataBatch(params);
+
+          setPaginationBatch(nextPagination);
+          loadDataBatch(nextPagination);
       }
 
       /* ************************ */
@@ -1662,8 +2020,9 @@
           setLoteId(loteId);
           setWfId(wfIdParam);
         
+          const initialDetailPagination = { current: 1, pageSize: 25, total: 0 };
           const params = {
-              pagination: paginationDetail,
+              pagination: initialDetailPagination,
               loading: true,
               data: tableDataDetail,
               loteId: loteId,
@@ -1861,26 +2220,13 @@
         })
         .then(r => {
           if( r.ok){
+              const outData = r.outData || {};
+              const polizaPaginada = Array.isArray(outData.data) ? outData.data : [];
+              const total = Number(outData.total || r.total || 0);
 
-              const polizaPaginada = r.outData.data;
-              const listaPoliza = [];
-              let indiceResultado = 0;
-
-              if (r.outData.total > 0) {
-                  setSearchTotalDetail(r.outData.total);
-                  for (let index = 0; index < r.outData.total; index++) {
-                      const factor = ((index + 1) / params.pagination.pageSize);
-                      if (factor > (params.pagination.current - 1) && factor <= params.pagination.current && (indiceResultado < polizaPaginada.length)) {
-                          listaPoliza.push(polizaPaginada[indiceResultado]);
-                          indiceResultado += 1;
-                      } else {
-                          //listaPoliza.push({ id: ("Loading data... " + index) });
-                      }
-                  }
-              }
-
-              setTableDataDetail(listaPoliza);
-              setPaginationDetail({ ...params.pagination, total: searchTotalDetail });
+              setSearchTotalDetail(total);
+              setTableDataDetail(polizaPaginada);
+              setPaginationDetail({ ...params.pagination, total: total });
             
           } else{
               notification.error({ message: 'Error', description: r.msg, duration: 10 });
@@ -2032,7 +2378,13 @@
           });
         } catch (error) {
           setProcessActive(false);
-          notification.error({ message: 'Error', description: error && error.message ? error.message : String(error), duration: 10 });
+          const description = error && error.message ? error.message : String(error);
+          const isRenewalWarning = /ya tiene una renov/i.test(description);
+          (isRenewalWarning ? notification.warning : notification.error)({
+            message: isRenewalWarning ? 'Advertencia' : 'Error',
+            description: description,
+            duration: 10
+          });
         }
       }
 
@@ -2521,14 +2873,15 @@
       // Detalle del lote - fin
       /* ************************ */
 
-      const getProcessData = (WFids) => 
-        exe("GetProcesses", {
-          filter: `id IN (${WFids})`
-        });
+      // Workflow actions are disabled in this tab. The batch grid only needs
+      // the paginated batch data; wfId is preserved for the detail view.
 
-      const loadDataBatch = (params = {}) => {
-          setLoadingBatch(params.loading);
-          const context = `{row:{currentPage:${params.pagination.current}, pageSize:${params.pagination.pageSize}, batchCode:'ANNIVERSARYLOTEVIEW'}}`;
+      const loadDataBatch = (pagination = {}) => {
+          const current = Number(pagination.current) > 0 ? Number(pagination.current) : 1;
+          const pageSize = Number(pagination.pageSize) > 0 ? Number(pagination.pageSize) : 25;
+
+          setLoadingBatch(true);
+          const context = `{row:{currentPage:${current}, pageSize:${pageSize}, batchCode:'ANNIVERSARYLOTEVIEW'}}`;
 
           exe("ExeChain",{
               chain: "cmdPaginationBatch",
@@ -2536,67 +2889,27 @@
           })
           .then(r => {
               if(r.ok){
-                  const polizaPaginada = Array.isArray(r.outData.data) ? r.outData.data : [];
-                  const listaPoliza = [];
-                  let indiceResultado = 0;
-
-                  if (r.outData.total > 0) {
-                      setSearchTotalBatch(r.outData.total);
-
-                      //recupero todos los wfs cargados
-                      var WFids = Array.from(
-                        new Set(
-                          (polizaPaginada || [])
-                            .map(function (x) { return Number(x && x.wfId); })
-                            .filter(function (x) { return x > 0; })
-                        )
-                      ).join(',');
-
-                      getProcessData(WFids).then(x => {
-
-                        //Recuperando datos del WF
-                        if(x.ok){
-
-                          try {
-                           
-                            for (let index = 0; index < r.outData.total; index++) {
-
-                              if(!polizaPaginada[indiceResultado]) continue;
-                              
-                              const process = x.outData.find(b => b.id == polizaPaginada[indiceResultado].wfId);
-                              if(process)
-                                polizaPaginada[indiceResultado].Process = process;
-                              else
-                                polizaPaginada[indiceResultado].Process = {};
-  
-                              const factor = ((index + 1) / params.pagination.pageSize);
-                              if (factor > (params.pagination.current - 1) && factor <= params.pagination.current && (indiceResultado < polizaPaginada.length)) {
-                                  listaPoliza.push(polizaPaginada[indiceResultado]);
-                                  indiceResultado += 1;
-                              } else {
-                                  listaPoliza.push({ id: ("Loading data... " + index) });
-                              }                              
-                              
-                            }
-                            
-                          } catch (error) {
-                            console.error(error) ;
-                          }
-                        }
-                        
-                        setTableDataBatch(listaPoliza);//console.log(listaPoliza)
-                        setPaginationBatch({ ...params.pagination, total: r.total });
-                        
-                      });
-                    
-                     
-                  }
-                  
+                  const outData = r && r.outData && !Array.isArray(r.outData)
+                    ? r.outData
+                    : (r || {});
+                  const polizaPaginada = Array.isArray(outData.data) ? outData.data : [];
+                  const total = Number(outData.total || r.total || 0);
+                  setSearchTotalBatch(total);
+                  setTableDataBatch(polizaPaginada);
+                  setPaginationBatch({ current: current, pageSize: pageSize, total: total });
               } else{
                   notification.error({ message: 'Error', description: r.msg, duration: 10 });
               }
               setLoadingBatch(false);
           })
+          .catch(error => {
+              setLoadingBatch(false);
+              notification.error({
+                  message: 'Error',
+                  description: error && error.message ? error.message : 'No fue posible cargar los lotes.',
+                  duration: 10
+              });
+          });
       }
 
       const onOpenModal = (record) => {
@@ -2750,9 +3063,10 @@
       },[]);
 
       return (
-          <Layout className="layout" style={{ minHeight: '100vh' }}>
+          <div className="renovacion-shell">
+            <Layout className="renovacion-layout">
               <Content>
-                  <Card bordered={false} bodyStyle={{ padding: 0 }}>
+                  <Card className="renovacion-card" bordered={false} bodyStyle={{ padding: 0 }}>
                       <Tabs activeKey={activeTab} onChange={setActiveTab} type="card" tabBarStyle={{ marginBottom: 0, paddingLeft: '10px', paddingTop: '10px' }}>
                           <TabPane
                               tab={<span><FileSearchOutlined />Pólizas</span>}
@@ -2767,6 +3081,7 @@
                                   tableDataBatch={tableDataBatch}
                                   loadingBatch={loadingBatch}
                                   searchTotalBatch={searchTotalBatch}
+                                  paginationBatch={paginationBatch}
                                   handleTableChangeBatch={handleTableChangeBatch}
                                   handleSearchBatch={handleSearchBatch}
                                   handleViewDetail={handleViewDetail}
@@ -2780,6 +3095,7 @@
                                 tableData={tableDataDetail}
                                 loadDataPolizas={loadDataLoteDetalle}
                                 searchTotal={searchTotalDetail}
+                                pagination={paginationDetail}
                                 handleTableChange={handleTableChangeDetail}
                                 paginacion={paginationDetail}
                                 loading={loadingBatch}
@@ -2814,7 +3130,8 @@
                     onCancel={handleCloseResults}
                     />
               </Content>
-          </Layout>
+            </Layout>
+          </div>
       );
     };
 

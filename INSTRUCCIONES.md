@@ -50,6 +50,8 @@
 ## Fechas y montos
 
 - Las fechas UTC deben convertirse explicitamente a la hora local de Panama antes de extraer una fecha de negocio.
+- Las fechas persistidas se deben evaluar y comparar siempre en UTC. Cuando un usuario seleccione una fecha de calendario en Panama, convertir el inicio de ese dia a `05:00:00Z` y usar como limite superior exclusivo las `05:00:00Z` del dia siguiente; no depender de la zona horaria del navegador, servidor o entorno de ejecucion.
+- La presentacion al usuario debe respetar la zona horaria local del navegador y nunca debe alterar el valor UTC persistido.
 - No reinterpretar fechas simples `yyyy-MM-dd` como UTC si el negocio espera conservar ese mismo dia local.
 - Respetar las horas originales cuando el calculo requiera fecha y hora.
 - Formatear fechas visuales segun el requerimiento de la vista o reporte y no alterar el valor persistido solo por presentacion.

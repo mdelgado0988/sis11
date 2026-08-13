@@ -39,7 +39,7 @@ SELECT
     b.[jData]
 FROM [Batch] b
 JOIN [ImportConfig] ic ON b.[importConfigId] = ic.[id]
-JOIN [Proceso] pro ON pro.[entity] = 'BATCH'
+LEFT JOIN [Proceso] pro ON pro.[entity] = 'BATCH'
     AND b.[id] = TRY_CAST(pro.[entityId] AS INT)
 WHERE ic.[category] = ${toSqlString(batchCode)}
 ORDER BY b.[id] DESC

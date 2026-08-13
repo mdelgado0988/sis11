@@ -14,7 +14,12 @@
 * @param {string} row.tipoPoliza Tipo de poliza
 * @param {Date} row.venceDesde Rango inicial de busqueda
 * @param {Date} row.venceHasta Rango final de busqueda
+* @param {string} row.venceHastaExclusive Limite UTC exclusivo del dia siguiente al rango final
 * @param {number} row.venceEn Dias en rango
+*
+* Date rule: LifePolicy dates are stored and compared in UTC. Date-only
+* filters from the view represent Panama calendar dates and arrive as UTC
+* boundaries, so the query must not use the server or browser local zone.
 */
 /*
 Name: cmdPolicyFilterLoteRenew
@@ -51,10 +56,18 @@ if(row.venceDesde){
 }
 if(row.venceHasta){
     filtro += ` AND pol.[end] <= ${sqlString(row.venceHasta)}`;
-  
+}
+if(row.venceHastaExclusive){
+    filtro = filtro.replace(
+        `AND pol.[end] <= ${sqlString(row.venceHasta)}`,
+        `AND pol.[end] < ${sqlString(row.venceHastaExclusive)}`
+    );
 }
 if(row.venceEn && venceEn >= 0){
-  filtro += ` AND CAST(pol.[end] AS DATE) <= DATEADD(DAY, ${venceEn}, CAST(GETDATE() AS DATE))`;  
+  // Calculate the current Panama day from UTC and compare UTC boundaries.
+  const panamaDayUtc = "DATEADD(HOUR, 5, CAST(CAST(DATEADD(HOUR, -5, SYSUTCDATETIME()) AS DATE) AS DATETIME2))";
+  filtro += ` AND pol.[end] >= ${panamaDayUtc}`;
+  filtro += ` AND pol.[end] < DATEADD(DAY, ${venceEn + 1}, ${panamaDayUtc})`;
 }
 
 cteQuery = `
