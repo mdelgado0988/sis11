@@ -19,7 +19,7 @@ try {
   const row = getContextRow();
   const policyId = getPositiveInteger(row.policyId);
   const loteId = getPositiveInteger(row.loteId);
-  const userEmail = getTrimmedString(row.userEmail);
+  const userEmail = getTrimmedString(row.userEmail || row[2]);
 
   validateInput(policyId, loteId, userEmail);
 
@@ -51,6 +51,7 @@ try {
 
   updateProcessUser(processId, userEmail);
   issuePolicy(policyId);
+  updateIssuanceEventUser(policyId, userEmail);
 
   return {
     ok: true,
@@ -276,6 +277,30 @@ function issuePolicy(policyId) {
         ? IssuePolicy.msg
         : `No fue posible emitir la póliza ${policyId}.`
     );
+  }
+}
+
+function updateIssuanceEventUser(policyId, userEmail) {
+  const sql = `
+    UPDATE eventRow
+    SET [user] = '${escapeSqlString(userEmail)}'
+    FROM [PolicyEvent] eventRow
+    INNER JOIN (
+      SELECT TOP (1) id AS eventId
+      FROM [PolicyEvent]
+      WHERE lifePolicyId = ${policyId}
+        AND [type] = 'ACTION'
+        AND [user] = 'SUPERVISOR'
+        AND [name] NOT IN ('Quoted', 'Cotizado')
+      ORDER BY id DESC
+    ) latestEvent ON latestEvent.eventId = eventRow.id;`;
+
+  doCmd({ cmd: 'DoQuery', data: { sql: sql } });
+
+  if (typeof DoQuery === 'undefined' || !DoQuery || DoQuery.ok === false) {
+    throw new Error(DoQuery && DoQuery.msg
+      ? DoQuery.msg
+      : `No fue posible actualizar el usuario del evento de emisión de la póliza ${policyId}.`);
   }
 }
 

@@ -2988,8 +2988,9 @@
                           ? response.msg
                           : 'No fue posible actualizar los resultados del lote de emisión.');
                       }
-                    }).then(() => exe('ExeChain', {
-                      chain: 'cmdUpdateRenewalPolicyEventUser',
+                    })
+                    /* }).then(() => exe('ExeChain', {
+                      // The issuance command updates the event user directly.
                       context: JSON.stringify({
                         processBatchId: validBatchId,
                         userEmail: processUserEmail || ''
@@ -3001,7 +3002,7 @@
                           ? response.msg
                           : 'No fue posible actualizar el usuario de las actividades de emisión.');
                       }
-                    })
+                    }) */
                   : Promise.resolve(); /*
                       // Quotation event user is updated inside cmdQuotePreview.
                       context: JSON.stringify({
