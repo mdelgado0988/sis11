@@ -41,7 +41,7 @@
 
 - Escapar cualquier texto antes de interpolarlo en filtros SQL y validar los identificadores numericos como numeros positivos.
 - Agrupar condiciones compuestas con parentesis para preservar la precedencia entre `AND` y `OR`.
-- No usar nombres reservados de SQL sin delimitarlos; por ejemplo, usar `[end]` cuando corresponda.
+- Delimitar con corchetes `[]` los nombres de columnas y campos que puedan ser palabras reservadas de SQL, tanto en consultas como en actualizaciones; por ejemplo, usar `[end]` y `[user]`.
 - Respetar los nombres reales de columnas y propiedades, incluyendo diferencias como `anualPremium`/`anualTotal`.
 - Cuando se consulte `GetTable`, tomar los encabezados de la primera fila y mapear el resto de las filas a objetos.
 - Cuando un repositorio retorne un arreglo, validar siempre que sea un arreglo antes de usar `map`, `filter` o `reduce`.

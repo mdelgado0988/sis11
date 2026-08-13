@@ -2609,7 +2609,15 @@
                           : `No fue posible programar el lote de cotización ${idLoteQuote}.`);
                       }
 
-                      beginBatchProgress(idLoteQuote, 'quotation');
+                      return getCurrentUserEmail().then(userEmail => {
+                        beginBatchProgress(idLoteQuote, 'quotation', userEmail);
+                        const quotationMessage = resultado.msg || x.msg || 'Lote de tarificación iniciado correctamente.';
+                        showBatchInfo({
+                          message: 'Lote de tarificación',
+                          description: quotationMessage,
+                          duration: 3
+                        });
+                      });
                       const quotationMessage = resultado.msg || x.msg || 'Lote de tarificación iniciado correctamente.';
                       showBatchInfo({
                         message: 'Lote de tarificación',
@@ -2942,7 +2950,7 @@
         });
       }
 
-      function beginBatchProgress(batchId, processType) {
+      function beginBatchProgress(batchId, processType, processUserEmail) {
         const validBatchId = Number(batchId || 0);
         if (validBatchId <= 0) {
           throw new Error('No se recibió un lote válido para monitorear.');
@@ -2981,7 +2989,20 @@
                           : 'No fue posible actualizar los resultados del lote de emisión.');
                       }
                     })
-                  : Promise.resolve();
+                  : exe('ExeChain', {
+                      chain: 'cmdUpdateQuotationPolicyEventUser',
+                      context: JSON.stringify({
+                        processBatchId: validBatchId,
+                        userEmail: processUserEmail || ''
+                      })
+                    }).then(result => {
+                      const response = result && result.outData ? result.outData : result;
+                      if (!response || response.ok === false) {
+                        throw new Error(response && response.msg
+                          ? response.msg
+                          : 'No fue posible actualizar el usuario de los eventos de cotización.');
+                      }
+                    });
 
                 finishProcess
                   .then(() => {
