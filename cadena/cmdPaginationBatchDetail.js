@@ -20,7 +20,7 @@ SELECT
         TRY_CAST(JSON_VALUE(item.value, '$[4]') AS INT),
         TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)
     ) AS newLifePolicyId,
-    ISNULL(lob.name,'') producto,
+    COALESCE(pro.name, nlp.productCode, '') producto,
     nlp.code poliza,
     ISNULL(ep.PrimaPura,0) prima,
     CASE WHEN ISNULL(lp.surcharges,0) = 0 AND ISNULL(ep.extraprima,0) > 0 THEN ISNULL(ep.extraprima,0) ELSE lp.surcharges END recargo,
@@ -42,7 +42,7 @@ FROM [Batch] b
 CROSS APPLY OPENJSON(b.jData) AS item
 INNER JOIN LifePolicy lp ON lp.id = TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)
 INNER JOIN LifePolicy nlp ON nlp.id = TRY_CAST(JSON_VALUE(item.value, '$[4]') AS INT)
-LEFT JOIN Lob ON lob.code = lp.lob
+LEFT JOIN Product pro ON pro.code = nlp.productCode
 OUTER APPLY (SELECT MAX(c.contractYear) contractYear
              FROM PayPlan c
              WHERE c.lifePolicyId = lp.id) cm
