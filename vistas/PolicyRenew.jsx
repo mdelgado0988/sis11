@@ -262,12 +262,27 @@
                 const orderBy = filterType == 0 ? 'code' : 'id';
                 setLoadingPolicy(true);
                 exe('DoQuery', {
-                sql: `SELECT TOP 25 pol.[id],pol.[code]
+                    sql: `SELECT TOP 25 pol.[id],pol.[code],pol.[start],pol.[end]
                         FROM LifePolicy pol
                         WHERE pol.activeDate is not null AND ${ filter }
                         ORDER BY pol.[${orderBy}];`})
                 .then( GetPolicy => {
-                    const policyOptions = GetPolicy.outData.map( item => ({ value: item.id, label: item.code }));
+                    const policyOptions = (Array.isArray(GetPolicy.outData) ? GetPolicy.outData : []).map(item => {
+                        const policyId = Number(item && item.id || 0);
+                        const policyCode = String(item && item.code || '').trim();
+                        const validity = `${formatPolicyDate(item && item.start)} - ${formatPolicyDate(item && item.end)}`;
+
+                        return {
+                            value: policyId,
+                            label: (
+                                <div style={{ lineHeight: 1.25 }}>
+                                    <div>{policyCode || policyId}</div>
+                                    <div style={{ color: '#8c8c8c', fontSize: 11 }}>{validity} | #{policyId}</div>
+                                </div>
+                            ),
+                            policyCode: policyCode
+                        };
+                    }).filter(item => item.value > 0);
                     setPolizas(policyOptions);
                 }).catch( error => message.error(error))
                 .finally(()=> {
@@ -278,6 +293,22 @@
             }
             timeout = setTimeout(filterPolizas, 400);
           }
+
+        const formatPolicyDate = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '-';
+
+            const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
+            if (datePart) {
+                const parts = datePart[0].split('-');
+                return `${parts[2]}-${parts[1]}-${parts[0]}`;
+            }
+
+            const date = new Date(raw);
+            if (Number.isNaN(date.getTime())) return raw;
+
+            return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
+        }
 
         const escapeSqlString = (value) => String(value || '').replace(/'/g, "''");
          
@@ -378,6 +409,7 @@
                                 defaultActiveFirstOption={ false }
                                 onSearch={ FetchPolicyValues }
                                 options={ polizas }
+                                optionLabelProp="policyCode"
                                 filterOption={ false }
                                 dropdownRender={ menu =>(<>
                                     { menu }
@@ -914,16 +946,19 @@
         }
 
         const getNextPolicyVersion = (policyId) => {
-            return exe('RepoLifePolicy', {
-                operation: 'GET',
+            return exe('LoadEntity', {
+                entity: 'LifePolicy',
                 filter: `id = ${policyId}`,
-                fields: 'id,policyVersion'
+                fields: 'id,policyVersion',
+                noTracking: true
             }).then(response => {
                 if (!response || !response.ok) {
                     throw new Error(response && response.msg ? response.msg : 'No fue posible recuperar la versión actual de la póliza');
                 }
 
-                const policy = Array.isArray(response.outData) && response.outData.length > 0 ? response.outData[0] : null;
+                const policy = Array.isArray(response.outData)
+                    ? response.outData[0]
+                    : response.outData;
                 if (!policy) {
                     throw new Error(`No se encontró la póliza ${policyId}`);
                 }
@@ -934,17 +969,17 @@
         }
 
         const createPolicyOfferVersion = (policy) => {
-            const policyId = Number(policy.originalPolicyId || policy.codigo || 0);
-            if (!policyId) {
+            const sourcePolicyId = Number(policy.codigo || policy.lifePolicyId || 0);
+            if (!sourcePolicyId) {
                 return Promise.reject(new Error(`La póliza ${policy.poliza || ''} no tiene un id válido`));
             }
 
-            return getNextPolicyVersion(policy.codigo)
-                .then(nextVersion => exe('AddPolicyVersion', {
-                    policyVersion: nextVersion,
+            return exe('AddPolicyVersion', {
+                    // Each renewal starts a new policy version at version 1.
+                    policyVersion: 1,
                     code: policy.poliza,
-                    policyId: policyId
-                }))
+                    policyId: sourcePolicyId
+                })
                 .then(response => {
                     if (!response || !response.ok) {
                         throw new Error(response && response.msg ? response.msg : `No fue posible generar la oferta de la póliza ${policy.poliza}`);
@@ -961,7 +996,7 @@
 
                     return exe("ExeChain", {
                         chain: "cmdUpdatePolicyRenewalPeriod",
-                        context: `{ policyId: ${newPolicyId}, renewalPolicyId: ${policy.codigo} }`
+                        context: `{ policyId: ${newPolicyId}, renewalPolicyId: ${sourcePolicyId} }`
                     }).then(periodResponse => {
                         if (!periodResponse || periodResponse.ok === false) {
                             throw new Error(

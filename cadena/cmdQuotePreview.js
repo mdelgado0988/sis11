@@ -13,44 +13,38 @@
  * @example { row: { lifePolicyId: 90 } }
  */
 
-try {
-  const policyId = getPolicyId(context);
+const policyId = getPolicyId(context);
 
-  if (!policyId) {
-    throw new Error('Debe informar un lifePolicyId válido para cotizar la póliza.');
-  }
+if (!policyId) {
+  throw new Error('Debe informar un lifePolicyId válido para cotizar la póliza.');
+}
 
-  loadPolicy(policyId);
-  const quoteResult = executePolicyQuote(policyId);
-  const documentResult = generateQuotationDocument(policyId);
+loadPolicy(policyId);
+const quoteResult = executePolicyQuote(policyId);
+const documentResult = generateQuotationDocument(policyId);
 
-  if (!documentResult.ok) {
-    return {
-      ok: false,
-      msg: `Póliza ${policyId} cotizada correctamente, pero falló la generación del documento: ${documentResult.msg || 'No fue posible generar el documento de cotización.'}`,
-      outData: quoteResult.outData
-    };
-  }
-
-  if (documentResult.skipped) {
-    return {
-      ok: true,
-      msg: `${quoteResult.msg || `Póliza ${policyId} cotizada correctamente.`} ${documentResult.msg || 'No se generó documento de cotización.'}`,
-      outData: quoteResult.outData
-    };
-  }
-
-  return {
-    ok: true,
-    msg: documentResult.msg || quoteResult.msg || `Póliza ${policyId} cotizada correctamente y documento generado.`,
-    outData: quoteResult.outData
-  };
-} catch (error) {
+if (!documentResult.ok) {
   return {
     ok: false,
-    msg: getErrorMessage(error)
+    msg: `Póliza ${policyId} cotizada correctamente, pero falló la generación del documento: ${documentResult.msg || 'No fue posible generar el documento de cotización.'}`,
+    outData: quoteResult.outData
   };
 }
+
+if (documentResult.skipped) {
+  return {
+    ok: true,
+    msg: `${quoteResult.msg || `Póliza ${policyId} cotizada correctamente.`} ${documentResult.msg || 'No se generó documento de cotización.'}`,
+    outData: quoteResult.outData
+  };
+}
+
+return {
+  ok: true,
+  msg: documentResult.msg || quoteResult.msg || `Póliza ${policyId} cotizada correctamente y documento generado.`,
+  outData: quoteResult.outData
+};
+
 
 function getPolicyId(commandContext) {
   const source = commandContext && commandContext.row
@@ -79,7 +73,7 @@ function loadPolicy(policyId) {
   const policy = policies.length > 0 ? policies[0] : null;
 
   if (!policy || Number(policy.id || 0) !== policyId) {
-    throw new Error(`No se encontró la póliza ${policyId}.`);
+    throw new Error(`@No se encontró la póliza ${policyId}.`);
   }
 
   return policy;
@@ -114,7 +108,8 @@ function generateQuotationDocument(policyId) {
 
 function validateCommandResult(result, defaultMessage) {
   if (!result || result.ok !== true) {
-    throw new Error(result && result.msg ? result.msg : defaultMessage);
+    const message = result && result.msg ? result.msg : defaultMessage;
+    throw new Error(`@${message}`);
   }
 }
 
