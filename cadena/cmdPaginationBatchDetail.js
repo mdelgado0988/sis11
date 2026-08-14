@@ -34,8 +34,8 @@ SELECT
     CASE WHEN lp.anualTotal = 0 THEN 0 ELSE ISNULL(c.pagado,0) / lp.anualTotal END * 100 porcentajepagado,
     CASE WHEN lp.anualTotal = 0 THEN 0 ELSE ISNULL(c.pendiente,0) / lp.anualTotal END * 100 porcentajependiente,
     ISNULL(s.cantidad,0) siniestros,
-    CONVERT(VARCHAR,nlp.[start],103) inicio,
-    CONVERT(VARCHAR,nlp.[end],103) vence,
+    nlp.[start] inicio,
+    nlp.[end] vence,
     nlp.anualPremium primaCotizada,
     CASE WHEN nlp.[activeDate] IS NULL THEN 'No' ELSE 'Si' END AS renovar
 FROM [Batch] b

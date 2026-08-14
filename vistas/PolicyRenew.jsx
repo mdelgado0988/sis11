@@ -67,8 +67,22 @@
     );
 
     const renderDate = (value) => {
-        if (!value) return ' - ';
-        return new Date(value).toLocaleDateString('es-ES');
+        const raw = String(value || '').trim();
+        if (!raw) return ' - ';
+
+        // Policy dates are stored in UTC. Values without an explicit zone
+        // must be marked as UTC before converting them to browser local time.
+        const utcValue = /z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw)
+            ? raw
+            : `${raw}Z`;
+        const date = new Date(utcValue);
+
+        if (Number.isNaN(date.getTime())) return raw;
+
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
     }
 
     //uso de scroll estático
@@ -1724,8 +1738,8 @@
           },
           { title: 'Póliza', dataIndex: 'poliza', width: 100, ellipsis: true },
           { title: 'Producto', dataIndex: 'producto', width: 150, ellipsis: true },
-          { title: 'Inicia', dataIndex: 'inicio', width: 80,  align: 'center' },
-          { title: 'Vence', dataIndex: 'vence', width: 80, align: 'center' },
+          { title: 'Inicia', dataIndex: 'inicio', width: 80, render: renderDate, align: 'center' },
+          { title: 'Vence', dataIndex: 'vence', width: 80, render: renderDate, align: 'center' },
           { title: 'Prima Pura', dataIndex: 'prima', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
           { title: 'Recargo', dataIndex: 'recargo', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
           { title: 'Descuento', dataIndex: 'descuento', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },

@@ -31,6 +31,7 @@ let querySql = '';
 let cteQuery = '';
 const policyId = getPositiveInteger(row.policyId);
 const venceEn = getNonNegativeInteger(row.venceEn);
+const hasExplicitExpirationRange = Boolean(row.venceDesde || row.venceHasta);
 
 if(row.policyId && policyId <= 0){
     return buildResult(false, 'El identificador de póliza no es válido');
@@ -63,7 +64,9 @@ if(row.venceHastaExclusive){
         `AND pol.[end] < ${sqlString(row.venceHastaExclusive)}`
     );
 }
-if(row.venceEn && venceEn >= 0){
+// An explicit expiration range takes precedence over the relative-day filter.
+// Applying both conditions would exclude valid policies unintentionally.
+if(!hasExplicitExpirationRange && row.venceEn && venceEn >= 0){
   // Calculate the current Panama day from UTC and compare UTC boundaries.
   const panamaDayUtc = "DATEADD(HOUR, 5, CAST(CAST(DATEADD(HOUR, -5, SYSUTCDATETIME()) AS DATE) AS DATETIME2))";
   filtro += ` AND pol.[end] >= ${panamaDayUtc}`;

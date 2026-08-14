@@ -111,7 +111,7 @@ try {
 
     const otrosDatos = {
         localCurrency: 'BS',
-        objectDefinitionCode: "DT_INCENDIO_V3"
+        objectDefinitionCode: getObjectDefinitionCode(context.row.productCode)
     };
           
     let dto = {
@@ -156,6 +156,13 @@ function getProduct(productCode) {
 
   const product = RepoProduct.outData[0];
   return product
+}
+
+function getObjectDefinitionCode(productCode) {
+  // Product 1_17 uses the sum-based fire insured-object definition.
+  return String(productCode || '').trim().toUpperCase() === '1_17'
+    ? 'DTINCENDIO_SUMA'
+    : 'DT_INCENDIO_V3';
 }
 
 function validarInputs(dto) {

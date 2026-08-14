@@ -680,6 +680,13 @@
 
       const handlers = {
         date: (value) => {
+          // The month is loaded by default for general searches. It must not
+          // hide a policy-specific search when the user has not selected an
+          // explicit issuance range.
+          if ((values.policyId || values.policyIdManual) && isDefaultIssuanceMonth(value)) {
+            return null;
+          }
+
           const { from, to } = getMonthDateBounds(value);
           if (!from || !to) return null;
           return buildCessionEmissionFilter(from, to);
@@ -781,6 +788,14 @@
         .filter(Boolean);
 
       return filters.join(' AND ');
+    }
+
+    function isDefaultIssuanceMonth(value) {
+      if (!value || typeof moment === 'undefined') {
+        return false;
+      }
+
+      return moment.isMoment(value) && value.isSame(moment(), 'month');
     }
 
     async function getLossFilter() {
