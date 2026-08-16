@@ -115,12 +115,17 @@
         if ($dropdown) $dropdown.remove();
   
         if (!items.length) return;
+
+        const inputElement = $input[0];
+        const inputRect = inputElement && inputElement.getBoundingClientRect
+          ? inputElement.getBoundingClientRect()
+          : null;
   
         $dropdown = $("<div></div>").addClass("autocomplete-dropdown").css({
-            position: "absolute",
-            top: $input.position().bottom + $input.outerHeight(),
-            left: $input.position().left,
-            width: $input.outerWidth(),
+            position: "fixed",
+            top: inputRect ? inputRect.bottom : 0,
+            left: inputRect ? inputRect.left : 0,
+            width: inputRect ? inputRect.width : $input.outerWidth(),
             border: "1px solid #d9d9d9",
             background: "#fff",
             "z-index": 10001,
@@ -224,8 +229,7 @@
   
         renderItems(items);
 
-        const $form = $input.closest('form');
-        $form.append($dropdown);
+        $(document.body).append($dropdown);
         activarCerrarDropdown($input, $dropdown);
         
       } catch (error) {

@@ -133,11 +133,27 @@
     </span>
   );
 
+  const CheckOutlined = () => (
+    <span role="img" aria-label="check" className="anticon anticon-check">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M880 256L384 752 144 512l56-56 184 184 440-440z"></path>
+      </svg>
+    </span>
+  );
+
   const FileTextOutlined = () => (
     <span role="img" aria-label="file-text" className="anticon anticon-file-text">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
         <path d="M832 64H192c-35.3 0-64 28.7-64 64v768c0 35.3 28.7 64 64 64h640c35.3 0 64-28.7 64-64V128c0-35.3-28.7-64-64-64zm-32 800H224V160h576v704z"></path>
         <path d="M288 288h448v64H288zm0 144h448v64H288zm0 144h288v64H288z"></path>
+      </svg>
+    </span>
+  );
+
+  const DownloadOutlined = () => (
+    <span role="img" aria-label="download" className="anticon anticon-download">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M505.7 661a8 8 0 0012.6 0l112-141.7c4.1-5.2.4-12.9-6.3-12.9h-74.1V168c0-4.4-3.6-8-8-8h-60c-4.4 0-8 3.6-8 8v338.3H400c-6.7 0-10.4 7.7-6.3 12.9l112 141.8zM878 626h-60c-4.4 0-8 3.6-8 8v154H214V634c0-4.4-3.6-8-8-8h-60c-4.4 0-8 3.6-8 8v198c0 17.7 14.3 32 32 32h684c17.7 0 32-14.3 32-32V634c0-4.4-3.6-8-8-8z"></path>
       </svg>
     </span>
   );
@@ -182,6 +198,9 @@
   const [transferPagination, setTransferPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transferTotal, setTransferTotal] = React.useState(0);
   const [transferScrollY, setTransferScrollY] = React.useState(420);
+  const [transferFilters, setTransferFilters] = React.useState({});
+  const [transferFilterVisible, setTransferFilterVisible] = React.useState(false);
+  const [transferFilterForm] = Form.useForm();
   const [branches, setBranches] = React.useState([]);
   const [currentUserEmail, setCurrentUserEmail] = React.useState('');
   const [newCashDeskVisible, setNewCashDeskVisible] = React.useState(false);
@@ -248,6 +267,7 @@
   const [collectionPaymentExecuting, setCollectionPaymentExecuting] = React.useState(false);
   const collectionExternalPolicySearchTimer = React.useRef(null);
   const [collectionFilterForm] = Form.useForm();
+  const [newIncomeAccountSearchForm] = Form.useForm();
   const [collectionLobOptions, setCollectionLobOptions] = React.useState([]);
   const [payerOptions, setPayerOptions] = React.useState([]);
   const [payerLoading, setPayerLoading] = React.useState(false);
@@ -259,6 +279,14 @@
   const [paymentMethodOptions, setPaymentMethodOptions] = React.useState([]);
   const [incomeTypeOptions, setIncomeTypeOptions] = React.useState([]);
   const [externalSourceOptions, setExternalSourceOptions] = React.useState([]);
+  const [newIncomeDestinationAccountOptions, setNewIncomeDestinationAccountOptions] = React.useState([]);
+  const [newIncomeDestinationAccountLoading, setNewIncomeDestinationAccountLoading] = React.useState(false);
+  const [newIncomeAccountSearchVisible, setNewIncomeAccountSearchVisible] = React.useState(false);
+  const [newIncomeAccountSearchRows, setNewIncomeAccountSearchRows] = React.useState([]);
+  const [newIncomeAccountSearchLoading, setNewIncomeAccountSearchLoading] = React.useState(false);
+  const [newIncomeAccountSearchPagination, setNewIncomeAccountSearchPagination] = React.useState({ current: 1, pageSize: 10 });
+  const [newIncomeAccountSearchTotal, setNewIncomeAccountSearchTotal] = React.useState(0);
+  const [newIncomeTypeCode, setNewIncomeTypeCode] = React.useState(undefined);
   const [depositAccountOptions, setDepositAccountOptions] = React.useState([]);
   const [newIncomePayments, setNewIncomePayments] = React.useState([
     { key: 1, methodCode: undefined, amount: '' }
@@ -268,6 +296,7 @@
   const [newIncomeActiveFormKey, setNewIncomeActiveFormKey] = React.useState(null);
   const newIncomeFormRefs = React.useRef({});
   const newIncomeTypeFormRef = React.useRef(null);
+  const newIncomeDestinationSearchTimer = React.useRef(null);
   const reversalFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
@@ -622,6 +651,41 @@
 
       .cashier-supervisor-view .cashier-supervisor-table .ant-table-body {
         overflow: auto !important;
+      }
+
+      .cashier-supervisor-account-search-table .ant-table-body {
+        overflow-x: scroll !important;
+        overflow-y: scroll !important;
+        scrollbar-gutter: stable;
+      }
+
+      .cashier-supervisor-account-search-table .ant-table-content {
+        overflow-x: scroll !important;
+        scrollbar-gutter: stable;
+      }
+
+      .cashier-supervisor-account-search-table .ant-table-thead > tr > th,
+      .cashier-supervisor-account-search-table .ant-table-tbody > tr > td {
+        padding: 4px 8px !important;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-account-search-table .cashier-supervisor-account-select-cell {
+        min-width: 82px;
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      .cashier-supervisor-account-search-table .cashier-supervisor-account-cell {
+        display: block;
+        max-width: 240px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cashier-supervisor-account-search-table .ant-table-tbody > tr {
+        cursor: pointer;
       }
 
       .cashier-supervisor-installment-menu-table .ant-table-thead > tr > th,
@@ -1170,9 +1234,65 @@
     return Array.isArray(rows) ? rows.length : 0;
   }
 
-  function buildTransferWorkspaceFilter() {
+  function buildTransferWorkspaceFilter(filters = transferFilters) {
     // Load every open cash desk; the grid remains remotely paginated.
-    return 'closed=0';
+    let filter = 'closed=0';
+    const source = filters || {};
+
+    if (source.dateFrom) {
+      filter += ` AND [date] >= N'${escapeSqlString(source.dateFrom)}'`;
+    }
+
+    if (source.dateToExclusive) {
+      filter += ` AND [date] < N'${escapeSqlString(source.dateToExclusive)}'`;
+    }
+
+    return filter;
+  }
+
+  function formatTransferFilterBoundary(value, addDay) {
+    if (!value || typeof value.format !== 'function') {
+      return '';
+    }
+
+    const parts = value.format('YYYY-MM-DD').split('-').map(Number);
+    if (parts.length !== 3 || parts.some(item => !Number.isInteger(item))) {
+      return '';
+    }
+
+    const utcDate = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0));
+    if (addDay) {
+      utcDate.setUTCDate(utcDate.getUTCDate() + 1);
+    }
+
+    const year = utcDate.getUTCFullYear();
+    const month = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(utcDate.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day} 00:00:00.000`;
+  }
+
+  function applyTransferFilters(values) {
+    const nextFilters = {
+      dateFrom: formatTransferFilterBoundary(values && values.dateFrom, false),
+      dateToExclusive: formatTransferFilterBoundary(values && values.dateTo, true)
+    };
+
+    setTransferFilters(nextFilters);
+    setTransferFilterVisible(false);
+    loadTransferWorkspaces({
+      filters: nextFilters,
+      pagination: { current: 1, pageSize: transferPagination.pageSize }
+    });
+  }
+
+  function clearTransferFilters() {
+    transferFilterForm.resetFields();
+    setTransferFilters({});
+    setTransferFilterVisible(false);
+    loadTransferWorkspaces({
+      filters: {},
+      pagination: { current: 1, pageSize: transferPagination.pageSize }
+    });
   }
 
   function loadTransitAccounts(params = {}) {
@@ -1378,11 +1498,15 @@
           value: item && item.code,
           label: `${item && item.symbol ? item.symbol : ''} ${getTrimmedString(item && item.name)}`.trim()
         })).filter(item => item.value));
-        setPaymentMethodOptions(getRows(paymentResponse).map(item => ({
-          value: item && item.code,
-          label: getTrimmedString(item && item.name),
-          formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
-        })).filter(item => item.value));
+        const cashierPaymentMethodCodes = ['1', 'CH', 'TCD', 'OT'];
+        setPaymentMethodOptions(getRows(paymentResponse)
+          .filter(item => cashierPaymentMethodCodes.indexOf(getTrimmedString(item && item.code)) >= 0)
+          .map(item => ({
+            value: item && item.code,
+            label: getTrimmedString(item && item.name),
+            formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
+          }))
+          .filter(item => item.value));
         setIncomeTypeOptions(getRows(incomeResponse).map(item => ({
           value: item && item.code,
           label: getTrimmedString(item && item.name),
@@ -1414,6 +1538,17 @@
     return Number.isFinite(amount) && amount >= 0 ? amount : 0;
   }
 
+  function limitIncomeAmountDecimals(value) {
+    const raw = getTrimmedString(value).replace(',', '.');
+    if (!raw) return '';
+    if (!/^\d*(\.\d*)?$/.test(raw)) return null;
+
+    const parts = raw.split('.');
+    if (parts.length === 1) return parts[0];
+
+    return `${parts[0]}.${parts[1].slice(0, 2)}`;
+  }
+
   function getNewIncomeTotal() {
     return newIncomePayments.reduce((total, payment) => total + parseIncomeAmount(payment.amount), 0);
   }
@@ -1431,6 +1566,11 @@
   function getIncomeTypeFormId(incomeTypeCode) {
     const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
     return option && Number(option.formId) > 0 ? Number(option.formId) : 0;
+  }
+
+  function isTransitIncomeType(incomeTypeCode) {
+    const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
+    return getTrimmedString(option && option.internalType).toUpperCase() === 'TRANSIT';
   }
 
   function activateNewIncomePaymentForm(paymentKey, control) {
@@ -1493,6 +1633,14 @@
   }
 
   function updateNewIncomeType(value) {
+    setNewIncomeTypeCode(value);
+    newIncomeForm.setFieldsValue({ destination: undefined });
+    setNewIncomeDestinationAccountOptions([]);
+
+    if (!isTransitIncomeType(value) && externalSourceOptions.length === 1) {
+      newIncomeForm.setFieldsValue({ destination: externalSourceOptions[0].value });
+    }
+
     const formId = getIncomeTypeFormId(value);
 
     if (formId > 0) {
@@ -1526,6 +1674,164 @@
     setNewIncomeTypeDynamicForm(null);
   }
 
+  function searchNewIncomeDestinationAccounts(value) {
+    const text = getTrimmedString(value);
+
+    if (newIncomeDestinationSearchTimer.current) {
+      clearTimeout(newIncomeDestinationSearchTimer.current);
+      newIncomeDestinationSearchTimer.current = null;
+    }
+
+    if (!text) {
+      setNewIncomeDestinationAccountOptions([]);
+      return;
+    }
+
+    newIncomeDestinationSearchTimer.current = setTimeout(() => {
+      setNewIncomeDestinationAccountLoading(true);
+      exe('ExeChain', {
+        chain: 'cmdSearchTransitAccounts',
+        context: JSON.stringify({ page: 1, size: 10, accountName: text })
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
+          }
+
+          setNewIncomeDestinationAccountOptions(mapTransitAccountOptions(getAccountSearchRows(response)));
+        })
+        .catch(error => {
+          setNewIncomeDestinationAccountOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setNewIncomeDestinationAccountLoading(false));
+    }, 250);
+  }
+
+  function getAccountSearchRows(response) {
+    const result = response && response.outData && !Array.isArray(response.outData)
+      ? response.outData
+      : response;
+    return Array.isArray(result && result.data) ? result.data : getRows(response);
+  }
+
+  function getCurrencyName(currency) {
+    const code = getTrimmedString(currency).toUpperCase();
+    const names = {
+      USD: 'Dólar Estadounidense',
+      EUR: 'Euro',
+      PAB: 'Balboa',
+      GBP: 'Libra Esterlina',
+      CAD: 'Dólar Canadiense',
+      MXN: 'Peso Mexicano',
+      COP: 'Peso Colombiano',
+      CRC: 'Colón Costarricense',
+      GTQ: 'Quetzal',
+      HNL: 'Lempira',
+      NIO: 'Córdoba'
+    };
+    return names[code] || code;
+  }
+
+  function mapTransitAccountOptions(rows) {
+    return (Array.isArray(rows) ? rows : []).map(account => {
+      const id = Number(account && account.id);
+      const accNo = getTrimmedString(account && account.accNo);
+      const name = getTrimmedString(account && account.name);
+      const policyCode = getTrimmedString(account && account.policyCode);
+      const contactName = getTrimmedString(account && account.contactName);
+      const currency = getTrimmedString(account && account.currency).toUpperCase();
+      const currencyName = getCurrencyName(currency);
+      const details = [
+        accNo && accNo !== name ? accNo : '',
+        policyCode ? `${t('Policy')}: ${policyCode}` : '',
+        contactName ? `${t('Contact')}: ${contactName}` : ''
+      ]
+        .filter(Boolean);
+
+      return {
+        value: id,
+        label: (
+          <div style={{ lineHeight: 1.25 }}>
+            <div>
+              {name || accNo || t('Unnamed account')} - {currencyName}
+            </div>
+            {details.map((detail, index) => (
+              <div key={`${id}-${index}`} style={{ color: '#8c8c8c', fontSize: 11 }}>{detail}</div>
+            ))}
+          </div>
+        ),
+        accountLabel: (
+          <span>
+            {name || accNo || t('Unnamed account')} - {currencyName}
+          </span>
+        ),
+        account: account
+      };
+    }).filter(option => Number.isFinite(option.value) && option.value > 0);
+  }
+
+  function loadNewIncomeAccountSearch(values, pagination) {
+    const source = values || newIncomeAccountSearchForm.getFieldsValue();
+    const currentPage = Number(pagination && pagination.current) || 1;
+    const pageSize = Number(pagination && pagination.pageSize) || 10;
+    const contactId = Number(source.contact);
+
+    setNewIncomeAccountSearchLoading(true);
+    exe('ExeChain', {
+      chain: 'cmdSearchTransitAccounts',
+      context: JSON.stringify({
+        page: currentPage,
+        size: pageSize,
+        accountName: source.accountName || '',
+        policy: source.policy || '',
+        holderId: Number.isFinite(contactId) && contactId > 0 ? contactId : 0
+      })
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
+        }
+
+        const result = response && response.outData && !Array.isArray(response.outData)
+          ? response.outData
+          : response;
+        setNewIncomeAccountSearchRows(getAccountSearchRows(response));
+        setNewIncomeAccountSearchTotal(Number(result && result.total) || 0);
+        setNewIncomeAccountSearchPagination({ current: currentPage, pageSize: pageSize });
+      })
+      .catch(error => {
+        setNewIncomeAccountSearchRows([]);
+        setNewIncomeAccountSearchTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setNewIncomeAccountSearchLoading(false));
+  }
+
+  function openNewIncomeAccountSearch() {
+    newIncomeAccountSearchForm.resetFields();
+    setNewIncomeAccountSearchRows([]);
+    setNewIncomeAccountSearchTotal(0);
+    setNewIncomeAccountSearchPagination({ current: 1, pageSize: 10 });
+    setNewIncomeAccountSearchVisible(true);
+  }
+
+  function clearNewIncomeAccountSearch() {
+    newIncomeAccountSearchForm.resetFields();
+    setNewIncomeAccountSearchRows([]);
+    setNewIncomeAccountSearchTotal(0);
+  }
+
+  function selectNewIncomeDestinationAccount(account) {
+    const id = Number(account && account.id);
+    if (!Number.isFinite(id) || id <= 0) return;
+
+    const options = mapTransitAccountOptions([account]);
+    setNewIncomeDestinationAccountOptions(current => options.concat(current.filter(item => Number(item.value) !== id)));
+    newIncomeForm.setFieldsValue({ destination: id });
+    setNewIncomeAccountSearchVisible(false);
+  }
+
   function updateNewIncomePayment(key, field, value) {
     setNewIncomePayments(rows => rows.map(row => row.key === key
       ? { ...row, [field]: value }
@@ -1554,6 +1860,8 @@
 
   function clearNewIncomeForm() {
     newIncomeForm.resetFields();
+    setNewIncomeTypeCode(undefined);
+    setNewIncomeDestinationAccountOptions([]);
     setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: '' }]);
     setCollectionExpectedAmount(0);
     setNewIncomeDynamicForms({});
@@ -1797,8 +2105,9 @@
 
   function getNewIncomeTransferEntity(formValues, destinationAccountId) {
     const currency = getTrimmedString(formValues.currency);
-    const sourceExternal = getTrimmedString(formValues.destination);
     const incomeType = getTrimmedString(formValues.incomeType);
+    const transitIncome = isTransitIncomeType(incomeType);
+    const sourceExternal = transitIncome ? null : getTrimmedString(formValues.destination);
 
     return {
       currency: currency,
@@ -1839,6 +2148,15 @@
   }
 
   function resolveNewIncomeDestinationAccount(formValues) {
+    if (isTransitIncomeType(formValues && formValues.incomeType)) {
+      const accountId = Number(formValues && formValues.destination);
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        return Promise.reject(new Error(t('Select a destination account.')));
+      }
+
+      return Promise.resolve(accountId);
+    }
+
     const sourceOption = externalSourceOptions.find(item => item && item.value === formValues.destination);
     const accountNo = getTrimmedString(sourceOption && sourceOption.destinationAccNo);
     if (!accountNo) {
@@ -1919,12 +2237,15 @@
 
       const paymentAmount = getNewIncomeTotal();
       const paymentConcept = getTrimmedString(createdTransfer.concept || entity.concept || 'IW');
+      const paymentConceptLabel = getTrimmedString(selectedIncomeType && selectedIncomeType.label)
+        || paymentConcept;
       clearNewIncomeForm();
       setCollectionChargeVisible(false);
       showNewIncomeExecutionConfirm({
         id: transferId,
         amount: paymentAmount,
-        concept: paymentConcept
+        concept: paymentConcept,
+        conceptLabel: paymentConceptLabel
       });
     } catch (error) {
       message.error(error && error.message ? error.message : t('The income could not be created.'));
@@ -1955,7 +2276,7 @@
           <div>{t('The payment was created successfully.')}</div>
           <div><strong>{t('ID')}:</strong> {transferId}</div>
           <div><strong>{t('Amount')}:</strong> {formatMoney(payment.amount)}</div>
-          <div><strong>{t('Concept')}:</strong> {payment.concept || '-'}</div>
+          <div><strong>{t('Concept')}:</strong> {payment.conceptLabel || payment.concept || '-'}</div>
           <div style={{ marginTop: 8 }}>{t('Do you want to execute this payment now?')}</div>
         </div>
       ),
@@ -2716,15 +3037,7 @@
           ? result.data
           : getRows(response);
         const total = Number(result && result.total);
-        setCollectionRows(rows.map(row => {
-          const source = row || {};
-          const policyId = Number(source.lifePolicyId || source.policyId || source.LifePolicyId || source.id || 0);
-          return {
-            ...source,
-            lifePolicyId: Number.isFinite(policyId) && policyId > 0 ? policyId : 0,
-            policyId: Number.isFinite(policyId) && policyId > 0 ? policyId : 0
-          };
-        }));
+        setCollectionRows(normalizeCollectionRows(rows));
         setCollectionTotal(Number.isFinite(total) && total >= 0 ? total : rows.length);
         setCollectionPagination({ current: currentPage, pageSize: pageSize });
       })
@@ -2734,6 +3047,112 @@
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setCollectionLoading(false));
+  }
+
+  function normalizeCollectionRows(rows) {
+    return (Array.isArray(rows) ? rows : []).map(row => {
+      const source = row || {};
+      const policyId = Number(source.lifePolicyId || source.policyId || source.LifePolicyId || source.id || 0);
+      return {
+        ...source,
+        lifePolicyId: Number.isFinite(policyId) && policyId > 0 ? policyId : 0,
+        policyId: Number.isFinite(policyId) && policyId > 0 ? policyId : 0
+      };
+    });
+  }
+
+  function buildCollectionContext(filters, page, size) {
+    const source = filters || {};
+    return JSON.stringify({
+      page: page,
+      size: size,
+      holderId: source.holderId || null,
+      lob: source.lob || null,
+      policyId: source.policyId ? Number(source.policyId) : null,
+      policyCode: source.policyCode || null,
+      issuanceFrom: source.issuanceFrom || null,
+      issuanceTo: source.issuanceTo || null
+    });
+  }
+
+  async function ensureCashierExcelLibrary() {
+    if (typeof XLSX !== 'undefined') {
+      return true;
+    }
+
+    const response = await exe('ExeChain', {
+      chain: 'cmdLoadLibrariesGroupedBordereau',
+      context: '{}'
+    });
+    const libraries = response && response.outData ? response.outData : {};
+    const xlsxLibrary = libraries.XLSX || libraries.xlsx || libraries.xlsxJs;
+
+    if (typeof xlsxLibrary === 'string') {
+      eval(xlsxLibrary);
+    } else if (xlsxLibrary) {
+      window.XLSX = xlsxLibrary;
+    }
+
+    return typeof XLSX !== 'undefined';
+  }
+
+  async function exportPremiumCollections(exportType) {
+    try {
+      const requestedSize = Number(collectionTotal) > 0 ? Number(collectionTotal) : 10000;
+      const response = await exe('ExeChain', {
+        chain: 'cmdPremiumCollectionCashier',
+        context: buildCollectionContext(collectionFilters, 1, requestedSize)
+      });
+
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('Premium collections could not be exported.'));
+      }
+
+      const result = response && response.outData && !Array.isArray(response.outData)
+        ? response.outData
+        : response;
+      const sourceRows = Array.isArray(result && result.data) ? result.data : getRows(response);
+      const rows = normalizeCollectionRows(sourceRows);
+
+      if (rows.length === 0) {
+        message.info(t('There are no records to export.'));
+        return;
+      }
+
+      if (!await ensureCashierExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const exportRows = exportType === 'remittance'
+        ? rows.map(row => ({
+          cnpoliza: row.poliza || '',
+          ctenedor: row.holderId || '',
+          crecibo: row.recibo || '',
+          monto: Number(row.pendiente || 0)
+        }))
+        : rows.map(row => ({
+          [t('Policy')]: row.poliza || '',
+          [t('Receipt')]: row.recibo || '',
+          [t('Year-Month')]: `${row.anio || ''}-${String(row.mes || '').padStart(2, '0')}`,
+          [t('Line of business')]: row.ramo || '',
+          [t('Payer')]: row.pagador || '',
+          [t('Insured')]: row.asegurado || '',
+          [t('Currency')]: row.moneda || '',
+          [t('Billed')]: Number(row.facturado || 0),
+          [t('Paid')]: Number(row.pagado || 0),
+          [t('Overdue')]: Number(row.vencido || 0),
+          [t('Pending')]: Number(row.pendiente || 0),
+          [t('Issuance date')]: row.fechaEmision || '',
+          [t('Pending installments')]: Array.isArray(row.Cuotas) ? row.Cuotas.length : 0
+        }));
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, exportType === 'remittance' ? 'Remittance' : 'Premium detail');
+      XLSX.writeFile(workbook, `premium-collections-${exportType}-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    }
   }
 
   function applyCollectionFilters(values) {
@@ -4005,7 +4424,7 @@
 
   function loadTransferWorkspaces(params = {}) {
     const pagination = params.pagination || transferPagination;
-    const filter = buildTransferWorkspaceFilter();
+    const filter = buildTransferWorkspaceFilter(params.filters || transferFilters);
     const pageSize = Number(pagination && pagination.pageSize) || 25;
     const currentPage = Number(pagination && pagination.current) || 1;
     const backendPage = Math.max(currentPage - 1, 0);
@@ -4052,6 +4471,7 @@
 
   function handleReloadCashDesks() {
     loadTransferWorkspaces({
+      filters: transferFilters,
       pagination: {
         current: 1,
         pageSize: transferPagination.pageSize
@@ -4061,6 +4481,7 @@
 
   function handleTableChange(pagination) {
     loadTransferWorkspaces({
+      filters: transferFilters,
       pagination: {
         current: pagination.current,
         pageSize: pagination.pageSize
@@ -4130,9 +4551,35 @@
   ];
 
   const premiumColumns = [
-    { title: t('Policy'), dataIndex: 'poliza', key: 'poliza', width: 150 },
-    { title: t('Year'), dataIndex: 'anio', key: 'anio', width: 75, align: 'center' },
-    { title: t('Month'), dataIndex: 'mes', key: 'mes', width: 75, align: 'center' },
+    {
+      title: t('Policy'),
+      dataIndex: 'poliza',
+      key: 'poliza',
+      width: 150,
+      render: (value, record) => {
+        const policyId = Number(record && record.lifePolicyId);
+        return Number.isFinite(policyId) && policyId > 0
+          ? (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+            >
+              {value || policyId}
+            </Button>
+          )
+          : (value || '-');
+      }
+    },
+    { title: t('Receipt'), dataIndex: 'recibo', key: 'recibo', width: 100 },
+    {
+      title: t('Year-Month'),
+      key: 'period',
+      width: 100,
+      align: 'center',
+      render: (_, record) => `${record && record.anio ? record.anio : ''}-${String(record && record.mes ? record.mes : '').padStart(2, '0')}`
+    },
     { title: t('Line of business'), dataIndex: 'ramo', key: 'ramo', width: 140 },
     { title: t('Payer'), dataIndex: 'pagador', key: 'pagador', width: 190, ellipsis: true },
     { title: t('Insured'), dataIndex: 'asegurado', key: 'asegurado', width: 190, ellipsis: true },
@@ -4143,7 +4590,7 @@
       title: t('Overdue'),
       dataIndex: 'vencido',
       key: 'vencido',
-      width: 165,
+      width: 145,
       align: 'right',
       render: (value, record) => {
         const installments = record && Array.isArray(record.Cuotas) ? record.Cuotas : [];
@@ -4342,28 +4789,33 @@
 
   const cashDeskTabContent = (
     <Card size="small">
-      <div className="cashier-supervisor-toolbar">
-        <Button type="primary" icon={<NewIcon />} onClick={openNewCashDeskModal}>
-          {t('New')}
-        </Button>
-        <Popconfirm
-          title={t('Close cash desk')}
-          description={t('Are you sure you want to close the selected cash desk?')}
-          okText={t('Yes')}
-          cancelText={t('No')}
-          onConfirm={closeCashDesk}
-          disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed) || closeCashDeskLoading}
-        >
-          <Button
-            icon={<LockOutlined />}
-            loading={closeCashDeskLoading}
-            disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed)}
-          >
-            {t('Close')}
+      <div className="cashier-supervisor-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <Button type="primary" icon={<NewIcon />} onClick={openNewCashDeskModal}>
+            {t('New')}
           </Button>
-        </Popconfirm>
-        <Button icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
-          {t('Cash count')}
+          <Popconfirm
+            title={t('Close cash desk')}
+            description={t('Are you sure you want to close the selected cash desk?')}
+            okText={t('Yes')}
+            cancelText={t('No')}
+            onConfirm={closeCashDesk}
+            disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed) || closeCashDeskLoading}
+          >
+            <Button
+              icon={<LockOutlined />}
+              loading={closeCashDeskLoading}
+              disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed)}
+            >
+              {t('Close')}
+            </Button>
+          </Popconfirm>
+          <Button icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
+            {t('Cash count')}
+          </Button>
+        </Space>
+        <Button icon={<FilterOutlined />} onClick={() => setTransferFilterVisible(true)}>
+          {t('Filter')}
         </Button>
       </div>
       <Table
@@ -4547,17 +4999,39 @@
 
   const premiumCollectionTabContent = (
     <Card size="small">
-      <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar">
-        <Button type="primary" icon={<FilterOutlined />} onClick={() => setCollectionFilterVisible(true)}>
-          {t('Filter')}
-        </Button>
-        <Button
-          type="primary"
-          onClick={openCollectionCharge}
-          disabled={collectionSelectedRowKeys.length === 0}
+      <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <Button type="primary" icon={<FilterOutlined />} onClick={() => setCollectionFilterVisible(true)}>
+            {t('Filter')}
+          </Button>
+          <Button
+            type="primary"
+            onClick={openCollectionCharge}
+            disabled={collectionSelectedRowKeys.length === 0}
+          >
+            {t('Collect')}
+          </Button>
+        </Space>
+        <Dropdown
+          trigger={['click']}
+          placement="bottomRight"
+          menu={{
+            items: [
+              {
+                key: 'detail',
+                label: t('Export detail'),
+                onClick: () => exportPremiumCollections('detail')
+              },
+              {
+                key: 'remittance',
+                label: t('Remittance format'),
+                onClick: () => exportPremiumCollections('remittance')
+              }
+            ]
+          }}
         >
-          {t('Collect')}
-        </Button>
+          <Button icon={<DownloadOutlined />}>{t('Export')}</Button>
+        </Dropdown>
       </div>
       <Table
         rowKey={getCollectionRowKey}
@@ -4905,7 +5379,12 @@
                 value={payment.amount}
                 prefix="$"
                 inputMode="decimal"
-                onChange={event => updateNewIncomePayment(payment.key, 'amount', event.target.value)}
+                onChange={event => {
+                  const nextValue = limitIncomeAmountDecimals(event && event.target ? event.target.value : '');
+                  if (nextValue !== null) {
+                    updateNewIncomePayment(payment.key, 'amount', nextValue);
+                  }
+                }}
               />
             </div>
             <div className="cashier-supervisor-payment-actions">
@@ -4921,6 +5400,9 @@
             <Form.Item label={t('Income type')} name="incomeType">
             <Select
               style={{ width: '100%' }}
+              showSearch
+              optionFilterProp="label"
+              filterOption={(input, option) => getTrimmedString(option && option.label).toLowerCase().indexOf(getTrimmedString(input).toLowerCase()) >= 0}
               options={collectionChargeVisible
                 ? incomeTypeOptions
                 : incomeTypeOptions.filter(item =>
@@ -4933,9 +5415,49 @@
           <Form.Item
             label={t('Destination')}
             required
-            name="destination"
           >
-            <Select placeholder={t('External source')} style={{ width: '100%' }} options={externalSourceOptions} />
+            {isTransitIncomeType(newIncomeTypeCode)
+              ? (
+                <Input.Group compact style={{ display: 'flex', width: '100%' }}>
+                  <Form.Item
+                    name="destination"
+                    noStyle
+                    rules={[{ required: true, message: t('Please select an account.') }]}
+                  >
+                    <Select
+                      showSearch
+                      allowClear
+                      filterOption={false}
+                      optionLabelProp="accountLabel"
+                      placeholder={t('Search account')}
+                      style={{ width: 'calc(100% - 40px)' }}
+                      options={newIncomeDestinationAccountOptions}
+                      loading={newIncomeDestinationAccountLoading}
+                      onSearch={searchNewIncomeDestinationAccounts}
+                      notFoundContent={newIncomeDestinationAccountLoading ? t('Loading...') : null}
+                    />
+                  </Form.Item>
+                  <Button
+                    icon={<InstallmentsIcon />}
+                    aria-label={t('Search accounts')}
+                    onClick={openNewIncomeAccountSearch}
+                    style={{ width: 40 }}
+                  />
+                </Input.Group>
+              )
+              : (
+                <Form.Item
+                  name="destination"
+                  noStyle
+                  rules={[{ required: true, message: t('Please select a destination.') }]}
+                >
+                  <Select
+                    placeholder={t('External source')}
+                    style={{ width: '100%' }}
+                    options={externalSourceOptions}
+                  />
+                </Form.Item>
+              )}
           </Form.Item>
           <Form.Item
             label={t('Currency')}
@@ -5393,6 +5915,124 @@
         </Modal>
 
         <Modal
+          title={t('Search accounts')}
+          open={newIncomeAccountSearchVisible}
+          onCancel={() => setNewIncomeAccountSearchVisible(false)}
+          footer={null}
+          width={900}
+          destroyOnClose={false}
+        >
+          <Form
+            form={newIncomeAccountSearchForm}
+            layout="vertical"
+            onFinish={values => loadNewIncomeAccountSearch(values, { current: 1, pageSize: newIncomeAccountSearchPagination.pageSize })}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <Form.Item label={t('Account name')} name="accountName">
+                <Input allowClear placeholder={t('Search by account name')} />
+              </Form.Item>
+              <Form.Item label={t('Policy')} name="policy">
+                <Input allowClear placeholder={t('Search by policy id or code')} />
+              </Form.Item>
+              <Form.Item label={t('Contact')} name="contact">
+                <Select
+                  showSearch
+                  allowClear
+                  filterOption={false}
+                  options={payerOptions}
+                  loading={payerLoading}
+                  onSearch={searchPayers}
+                  optionLabelProp="name"
+                  placeholder={t('Type at least 3 characters')}
+                  notFoundContent={t('No payers found')}
+                />
+              </Form.Item>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+              <Button onClick={clearNewIncomeAccountSearch}>{t('Clear')}</Button>
+              <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>{t('Search')}</Button>
+            </div>
+          </Form>
+          <Table
+            className="cashier-supervisor-account-search-table"
+            rowKey={record => String(record && record.id)}
+            size="small"
+            bordered
+            loading={newIncomeAccountSearchLoading}
+            dataSource={newIncomeAccountSearchRows}
+            columns={[
+              {
+                title: t('Select'),
+                key: 'action',
+                width: 90,
+                align: 'center',
+                fixed: 'left',
+                render: (_, record) => (
+                  <Tooltip title={t('Select')}>
+                    <Button
+                      className="cashier-supervisor-account-select-cell"
+                      type="link"
+                      aria-label={t('Select')}
+                      icon={<CheckOutlined />}
+                      onClick={() => selectNewIncomeDestinationAccount(record)}
+                    />
+                  </Tooltip>
+                )
+              },
+              {
+                title: t('Account'),
+                dataIndex: 'accNo',
+                key: 'accNo',
+                width: 220,
+                render: value => (
+                  <Tooltip title={getTrimmedString(value)}>
+                    <span className="cashier-supervisor-account-cell">{getTrimmedString(value) || '-'}</span>
+                  </Tooltip>
+                )
+              },
+              {
+                title: t('Name'),
+                dataIndex: 'name',
+                key: 'name',
+                width: 280,
+                render: value => (
+                  <Tooltip title={getTrimmedString(value)}>
+                    <span className="cashier-supervisor-account-cell">{getTrimmedString(value) || '-'}</span>
+                  </Tooltip>
+                )
+              },
+              { title: t('Policy'), dataIndex: 'policyCode', key: 'policyCode', width: 150 },
+              {
+                title: t('Contact'),
+                dataIndex: 'contactName',
+                key: 'contactName',
+                width: 280,
+                render: value => (
+                  <Tooltip title={getTrimmedString(value)}>
+                    <span className="cashier-supervisor-account-cell">{getTrimmedString(value) || '-'}</span>
+                  </Tooltip>
+                )
+              },
+              { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' }
+            ]}
+            onRow={record => ({
+              onClick: () => selectNewIncomeDestinationAccount(record)
+            })}
+            pagination={{
+              current: newIncomeAccountSearchPagination.current,
+              pageSize: newIncomeAccountSearchPagination.pageSize,
+              total: newIncomeAccountSearchTotal,
+              showSizeChanger: false,
+              onChange: (current, pageSize) => loadNewIncomeAccountSearch(
+                newIncomeAccountSearchForm.getFieldsValue(),
+                { current: current, pageSize: pageSize }
+              )
+            }}
+            scroll={{ x: 1100, y: 300 }}
+          />
+        </Modal>
+
+        <Modal
           title={t('Search policy')}
           open={collectionExternalPolicyVisible}
           onCancel={() => {
@@ -5447,6 +6087,42 @@
             ]}
           />
         </Modal>
+
+        <Drawer
+          title={t('Cash desk filters')}
+          placement="right"
+          width={360}
+          open={transferFilterVisible}
+          onClose={() => setTransferFilterVisible(false)}
+          destroyOnClose={false}
+          footer={(
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={clearTransferFilters}>{t('Clear')}</Button>
+              <Button type="primary" onClick={() => transferFilterForm.submit()}>{t('Apply')}</Button>
+            </div>
+          )}
+        >
+          <Form
+            form={transferFilterForm}
+            layout="vertical"
+            onFinish={applyTransferFilters}
+          >
+            <Form.Item label={t('Start date')} name="dateFrom">
+              <DatePicker
+                style={{ width: '100%' }}
+                format="DD/MM/YYYY"
+                allowClear
+              />
+            </Form.Item>
+            <Form.Item label={t('End date')} name="dateTo">
+              <DatePicker
+                style={{ width: '100%' }}
+                format="DD/MM/YYYY"
+                allowClear
+              />
+            </Form.Item>
+          </Form>
+        </Drawer>
 
         <Drawer
           title={t('Premium collection filters')}

@@ -1,0 +1,29 @@
+scanCommand:  
+  cmd: ExeChain
+  data:
+    chain: cmdIngresoVarioCajaDTO
+    context: "{id:_id}" 
+unique: _reference
+reference: _reference
+status: 1
+code: _tipo
+description: _description
+entity: "Transfer"
+entityId: _id
+Lines:
+  - account: _debe
+    debit: '_amount > 0 ? _amount : 0'
+    credit: '_amount < 0 ? -_amount : 0'
+    comments: _xDebit
+    order: _lineNumber
+  - account: _cuentaITBS
+    condition: _MontoFactor != 0
+    debit: '_MontoFactor < 0 ? -_MontoFactor : 0'
+    credit: '_MontoFactor > 0 ? _MontoFactor : 0'
+    comments: _xCredit
+    order: _lineNumber
+  - account: _habe
+    debit: '_netoCaja < 0 ? -_netoCaja : 0'
+    credit: '_netoCaja > 0 ? _netoCaja : 0'
+    comments: _xCredit
+    order: _lineNumber
