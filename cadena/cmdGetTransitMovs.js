@@ -13,6 +13,8 @@
  *   size?: number,
  *   holderId?: number,
  *   policy?: string|number,
+ *   accountName?: string,
+ *   currency?: string,
  *   name?: string,
  *   cancellations?: boolean,
  *   onlyWithBalance?: boolean
@@ -99,6 +101,8 @@ function normalizeInput(source) {
     size: Math.min(Math.max(toPositiveInteger(value.size) || 15, 1), 100),
     holderId: toPositiveInteger(value.holderId),
     policy: normalizeText(value.policy),
+    accountName: normalizeText(value.accountName),
+    currency: normalizeText(value.currency).toUpperCase(),
     name: normalizeText(value.name),
     cancellations: value.cancellations === true,
     onlyWithBalance: value.onlyWithBalance === true
@@ -129,6 +133,14 @@ function buildFilter(input) {
     } else {
       conditions.push(`pol.[code] LIKE N'${escapeSql(input.policy)}%'`);
     }
+  }
+
+  if (input.accountName) {
+    conditions.push(`a.[name] LIKE N'%${escapeSql(input.accountName)}%'`);
+  }
+
+  if (input.currency) {
+    conditions.push(`UPPER(ISNULL(a.[currency], '')) = '${escapeSql(input.currency)}'`);
   }
 
   if (input.name) {

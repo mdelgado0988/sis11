@@ -31,11 +31,13 @@ const incomeTypeForm = safeJson(transfer.jIncomeTypeForm, []);
 const clientePAField = Array.isArray(incomeTypeForm)
   ? incomeTypeForm.find(field => field && field.name === "clientePA")
   : null;
-const clientePA = clientePAField && Array.isArray(clientePAField.userData)
-  ? clientePAField.userData[0]
-  : clientePAField && clientePAField.userData !== undefined && clientePAField.userData !== null
-    ? clientePAField.userData
-    : null;
+const pagadorField = Array.isArray(incomeTypeForm)
+  ? incomeTypeForm.find(field => field && field.name === "pagador")
+  : null;
+const clientePAValue = getFormFieldValue(clientePAField);
+const clientePA = clientePAValue === null
+  ? getFormFieldValue(pagadorField)
+  : clientePAValue;
 
 doCmd({
   cmd: "LoadEntity",
@@ -106,6 +108,20 @@ function safeJson(value, fallback) {
   } catch (error) {
     return fallback;
   }
+}
+
+function getFormFieldValue(field) {
+  if (!field || field.userData === undefined || field.userData === null) return null;
+
+  const value = Array.isArray(field.userData)
+    ? field.userData[0]
+    : field.userData;
+
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  return value;
 }
 
 function loadIncomeTypeAccountingConfig() {

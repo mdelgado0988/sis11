@@ -13,6 +13,7 @@
  *   page?: number,
  *   size?: number,
  *   accountName?: string,
+ *   currency?: string,
  *   policy?: string|number,
  *   holderId?: number
  * }
@@ -79,6 +80,7 @@ function normalizeInput(source) {
     page: Math.max(toPositiveInteger(value.page) || 1, 1),
     size: Math.min(Math.max(toPositiveInteger(value.size) || 15, 1), 100),
     accountName: normalizeText(value.accountName || value.name),
+    currency: normalizeText(value.currency).toUpperCase(),
     policy: normalizeText(value.policy),
     holderId: toPositiveInteger(value.holderId)
   };
@@ -98,6 +100,10 @@ function buildFilter(input) {
 
   if (input.holderId > 0) {
     conditions.push(`a.[holderId] = ${input.holderId}`);
+  }
+
+  if (input.currency) {
+    conditions.push(`LTRIM(RTRIM(UPPER(ISNULL(a.[currency], '')))) = '${escapeSql(input.currency)}'`);
   }
 
   if (input.policy) {

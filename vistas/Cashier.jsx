@@ -14,6 +14,7 @@
     Popover,
     Radio,
     Select,
+    Slider,
     Space,
     Table,
     Tag,
@@ -174,6 +175,15 @@
     </span>
   );
 
+  const TransferAccountIcon = () => (
+    <span role="img" aria-label="transfer" className="anticon anticon-swap">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M120 320h552l-96-96 56-56 192 192-192 192-56-56 96-96H120v-80z"></path>
+        <path d="M904 704H352l96 96-56 56-192-192 192-192 56 56-96 96h552v80z"></path>
+      </svg>
+    </span>
+  );
+
   const ClearOutlined = () => (
     <span role="img" aria-label="clear" className="anticon anticon-close-circle">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -223,6 +233,7 @@
   const [balanceRows, setBalanceRows] = React.useState([]);
   const [balanceLoading, setBalanceLoading] = React.useState(false);
   const [transitAccountRows, setTransitAccountRows] = React.useState([]);
+  const [selectedTransitAccountId, setSelectedTransitAccountId] = React.useState(null);
   const [transitAccountLoading, setTransitAccountLoading] = React.useState(false);
   const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 15 });
   const [transitAccountTotal, setTransitAccountTotal] = React.useState(0);
@@ -231,6 +242,13 @@
   const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
   const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
   const [transitFilterForm] = Form.useForm();
+  const [refundMoneyVisible, setRefundMoneyVisible] = React.useState(false);
+  const [refundMoneyForm] = Form.useForm();
+  const [accountTransferVisible, setAccountTransferVisible] = React.useState(false);
+  const [accountTransferForm] = Form.useForm();
+  const [accountTransferAccountOptions, setAccountTransferAccountOptions] = React.useState([]);
+  const [accountTransferAccountLoading, setAccountTransferAccountLoading] = React.useState(false);
+  const accountTransferAccountSearchTimer = React.useRef(null);
   const [reversalVisible, setReversalVisible] = React.useState(false);
   const [reversalCatalogLoading, setReversalCatalogLoading] = React.useState(false);
   const [reversalLoading, setReversalLoading] = React.useState(false);
@@ -300,6 +318,24 @@
   const reversalFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!accountTransferVisible || !Array.isArray(currencyOptions) || currencyOptions.length === 0) return;
+
+    const currentCurrency = accountTransferForm.getFieldValue('currency');
+    if (!currentCurrency) {
+      accountTransferForm.setFieldsValue({ currency: currencyOptions[0].value });
+    }
+  }, [accountTransferVisible, currencyOptions]);
+
+  React.useEffect(() => {
+    if (!transitFilterVisible || !Array.isArray(currencyOptions) || currencyOptions.length !== 1) return;
+
+    const currentCurrency = transitFilterForm.getFieldValue('currency');
+    if (!currentCurrency) {
+      transitFilterForm.setFieldsValue({ currency: currencyOptions[0].value });
+    }
+  }, [transitFilterVisible, currencyOptions]);
 
   React.useEffect(() => {
     const styleId = 'cashier-supervisor-style';
@@ -773,6 +809,15 @@
       }
 
       .cashier-supervisor-shell .ant-checkbox:hover .ant-checkbox-inner {
+        border-color: #1f2937;
+      }
+
+      .cashier-supervisor-shell .ant-radio-inner {
+        border-color: #5b6573;
+        border-width: 2px;
+      }
+
+      .cashier-supervisor-shell .ant-radio:hover .ant-radio-inner {
         border-color: #1f2937;
       }
 
@@ -1311,6 +1356,8 @@
           ? filters.holderId
           : '',
         policy: getTrimmedString(filters && filters.policy),
+        accountName: getTrimmedString(filters && filters.accountName),
+        currency: getTrimmedString(filters && filters.currency),
         name: getTrimmedString(filters && filters.name),
         cancellations: filters && filters.cancellations === true,
         onlyWithBalance: filters && filters.onlyWithBalance === true
@@ -1326,11 +1373,15 @@
           : {};
         const rows = Array.isArray(payload.data) ? payload.data : [];
         setTransitAccountRows(rows);
+        setSelectedTransitAccountId(current => rows.some(row => Number(row && row.id) === Number(current))
+          ? current ? String(current) : null
+          : null);
         setTransitAccountTotal(Number(payload.total) || 0);
         setTransitAccountPagination({ current: currentPage, pageSize });
       })
       .catch(error => {
         setTransitAccountRows([]);
+        setSelectedTransitAccountId(null);
         setTransitAccountTotal(0);
         message.error(error && error.message ? error.message : String(error));
       })
@@ -1357,6 +1408,8 @@
     const nextFilters = {
       holderId: values && values.contact !== undefined && values.contact !== null ? values.contact : '',
       policy: getTrimmedString(values && values.policy),
+      accountName: getTrimmedString(values && values.accountName),
+      currency: getTrimmedString(values && values.currency),
       name: getTrimmedString(values && values.name),
       cancellations: values && values.cancellations === true,
       onlyWithBalance: values && values.onlyWithBalance === true
@@ -1372,9 +1425,13 @@
 
   function clearTransitFilters() {
     transitFilterForm.resetFields();
+    if (Array.isArray(currencyOptions) && currencyOptions.length === 1) {
+      transitFilterForm.setFieldsValue({ currency: currencyOptions[0].value });
+    }
     setTransitAccountFilters({});
     setTransitHasSearched(false);
     setTransitAccountRows([]);
+    setSelectedTransitAccountId(null);
     setTransitAccountTotal(0);
     setTransitFilterVisible(false);
   }
@@ -1396,6 +1453,278 @@
       ...current,
       [accountId]: { current: pagination.current, pageSize: pagination.pageSize }
     }));
+  }
+
+  function getTransitSourceAccountOptions() {
+    return transitAccountRows
+      .map(account => {
+        const label = getTransitAccountLabel(account);
+        const accountId = Number(account && account.id) || 0;
+        if (accountId <= 0) return null;
+
+        return {
+          value: accountId,
+          label: `${getTrimmedString(account && account.accNo) || '-'} - ${getTrimmedString(account && account.name) || '-'} - ${getTrimmedString(account && account.currency) || '-'}`,
+          accountLabel: label
+        };
+      })
+      .filter(option => option);
+  }
+
+  function openRefundMoneyModal() {
+    const selectedAccount = transitAccountRows.find(row => Number(row && row.id) === Number(selectedTransitAccountId));
+
+    if (!selectedAccount) {
+      message.warning(t('Select a transit account first.'));
+      return;
+    }
+
+    const selectedCurrency = getTrimmedString(selectedAccount.currency).toUpperCase();
+    const currency = currencyOptions.some(option => getTrimmedString(option && option.value).toUpperCase() === selectedCurrency)
+      ? selectedCurrency
+      : currencyOptions[0] && currencyOptions[0].value;
+
+    refundMoneyForm.setFieldsValue({
+      currency: currency,
+      sourceAccount: Number(selectedAccount.id),
+      sourcePercentage: 100,
+      amount: Math.max(0, getAuditNumber(selectedAccount.movementBalance)),
+      paymentMethod: undefined,
+      beneficiary: currentUserEmail || '',
+      reference: ''
+    });
+    setRefundMoneyVisible(true);
+  }
+
+  function closeRefundMoneyModal() {
+    setRefundMoneyVisible(false);
+    refundMoneyForm.resetFields();
+  }
+
+  function submitRefundMoneyRequest() {
+    message.info(t('The refund request form is ready for processing.'));
+  }
+
+  function openAccountTransferModal() {
+    accountTransferForm.resetFields();
+    setAccountTransferAccountOptions([]);
+    accountTransferForm.setFieldsValue({
+      currency: currencyOptions[0] && currencyOptions[0].value,
+      externalSource: false
+    });
+    setAccountTransferVisible(true);
+  }
+
+  function closeAccountTransferModal() {
+    if (accountTransferAccountSearchTimer.current) {
+      clearTimeout(accountTransferAccountSearchTimer.current);
+      accountTransferAccountSearchTimer.current = null;
+    }
+    setAccountTransferVisible(false);
+    setAccountTransferAccountOptions([]);
+    accountTransferForm.resetFields();
+  }
+
+  function searchAccountTransferAccounts(value) {
+    const text = getTrimmedString(value);
+    const currency = getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase();
+
+    if (accountTransferAccountSearchTimer.current) {
+      clearTimeout(accountTransferAccountSearchTimer.current);
+      accountTransferAccountSearchTimer.current = null;
+    }
+
+    if (!text) {
+      setAccountTransferAccountOptions([]);
+      return;
+    }
+
+    if (!currency) {
+      setAccountTransferAccountOptions([]);
+      message.warning(t('Select a currency before searching accounts.'));
+      return;
+    }
+
+    accountTransferAccountSearchTimer.current = setTimeout(() => {
+      setAccountTransferAccountLoading(true);
+      exe('ExeChain', {
+        chain: 'cmdSearchTransitAccounts',
+        context: JSON.stringify({ page: 1, size: 10, accountName: text, currency: currency })
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
+          }
+
+          setAccountTransferAccountOptions(
+            mapTransitAccountOptions(getAccountSearchRows(response))
+              .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency)
+          );
+        })
+        .catch(error => {
+          setAccountTransferAccountOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setAccountTransferAccountLoading(false));
+    }, 250);
+  }
+
+  function handleAccountTransferCurrencyChange(value) {
+    if (accountTransferAccountSearchTimer.current) {
+      clearTimeout(accountTransferAccountSearchTimer.current);
+      accountTransferAccountSearchTimer.current = null;
+    }
+
+    accountTransferForm.setFieldsValue({
+      currency: value,
+      sourceAccount: undefined,
+      sourceName: '',
+      destinationAccount: undefined,
+      destinationName: ''
+    });
+    setAccountTransferAccountOptions([]);
+  }
+
+  function updateAccountTransferContact(fieldName, accountId) {
+    const selectedOption = accountTransferAccountOptions.find(option => Number(option && option.value) === Number(accountId));
+    const account = selectedOption && selectedOption.account;
+    const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
+    const targetField = fieldName === 'sourceAccount' ? 'sourceName' : 'destinationName';
+
+    accountTransferForm.setFieldsValue({ [targetField]: contactName });
+  }
+
+  async function submitAccountTransfer(values) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const sourceAccountId = Number(values && values.sourceAccount);
+    const destinationAccountId = Number(values && values.destinationAccount);
+    const amount = Number(values && values.amount);
+
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.error(t('Select an open cash desk first.'));
+      return;
+    }
+
+    if (!Number.isFinite(sourceAccountId) || sourceAccountId <= 0
+      || !Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
+      message.error(t('Select both source and destination accounts.'));
+      return;
+    }
+
+    if (sourceAccountId === destinationAccountId) {
+      message.error(t('Source and destination accounts must be different.'));
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      message.error(t('Enter an amount greater than zero.'));
+      return;
+    }
+
+    const depositPaymentType = incomeTypeOptions.find(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'DEPOPAYMENT'
+      || getTrimmedString(item && (item.value || item.code)).toUpperCase() === 'DEPOPAYMENT'
+    );
+    if (!depositPaymentType) {
+      message.error(t('The DEPOPAYMENT income type is not configured.'));
+      return;
+    }
+
+    const currency = getTrimmedString(values && values.currency);
+    const concept = getTrimmedString(values && values.reference);
+    const sourceName = getTrimmedString(values && values.sourceName);
+    const destinationName = getTrimmedString(values && values.destinationName);
+    const incomeType = getTrimmedString(depositPaymentType.value || depositPaymentType.code);
+    const date = getCurrentUtcDateTime();
+
+    // Each movement points only to its destination account, matching the cash income model.
+    const buildTransferEntity = (transferAmount, destinationAccount, accountName) => ({
+      currency: currency,
+      amount: transferAmount,
+      sourceAccountId: null,
+      destinationAccountId: destinationAccount,
+      concept: concept,
+      paymentMethod: 'OT',
+      paymentMethodName: 'OT',
+      SplitPayments: [{
+        paymentMethod: 'OT',
+        paymentMethodName: 'OT',
+        amount: transferAmount,
+        currency: currency,
+        id: 0,
+        transferId: 0
+      }],
+      sourceName: null,
+      destinationName: accountName,
+      source: null,
+      destination: null,
+      AllocationMovements: null,
+      id: 0,
+      transactionCode: null,
+      producer: null,
+      lifePolicyId: null,
+      date: date,
+      status: 0,
+      executed: false,
+      isExternal: true,
+      sourceExternal: null,
+      allocationId: null,
+      Allocation: null,
+      operatingAccountId: 0,
+      claimPaymentId: null,
+      ClaimPayment: null,
+      SourceAccount: null,
+      DestinationAccount: null,
+      Movements: null,
+      reversalDate: null,
+      incomeType: incomeType,
+      IncomeType: null,
+      jIncomeTypeForm: null,
+      transferWorkspaceId: workspaceId,
+      user: currentUserEmail || null
+    });
+
+    const outgoingEntity = buildTransferEntity(-amount, sourceAccountId, sourceName);
+    const incomingEntity = buildTransferEntity(amount, destinationAccountId, destinationName);
+
+    async function createTransfer(transferEntity) {
+      const response = await exe('RepoTransfer', {
+        operation: 'ADD',
+        entity: transferEntity,
+        bulkJson: null,
+        filter: null,
+        include: null,
+        size: 0,
+        page: 0,
+        execute: false,
+        otherReceivables: null
+      });
+
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The account transfer could not be created.'));
+      }
+
+      const createdRows = getRows(response);
+      const createdTransfer = createdRows[0]
+        || (response && response.outData && !Array.isArray(response.outData) ? response.outData : {});
+      const transferId = Number(createdTransfer && (createdTransfer.id || createdTransfer.transferId));
+      if (!Number.isFinite(transferId) || transferId <= 0) {
+        throw new Error(t('The transfer was created, but its movement identifier could not be identified.'));
+      }
+
+      return { id: transferId, amount: transferEntity.amount, concept: transferEntity.concept };
+    }
+
+    try {
+      const outgoingTransfer = await createTransfer(outgoingEntity);
+      const incomingTransfer = await createTransfer(incomingEntity);
+
+      closeAccountTransferModal();
+      loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } });
+      showAccountTransferExecutionConfirm([outgoingTransfer, incomingTransfer]);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    }
   }
 
   function getCurrentUtcDateTime() {
@@ -1570,7 +1899,8 @@
 
   function isTransitIncomeType(incomeTypeCode) {
     const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
-    return getTrimmedString(option && option.internalType).toUpperCase() === 'TRANSIT';
+    const internalType = getTrimmedString(option && option.internalType).toUpperCase();
+    return ['TRANSIT', 'DEPOPAYMENT'].includes(internalType);
   }
 
   function activateNewIncomePaymentForm(paymentKey, control) {
@@ -1766,6 +2096,7 @@
             {name || accNo || t('Unnamed account')} - {currencyName}
           </span>
         ),
+        shortAccountLabel: `${name || accNo || t('Unnamed account')} - ${accNo || '-'}`,
         account: account
       };
     }).filter(option => Number.isFinite(option.value) && option.value > 0);
@@ -2285,6 +2616,90 @@
       onOk: () => {
         openMovements();
         executeMovement({ id: transferId });
+      },
+      onCancel: openMovements
+    });
+  }
+
+  async function executeAccountTransferPair(transfers) {
+    const validTransfers = Array.isArray(transfers)
+      ? transfers.filter(item => Number(item && item.id) > 0)
+      : [];
+
+    if (validTransfers.length !== 2) {
+      message.error(t('Both account transfer movements are required.'));
+      return;
+    }
+
+    try {
+      setMovementActionId(validTransfers[0].id);
+      for (let index = 0; index < validTransfers.length; index += 1) {
+        const transferId = Number(validTransfers[index].id);
+        const response = await exe('DoTransfer', {
+          transferId: transferId,
+          transfer: null
+        });
+
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg
+            ? response.msg
+            : t('The account transfer movement could not be executed.'));
+        }
+      }
+
+      message.success(t('The outgoing and incoming movements were executed successfully.'));
+      loadMovements({ pagination: movementPagination });
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setMovementActionId(0);
+    }
+  }
+
+  function showAccountTransferExecutionConfirm(transfers) {
+    const validTransfers = Array.isArray(transfers)
+      ? transfers.filter(item => Number(item && item.id) > 0)
+      : [];
+
+    if (validTransfers.length !== 2) {
+      message.error(t('Both account transfer movements are required.'));
+      return;
+    }
+
+    const openMovements = () => {
+      setActiveTab('movements');
+      loadMovements({
+        pagination: {
+          current: 1,
+          pageSize: movementPagination.pageSize
+        }
+      });
+    };
+
+    Modal.confirm({
+      title: t('Account transfer created'),
+      content: (
+        <div>
+          <div>{t('The account transfer movements were created successfully.')}</div>
+          <div style={{ marginTop: 8 }}>{t('Approval will execute both the outgoing and incoming movements.')}</div>
+          <div>
+            <strong>{t('Outgoing movement ID')}:</strong> {validTransfers[0].id}
+            {' - '}
+            {formatMoney(Math.abs(Number(validTransfers[0].amount) || 0))}
+          </div>
+          <div>
+            <strong>{t('Incoming movement ID')}:</strong> {validTransfers[1].id}
+            {' - '}
+            {formatMoney(Math.abs(Number(validTransfers[1].amount) || 0))}
+          </div>
+          <div style={{ marginTop: 8 }}>{t('Do you want to execute both movements now?')}</div>
+        </div>
+      ),
+      okText: t('Yes'),
+      cancelText: t('No'),
+      onOk: () => {
+        openMovements();
+        return executeAccountTransferPair(validTransfers);
       },
       onCancel: openMovements
     });
@@ -3541,6 +3956,7 @@
 
   function selectCashDesk(record) {
     setSelectedCashierRow(record || null);
+    setSelectedTransitAccountId(null);
     if (!record) {
       setActiveTab('cash-desks');
       setBalanceRows([]);
@@ -4929,6 +5345,16 @@
           {t('Filter')}
         </Button>
         <Button
+          icon={<RevertMovementIcon />}
+          disabled={!transitHasSearched || !selectedTransitAccountId}
+          onClick={openRefundMoneyModal}
+        >
+          {t('Return money')}
+        </Button>
+        <Button icon={<TransferAccountIcon />} onClick={openAccountTransferModal}>
+          {t('Transfer between accounts')}
+        </Button>
+        <Button
           icon={<ReloadOutlined />}
           loading={transitAccountLoading}
           disabled={!transitHasSearched}
@@ -4948,6 +5374,19 @@
         bordered
         className="cashier-supervisor-table"
         loading={transitAccountLoading}
+        rowSelection={{
+          type: 'radio',
+          selectedRowKeys: selectedTransitAccountId ? [String(selectedTransitAccountId)] : [],
+          onChange: keys => setSelectedTransitAccountId(keys.length > 0 ? String(keys[0]) : null)
+        }}
+        onRow={record => ({
+          onClick: event => {
+            if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper')) return;
+            setSelectedTransitAccountId(record && record.id !== undefined && record.id !== null
+              ? String(record.id)
+              : null);
+          }
+        })}
         pagination={{
           current: transitAccountPagination.current,
           pageSize: transitAccountPagination.pageSize,
@@ -4983,7 +5422,7 @@
                     { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 100 },
                     { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, render: value => formatDate(value) },
                     { title: t('Transaction'), dataIndex: 'transaction', key: 'transaction' },
-                    { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 160 },
+                    { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 220 },
                     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: value => formatMoney(value) }
                   ]}
                   dataSource={detailRows}
@@ -5591,22 +6030,22 @@
             <button
               type="button"
               role="tab"
-              aria-selected={activeTab === 'balances'}
-              disabled={!selectedCashierRow}
-              className={`cashier-supervisor-tab${activeTab === 'balances' ? ' active' : ''}`}
-              onClick={() => handleTabChange('balances')}
-            >
-              <BalanceIcon /> {t('Balances')}
-            </button>
-            <button
-              type="button"
-              role="tab"
               aria-selected={activeTab === 'transit-premiums'}
               disabled={!selectedCashierRow}
               className={`cashier-supervisor-tab${activeTab === 'transit-premiums' ? ' active' : ''}`}
               onClick={() => handleTabChange('transit-premiums')}
             >
               <PremiumIcon /> {t('Transit premiums')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'balances'}
+              disabled={!selectedCashierRow}
+              className={`cashier-supervisor-tab${activeTab === 'balances' ? ' active' : ''}`}
+              onClick={() => handleTabChange('balances')}
+            >
+              <BalanceIcon /> {t('Balances')}
             </button>
           </div>
           <div className="cashier-supervisor-tab-content" role="tabpanel">
@@ -5864,6 +6303,182 @@
             <Form.Item label={t('Reference')} name="reference">
               <Input />
             </Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={t('Money withdrawal request')}
+          open={refundMoneyVisible}
+          onCancel={closeRefundMoneyModal}
+          onOk={() => refundMoneyForm.submit()}
+          okText={t('Request')}
+          cancelText={t('Cancel')}
+          destroyOnClose={false}
+        >
+          <Form
+            form={refundMoneyForm}
+            layout="vertical"
+            onFinish={submitRefundMoneyRequest}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Form.Item
+                label={t('Currency')}
+                name="currency"
+                rules={[{ required: true, message: t('Select a currency.') }]}
+              >
+                <Select disabled options={currencyOptions} placeholder={t('Currency')} />
+              </Form.Item>
+
+              <Form.Item
+                label={t('Source account')}
+                name="sourceAccount"
+                rules={[{ required: true, message: t('Select a source account.') }]}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  options={getTransitSourceAccountOptions()}
+                  placeholder={t('Source account')}
+                  notFoundContent={t('Search and select a transit account first.')}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={t('Amount')}
+                name="amount"
+                rules={[{ required: true, message: t('Enter an amount.') }]}
+              >
+                <InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} />
+              </Form.Item>
+
+              <Form.Item label={t('Source account percentage')} name="sourcePercentage">
+                <Slider min={0} max={100} tooltip={{ formatter: value => `${value}%` }} />
+              </Form.Item>
+            </div>
+
+            <Form.Item
+              label={t('Payment method')}
+              name="paymentMethod"
+              rules={[{ required: true, message: t('Select a payment method.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={paymentMethodOptions}
+                placeholder={t('Payment method')}
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={t('Beneficiary')}
+              name="beneficiary"
+              rules={[{ required: true, message: t('Enter a beneficiary.') }]}
+            >
+              <Input disabled />
+            </Form.Item>
+
+            <Form.Item label={t('Reference')} name="reference">
+              <Input />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={t('Manual account transfer')}
+          open={accountTransferVisible}
+          onCancel={closeAccountTransferModal}
+          onOk={() => accountTransferForm.submit()}
+          okText={t('Execute')}
+          cancelText={t('Cancel')}
+          destroyOnClose={false}
+          width={900}
+        >
+          <Form
+            form={accountTransferForm}
+            layout="vertical"
+            onFinish={submitAccountTransfer}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div className="cashier-supervisor-section-title">{t('Source information')}</div>
+                <Form.Item
+                  label={t('Currency')}
+                  name="currency"
+                  rules={[{ required: true, message: t('Select a currency.') }]}
+                >
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    options={currencyOptions}
+                    placeholder={t('Currency')}
+                    onChange={handleAccountTransferCurrencyChange}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={t('Amount')}
+                  name="amount"
+                  rules={[{ required: true, message: t('Enter an amount.') }]}
+                >
+                  <InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item
+                  label={t('Reference')}
+                  name="reference"
+                  rules={[{ required: true, message: t('Enter a reference.') }]}
+                >
+                  <Input />
+                </Form.Item>
+                {/* External source is kept disabled until its transfer flow is defined. */}
+              </div>
+
+              <div>
+                <div className="cashier-supervisor-section-title">{t('Destination information')}</div>
+                <Form.Item
+                  label={t('Destination account')}
+                  name="destinationAccount"
+                  rules={[{ required: true, message: t('Select a destination account.') }]}
+                >
+                  <Select
+                    showSearch
+                    allowClear
+                    filterOption={false}
+                    optionFilterProp="label"
+                    optionLabelProp="shortAccountLabel"
+                    options={accountTransferAccountOptions}
+                    loading={accountTransferAccountLoading}
+                    placeholder={t('Type to search account')}
+                    onSearch={searchAccountTransferAccounts}
+                    onChange={value => updateAccountTransferContact('destinationAccount', value)}
+                    notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
+                  />
+                </Form.Item>
+                <Form.Item label={t('Destination name')} name="destinationName">
+                  <Input />
+                </Form.Item>
+                <Form.Item
+                  label={t('Source account')}
+                  name="sourceAccount"
+                  rules={[{ required: true, message: t('Select a source account.') }]}
+                >
+                  <Select
+                    showSearch
+                    allowClear
+                    filterOption={false}
+                    optionFilterProp="label"
+                    optionLabelProp="shortAccountLabel"
+                    options={accountTransferAccountOptions}
+                    loading={accountTransferAccountLoading}
+                    placeholder={t('Type to search account')}
+                    onSearch={searchAccountTransferAccounts}
+                    onChange={value => updateAccountTransferContact('sourceAccount', value)}
+                    notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
+                  />
+                </Form.Item>
+                <Form.Item label={t('Source name')} name="sourceName">
+                  <Input />
+                </Form.Item>
+              </div>
+            </div>
           </Form>
         </Modal>
 
@@ -6234,6 +6849,16 @@
                 optionLabelProp="policyCode"
                 placeholder={t('Type policy id or code')}
                 notFoundContent={t('No policies found')}
+              />
+            </Form.Item>
+            <Form.Item label={t('Account name')} name="accountName">
+              <Input allowClear placeholder={t('Search by account name')} />
+            </Form.Item>
+            <Form.Item label={t('Currency')} name="currency">
+              <Select
+                allowClear
+                options={currencyOptions}
+                placeholder={t('Currency')}
               />
             </Form.Item>
             <Form.Item label={t('Transaction')} name="name">
