@@ -270,6 +270,7 @@
   const [collectionLoading, setCollectionLoading] = React.useState(false);
   const [collectionPagination, setCollectionPagination] = React.useState({ current: 1, pageSize: 15 });
   const [collectionTotal, setCollectionTotal] = React.useState(0);
+  const [collectionExecutionTime, setCollectionExecutionTime] = React.useState(0);
   const [collectionFilters, setCollectionFilters] = React.useState({});
   const [collectionFilterVisible, setCollectionFilterVisible] = React.useState(false);
   const [collectionSelectedRowKeys, setCollectionSelectedRowKeys] = React.useState([]);
@@ -3436,6 +3437,7 @@
     if (!hasCollectionFilters(filters)) {
       setCollectionRows([]);
       setCollectionTotal(0);
+      setCollectionExecutionTime(0);
       return;
     }
 
@@ -3468,13 +3470,16 @@
           ? result.data
           : getRows(response);
         const total = Number(result && result.total);
+        const executionTime = Number(response && response.texe);
         setCollectionRows(normalizeCollectionRows(rows));
         setCollectionTotal(Number.isFinite(total) && total >= 0 ? total : rows.length);
+        setCollectionExecutionTime(Number.isFinite(executionTime) && executionTime >= 0 ? executionTime : 0);
         setCollectionPagination({ current: currentPage, pageSize: pageSize });
       })
       .catch(error => {
         setCollectionRows([]);
         setCollectionTotal(0);
+        setCollectionExecutionTime(0);
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setCollectionLoading(false));
@@ -3652,6 +3657,7 @@
     setCollectionFilters({});
     setCollectionRows([]);
     setCollectionTotal(0);
+    setCollectionExecutionTime(0);
     setCollectionSelectedRowKeys([]);
     setCollectionPagination({ current: 1, pageSize: collectionPagination.pageSize });
     setCollectionFilterVisible(false);
@@ -3667,6 +3673,14 @@
   function getSelectedCollectionRows() {
     const selectedKeys = collectionSelectedRowKeys.map(key => String(key));
     return collectionRows.filter(row => selectedKeys.indexOf(getCollectionRowKey(row)) >= 0);
+  }
+
+  function getCollectionSelectionSummary() {
+    return getSelectedCollectionRows().reduce((summary, row) => ({
+      count: summary.count + 1,
+      overdue: summary.overdue + (Number(row && row.vencido) || 0),
+      pending: summary.pending + (Number(row && row.pendiente) || 0)
+    }), { count: 0, overdue: 0, pending: 0 });
   }
 
   function openCollectionCharge() {
@@ -5490,6 +5504,8 @@
     </Card>
   );
 
+  const premiumCollectionSelectionSummary = getCollectionSelectionSummary();
+
   const premiumCollectionTabContent = (
     <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -5504,27 +5520,32 @@
           >
             {t('Collect')}
           </Button>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomRight"
+            menu={{
+              items: [
+                {
+                  key: 'detail',
+                  label: t('Export detail'),
+                  onClick: () => exportPremiumCollections('detail')
+                },
+                {
+                  key: 'remittance',
+                  label: t('Remittance format'),
+                  onClick: () => exportPremiumCollections('remittance')
+                }
+              ]
+            }}
+          >
+            <Button icon={<DownloadOutlined />}>{t('Export')}</Button>
+          </Dropdown>
         </Space>
-        <Dropdown
-          trigger={['click']}
-          placement="bottomRight"
-          menu={{
-            items: [
-              {
-                key: 'detail',
-                label: t('Export detail'),
-                onClick: () => exportPremiumCollections('detail')
-              },
-              {
-                key: 'remittance',
-                label: t('Remittance format'),
-                onClick: () => exportPremiumCollections('remittance')
-              }
-            ]
-          }}
-        >
-          <Button icon={<DownloadOutlined />}>{t('Export')}</Button>
-        </Dropdown>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto', color: '#595959', fontSize: 12 }}>
+          <span>{t('Selected')}: <strong>{premiumCollectionSelectionSummary.count}</strong></span>
+          <span style={{ color: '#1677ff' }}>{t('Overdue')}: <strong>{formatMoney(premiumCollectionSelectionSummary.overdue)}</strong></span>
+          <span style={{ color: '#cf1322' }}>{t('Pending')}: <strong>{formatMoney(premiumCollectionSelectionSummary.pending)}</strong></span>
+        </div>
       </div>
       <Table
         rowKey={getCollectionRowKey}
@@ -5556,7 +5577,12 @@
           pageSize: collectionPagination.pageSize,
           total: collectionTotal,
           showSizeChanger: true,
-          pageSizeOptions: ['15', '25', '50', '100']
+          pageSizeOptions: ['15', '25', '50', '100'],
+          showTotal: total => (
+            <span className="cashier-supervisor-pagination-summary">
+              {t('Total records')}: {total} | {t('Time')}: {collectionExecutionTime.toFixed(2)} {t('milliseconds')}
+            </span>
+          )
         }}
         onChange={handleCollectionTableChange}
         scroll={{ x: 1500, y: transferScrollY }}
