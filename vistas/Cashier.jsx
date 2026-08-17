@@ -151,6 +151,12 @@
     </span>
   );
 
+  const PolicyIcon = () => (
+    <span style={tabIconStyle}>
+      <FileTextOutlined />
+    </span>
+  );
+
   const DownloadOutlined = () => (
     <span role="img" aria-label="download" className="anticon anticon-download">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -6105,7 +6111,7 @@
               className={`cashier-supervisor-tab${activeTab === 'premiums' ? ' active' : ''}`}
               onClick={() => handleTabChange('premiums')}
             >
-              <PremiumIcon /> {t('Premium collections')}
+              <PolicyIcon /> {t('Premium collections')}
             </button>
             <button
               type="button"
