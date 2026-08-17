@@ -3738,6 +3738,11 @@
     return Number.isFinite(pending) && pending > 0 ? Number(pending.toFixed(2)) : 0;
   }
 
+  function getCollectionPolicyOverdue(row) {
+    const overdue = Number(row && row.vencido);
+    return Number.isFinite(overdue) && overdue > 0 ? Number(overdue.toFixed(2)) : 0;
+  }
+
   function getCollectionPolicyIdentifier(row) {
     const policyId = getCollectionPolicyNumericId(row);
     if (Number.isFinite(policyId) && policyId > 0) return policyId;
@@ -3770,17 +3775,32 @@
 
     const policyRows = selectedRows.map(row => {
       const pendingAmount = getCollectionPolicyPending(row);
-      const amount = Math.min(pendingAmount, Math.max(remainingAmount, 0));
-      remainingAmount = Number((remainingAmount - amount).toFixed(2));
 
       return {
         key: getCollectionRowKey(row),
         policyId: getCollectionPolicyIdentifier(row),
         policy: getTrimmedString(row && row.poliza),
         pendingAmount: pendingAmount,
-        amount: Number(amount.toFixed(2)),
+        overdueAmount: Math.min(getCollectionPolicyOverdue(row), pendingAmount),
+        amount: 0,
         installments: Array.isArray(row && row.Cuotas) ? row.Cuotas : []
       };
+    });
+
+    // First apply the payment to each policy's overdue amount.
+    policyRows.forEach(row => {
+      const amount = Math.min(row.overdueAmount, Math.max(remainingAmount, 0));
+      row.amount = Number(amount.toFixed(2));
+      remainingAmount = Number((remainingAmount - amount).toFixed(2));
+    });
+
+    // If overdue amounts are fully covered, apply the remaining payment to the
+    // unpaid balance before treating it as supplementary premium.
+    policyRows.forEach(row => {
+      const availablePending = Math.max(row.pendingAmount - row.amount, 0);
+      const additionalAmount = Math.min(availablePending, Math.max(remainingAmount, 0));
+      row.amount = Number((row.amount + additionalAmount).toFixed(2));
+      remainingAmount = Number((remainingAmount - additionalAmount).toFixed(2));
     });
 
     const excessAmount = Number(Math.max(remainingAmount, 0).toFixed(2));
