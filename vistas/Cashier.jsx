@@ -812,6 +812,14 @@
         border-color: #1f2937;
       }
 
+      .cashier-supervisor-drawer .ant-checkbox-inner {
+        border-color: #5b6573;
+      }
+
+      .cashier-supervisor-drawer .ant-checkbox:hover .ant-checkbox-inner {
+        border-color: #1f2937;
+      }
+
       .cashier-supervisor-shell .ant-radio-inner {
         border-color: #5b6573;
         border-width: 2px;
@@ -2439,6 +2447,7 @@
     const incomeType = getTrimmedString(formValues.incomeType);
     const transitIncome = isTransitIncomeType(incomeType);
     const sourceExternal = transitIncome ? null : getTrimmedString(formValues.destination);
+    const concept = collectionChargeVisible ? 'Aplicación de prima' : 'Ingreso Vario';
 
     return {
       currency: currency,
@@ -2472,7 +2481,7 @@
       destinationAccountId: destinationAccountId,
       jIncomeTypeForm: getIncomeTypeFormJson(),
       isExternal: true,
-      concept: 'IW',
+      concept: concept,
       transferWorkspaceId: Number(selectedCashierRow && selectedCashierRow.id),
       user: currentUserEmail
     };
@@ -2567,7 +2576,7 @@
       }
 
       const paymentAmount = getNewIncomeTotal();
-      const paymentConcept = getTrimmedString(createdTransfer.concept || entity.concept || 'IW');
+      const paymentConcept = getTrimmedString(createdTransfer.concept || entity.concept || 'Ingreso Vario');
       const paymentConceptLabel = getTrimmedString(selectedIncomeType && selectedIncomeType.label)
         || paymentConcept;
       clearNewIncomeForm();
@@ -3424,6 +3433,12 @@
     const pageSize = Number(pagination && pagination.pageSize) || 15;
     const filters = params.filters || collectionFilters || {};
 
+    if (!hasCollectionFilters(filters)) {
+      setCollectionRows([]);
+      setCollectionTotal(0);
+      return;
+    }
+
     setCollectionLoading(true);
     const context = JSON.stringify({
       page: currentPage,
@@ -3433,7 +3448,8 @@
       policyId: filters.policyId ? Number(filters.policyId) : null,
       policyCode: filters.policyCode || null,
       issuanceFrom: filters.issuanceFrom || null,
-      issuanceTo: filters.issuanceTo || null
+      issuanceTo: filters.issuanceTo || null,
+      onlyOverdue: filters.onlyOverdue === true
     });
 
     exe('ExeChain', {
@@ -3486,8 +3502,22 @@
       policyId: source.policyId ? Number(source.policyId) : null,
       policyCode: source.policyCode || null,
       issuanceFrom: source.issuanceFrom || null,
-      issuanceTo: source.issuanceTo || null
+      issuanceTo: source.issuanceTo || null,
+      onlyOverdue: source.onlyOverdue === true
     });
+  }
+
+  function hasCollectionFilters(filters) {
+    const source = filters || {};
+    return [
+      source.holderId,
+      source.lob,
+      source.policyId,
+      source.policyCode,
+      source.issuanceFrom,
+      source.issuanceTo
+    ].some(value => value !== undefined && value !== null && String(value).trim() !== '')
+      || source.onlyOverdue === true;
   }
 
   async function ensureCashierExcelLibrary() {
@@ -3512,6 +3542,11 @@
   }
 
   async function exportPremiumCollections(exportType) {
+    if (!hasCollectionFilters(collectionFilters)) {
+      message.warning(t('Apply at least one premium filter before exporting.'));
+      return;
+    }
+
     try {
       const requestedSize = Number(collectionTotal) > 0 ? Number(collectionTotal) : 10000;
       const response = await exe('ExeChain', {
@@ -3574,9 +3609,28 @@
     const source = values || {};
     const filters = {
       ...source,
+      onlyOverdue: source.onlyOverdue === true,
       issuanceFrom: formatCollectionFilterDate(source.issuanceFrom),
       issuanceTo: formatCollectionFilterDate(source.issuanceTo)
     };
+
+    const hasIssuanceFrom = Boolean(filters.issuanceFrom);
+    const hasIssuanceTo = Boolean(filters.issuanceTo);
+    if (hasIssuanceFrom !== hasIssuanceTo) {
+      message.warning(t('Complete both issuance date filters.'));
+      return;
+    }
+
+    if (hasIssuanceFrom && filters.issuanceFrom > filters.issuanceTo) {
+      message.warning(t('The issuance start date cannot be later than the end date.'));
+      return;
+    }
+
+    if (!hasCollectionFilters(filters)) {
+      message.warning(t('Select at least one premium filter.'));
+      return;
+    }
+
     setCollectionFilters(filters);
     setCollectionFilterVisible(false);
     loadCollection({
@@ -6705,6 +6759,7 @@
 
         <Drawer
           title={t('Cash desk filters')}
+          className="cashier-supervisor-drawer"
           placement="right"
           width={360}
           open={transferFilterVisible}
@@ -6741,6 +6796,7 @@
 
         <Drawer
           title={t('Premium collection filters')}
+          className="cashier-supervisor-drawer"
           placement="right"
           width={360}
           open={collectionFilterVisible}
@@ -6803,11 +6859,16 @@
             <Form.Item label={t('Issuance date to')} name="issuanceTo">
               <DatePicker format="YYYY-MM-DD" style={{ width: '100%' }} />
             </Form.Item>
+
+            <Form.Item name="onlyOverdue" valuePropName="checked">
+              <Checkbox>{t('Only overdue')}</Checkbox>
+            </Form.Item>
           </Form>
         </Drawer>
 
         <Drawer
           title={t('Transit premium filters')}
+          className="cashier-supervisor-drawer"
           placement="right"
           width={360}
           open={transitFilterVisible}

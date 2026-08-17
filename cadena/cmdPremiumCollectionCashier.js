@@ -18,7 +18,8 @@
  *   policyCode?: string,
  *   policyNumber?: string,
  *   issuanceFrom?: string,
- *   issuanceTo?: string
+ *   issuanceTo?: string,
+ *   onlyOverdue?: boolean
  * }
  * @returns: Policy collection summary with pending installments in Cuotas.
  */
@@ -292,6 +293,17 @@ function buildPolicyFilter(source) {
 
   if (issuanceFrom && issuanceTo && issuanceFrom > issuanceTo) {
     throw new Error('El rango de fecha de emisión no es válido.');
+  }
+
+  if (input.onlyOverdue === true) {
+    filters.push(`AND EXISTS (
+        SELECT 1
+        FROM [PayPlan] overduePlan
+        WHERE overduePlan.[lifePolicyId] = pol.[id]
+          AND overduePlan.[cancellationDate] IS NULL
+          AND CAST(overduePlan.[dueDate] AS DATE) < CAST(GETDATE() AS DATE)
+          AND ISNULL(overduePlan.[minimum], 0) - ISNULL(overduePlan.[payed], 0) <> 0
+      )`);
   }
 
   return filters.join('\n      ');
