@@ -16,6 +16,7 @@
     Select,
     Slider,
     Space,
+    Spin,
     Table,
     Tag,
     Tabs,
@@ -277,6 +278,7 @@
   const [collectionPagination, setCollectionPagination] = React.useState({ current: 1, pageSize: 15 });
   const [collectionTotal, setCollectionTotal] = React.useState(0);
   const [collectionExecutionTime, setCollectionExecutionTime] = React.useState(0);
+  const [premiumExportLoading, setPremiumExportLoading] = React.useState(false);
   const [collectionFilters, setCollectionFilters] = React.useState({});
   const [collectionFilterVisible, setCollectionFilterVisible] = React.useState(false);
   const [collectionSelectedRowKeys, setCollectionSelectedRowKeys] = React.useState([]);
@@ -388,6 +390,64 @@
 
       .cashier-supervisor-premium-toolbar .ant-btn:last-child {
         border-radius: 0;
+      }
+
+      .cashier-supervisor-premium-pay-button.ant-btn,
+      .cashier-supervisor-premium-pay-button.ant-btn-primary {
+        color: #fff !important;
+        background: #1677ff !important;
+        border-color: #1677ff !important;
+      }
+
+      .cashier-supervisor-premium-pay-button.ant-btn:hover,
+      .cashier-supervisor-premium-pay-button.ant-btn:focus,
+      .cashier-supervisor-premium-pay-button.ant-btn-primary:hover,
+      .cashier-supervisor-premium-pay-button.ant-btn-primary:focus {
+        color: #fff !important;
+        background: #4096ff !important;
+        border-color: #4096ff !important;
+      }
+
+      .cashier-supervisor-spaced-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .cashier-supervisor-outline-button.ant-btn {
+        color: #1677ff;
+        background: transparent;
+        border-color: #1677ff;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .cashier-supervisor-outline-button.ant-btn:hover,
+      .cashier-supervisor-outline-button.ant-btn:focus {
+        color: #4096ff;
+        background: #e6f4ff;
+        border-color: #4096ff;
+      }
+
+      .cashier-supervisor-outline-button.ant-btn:disabled {
+        color: rgba(0, 0, 0, 0.25);
+        background: #f5f5f5;
+        border-color: #d9d9d9;
+      }
+
+      .cashier-supervisor-success-button.ant-btn {
+        color: #389e0d;
+        background: #f6ffed;
+        border-color: #52c41a;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .cashier-supervisor-success-button.ant-btn:hover,
+      .cashier-supervisor-success-button.ant-btn:focus {
+        color: #237804;
+        background: #d9f7be;
+        border-color: #389e0d;
       }
 
       .cashier-supervisor-selection-card {
@@ -631,6 +691,10 @@
         overflow-x: hidden;
       }
 
+      .cashier-supervisor-tab-content.cashier-supervisor-tab-content-premiums {
+        overflow: hidden;
+      }
+
       .cashier-supervisor-view .ant-tabs {
         flex: 1 1 auto;
         display: flex;
@@ -694,6 +758,43 @@
 
       .cashier-supervisor-view .cashier-supervisor-table .ant-table-body {
         overflow: auto !important;
+      }
+
+      .cashier-supervisor-premium-spin {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        overflow: hidden;
+      }
+
+      .cashier-supervisor-premium-spin > .ant-spin-container {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .cashier-supervisor-premium-spin > .ant-spin-container > .ant-card {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-table-content {
+        overflow-y: hidden !important;
+      }
+
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-table,
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-table-container,
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-table-tbody,
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-spin-nested-loading,
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-card,
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-card-body {
+        overflow-y: hidden !important;
+      }
+
+      .cashier-supervisor-tab-content-premiums .cashier-supervisor-table .ant-table-body {
+        overflow-y: auto !important;
       }
 
       .cashier-supervisor-account-search-table .ant-table-body {
@@ -849,6 +950,36 @@
 
       .cashier-supervisor-view .cashier-supervisor-new-income-card .ant-card-body {
         overflow: visible;
+      }
+
+      .cashier-supervisor-tab-content.cashier-supervisor-tab-content-new-income {
+        flex: 0 0 auto;
+        overflow: visible;
+      }
+
+      .cashier-supervisor-center.cashier-supervisor-center-new-income {
+        flex: 0 0 calc(100dvh - 180px - var(--cashier-supervisor-north-height) - 8px);
+        height: calc(100dvh - 180px - var(--cashier-supervisor-north-height) - 8px);
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        display: block;
+      }
+
+      .cashier-supervisor-center.cashier-supervisor-center-new-income .cashier-supervisor-view {
+        height: auto;
+        min-height: 100%;
+        overflow: visible;
+      }
+
+      .cashier-supervisor-tab-content-new-income .cashier-supervisor-new-income-card {
+        height: auto !important;
+        min-height: 0 !important;
+      }
+
+      .cashier-supervisor-tab-content-new-income .cashier-supervisor-new-income-card .ant-card-body {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
       }
 
       .cashier-supervisor-new-income-actions {
@@ -3573,6 +3704,8 @@
       return;
     }
 
+    setPremiumExportLoading(true);
+
     try {
       const requestedSize = Number(collectionTotal) > 0 ? Number(collectionTotal) : 10000;
       const response = await exe('ExeChain', {
@@ -3628,6 +3761,8 @@
       XLSX.writeFile(workbook, `premium-collections-${exportType}-${Date.now()}.xlsx`);
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setPremiumExportLoading(false);
     }
   }
 
@@ -5328,6 +5463,7 @@
             disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed) || closeCashDeskLoading}
           >
             <Button
+              type="danger"
               icon={<LockOutlined />}
               loading={closeCashDeskLoading}
               disabled={!selectedCashierRow || Boolean(selectedCashierRow && selectedCashierRow.closed)}
@@ -5335,11 +5471,11 @@
               {t('Close')}
             </Button>
           </Popconfirm>
-          <Button icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
+          <Button className="cashier-supervisor-outline-button" icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
             {t('Cash count')}
           </Button>
         </Space>
-        <Button icon={<FilterOutlined />} onClick={() => setTransferFilterVisible(true)}>
+        <Button className="cashier-supervisor-outline-button" icon={<FilterOutlined />} onClick={() => setTransferFilterVisible(true)}>
           {t('Filter')}
         </Button>
       </div>
@@ -5370,7 +5506,7 @@
 
   const balancesTabContent = (
     <Card size="small">
-      <div className="cashier-supervisor-toolbar">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
         <Button
           type="primary"
           icon={<NewIcon />}
@@ -5380,6 +5516,7 @@
           {t('New deposit')}
         </Button>
         <Button
+          className="cashier-supervisor-outline-button"
           icon={<ReloadOutlined />}
           loading={balanceLoading}
           disabled={!selectedCashierRow}
@@ -5449,21 +5586,23 @@
 
   const transitPremiumsTabContent = (
     <Card size="small">
-      <div className="cashier-supervisor-toolbar">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
         <Button type="primary" icon={<FilterOutlined />} onClick={() => setTransitFilterVisible(true)}>
           {t('Filter')}
         </Button>
         <Button
+          className="cashier-supervisor-outline-button"
           icon={<RevertMovementIcon />}
           disabled={!transitHasSearched || !selectedTransitAccountId}
           onClick={openRefundMoneyModal}
         >
           {t('Return money')}
         </Button>
-        <Button icon={<TransferAccountIcon />} onClick={openAccountTransferModal}>
+        <Button className="cashier-supervisor-success-button" icon={<TransferAccountIcon />} onClick={openAccountTransferModal}>
           {t('Transfer between accounts')}
         </Button>
         <Button
+          className="cashier-supervisor-outline-button"
           icon={<ReloadOutlined />}
           loading={transitAccountLoading}
           disabled={!transitHasSearched}
@@ -5528,8 +5667,8 @@
                     onChange: nextPage => setTransitDetailPage(accountId, nextPage)
                   }}
                   columns={[
-                    { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 100 },
-                    { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, render: value => formatDate(value) },
+                    { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 120, align: 'center' },
+                    { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, align: 'center', render: value => formatDate(value) },
                     { title: t('Transaction'), dataIndex: 'transaction', key: 'transaction' },
                     { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 220 },
                     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: value => formatMoney(value) }
@@ -5548,13 +5687,15 @@
   const premiumCollectionSelectionSummary = getCollectionSelectionSummary();
 
   const premiumCollectionTabContent = (
-    <Card size="small">
+    <Spin className="cashier-supervisor-premium-spin" spinning={premiumExportLoading} tip={t('Exporting...')}>
+      <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-premium-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
           <Button type="primary" icon={<FilterOutlined />} onClick={() => setCollectionFilterVisible(true)}>
             {t('Filter')}
           </Button>
           <Button
+            className="cashier-supervisor-premium-pay-button"
             type="primary"
             onClick={openCollectionCharge}
             disabled={collectionSelectedRowKeys.length === 0}
@@ -5579,7 +5720,9 @@
               ]
             }}
           >
-            <Button icon={<DownloadOutlined />}>{t('Export')}</Button>
+            <Button className="cashier-supervisor-outline-button" icon={<DownloadOutlined />} loading={premiumExportLoading} disabled={premiumExportLoading}>
+              {t('Export')}
+            </Button>
           </Dropdown>
         </Space>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginLeft: 'auto', color: '#595959', fontSize: 12 }}>
@@ -5628,12 +5771,13 @@
         onChange={handleCollectionTableChange}
         scroll={{ x: 1500, y: transferScrollY }}
       />
-    </Card>
+      </Card>
+    </Spin>
   );
 
   const movementsTabContent = (
     <Card size="small">
-      <div className="cashier-supervisor-toolbar">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
         <Dropdown
           trigger={['click']}
           placement="bottomLeft"
@@ -5645,11 +5789,12 @@
             }))
           }}
         >
-          <Button type="link" icon={<FileTextOutlined />} disabled={!selectedCashierRow || cashierReports.length === 0}>
+          <Button className="cashier-supervisor-outline-button" icon={<FileTextOutlined />} disabled={!selectedCashierRow || cashierReports.length === 0}>
             {t('Reports')}
           </Button>
         </Dropdown>
         <Button
+          className="cashier-supervisor-outline-button"
           icon={<ReloadOutlined />}
           onClick={() => loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } })}
           loading={movementLoading}
@@ -5917,7 +6062,7 @@
           {t(collectionMode ? 'Next' : 'Execute')}
         </Button>
         {!collectionMode && (
-          <Button type="link" icon={<ClearOutlined />} onClick={clearNewIncomeForm}>
+          <Button className="cashier-supervisor-outline-button" icon={<ClearOutlined />} onClick={clearNewIncomeForm}>
             {t('Clear')}
           </Button>
         )}
@@ -6106,7 +6251,10 @@
             {renderSelectedCashDeskHeader()}
           </div>
 
-          <div className="cashier-supervisor-center" ref={mainViewportRef}>
+          <div
+            className={`cashier-supervisor-center${activeTab === 'new-income' ? ' cashier-supervisor-center-new-income' : ''}`}
+            ref={mainViewportRef}
+          >
             <div className="cashier-supervisor-view">
           <div className="cashier-supervisor-tab-bar" role="tablist">
             <button
@@ -6169,7 +6317,14 @@
               <BalanceIcon /> {t('Balances')}
             </button>
           </div>
-          <div className="cashier-supervisor-tab-content" role="tabpanel">
+          <div
+            className={`cashier-supervisor-tab-content${activeTab === 'premiums'
+              ? ' cashier-supervisor-tab-content-premiums'
+              : activeTab === 'new-income'
+                ? ' cashier-supervisor-tab-content-new-income'
+                : ''}`}
+            role="tabpanel"
+          >
             {activeTab === 'premiums'
               ? premiumCollectionTabContent
               : activeTab === 'new-income'
