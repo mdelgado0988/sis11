@@ -29,6 +29,7 @@ try {
   const page = getPositiveInteger(input && input.page, 1);
   const size = getPositiveInteger(input && input.size, 15);
   const offset = (page - 1) * size;
+  const onlyOverdue = input && input.onlyOverdue === true;
   const policyFilter = buildPolicyFilter(input);
 
   const dataQuery = `
@@ -49,6 +50,7 @@ WITH AllInstallments AS (
         DATEDIFF(DAY, CAST(pp.[dueDate] AS DATE), CAST(GETDATE() AS DATE)) AS [dueDays],
         CASE
             WHEN CAST(pp.[dueDate] AS DATE) < CAST(GETDATE() AS DATE)
+                AND ISNULL(pp.[minimum], 0) - ISNULL(pp.[payed], 0) > 0
                 THEN ISNULL(pp.[minimum], 0) - ISNULL(pp.[payed], 0)
             ELSE 0
         END AS [overdueAmount],
@@ -57,8 +59,8 @@ WITH AllInstallments AS (
     WHERE pp.[cancellationDate] IS NULL
 ), PendingInstallments AS (
     SELECT *
-    FROM AllInstallments
-    WHERE [pendingAmount] <> 0
+    FROM AllInstallments ai
+    WHERE ${buildPendingInstallmentCondition('ai', onlyOverdue)}
 ), PolicyCollection AS (
     SELECT
         pol.[id] AS [lifePolicyId],
@@ -175,7 +177,7 @@ FROM (
     INNER JOIN [LifePolicy] pol ON pol.[id] = pp.[lifePolicyId]
     WHERE pp.[cancellationDate] IS NULL
       AND pol.[activeDate] IS NOT NULL
-      AND ISNULL(pp.[minimum], 0) - ISNULL(pp.[payed], 0) <> 0
+      AND ${buildPendingInstallmentCondition('pp', onlyOverdue)}
       ${policyFilter}
     GROUP BY pp.[lifePolicyId]
 ) totals;`;
@@ -301,12 +303,23 @@ function buildPolicyFilter(source) {
         FROM [PayPlan] overduePlan
         WHERE overduePlan.[lifePolicyId] = pol.[id]
           AND overduePlan.[cancellationDate] IS NULL
-          AND CAST(overduePlan.[dueDate] AS DATE) < CAST(GETDATE() AS DATE)
-          AND ISNULL(overduePlan.[minimum], 0) - ISNULL(overduePlan.[payed], 0) <> 0
+          AND ${buildPendingInstallmentCondition('overduePlan', true)}
       )`);
   }
 
   return filters.join('\n      ');
+}
+
+function buildPendingInstallmentCondition(alias, onlyOverdue) {
+  const prefix = alias ? `${alias}.` : '';
+  const pendingAmount = `ISNULL(${prefix}[minimum], 0) - ISNULL(${prefix}[payed], 0)`;
+
+  if (onlyOverdue) {
+    return `CAST(${prefix}[dueDate] AS DATE) < CAST(GETDATE() AS DATE)
+      AND ${pendingAmount} > 0`;
+  }
+
+  return `${pendingAmount} <> 0`;
 }
 
 function getContextInput(source) {
