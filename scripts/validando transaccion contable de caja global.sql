@@ -6,7 +6,7 @@ FROM MAUTOCAJA_NET m
 inner join DAUTOCAJA_NET d on d.NASIPRE = m.NASIPRE
 WHERE m.bcaja = 1 AND m.stat = 'V'
 AND m.NASIPRE not in (0,32)
---AND m.nasipre = 23
+AND m.nasipre = 23
 ORDER BY 1
 
 select * from vartran where nombre = '@pago_vario'

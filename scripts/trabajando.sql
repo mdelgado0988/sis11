@@ -13,8 +13,8 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 1
-and t.cplan = 'MGLOBAL' 
-and t.cendoso = 36
+and t.cplan = 'INC_cont' 
+and t.cendoso = 37
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
 AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
@@ -37,7 +37,7 @@ inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
 where c.cramo = 1
 --AND pl.istatplan = 'V'
-and C.cplan = '1_17' 
+and C.cplan = 'INC_cont' 
 
 SELECT * FROM #Coberturas
 order by 1,2,4

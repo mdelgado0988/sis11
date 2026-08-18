@@ -1149,7 +1149,6 @@
   }, []);
 
   React.useEffect(() => {
-    loadTransferWorkspaces();
     loadBranches();
     loadCurrentUser();
     loadCollectionLobs();
@@ -1202,6 +1201,17 @@
       }
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!getTrimmedString(currentUserEmail)) {
+      return;
+    }
+
+    loadTransferWorkspaces({
+      filters: transferFilters,
+      pagination: { current: 1, pageSize: transferPagination.pageSize }
+    });
+  }, [currentUserEmail]);
 
   function formatMoney(value) {
     const number = Number(value || 0);
@@ -1295,8 +1305,13 @@
   }
 
   function buildTransferWorkspaceFilter(filters = transferFilters) {
-    // Load every open cash desk; the grid remains remotely paginated.
-    let filter = 'closed=0';
+    // Only open cash desks owned by the current session user are shown.
+    const sessionUser = getTrimmedString(currentUserEmail);
+    if (!sessionUser) {
+      return '1=0';
+    }
+
+    let filter = `closed=0 AND [user] = N'${escapeSqlString(sessionUser)}'`;
     const source = filters || {};
 
     if (source.dateFrom) {
