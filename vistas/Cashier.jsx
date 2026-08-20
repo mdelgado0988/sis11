@@ -5057,25 +5057,30 @@
     }
 
     setReversalLoading(true);
-    const reversalPayload = {
-      transferId: transferId,
-      reversalCause: cause,
-      reversalSubcause: subcause,
-      jReversalFormValues: reversalFormConfig
-        ? getDynamicFormJson(reversalFormConfig, document.getElementById('cashier-reversal-form') || reversalFormRef.current)
-        : null,
-      creditFundsToAccountId: reversalCreditFunds ? accountId : null,
-      workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null,
-      transferWorkspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
-    };
-
-    if (allocationId > 0) {
-      reversalPayload.allocationId = allocationId;
-    }
-
     const reversalCommand = allocationId > 0
       ? 'UnDoPaymentAllocation'
       : 'UndoTransfer';
+
+    const reversalFormValues = reversalFormConfig
+      ? getDynamicFormJson(reversalFormConfig, document.getElementById('cashier-reversal-form') || reversalFormRef.current)
+      : null;
+
+    const reversalPayload = reversalCommand === 'UnDoPaymentAllocation'
+      ? {
+          allocationId: allocationId,
+          reversalCause: cause,
+          reversalSubcause: subcause,
+          jReversalFormValues: reversalFormValues
+        }
+      : {
+          transferId: transferId,
+          reversalCause: cause,
+          reversalSubcause: subcause,
+          jReversalFormValues: reversalFormValues,
+          creditFundsToAccountId: reversalCreditFunds ? accountId : null,
+          workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null,
+          transferWorkspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
+        };
 
     exe(reversalCommand, reversalPayload)
       .then(response => {
