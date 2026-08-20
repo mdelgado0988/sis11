@@ -326,10 +326,12 @@ function createTransfer(input, workspaceId, amount) {
     ? input.transferEntity
     : null;
   const entity = sourceEntity
-    ? {
+      ? {
         ...sourceEntity,
         currency: sourceEntity.currency || currency,
         amount: amount,
+        // Keep the accounting concept expected by UnDoPaymentAllocation.
+        concept: 'IW',
         transferWorkspaceId: workspaceId
       }
     : {
@@ -344,7 +346,8 @@ function createTransfer(input, workspaceId, amount) {
         sourceExternal: getTrimmedString(input.sourceExternal) || 'CajaAhUSD',
         destinationAccountId: getPositiveInteger(input.destinationAccountId) || 208,
         isExternal: true,
-        concept: getTrimmedString(input.concept) || 'IW',
+        // UnDoPaymentAllocation espera la transferencia principal con este concepto.
+        concept: 'IW',
         transferWorkspaceId: workspaceId
       };
 
