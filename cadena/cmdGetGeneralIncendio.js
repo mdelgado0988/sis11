@@ -15,8 +15,9 @@ try {
     
     let { poliza, action, extra, esEndoso } = context;
     const safeAction = String(action ?? '').trim();
+    const isQuotationAction = ['QUOTE', 'PREQUOTE'].includes(safeAction.toUpperCase());
 
-     /*doCmd({ cmd:'GetPing', data: { datos: JSON.stringify(context)} });*/
+    //doCmd({ cmd:'GetPing', data: { datos: JSON.stringify(context)} });
     
     var endoso = esEndoso ?? false;
 
@@ -25,8 +26,8 @@ try {
     }
 
     let policyGet = {};
-    if (!endoso) policyGet = GetPolicyEndoso(poliza);
-    if (endoso) policyGet = GetPolicyEndoso(poliza);
+    if (!endoso) policyGet = GetPolicyEndoso(poliza, isQuotationAction);
+    if (endoso) policyGet = GetPolicyEndoso(poliza, isQuotationAction);
 
     let accionActual = safeAction || 'QUOTE';
     if (accionActual == 'PREQUOTE' || safeAction.includes('Change')) {
@@ -39,6 +40,8 @@ try {
     cramo = policyGet.ramo;
     cplan = policyGet.plan;
     let Coverages = policyGet.coverages;
+    const originalAnniversary = getOriginalAnniversary(policyGet.anniversaries);
+    const originalAnniversaryInsuredSum = getAnniversaryInsuredSum(originalAnniversary);
     const oa = policyGet.userData;
     let oaCambioObjeto = [];
 
@@ -82,13 +85,6 @@ try {
     ].includes(safeAction);
     const oldCapital = Number(policyGet?.poliza?.insuredSum || 0);
     const newCapital = Number(extra?.data?.newCapital || extra?.newCapital || 0);
-
-    let sentenciaprima = "";
-    let sentenciadeducible = "";
-    let sentencialimit = "";
-    let sentenciacondicion = "";
-    let sentenciadescription = "";
-
 
     let sacov = "0";
     let cgrupo = "-1";
@@ -148,6 +144,21 @@ try {
         limitReturn = 0;
         let limitCob = 0;
         if (!userData) return { code: covItem.code, limit: 0, premium: 0 };
+
+        // A manually defined premium is the source value for quotations.
+        if (isQuotationAction && isManualPremium(covItem)) {
+          const manualDeductible = covItem.deductible !== null && covItem.deductible !== undefined
+            ? covItem.deductible
+            : (covItem.dedutible || 0);
+
+          return {
+            code: covItem.code,
+            limit: covItem.limit || 0,
+            premium: covItem.basePremium,
+            dedutible: manualDeductible,
+            description: covItem.description || ''
+          };
+        }
 
         //log(`Iniciando cálculo de cobertura: ${covItem.code}`);
         errorPuntero = `cob-${covItem.code}-state-ini`;
@@ -234,119 +245,43 @@ try {
             rowtarifas = TarifasCatalog.find(x => String(x.cramo).trim() === String(cramo).trim() && String(x.codigoplan).trim() === String(cplan).trim() && parseInt(x.ccobertura, 10) === parseInt(covItem.code, 10) && String(x.cendoso).trim().toUpperCase() === 'QUOTE');
         }
 
-        //log(`Tarifas V2: ${JSON.stringify(rowtarifas)}`);
-
-        /*doCmd({ 
-          cmd: "GetPing",
-          data: {
-            linea: "Despues",
-            rowtarifas: rowtarifas,
-            ramo: cramo,
-            plan: cplan,
-            cober: Number(covItem.code),
-            tarifas: TarifasCatalog,
-            prorate: prorate,
-            detail: detail
-          }
-        });*/
-
         errorPuntero = `cob-${covItem.code}-state-sentence`;
 
-        sentenciacondicion = varG;
+        const tariffResult = evaluateCoverageTariff(
+          rowtarifas,
+          covItem.code,
+          expression => eval(expression),
+          varG
+        );
+        premiumReturn = tariffResult.premium;
+        deductibleReturn = tariffResult.deductible;
+        limitReturn = tariffResult.limit;
+        descriptionReturn = tariffResult.description;
+        const sentenciaprima = tariffResult.sentenciaprima;
+        const sentenciadeducible = tariffResult.sentenciadeducible;
+        const sentencialimit = tariffResult.sentencialimit;
+        const sentenciacondicion = tariffResult.sentenciacondicion;
+        const sentenciadescription = tariffResult.sentenciadescription;
 
-        try {
-          if (!isNullOrEmpty(rowtarifas?.condicion)) {
-              sentenciacondicion = sentenciacondicion + " if(" + rowtarifas.condicion + ") ";
-          }  
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna condición: ${error}`);
-          throw new Error(error);
-        }
-
-        try {
-          if (!isNullOrEmpty(rowtarifas?.prima)) {
-            sentenciaprima = sentenciacondicion + " " + rowtarifas.prima;
-            //log(`Prima => ${sentenciaprima}`);
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna prima: ${error}`);
-          throw new Error(error);
-        }
-
-        try {
-          if (!isNullOrEmpty(rowtarifas?.deducible)) {
-            sentenciadeducible = sentenciacondicion + " " + rowtarifas.deducible;
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna deducible: ${error}`);
-          throw new Error(error);
-        }
-        
-        try {
-          if (!isNullOrEmpty(rowtarifas?.sumaasegurada)) {
-            sentencialimit = sentenciacondicion + " " + rowtarifas.sumaasegurada;
-            //log(`Suma => ${sentencialimit}`);
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna suma: ${error}`);
-          throw new Error(error);
-        }
-
-        try {
-          if (!isNullOrEmpty(rowtarifas?.etiqueta)) {
-            sentenciadescription = sentenciacondicion + " " + rowtarifas.etiqueta;
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna etiqueta: ${error}`);
-          throw new Error(error);
-        }      
-
-        errorPuntero = `cob-${covItem.code}-state-calc`;
-
-        // TARIFICA DINAMICAMENTE 
-        try {
-          if (!isNullOrEmpty(sentenciaprima)) {
-            premiumReturn = eval(sentenciaprima);
-            //   throw sentenciaprima;
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna prima: ${error}`);
-          throw new Error(error);
-        }                
-
-        try {
-          if (!isNullOrEmpty(sentenciadeducible)) {
-            deductibleReturn = eval(sentenciadeducible);
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna deducible: ${error}`);
-          throw new Error(error);
-        }
-        
-        try {
-          if (!isNullOrEmpty(sentencialimit)) {
-            limitReturn = eval(sentencialimit);
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna suma: ${error}`);
-          throw new Error(error);
-        }
-        
-        try {
-          if (!isNullOrEmpty(rowtarifas?.etiqueta)) {
-            descriptionReturn = eval(sentenciadescription);
-          } else {
-              descriptionReturn = deductibleReturn;
-          }
-        } catch (error) {
-          //log(`Error calculando cob ${covItem.code}, columna etiqueta: ${error}, ver detalles en siguiente log`);
-          //log(`Sentencia etiqueta error: ${sentenciadescription}`);
-          throw new Error(error);
-        }
-        
-        //Aquí aplicamos prorrata según configuración de la tabla.
-        const primaSinProrrata = premiumReturn;
+        let primaSinProrrata = premiumReturn;
         const primaExistenteCobertura = Number(covItem?.premium || covItem?.basePremium || 0);
+        const hasManualPremium = isManualPremium(covItem);
+        const originalManualPremium = hasManualPremium
+          ? getAnniversaryBasePremium(originalAnniversary, covItem.code)
+          : null;
+        const manualPremiumCanBeCalculated = isCapitalOrObjectChange &&
+          hasManualPremium &&
+          Number.isFinite(originalManualPremium) &&
+          originalManualPremium >= 0 &&
+          originalAnniversaryInsuredSum > 0 &&
+          sumInsured > 0;
+
+        // Use the original anniversary rate only for manual premiums. The
+        // current endorsement difference is prorated, not previous changes.
+        if (manualPremiumCanBeCalculated) {
+            primaSinProrrata = originalManualPremium * (sumInsured / originalAnniversaryInsuredSum);
+            primaSinProrrata = Math.round((primaSinProrrata + Number.EPSILON) * 100) / 100;
+        }
 
         // GLOB-925. For capital and insured-object changes we keep the current
         // coverage premium as the base, prorate only the calculated premium
@@ -454,7 +389,98 @@ function GetPolicy(poliza) {
     };
 }
 
-function GetPolicyEndoso(poliza) {
+function evaluateCoverageTariff(rowtarifas, coverageCode, evaluateExpression, baseStatement) {
+  let sentenciacondicion = baseStatement;
+  let sentenciaprima = '';
+  let sentenciadeducible = '';
+  let sentencialimit = '';
+  let sentenciadescription = '';
+
+  try {
+    if (!isNullOrEmpty(rowtarifas?.condicion)) {
+      sentenciacondicion += ` if(${rowtarifas.condicion}) `;
+    }
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna condición: ${error}`);
+  }
+
+  try {
+    if (!isNullOrEmpty(rowtarifas?.prima)) {
+      sentenciaprima = `${sentenciacondicion} ${rowtarifas.prima}`;
+    }
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna prima: ${error}`);
+  }
+
+  try {
+    if (!isNullOrEmpty(rowtarifas?.deducible)) {
+      sentenciadeducible = `${sentenciacondicion} ${rowtarifas.deducible}`;
+    }
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna deducible: ${error}`);
+  }
+
+  try {
+    if (!isNullOrEmpty(rowtarifas?.sumaasegurada)) {
+      sentencialimit = `${sentenciacondicion} ${rowtarifas.sumaasegurada}`;
+    }
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna suma: ${error}`);
+  }
+
+  try {
+    if (!isNullOrEmpty(rowtarifas?.etiqueta)) {
+      sentenciadescription = `${sentenciacondicion} ${rowtarifas.etiqueta}`;
+    }
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna etiqueta: ${error}`);
+  }
+
+  let premium = 0;
+  let deductible = 0;
+  let limit = 0;
+  let description = 0;
+
+  try {
+    if (!isNullOrEmpty(sentenciaprima)) premium = evaluateExpression(sentenciaprima);
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna prima: ${error}`);
+  }
+
+  try {
+    if (!isNullOrEmpty(sentenciadeducible)) deductible = evaluateExpression(sentenciadeducible);
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna deducible: ${error}`);
+  }
+
+  try {
+    if (!isNullOrEmpty(sentencialimit)) limit = evaluateExpression(sentencialimit);
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna suma: ${error}`);
+  }
+
+  try {
+    description = !isNullOrEmpty(rowtarifas?.etiqueta)
+      ? evaluateExpression(sentenciadescription)
+      : deductible;
+  } catch (error) {
+    throw new Error(`Error calculando cob ${coverageCode}, columna etiqueta: ${error}`);
+  }
+
+  return {
+    premium,
+    deductible,
+    limit,
+    description,
+    sentenciaprima,
+    sentenciadeducible,
+    sentencialimit,
+    sentenciacondicion,
+    sentenciadescription
+  };
+}
+
+function GetPolicyEndoso(poliza, useContextCoverages) {
 
     doCmd({
         cmd: "RepoLifePolicy",
@@ -462,7 +488,7 @@ function GetPolicyEndoso(poliza) {
             operation: 'GET',
             filter: `id=${poliza.id}`,
             noTracking: true,
-            include: ['Coverages', 'InsuredObjects']
+            include: ['Coverages', 'InsuredObjects', 'Anniversaries']
         }
     });
 
@@ -470,6 +496,9 @@ function GetPolicyEndoso(poliza) {
     const localPoliza = RepoLifePolicy.outData[0];
     const insuredObject = localPoliza.InsuredObjects.find(x => definitions.includes(x.objectDefinitionId));
     const userData = insuredObject?.userData ?? [];
+    const contextCoverages = useContextCoverages && Array.isArray(poliza?.Coverages) && poliza.Coverages.length > 0
+      ? poliza.Coverages
+      : localPoliza.Coverages;
 
     if(userData.length == 0)
       throw new Error("No se encontró el objeto asegurado requerido.");
@@ -478,9 +507,58 @@ function GetPolicyEndoso(poliza) {
         ramo: localPoliza.lob,
         plan: localPoliza.productCode,
         poliza: localPoliza,
-        coverages: localPoliza.Coverages,
-        userData: userData
+        // Prefer context coverages because they may contain the user's
+        // current manualPremium and basePremium values.
+        coverages: contextCoverages,
+        userData: userData,
+        anniversaries: localPoliza.Anniversaries
     };
+}
+
+function isManualPremium(coverage) {
+  if (!coverage) return false;
+  if (coverage.manualPremium === true) return true;
+
+  const value = String(coverage.manualPremium || '').trim().toLowerCase();
+  return value === 'true' || value === '1' || value === 'yes' || value === 'si';
+}
+
+function getOriginalAnniversary(anniversaries) {
+  const rows = Array.isArray(anniversaries) ? anniversaries : [];
+
+  return rows
+    .filter(row => row && row.jSnapshot)
+    .sort((left, right) => {
+      const yearDifference = Number(left.contractYear || 0) - Number(right.contractYear || 0);
+      if (yearDifference !== 0) return yearDifference;
+      return Number(left.id || 0) - Number(right.id || 0);
+    })[0] || null;
+}
+
+function getAnniversarySnapshot(anniversary) {
+  return safeJson(anniversary && anniversary.jSnapshot, {});
+}
+
+function getAnniversaryInsuredSum(anniversary) {
+  if (!anniversary) return 0;
+
+  const snapshot = getAnniversarySnapshot(anniversary);
+  const snapshotInsuredSum = snapshot.insuredSum || snapshot.InsuredSum || 0;
+  const value = Number(anniversary.insuredSum || snapshotInsuredSum || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function getAnniversaryBasePremium(anniversary, coverageCode) {
+  if (!anniversary) return null;
+
+  const snapshot = getAnniversarySnapshot(anniversary);
+  const coverages = snapshot.Coverages || snapshot.coverages || [];
+  const coverage = Array.isArray(coverages)
+    ? coverages.find(item => String(item && item.code) === String(coverageCode))
+    : null;
+  const value = Number(coverage && coverage.basePremium);
+
+  return Number.isFinite(value) ? value : null;
 }
 
 function getChangeInsuredObjectChangeUserData(extra) {
@@ -684,10 +762,12 @@ function isNullOrEmpty(value) {
 
 /*
 Test:
-QUOTE,
-renovacion: ANNIVERSARY
-action: 'ChangeCapital'
-{ poliza: { id: 218 }, action: 'ChangePolicyCapital', esEndoso: null }
+{ poliza: { id: 1927, coverages: [
+  { "code": 1,   "name": "Incendio/Rayo/Explosión Básico" },
+  { "code": 3,   "name": "Terremoto, Temblor y/o Erupción Volcánica" }
+]
+ }, action: 'ChangePolicyCapital', esEndoso: null,
+ extra: { data: { newCapital: 120000, effectiveDate: "2026-09-30" } }}
 
 //ejemplo con cobs
 { poliza: { id: 393, coverages: [

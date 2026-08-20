@@ -530,6 +530,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     FechaInicioVigencia: toDate(policy?.start),
     FechaFinVigencia: toDate(policy?.end),
     HoraVigencia: "12:00 AM",
+    FechaEfectiva: getFechaImpresion(change?.effectiveDate),
     FechaImpresion: getFechaImpresion(change?.created),
 
     PrimaNetaTotal: n(policy?.anualPremium),
