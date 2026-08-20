@@ -435,15 +435,36 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   // Si tienes email plano ok, si no, intenta buscarlo en Emails
   const email = holder.email || holder?.Emails?.[0]?.email || "No Tiene";
   
+  const parseUtcDate = (fecha) => {
+    if (fecha instanceof Date) {
+      return isNaN(fecha.getTime()) ? null : fecha;
+    }
+
+    const value = String(fecha || '').trim();
+    if (!value) return null;
+
+    // Las fechas de póliza llegan en UTC. Si no traen indicador de zona,
+    // se agrega Z para evitar que el servidor las interprete como locales.
+    const hasTimeZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(value);
+    const d = new Date(hasTimeZone ? value : `${value}Z`);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
   const getHora = (fecha) => {
-    const d = (fecha instanceof Date) ? fecha : new Date(fecha);
-    if (isNaN(d)) return null;
-  
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-  
-    return `${hh}:${mm}:${ss}`;
+    const d = parseUtcDate(fecha);
+    if (!d) return null;
+
+    // Panamá permanece en UTC-5; se ajusta manualmente para no depender de
+    // APIs de internacionalización ni de la zona horaria del servidor.
+    const panamaDate = new Date(d.getTime() - (5 * 60 * 60 * 1000));
+    const hour24 = panamaDate.getUTCHours();
+    const period = hour24 >= 12 ? 'PM' : 'AM';
+    const hour12 = hour24 % 12 || 12;
+    const hh = String(hour12).padStart(2, '0');
+    const mm = String(panamaDate.getUTCMinutes()).padStart(2, '0');
+    const ss = String(panamaDate.getUTCSeconds()).padStart(2, '0');
+
+    return `${hh}:${mm}:${ss} ${period}`;
   };
 
   const getFechaImpresion = (fecha = new Date()) => {

@@ -73,3 +73,4 @@
 - Corregir acentos y mensajes en espanol usando codificacion normal; nunca introducir cadenas corruptas.
 - En vistas, mantener las etiquetas fuente en ingles y traducir con `t()` de acuerdo con el estandar de las vistas existentes.
 - Documentar reglas especiales de negocio en comentarios claros y breves.
+- No usar `Intl` en comandos ni vistas; para conversiones o formatos regionales usar las utilidades manuales definidas por el proyecto.
