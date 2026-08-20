@@ -2000,6 +2000,7 @@
         setIncomeTypeOptions(getRows(incomeResponse).map(item => ({
           value: item && item.code,
           label: getTrimmedString(item && item.name),
+          name: getTrimmedString(item && item.name),
           formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0,
           internalType: getTrimmedString(item && item.internalType)
         })).filter(item => item.value));
@@ -2026,6 +2027,42 @@
     const normalized = getTrimmedString(value).replace(/[$,\s]/g, '');
     const amount = Number(normalized);
     return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+  }
+
+  function getDepositIncomeTypeOptions() {
+    return incomeTypeOptions.filter(item =>
+      getTrimmedString(item && item.internalType).toUpperCase().startsWith('DEPOSIT-')
+    );
+  }
+
+  function updateDepositIncomeType(value) {
+    const selected = getDepositIncomeTypeOptions().find(item => item && item.value === value);
+    const typeNames = [
+      getTrimmedString(selected && (selected.name || selected.label)),
+      getTrimmedString(selected && selected.internalType)
+    ];
+    let destinationId = 0;
+
+    typeNames.some(typeName => {
+      const parts = typeName.split('-');
+      const candidate = Number(getTrimmedString(parts[parts.length - 1]));
+      if (Number.isFinite(candidate) && candidate > 0) {
+        destinationId = candidate;
+        return true;
+      }
+      return false;
+    });
+
+    const depositAccount = depositAccountOptions.find(item =>
+      getTrimmedString(item && item.code) === String(destinationId)
+    );
+
+    depositForm.setFieldsValue({
+      incomeType: value,
+      destination: depositAccount && Number.isFinite(Number(depositAccount.value))
+        ? Number(depositAccount.value)
+        : undefined
+    });
   }
 
   function limitIncomeAmountDecimals(value) {
@@ -2062,6 +2099,11 @@
     const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
     const internalType = getTrimmedString(option && option.internalType).toUpperCase();
     return ['TRANSIT', 'DEPOPAYMENT'].includes(internalType);
+  }
+
+  function isVisibleNewIncomeType(option) {
+    const internalType = getTrimmedString(option && option.internalType).toUpperCase();
+    return !internalType.startsWith('DEPOSIT-');
   }
 
   function activateNewIncomePaymentForm(paymentKey, control) {
@@ -3230,10 +3272,10 @@
     const firstCurrency = currencyOptions[0] && currencyOptions[0].value;
 
     depositForm.setFieldsValue({
+      incomeType: undefined,
       paymentMethod: undefined,
       currency: firstCurrency,
       amount: undefined,
-      cutoff: 0,
       expectedAmount: 0,
       difference: 0,
       destination: undefined,
@@ -3296,6 +3338,7 @@
       const difference = getAuditNumber(values && values.difference);
       const response = await exe('DepositCashierPayments', {
         workspaceId: workspaceId,
+        incomeType: getTrimmedString(values && values.incomeType),
         paymentMethod: getTrimmedString(values && values.paymentMethod),
         currency: getTrimmedString(values && values.currency),
         amountAtSight: amount,
@@ -4936,12 +4979,10 @@
     }
 
     const allocationId = getMovementAllocationId(group);
-    if (allocationId <= 0) {
-      message.error(t('The allocation identifier is invalid.'));
-      return;
-    }
-
-    setReversalRecord({ group: group, allocationId: allocationId });
+    setReversalRecord({
+      group: group,
+      allocationId: allocationId > 0 ? allocationId : null
+    });
     setReversalCause(undefined);
     setReversalSubcause(undefined);
     setReversalCreditFunds(false);
@@ -4956,12 +4997,16 @@
   }
 
   function executeReversal() {
-    const allocationId = Number(reversalRecord && reversalRecord.allocationId);
+    const allocationIdValue = Number(reversalRecord && reversalRecord.allocationId);
+    const allocationId = Number.isFinite(allocationIdValue) && allocationIdValue > 0
+      ? allocationIdValue
+      : null;
+    const transferId = Number(reversalRecord && reversalRecord.group && reversalRecord.group.id);
     const cause = getTrimmedString(reversalCause);
     const subcause = getTrimmedString(reversalSubcause);
 
-    if (!Number.isFinite(allocationId) || allocationId <= 0) {
-      message.error(t('The allocation identifier is invalid.'));
+    if (!Number.isFinite(transferId) || transferId <= 0) {
+      message.error(t('The movement identifier is invalid.'));
       return;
     }
 
@@ -5012,16 +5057,27 @@
     }
 
     setReversalLoading(true);
-    exe('UnDoPaymentAllocation', {
-      allocationId: allocationId,
+    const reversalPayload = {
+      transferId: transferId,
       reversalCause: cause,
       reversalSubcause: subcause,
       jReversalFormValues: reversalFormConfig
         ? getDynamicFormJson(reversalFormConfig, document.getElementById('cashier-reversal-form') || reversalFormRef.current)
         : null,
       creditFundsToAccountId: reversalCreditFunds ? accountId : null,
-      workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
-    })
+      workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null,
+      transferWorkspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
+    };
+
+    if (allocationId > 0) {
+      reversalPayload.allocationId = allocationId;
+    }
+
+    const reversalCommand = allocationId > 0
+      ? 'UnDoPaymentAllocation'
+      : 'UndoTransfer';
+
+    exe(reversalCommand, reversalPayload)
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('The payment could not be reverted.'));
@@ -6109,9 +6165,10 @@
               optionFilterProp="label"
               filterOption={(input, option) => getTrimmedString(option && option.label).toLowerCase().indexOf(getTrimmedString(input).toLowerCase()) >= 0}
               options={collectionChargeVisible
-                ? incomeTypeOptions
+                ? incomeTypeOptions.filter(isVisibleNewIncomeType)
                 : incomeTypeOptions.filter(item =>
                   getTrimmedString(item && item.internalType).toUpperCase() !== 'PREMIUM'
+                  && isVisibleNewIncomeType(item)
                 )}
               disabled={collectionChargeVisible}
               onChange={updateNewIncomeType}
@@ -6528,38 +6585,47 @@
               />
             </Form.Item>
 
-            <Space size={12} style={{ display: 'flex', alignItems: 'flex-end' }}>
-              <Form.Item
-                label={t('Deposited amount')}
-                name="amount"
-                rules={[{ required: true, message: t('Enter the deposited amount.') }]}
-                style={{ flex: 1, marginBottom: 0 }}
-              >
-                <InputNumber
-                  min={0}
-                  max={depositExpectedAmount}
-                  precision={2}
-                  style={{ width: '100%' }}
-                  onChange={updateDepositDifference}
-                />
-              </Form.Item>
-              <Form.Item label={t('Cutoff')} name="cutoff" style={{ flex: 1, marginBottom: 0 }}>
+            <Form.Item
+              label={t('Deposited amount')}
+              name="amount"
+              rules={[{ required: true, message: t('Enter the deposited amount.') }]}
+            >
+              <InputNumber
+                min={0}
+                max={depositExpectedAmount}
+                precision={2}
+                style={{ width: '100%' }}
+                onChange={updateDepositDifference}
+              />
+            </Form.Item>
+
+            <Space size={12} style={{ display: 'flex', alignItems: 'flex-start' }}>
+              <Form.Item label={t('Expected amount')} name="expectedAmount" style={{ flex: 1 }}>
                 <InputNumber disabled precision={2} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item label={t('Difference')} name="difference" style={{ flex: 1 }}>
+                <InputNumber
+                  disabled
+                  precision={2}
+                  style={{
+                    width: '100%',
+                    color: Math.abs(getAuditNumber(depositForm.getFieldValue('difference'))) < 0.01 ? '#52c41a' : undefined
+                  }}
+                />
               </Form.Item>
             </Space>
 
-            <Form.Item label={t('Expected amount')} name="expectedAmount">
-              <InputNumber disabled precision={2} style={{ width: '100%' }} />
-            </Form.Item>
-
-            <Form.Item label={t('Difference')} name="difference">
-              <InputNumber
-                disabled
-                precision={2}
-                style={{
-                  width: '100%',
-                  color: Math.abs(getAuditNumber(depositForm.getFieldValue('difference'))) < 0.01 ? '#52c41a' : undefined
-                }}
+            <Form.Item
+              label={t('Income type')}
+              name="incomeType"
+              rules={[{ required: true, message: t('Select an income type.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('Select an income type')}
+                options={getDepositIncomeTypeOptions()}
+                onChange={updateDepositIncomeType}
               />
             </Form.Item>
 

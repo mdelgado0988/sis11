@@ -136,3 +136,22 @@ select distinct ccobertura from maplancob c
 where c.cramo = 31
 and cplan not in ('EG1','EG2','EG3','EG4','EG5')
 
+select pl.xplan, r.* 
+from marepteccia r
+left join maplanes pl on pl.cramo = r.cramo and pl.cplan = r.cplan
+where r.cramo in (81,82,83,84)
+and r.xdpto = 'EMISION'
+--and cplan = 'FIAGCCOG'
+and r.xdescripcion like '%contrato%'
+AND r.xnombrep NOT LIKE '%endoso%'
+order by r.cramo, r.cplan
+
+SELECT pl.xplan, rep.xdescripcion, rep.xnombrep, rep.xformula_sel, rep.xtipodoc, rep.cramo, ISNULL(rep.bok, 0) AS Expr1, rep.creporte, rep.xcampos, rep.orden
+,rep.xformula1, rep.cplan, rep.cprog, rep.itipo, RTRIM(ISNULL((CASE WHEN LEN(rep.cerror)=0 THEN 0 ELSE rep.cerror END), '0')) cerror, rep.iestado
+FROM  dbo.maplancob mapla 
+INNER JOIN dbo.marepteccia rep ON rep.cramo = mapla.cramo AND (mapla.ccobertura=rep.xformula1  OR  mapla.ccobertura=rep.xformula2 OR mapla.ccobertura=rep.xformula3 OR mapla.ccobertura=rep.xformula4 OR mapla.ccobertura=rep.xformula5) 
+		and rep.cplan = mapla.cplan 
+INNER JOIn maplanes pl on pl.cramo = mapla.cramo and pl.cplan = mapla.cplan
+WHERE  mapla.cplan= CASE (mapla.cramo) WHEN 81 THEN REP.cplan WHEN 82 THEN REP.cplan WHEN 83 THEN REP.cplan WHEN 84 THEN REP.cplan END
+and   (mapla.bimprime = 1)
+AND rep.itipo='GEN'
