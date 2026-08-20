@@ -39,35 +39,46 @@ try {
   }
 
   const transactions = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
-  const transaction = transactions.length > 0 ? transactions[transactions.length - 1] : null;
-  const transactionId = getPositiveInteger(transaction && transaction.id);
+  const transactionIds = transactions
+    .map(transaction => getPositiveInteger(transaction && transaction.id))
+    .filter(transactionId => transactionId > 0);
 
-  if (transactionId <= 0) {
+  if (transactionIds.length === 0) {
     throw new Error(
-      `No se encontró una transacción contable asociada al allocationId ${allocationId}.`
+      `No se encontraron transacciones contables asociadas al allocationId ${allocationId}.`
     );
   }
 
-  doCmd({
-    cmd: "ReverseTransaction",
-    data: {
-      transactionId: transactionId,
-      notes: null
-    }
-  });
+  const reversals = [];
 
-  if (typeof ReverseTransaction === "undefined" || !ReverseTransaction || ReverseTransaction.ok === false) {
-    throw new Error(
-      ReverseTransaction && ReverseTransaction.msg
-        ? ReverseTransaction.msg
-        : "No fue posible revertir la transacción contable."
-    );
+  for (const transactionId of transactionIds) {
+    doCmd({
+      cmd: "ReverseTransaction",
+      data: {
+        transactionId: transactionId,
+        notes: null
+      }
+    });
+
+    if (typeof ReverseTransaction === "undefined" || !ReverseTransaction || ReverseTransaction.ok === false) {
+      throw new Error(
+        ReverseTransaction && ReverseTransaction.msg
+          ? ReverseTransaction.msg
+          : `No fue posible revertir la transacción contable ${transactionId}.`
+      );
+    }
+
+    reversals.push({
+      transactionId: transactionId,
+      result: ReverseTransaction.outData || null,
+      msg: ReverseTransaction.msg || null
+    });
   }
 
   return {
     ok: true,
-    msg: ReverseTransaction.msg || "Transacción contable revertida correctamente.",
-    outData: ReverseTransaction.outData || null
+    msg: `${reversals.length} transacciones contables revertidas correctamente.`,
+    outData: reversals
   };
 } catch (error) {
   const message = error && error.message ? error.message : String(error);
