@@ -225,14 +225,19 @@
   const [closeCashDeskLoading, setCloseCashDeskLoading] = React.useState(false);
   const [newCashDeskForm] = Form.useForm();
   const [depositVisible, setDepositVisible] = React.useState(false);
+  const [depositSubmitting, setDepositSubmitting] = React.useState(false);
   const [depositForm] = Form.useForm();
   const [depositExpectedAmount, setDepositExpectedAmount] = React.useState(0);
+  const [uniqueDeposit, setUniqueDeposit] = React.useState(true);
   const [newIncomeForm] = Form.useForm();
   const [activeTab, setActiveTab] = React.useState('cash-desks');
   const [movementRows, setMovementRows] = React.useState([]);
   const [movementLoading, setMovementLoading] = React.useState(false);
   const [movementPagination, setMovementPagination] = React.useState({ current: 1, pageSize: 15 });
   const [movementTotal, setMovementTotal] = React.useState(0);
+  const [movementFilters, setMovementFilters] = React.useState({});
+  const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
+  const [movementFilterForm] = Form.useForm();
   const [movementActionId, setMovementActionId] = React.useState(0);
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
   const [movementViewVisible, setMovementViewVisible] = React.useState(false);
@@ -2065,6 +2070,37 @@
     });
   }
 
+  function applyMovementFilters(values) {
+    const transferId = Number(values && values.transferId);
+    const rawAmount = values && values.amount;
+    const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== '';
+    const amount = Number(rawAmount);
+    const incomeType = getTrimmedString(values && values.incomeType);
+    const nextFilters = {
+      pending: values && values.pending === true,
+      transferId: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+      amount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
+      incomeType: incomeType || null
+    };
+
+    setMovementFilters(nextFilters);
+    setMovementFilterVisible(false);
+    loadMovements({
+      filters: nextFilters,
+      pagination: { current: 1, pageSize: movementPagination.pageSize }
+    });
+  }
+
+  function clearMovementFilters() {
+    movementFilterForm.resetFields();
+    setMovementFilters({});
+    setMovementFilterVisible(false);
+    loadMovements({
+      filters: {},
+      pagination: { current: 1, pageSize: movementPagination.pageSize }
+    });
+  }
+
   function limitIncomeAmountDecimals(value) {
     const raw = getTrimmedString(value).replace(',', '.');
     if (!raw) return '';
@@ -3268,25 +3304,55 @@
     return Math.max(0, amount + deposit + cashFund);
   }
 
+  function getBalanceAvailableAmount(row) {
+    const amount = getAuditNumber(row && row.amount);
+    const deposit = getAuditNumber(row && row.deposit);
+    const cashFund = getAuditNumber(row && row.assignedFund);
+    return Math.max(0, amount + deposit + cashFund);
+  }
+
+  function getUniqueDepositRows(currency) {
+    const selectedCurrency = getTrimmedString(currency).toUpperCase();
+
+    return balanceRows
+      .map(row => ({
+        row: row,
+        amount: getBalanceAvailableAmount(row),
+        paymentMethod: getTrimmedString(row && (row.paymentMethodCode || row.paymentMethod))
+      }))
+      .filter(item => getTrimmedString(item.row && item.row.currency).toUpperCase() === selectedCurrency)
+      .filter(item => item.amount > 0 && item.paymentMethod);
+  }
+
+  function getUniqueDepositExpectedAmount(currency) {
+    return getUniqueDepositRows(currency).reduce((total, item) => total + item.amount, 0);
+  }
+
   function openNewDepositModal() {
     const firstCurrency = currencyOptions[0] && currencyOptions[0].value;
+    const expectedAmount = getUniqueDepositExpectedAmount(firstCurrency);
 
     depositForm.setFieldsValue({
       incomeType: undefined,
+      uniqueDeposit: true,
       paymentMethod: undefined,
       currency: firstCurrency,
       amount: undefined,
-      expectedAmount: 0,
-      difference: 0,
+      expectedAmount: expectedAmount,
+      difference: expectedAmount,
       destination: undefined,
       reference: ''
     });
-    setDepositExpectedAmount(0);
+    setUniqueDeposit(true);
+    setDepositExpectedAmount(expectedAmount);
     setDepositVisible(true);
   }
 
   function handleDepositValuesChange(changedValues, allValues) {
-    const expectedAmount = getDepositExpectedAmount(allValues && allValues.paymentMethod, allValues && allValues.currency);
+    const isUniqueDeposit = allValues && allValues.uniqueDeposit !== false;
+    const expectedAmount = isUniqueDeposit
+      ? getUniqueDepositExpectedAmount(allValues && allValues.currency)
+      : getDepositExpectedAmount(allValues && allValues.paymentMethod, allValues && allValues.currency);
     const depositedAmount = getAuditNumber(allValues && allValues.amount);
     setDepositExpectedAmount(expectedAmount);
     depositForm.setFieldsValue({
@@ -3302,29 +3368,63 @@
     });
   }
 
+  function useDepositExpectedAmount() {
+    const expectedAmount = getAuditNumber(depositForm.getFieldValue('expectedAmount'));
+    depositForm.setFieldsValue({
+      amount: expectedAmount,
+      difference: 0
+    });
+  }
+
+  function handleUniqueDepositChange(event) {
+    const checked = Boolean(event && event.target && event.target.checked);
+    setUniqueDeposit(checked);
+    const currency = depositForm.getFieldValue('currency');
+    const paymentMethod = depositForm.getFieldValue('paymentMethod');
+    const expectedAmount = checked
+      ? getUniqueDepositExpectedAmount(currency)
+      : getDepositExpectedAmount(paymentMethod, currency);
+    const depositedAmount = getAuditNumber(depositForm.getFieldValue('amount'));
+    setDepositExpectedAmount(expectedAmount);
+    depositForm.setFieldsValue({
+      uniqueDeposit: checked,
+      paymentMethod: checked ? undefined : paymentMethod,
+      expectedAmount: expectedAmount,
+      difference: expectedAmount - depositedAmount
+    });
+  }
+
   function closeNewDepositModal() {
+    if (depositSubmitting) return;
     setDepositVisible(false);
     depositForm.resetFields();
     setDepositExpectedAmount(0);
   }
 
   async function createDeposit(values) {
+    if (depositSubmitting) return;
+    setDepositSubmitting(true);
+
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
     const amount = getAuditNumber(values && values.amount);
+    const isUniqueDeposit = values && values.uniqueDeposit !== false;
 
     if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
       message.warning(t('Select a cash desk first.'));
+      setDepositSubmitting(false);
       return;
     }
 
     if (amount <= 0) {
       message.warning(t('Enter a deposited amount greater than zero.'));
+      setDepositSubmitting(false);
       return;
     }
 
     const expectedAmount = getAuditNumber(values && values.expectedAmount);
     if (amount > expectedAmount + 0.01) {
       message.warning(t('The deposited amount cannot exceed the expected amount.'));
+      setDepositSubmitting(false);
       return;
     }
 
@@ -3335,25 +3435,63 @@
         return;
       }
 
-      const difference = getAuditNumber(values && values.difference);
-      const response = await exe('DepositCashierPayments', {
-        workspaceId: workspaceId,
-        incomeType: getTrimmedString(values && values.incomeType),
-        paymentMethod: getTrimmedString(values && values.paymentMethod),
-        currency: getTrimmedString(values && values.currency),
-        amountAtSight: amount,
-        amount: amount,
-        dif: difference,
-        destinationAccountId: destinationAccountId,
-        concept: getTrimmedString(values && values.reference),
-        externalSource: null
-      });
+      const currency = getTrimmedString(values && values.currency);
+      const incomeType = getTrimmedString(values && values.incomeType);
+      const concept = getTrimmedString(values && values.reference);
+      const depositRows = isUniqueDeposit
+        ? getUniqueDepositRows(currency)
+        : [{
+          row: null,
+          amount: getAuditNumber(values && values.expectedAmount),
+          paymentMethod: getTrimmedString(values && values.paymentMethod)
+        }];
 
-      if (!response || response.ok === false) {
-        throw new Error(response && response.msg ? response.msg : t('The deposit could not be created.'));
+      if (depositRows.length === 0) {
+        message.warning(t('There are no balances available for the selected currency.'));
+        setDepositSubmitting(false);
+        return;
       }
 
-      message.success(response.msg || t('Deposit created successfully.'));
+      let remainingAmount = amount;
+      const responses = [];
+
+      for (const depositRow of depositRows) {
+        if (remainingAmount <= 0) break;
+
+        const rowAmount = isUniqueDeposit ? depositRow.amount : getAuditNumber(values && values.expectedAmount);
+        const depositAmount = Math.min(remainingAmount, rowAmount);
+        if (depositAmount <= 0) continue;
+
+        const response = await exe('DepositCashierPayments', {
+          workspaceId: workspaceId,
+          incomeType: incomeType,
+          paymentMethod: depositRow.paymentMethod,
+          currency: currency,
+          amountAtSight: depositAmount,
+          amount: depositAmount,
+          dif: rowAmount - depositAmount,
+          destinationAccountId: destinationAccountId,
+          concept: concept,
+          externalSource: null
+        });
+
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The deposit could not be created.'));
+        }
+
+        responses.push(response);
+        remainingAmount -= depositAmount;
+      }
+
+      if (remainingAmount > 0.01) {
+        throw new Error(t('The deposited amount could not be fully distributed among the available balances.'));
+      }
+
+      message.success(
+        isUniqueDeposit
+          ? t('Deposits created successfully.')
+          : (responses[0] && responses[0].msg) || t('Deposit created successfully.')
+      );
       closeNewDepositModal();
       loadMovements({
         pagination: {
@@ -3365,6 +3503,8 @@
       if (cashDeskAuditVisible) openCashDeskAudit();
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setDepositSubmitting(false);
     }
   }
 
@@ -4754,8 +4894,14 @@
     }
 
     const pagination = params.pagination || movementPagination;
+    const filters = params.filters || movementFilters;
     const pageSize = Number(pagination && pagination.pageSize) || 15;
     const currentPage = Number(pagination && pagination.current) || 1;
+    const transferId = Number(filters && filters.transferId);
+    const rawAmount = filters && filters.amount;
+    const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== '';
+    const amount = Number(rawAmount);
+    const incomeType = getTrimmedString(filters && filters.incomeType);
 
     setMovementLoading(true);
     exe('FilterTransfer', {
@@ -4766,25 +4912,30 @@
       currency: null,
       allocated: null,
       external: null,
-      executed: null,
+      executed: filters && filters.pending === true ? false : null,
       concept: null,
-      minAmount: null,
-      maxAmount: null,
+      minAmount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
+      maxAmount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
       month: null,
       claimPaymentId: null,
       allocationId: null,
       fromDate: null,
       toDate: null,
-      id: null,
+      id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
       paymentMethod: null,
-      incomeType: null
+      incomeType: incomeType || null
     })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
         }
 
-        const groups = getRows(response);
+        const allGroups = getRows(response);
+        // FilterTransfer can return reverted records together with executed=false.
+        // When the user requests pending movements, exclude them explicitly from the result.
+        const groups = filters && filters.pending === true
+          ? allGroups.filter(group => !isMovementReverted(group))
+          : allGroups;
         const rows = groups.map((group, index) => {
           const children = getMovementChildren(group);
           const first = children[0] || {};
@@ -4817,6 +4968,7 @@
 
   function handleMovementTableChange(pagination) {
     loadMovements({
+      filters: movementFilters,
       pagination: {
         current: pagination.current,
         pageSize: pagination.pageSize
@@ -5839,6 +5991,14 @@
   const movementsTabContent = (
     <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Button
+          className="cashier-supervisor-outline-button"
+          icon={<FilterOutlined />}
+          onClick={() => setMovementFilterVisible(true)}
+          disabled={!selectedCashierRow}
+        >
+          {t('Filter')}
+        </Button>
         <Dropdown
           trigger={['click']}
           placement="bottomLeft"
@@ -6556,26 +6716,40 @@
           onOk={() => depositForm.submit()}
           okText={t('Deposit')}
           cancelText={t('Cancel')}
+          confirmLoading={depositSubmitting}
+          maskClosable={!depositSubmitting}
+          closable={!depositSubmitting}
           destroyOnClose={false}
         >
-          <Form
-            form={depositForm}
-            layout="vertical"
-            onValuesChange={handleDepositValuesChange}
-            onFinish={createDeposit}
-          >
-            <Form.Item
-              label={t('Payment method')}
-              name="paymentMethod"
-              rules={[{ required: true, message: t('Select a payment method.') }]}
+          <Spin spinning={depositSubmitting} tip={t('Processing deposit...')}>
+            <Form
+              form={depositForm}
+              layout="vertical"
+              onValuesChange={handleDepositValuesChange}
+              onFinish={createDeposit}
             >
-              <Select
-                showSearch
-                optionFilterProp="label"
-                placeholder={t('Payment method')}
-                options={paymentMethodOptions}
-              />
-            </Form.Item>
+            <Space align="center" size={16} style={{ display: 'flex', marginBottom: 8 }}>
+              <span>{t('Payment method')}</span>
+              <Form.Item name="uniqueDeposit" valuePropName="checked" noStyle>
+                <Checkbox onChange={handleUniqueDepositChange}>
+                  {t('Single deposit')}
+                </Checkbox>
+              </Form.Item>
+            </Space>
+
+            {!uniqueDeposit && (
+              <Form.Item
+                name="paymentMethod"
+                rules={[{ required: true, message: t('Select a payment method.') }]}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={t('Payment method')}
+                  options={paymentMethodOptions}
+                />
+              </Form.Item>
+            )}
 
             <Form.Item
               label={t('Currency')}
@@ -6601,6 +6775,16 @@
                 precision={2}
                 style={{ width: '100%' }}
                 onChange={updateDepositDifference}
+                addonAfter={(
+                  <Tooltip title={t('Use the total expected amount')}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CheckOutlined />}
+                      onClick={useDepositExpectedAmount}
+                    />
+                  </Tooltip>
+                )}
               />
             </Form.Item>
 
@@ -6650,7 +6834,8 @@
             <Form.Item label={t('Reference')} name="reference">
               <Input />
             </Form.Item>
-          </Form>
+            </Form>
+          </Spin>
         </Modal>
 
         <Modal
@@ -7082,6 +7267,60 @@
                 style={{ width: '100%' }}
                 format="DD/MM/YYYY"
                 allowClear
+              />
+            </Form.Item>
+          </Form>
+        </Drawer>
+
+        <Drawer
+          title={t('Movement filters')}
+          className="cashier-supervisor-drawer"
+          placement="right"
+          width={360}
+          open={movementFilterVisible}
+          onClose={() => setMovementFilterVisible(false)}
+          destroyOnClose={false}
+          footer={(
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={clearMovementFilters}>{t('Clear')}</Button>
+              <Button type="primary" onClick={() => movementFilterForm.submit()}>{t('Apply')}</Button>
+            </div>
+          )}
+        >
+          <Form
+            form={movementFilterForm}
+            layout="vertical"
+            onFinish={applyMovementFilters}
+          >
+            <Form.Item name="pending" valuePropName="checked">
+              <Checkbox>{t('Pending to execute')}</Checkbox>
+            </Form.Item>
+
+            <Form.Item label={t('Transfer ID')} name="transferId">
+              <InputNumber
+                min={1}
+                precision={0}
+                style={{ width: '100%' }}
+                placeholder={t('Transfer ID')}
+              />
+            </Form.Item>
+
+            <Form.Item label={t('Amount')} name="amount">
+              <InputNumber
+                min={0}
+                precision={2}
+                style={{ width: '100%' }}
+                placeholder={t('Amount')}
+              />
+            </Form.Item>
+
+            <Form.Item label={t('Income type')} name="incomeType">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={incomeTypeOptions}
+                placeholder={t('Select an income type')}
               />
             </Form.Item>
           </Form>

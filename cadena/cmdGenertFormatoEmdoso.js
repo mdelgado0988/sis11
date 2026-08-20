@@ -468,12 +468,14 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   };
 
   const getFechaImpresion = (fecha = new Date()) => {
-    const d = (fecha instanceof Date) ? fecha : new Date(fecha);
-    if (isNaN(d)) return null;
-  
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
+    const d = parseUtcDate(fecha);
+    if (!d) return null;
+
+    // Change.created llega en UTC; la fecha impresa debe corresponder a Panamá.
+    const panamaDate = new Date(d.getTime() - (5 * 60 * 60 * 1000));
+    const dd = String(panamaDate.getUTCDate()).padStart(2, '0');
+    const mm = String(panamaDate.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = panamaDate.getUTCFullYear();
   
     return `${dd}/${mm}/${yyyy}`;
   };
@@ -527,8 +529,8 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
 
     FechaInicioVigencia: toDate(policy?.start),
     FechaFinVigencia: toDate(policy?.end),
-    HoraVigencia: getHora(policy?.start),
-    FechaImpresion: getFechaImpresion(),
+    HoraVigencia: "12:00 AM",
+    FechaImpresion: getFechaImpresion(change?.created),
 
     PrimaNetaTotal: n(policy?.anualPremium),
     Impuesto: n(policy?.tax),
