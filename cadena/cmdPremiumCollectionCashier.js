@@ -273,7 +273,7 @@ function buildPolicyFilter(source) {
   }
 
   if (policyCode) {
-    filters.push(`AND pol.[code] LIKE N'%${escapeSqlString(policyCode)}%'`);
+    filters.push(`AND pol.[code] = N'${escapeSqlString(policyCode)}'`);
   }
 
   const issuanceFrom = getDateFilterValue(input.issuanceFrom || input.emissionFrom);

@@ -14,6 +14,7 @@
  *   holderId?: number,
  *   policy?: string|number,
  *   accountName?: string,
+ *   accountCode?: string,
  *   currency?: string,
  *   name?: string,
  *   cancellations?: boolean,
@@ -102,6 +103,7 @@ function normalizeInput(source) {
     holderId: toPositiveInteger(value.holderId),
     policy: normalizeText(value.policy),
     accountName: normalizeText(value.accountName),
+    accountCode: normalizeText(value.accountCode),
     currency: normalizeText(value.currency).toUpperCase(),
     name: normalizeText(value.name),
     cancellations: value.cancellations === true,
@@ -127,16 +129,15 @@ function buildFilter(input) {
   }
 
   if (input.policy) {
-    const policyId = toPositiveInteger(input.policy);
-    if (policyId > 0) {
-      conditions.push(`a.[lifePolicyId] = ${policyId}`);
-    } else {
-      conditions.push(`pol.[code] LIKE N'${escapeSql(input.policy)}%'`);
-    }
+    conditions.push(`pol.[code] = N'${escapeSql(input.policy)}'`);
   }
 
   if (input.accountName) {
     conditions.push(`a.[name] LIKE N'%${escapeSql(input.accountName)}%'`);
+  }
+
+  if (input.accountCode) {
+    conditions.push(`a.[accNo] LIKE N'%${escapeSql(input.accountCode)}%'`);
   }
 
   if (input.currency) {

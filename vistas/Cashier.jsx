@@ -258,6 +258,8 @@
   const [refundMoneyForm] = Form.useForm();
   const [accountTransferVisible, setAccountTransferVisible] = React.useState(false);
   const [accountTransferForm] = Form.useForm();
+  const accountTransferAmount = Form.useWatch('amount', accountTransferForm);
+  const [accountTransferSourceBalance, setAccountTransferSourceBalance] = React.useState(0);
   const [accountTransferAccountOptions, setAccountTransferAccountOptions] = React.useState([]);
   const [accountTransferAccountLoading, setAccountTransferAccountLoading] = React.useState(false);
   const accountTransferAccountSearchTimer = React.useRef(null);
@@ -314,6 +316,7 @@
   const [newIncomeDestinationAccountOptions, setNewIncomeDestinationAccountOptions] = React.useState([]);
   const [newIncomeDestinationAccountLoading, setNewIncomeDestinationAccountLoading] = React.useState(false);
   const [newIncomeAccountSearchVisible, setNewIncomeAccountSearchVisible] = React.useState(false);
+  const [accountTransferSearchTarget, setAccountTransferSearchTarget] = React.useState(null);
   const [newIncomeAccountSearchRows, setNewIncomeAccountSearchRows] = React.useState([]);
   const [newIncomeAccountSearchLoading, setNewIncomeAccountSearchLoading] = React.useState(false);
   const [newIncomeAccountSearchPagination, setNewIncomeAccountSearchPagination] = React.useState({ current: 1, pageSize: 10 });
@@ -815,12 +818,15 @@
 
       .cashier-supervisor-account-search-table .ant-table-thead > tr > th,
       .cashier-supervisor-account-search-table .ant-table-tbody > tr > td {
-        padding: 4px 8px !important;
-        line-height: 18px;
+        padding: 2px 6px !important;
+        line-height: 16px;
       }
 
       .cashier-supervisor-account-search-table .cashier-supervisor-account-select-cell {
         min-width: 82px;
+        height: 22px;
+        padding: 0 4px;
+        line-height: 20px;
         text-align: center;
         white-space: nowrap;
       }
@@ -1523,6 +1529,7 @@
           : '',
         policy: getTrimmedString(filters && filters.policy),
         accountName: getTrimmedString(filters && filters.accountName),
+        accountCode: getTrimmedString(filters && filters.accountCode),
         currency: getTrimmedString(filters && filters.currency),
         name: getTrimmedString(filters && filters.name),
         cancellations: filters && filters.cancellations === true,
@@ -1556,11 +1563,26 @@
 
   function getTransitMovements(account) {
     const movements = getRows({ outData: account && account.Movements });
+    const visibleMovements = movements.filter(item => {
+      const transactionCode = getTrimmedString(item && item.transactionCode).toUpperCase();
+      const amount = Number(item && item.amount);
+      return transactionCode !== 'PREMIUMPAY'
+        && transactionCode !== 'MONEYOUT'
+        && Number.isFinite(amount);
+    });
+
     if (transitAccountFilters && transitAccountFilters.cancellations === true) {
-      return movements.filter(item => getTrimmedString(item && item.transaction) === 'Cancellation');
+      return visibleMovements.filter(item => getTrimmedString(item && item.transaction) === 'Cancellation');
     }
 
-    return movements.filter(item => getTrimmedString(item && item.transactionCode).toUpperCase() !== 'PREMIUMPAY');
+    return visibleMovements;
+  }
+
+  function getTransitAccountBalance(account) {
+    return getTransitMovements(account).reduce((total, movement) => {
+      const amount = Number(movement && movement.amount);
+      return total + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
   }
 
   function getTransitAccountLabel(account) {
@@ -1575,6 +1597,7 @@
       holderId: values && values.contact !== undefined && values.contact !== null ? values.contact : '',
       policy: getTrimmedString(values && values.policy),
       accountName: getTrimmedString(values && values.accountName),
+      accountCode: getTrimmedString(values && values.accountCode),
       currency: getTrimmedString(values && values.currency),
       name: getTrimmedString(values && values.name),
       cancellations: values && values.cancellations === true,
@@ -1673,6 +1696,8 @@
 
   function openAccountTransferModal() {
     accountTransferForm.resetFields();
+    setAccountTransferSourceBalance(0);
+    setAccountTransferSearchTarget(null);
     setAccountTransferAccountOptions([]);
     accountTransferForm.setFieldsValue({
       currency: currencyOptions[0] && currencyOptions[0].value,
@@ -1687,6 +1712,8 @@
       accountTransferAccountSearchTimer.current = null;
     }
     setAccountTransferVisible(false);
+    setAccountTransferSourceBalance(0);
+    setAccountTransferSearchTarget(null);
     setAccountTransferAccountOptions([]);
     accountTransferForm.resetFields();
   }
@@ -1748,6 +1775,7 @@
       destinationAccount: undefined,
       destinationName: ''
     });
+    setAccountTransferSourceBalance(0);
     setAccountTransferAccountOptions([]);
   }
 
@@ -1757,7 +1785,17 @@
     const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
     const targetField = fieldName === 'sourceAccount' ? 'sourceName' : 'destinationName';
 
+    if (fieldName === 'sourceAccount') {
+      const balance = Number(account && account.movementBalance);
+      setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
+    }
+
     accountTransferForm.setFieldsValue({ [targetField]: contactName });
+  }
+
+  function getAccountTransferSourceBalance() {
+    const balance = Number(accountTransferSourceBalance);
+    return Number.isFinite(balance) ? balance : 0;
   }
 
   async function submitAccountTransfer(values) {
@@ -1784,6 +1822,14 @@
 
     if (!Number.isFinite(amount) || amount <= 0) {
       message.error(t('Enter an amount greater than zero.'));
+      return;
+    }
+
+    const availableBalance = getAccountTransferSourceBalance();
+    if (amount > availableBalance) {
+      message.error(
+        `${t('The source account does not have enough balance.')} ${t('Available')}: ${formatMoney(availableBalance)}.`
+      );
       return;
     }
 
@@ -2346,6 +2392,9 @@
     const currentPage = Number(pagination && pagination.current) || 1;
     const pageSize = Number(pagination && pagination.pageSize) || 10;
     const contactId = Number(source.contact);
+    const transferCurrency = accountTransferSearchTarget
+      ? getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase()
+      : '';
 
     setNewIncomeAccountSearchLoading(true);
     exe('ExeChain', {
@@ -2355,7 +2404,8 @@
         size: pageSize,
         accountName: source.accountName || '',
         policy: source.policy || '',
-        holderId: Number.isFinite(contactId) && contactId > 0 ? contactId : 0
+        holderId: Number.isFinite(contactId) && contactId > 0 ? contactId : 0,
+        currency: transferCurrency || undefined
       })
     })
       .then(response => {
@@ -2366,7 +2416,10 @@
         const result = response && response.outData && !Array.isArray(response.outData)
           ? response.outData
           : response;
-        setNewIncomeAccountSearchRows(getAccountSearchRows(response));
+        const rows = getAccountSearchRows(response);
+        setNewIncomeAccountSearchRows(transferCurrency
+          ? rows.filter(account => getTrimmedString(account && account.currency).toUpperCase() === transferCurrency)
+          : rows);
         setNewIncomeAccountSearchTotal(Number(result && result.total) || 0);
         setNewIncomeAccountSearchPagination({ current: currentPage, pageSize: pageSize });
       })
@@ -2378,8 +2431,9 @@
       .finally(() => setNewIncomeAccountSearchLoading(false));
   }
 
-  function openNewIncomeAccountSearch() {
+  function openNewIncomeAccountSearch(targetField) {
     newIncomeAccountSearchForm.resetFields();
+    setAccountTransferSearchTarget(targetField || null);
     setNewIncomeAccountSearchRows([]);
     setNewIncomeAccountSearchTotal(0);
     setNewIncomeAccountSearchPagination({ current: 1, pageSize: 10 });
@@ -2395,6 +2449,28 @@
   function selectNewIncomeDestinationAccount(account) {
     const id = Number(account && account.id);
     if (!Number.isFinite(id) || id <= 0) return;
+
+    if (accountTransferSearchTarget) {
+      const targetField = accountTransferSearchTarget;
+      const targetName = targetField === 'sourceAccount' ? 'sourceName' : 'destinationName';
+      const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
+      const options = mapTransitAccountOptions([account]);
+
+      setAccountTransferAccountOptions(current => options.concat(
+        current.filter(item => Number(item.value) !== id)
+      ));
+      accountTransferForm.setFieldsValue({
+        [targetField]: id,
+        [targetName]: contactName
+      });
+      if (targetField === 'sourceAccount') {
+        const balance = Number(account && account.movementBalance);
+        setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
+      }
+      setAccountTransferSearchTarget(null);
+      setNewIncomeAccountSearchVisible(false);
+      return;
+    }
 
     const options = mapTransitAccountOptions([account]);
     setNewIncomeDestinationAccountOptions(current => options.concat(current.filter(item => Number(item.value) !== id)));
@@ -5761,6 +5837,13 @@
       render: value => getTrimmedString(value) || '-'
     },
     {
+      title: t('Name'),
+      dataIndex: 'name',
+      key: 'name',
+      width: 210,
+      render: value => getTrimmedString(value) || '-'
+    },
+    {
       title: t('Policy'),
       key: 'policy',
       width: 150,
@@ -5784,9 +5867,7 @@
       key: 'balance',
       width: 130,
       align: 'right',
-      render: (_, record) => formatMoney(record && record.movementBalance !== undefined && record.movementBalance !== null
-        ? record.movementBalance
-        : 0)
+      render: (_, record) => formatMoney(getTransitAccountBalance(record))
     },
     {
       title: t('Movements'),
@@ -6960,53 +7041,100 @@
                 >
                   <Input />
                 </Form.Item>
+                <Form.Item shouldUpdate>
+                  {() => {
+                    const availableBalance = getAccountTransferSourceBalance();
+                    const transferAmount = Number(accountTransferAmount);
+                    const safeTransferAmount = Number.isFinite(transferAmount) ? transferAmount : 0;
+                    const finalBalance = availableBalance - safeTransferAmount;
+                    const renderSummaryAmount = amount => (
+                      <strong style={{ color: amount < 0 ? '#cf1322' : undefined }}>
+                        {formatMoney(amount)}
+                      </strong>
+                    );
+
+                    return (
+                      <div className="cashier-supervisor-account-transfer-summary">
+                        <div><span>{t('Available balance')}: </span>{renderSummaryAmount(availableBalance)}</div>
+                        <div><span>{t('Amount to transfer')}: </span>{renderSummaryAmount(safeTransferAmount)}</div>
+                        <div><span>{t('Final balance')}: </span>{renderSummaryAmount(finalBalance)}</div>
+                      </div>
+                    );
+                  }}
+                </Form.Item>
                 {/* External source is kept disabled until its transfer flow is defined. */}
               </div>
 
               <div>
-                <div className="cashier-supervisor-section-title">{t('Destination information')}</div>
+                <div className="cashier-supervisor-section-title">{t('Account information')}</div>
                 <Form.Item
-                  label={t('Destination account')}
-                  name="destinationAccount"
-                  rules={[{ required: true, message: t('Select a destination account.') }]}
+                  label={t('Source account')}
                 >
-                  <Select
-                    showSearch
-                    allowClear
-                    filterOption={false}
-                    optionFilterProp="label"
-                    optionLabelProp="shortAccountLabel"
-                    options={accountTransferAccountOptions}
-                    loading={accountTransferAccountLoading}
-                    placeholder={t('Type to search account')}
-                    onSearch={searchAccountTransferAccounts}
-                    onChange={value => updateAccountTransferContact('destinationAccount', value)}
-                    notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
-                  />
+                  <Input.Group compact style={{ display: 'flex', width: '100%' }}>
+                    <Form.Item
+                      name="sourceAccount"
+                      noStyle
+                      rules={[{ required: true, message: t('Select a source account.') }]}
+                    >
+                      <Select
+                        showSearch
+                        allowClear
+                        filterOption={false}
+                        optionFilterProp="label"
+                        optionLabelProp="shortAccountLabel"
+                        options={accountTransferAccountOptions}
+                        loading={accountTransferAccountLoading}
+                        placeholder={t('Type to search account')}
+                        onSearch={searchAccountTransferAccounts}
+                        onChange={value => updateAccountTransferContact('sourceAccount', value)}
+                        notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
+                        style={{ width: 'calc(100% - 40px)' }}
+                      />
+                    </Form.Item>
+                    <Button
+                      icon={<InstallmentsIcon />}
+                      aria-label={t('Search accounts')}
+                      onClick={() => openNewIncomeAccountSearch('sourceAccount')}
+                      style={{ width: 40 }}
+                    />
+                  </Input.Group>
                 </Form.Item>
-                <Form.Item label={t('Destination name')} name="destinationName">
+                <Form.Item label={t('Source name')} name="sourceName">
                   <Input />
                 </Form.Item>
                 <Form.Item
-                  label={t('Source account')}
-                  name="sourceAccount"
-                  rules={[{ required: true, message: t('Select a source account.') }]}
+                  label={t('Destination account')}
                 >
-                  <Select
-                    showSearch
-                    allowClear
-                    filterOption={false}
-                    optionFilterProp="label"
-                    optionLabelProp="shortAccountLabel"
-                    options={accountTransferAccountOptions}
-                    loading={accountTransferAccountLoading}
-                    placeholder={t('Type to search account')}
-                    onSearch={searchAccountTransferAccounts}
-                    onChange={value => updateAccountTransferContact('sourceAccount', value)}
-                    notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
-                  />
+                  <Input.Group compact style={{ display: 'flex', width: '100%' }}>
+                    <Form.Item
+                      name="destinationAccount"
+                      noStyle
+                      rules={[{ required: true, message: t('Select a destination account.') }]}
+                    >
+                      <Select
+                        showSearch
+                        allowClear
+                        filterOption={false}
+                        optionFilterProp="label"
+                        optionLabelProp="shortAccountLabel"
+                        options={accountTransferAccountOptions}
+                        loading={accountTransferAccountLoading}
+                        placeholder={t('Type to search account')}
+                        onSearch={searchAccountTransferAccounts}
+                        onChange={value => updateAccountTransferContact('destinationAccount', value)}
+                        notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
+                        style={{ width: 'calc(100% - 40px)' }}
+                      />
+                    </Form.Item>
+                    <Button
+                      icon={<InstallmentsIcon />}
+                      aria-label={t('Search accounts')}
+                      onClick={() => openNewIncomeAccountSearch('destinationAccount')}
+                      style={{ width: 40 }}
+                    />
+                  </Input.Group>
                 </Form.Item>
-                <Form.Item label={t('Source name')} name="sourceName">
+                <Form.Item label={t('Destination name')} name="destinationName">
                   <Input />
                 </Form.Item>
               </div>
@@ -7064,7 +7192,10 @@
         <Modal
           title={t('Search accounts')}
           open={newIncomeAccountSearchVisible}
-          onCancel={() => setNewIncomeAccountSearchVisible(false)}
+          onCancel={() => {
+            setNewIncomeAccountSearchVisible(false);
+            setAccountTransferSearchTarget(null);
+          }}
           footer={null}
           width={900}
           destroyOnClose={false}
@@ -7130,7 +7261,7 @@
                 title: t('Account'),
                 dataIndex: 'accNo',
                 key: 'accNo',
-                width: 220,
+                width: 140,
                 render: value => (
                   <Tooltip title={getTrimmedString(value)}>
                     <span className="cashier-supervisor-account-cell">{getTrimmedString(value) || '-'}</span>
@@ -7141,26 +7272,40 @@
                 title: t('Name'),
                 dataIndex: 'name',
                 key: 'name',
-                width: 280,
+                width: 180,
                 render: value => (
                   <Tooltip title={getTrimmedString(value)}>
                     <span className="cashier-supervisor-account-cell">{getTrimmedString(value) || '-'}</span>
                   </Tooltip>
                 )
               },
-              { title: t('Policy'), dataIndex: 'policyCode', key: 'policyCode', width: 150 },
+              { title: t('Policy'), dataIndex: 'policyCode', key: 'policyCode', width: 160 },
+              {
+                title: t('Balance'),
+                key: 'currencyBalance',
+                width: 140,
+                align: 'right',
+                render: (_, record) => (
+                  <Tooltip
+                    title={`${getTrimmedString(record && record.currency) || '-'} ${formatMoney(record && record.movementBalance !== undefined && record.movementBalance !== null ? record.movementBalance : 0)}`}
+                  >
+                    <span className="cashier-supervisor-account-cell">
+                      {getTrimmedString(record && record.currency) || '-'} {formatMoney(record && record.movementBalance !== undefined && record.movementBalance !== null ? record.movementBalance : 0)}
+                    </span>
+                  </Tooltip>
+                )
+              },
               {
                 title: t('Contact'),
                 dataIndex: 'contactName',
                 key: 'contactName',
-                width: 280,
+                width: 180,
                 render: value => (
                   <Tooltip title={getTrimmedString(value)}>
                     <span className="cashier-supervisor-account-cell">{getTrimmedString(value) || '-'}</span>
                   </Tooltip>
                 )
-              },
-              { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' }
+              }
             ]}
             onRow={record => ({
               onClick: () => selectNewIncomeDestinationAccount(record)
@@ -7175,7 +7320,7 @@
                 { current: current, pageSize: pageSize }
               )
             }}
-            scroll={{ x: 1100, y: 300 }}
+            scroll={{ x: 900, y: 300 }}
           />
         </Modal>
 
@@ -7370,17 +7515,10 @@
               />
             </Form.Item>
 
-            <Form.Item label={t('Policy')} name="policyId">
-              <Select
-                showSearch
+            <Form.Item label={t('Policy')} name="policyCode">
+              <Input
                 allowClear
-                filterOption={false}
-                options={policyOptions}
-                loading={policyLoading}
-                onSearch={searchPolicies}
-                optionLabelProp="policyCode"
-                placeholder={t('Type policy id or code')}
-                notFoundContent={t('No policies found')}
+                placeholder={t('Enter the complete policy code')}
               />
             </Form.Item>
 
@@ -7432,20 +7570,16 @@
               />
             </Form.Item>
             <Form.Item label={t('Policy')} name="policy">
-              <Select
-                showSearch
+              <Input
                 allowClear
-                filterOption={false}
-                options={policyOptions}
-                loading={policyLoading}
-                onSearch={searchPolicies}
-                optionLabelProp="policyCode"
-                placeholder={t('Type policy id or code')}
-                notFoundContent={t('No policies found')}
+                placeholder={t('Enter the complete policy code')}
               />
             </Form.Item>
             <Form.Item label={t('Account name')} name="accountName">
               <Input allowClear placeholder={t('Search by account name')} />
+            </Form.Item>
+            <Form.Item label={t('Account code')} name="accountCode">
+              <Input allowClear placeholder={t('Search by account code')} />
             </Form.Item>
             <Form.Item label={t('Currency')} name="currency">
               <Select

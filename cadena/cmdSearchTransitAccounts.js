@@ -34,10 +34,18 @@ SELECT
     a.[currency],
     a.[name],
     pol.[code] AS [policyCode],
-    LTRIM(RTRIM(CONCAT(ISNULL(con.[name], ''), ' ', ISNULL(con.[surname1], ''), ' ', ISNULL(con.[surname2], '')))) AS [contactName]
+    LTRIM(RTRIM(CONCAT(ISNULL(con.[name], ''), ' ', ISNULL(con.[surname1], ''), ' ', ISNULL(con.[surname2], '')))) AS [contactName],
+    ISNULL(balance.[movementBalance], 0) AS [movementBalance]
 FROM [Account] a
 LEFT JOIN [Contact] con ON con.[id] = a.[holderId]
 LEFT JOIN [LifePolicy] pol ON pol.[id] = a.[lifePolicyId]
+OUTER APPLY (
+    SELECT SUM(ISNULL(am.[amount], 0)) AS [movementBalance]
+    FROM [AccountMov] am
+    WHERE am.[accountId] = a.[id]
+      AND ISNULL(am.[transactionCode], '') <> 'PREMIUMPAY'
+      AND ISNULL(am.[transactionCode], '') <> 'MONEYOUT'
+) balance
 WHERE ${filter}
 ORDER BY a.[id]
 OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
