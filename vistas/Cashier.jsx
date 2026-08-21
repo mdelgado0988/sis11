@@ -2310,15 +2310,6 @@
     setNewIncomeTypeDynamicForm(null);
   }
 
-  function ensureNewIncomeTypeFormLoaded() {
-    if (!collectionChargeVisible || !newIncomeTypeCode || newIncomeTypeDynamicForm) return;
-
-    const formId = getIncomeTypeFormId(newIncomeTypeCode);
-    if (formId <= 0) return;
-
-    updateNewIncomeType(newIncomeTypeCode);
-  }
-
   function searchNewIncomeDestinationAccounts(value) {
     const text = getTrimmedString(value);
 
@@ -2584,7 +2575,7 @@
         return false;
       }
 
-      const typeContainer = document.getElementById('cashier-income-type-form')
+      const typeContainer = document.getElementById(`cashier-income-type-form-${getNewIncomeFormScope()}`)
         || newIncomeTypeFormRef.current;
       if (newIncomeTypeDynamicForm.error) {
         message.error(newIncomeTypeDynamicForm.error);
@@ -2620,7 +2611,7 @@
         return false;
       }
 
-      const container = document.getElementById(`cashier-payment-form-${payment.key}`)
+      const container = document.getElementById(`cashier-payment-form-${payment.key}-${getNewIncomeFormScope()}`)
         || newIncomeFormRefs.current[payment.key];
       const definition = getDynamicFormDefinition(config.form);
       const requiredFields = Array.isArray(definition)
@@ -2666,7 +2657,7 @@
   }
 
   function getDynamicIncomeFormValues(paymentKey) {
-    const container = document.getElementById(`cashier-payment-form-${paymentKey}`)
+    const container = document.getElementById(`cashier-payment-form-${paymentKey}-${getNewIncomeFormScope()}`)
       || newIncomeFormRefs.current[paymentKey];
     return getDynamicFormValues(container);
   }
@@ -2806,15 +2797,21 @@
 
   function getDynamicIncomeFormJson(paymentKey) {
     const config = newIncomeDynamicForms[paymentKey];
-    const container = document.getElementById(`cashier-payment-form-${paymentKey}`)
+    const container = document.getElementById(`cashier-payment-form-${paymentKey}-${getNewIncomeFormScope()}`)
       || newIncomeFormRefs.current[paymentKey];
     return getDynamicFormJson(config, container);
   }
 
   function getIncomeTypeFormJson() {
-    const container = document.getElementById('cashier-income-type-form')
+    const container = document.getElementById(`cashier-income-type-form-${getNewIncomeFormScope()}`)
       || newIncomeTypeFormRef.current;
     return getDynamicFormJson(newIncomeTypeDynamicForm, container);
+  }
+
+  function getNewIncomeFormScope() {
+    if (movementEditVisible) return 'edit';
+    if (collectionChargeVisible) return 'premium';
+    return 'new';
   }
 
   function getDynamicFormJson(config, container) {
@@ -3128,28 +3125,27 @@
   React.useEffect(() => {
     Object.keys(newIncomeDynamicForms).forEach(paymentKey => {
       const config = newIncomeDynamicForms[paymentKey];
-      const container = document.getElementById(`cashier-payment-form-${paymentKey}`)
-        || newIncomeFormRefs.current[paymentKey];
-
-      if (!config || config.loading || !config.form || !container) return;
+      if (!config || config.loading || !config.form) return;
       if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return;
 
       const formData = getDynamicFormDefinition(config.form);
       if (!formData) return;
 
-      const formSignature = JSON.stringify(formData);
-      if (container.dataset.formSignature === formSignature) return;
+      document.querySelectorAll(`[id^="cashier-payment-form-${paymentKey}-"]`).forEach(container => {
+        const formSignature = JSON.stringify(formData);
+        if (container.dataset.formSignature === formSignature) return;
 
-      container.innerHTML = '';
-      $(container).formRender({ formData: formData });
-      applyDynamicFormLayout(container);
-      container.dataset.formSignature = formSignature;
+        container.innerHTML = '';
+        $(container).formRender({ formData: formData });
+        applyDynamicFormLayout(container);
+        container.dataset.formSignature = formSignature;
 
-      try {
-        evalNewIncomeFormLogic(config.form.logic, { exe: exe });
-      } catch (error) {
-        message.error(error && error.message ? error.message : String(error));
-      }
+        try {
+          evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+        } catch (error) {
+          message.error(error && error.message ? error.message : String(error));
+        }
+      });
     });
   }, [newIncomeDynamicForms]);
 
@@ -3175,9 +3171,8 @@
         return;
       }
 
-      const container = document.getElementById('cashier-income-type-form')
-        || newIncomeTypeFormRef.current;
-      if (!container) {
+      const containers = document.querySelectorAll('[id^="cashier-income-type-form-"]');
+      if (!containers.length) {
         if (attempts < 10) {
           attempts += 1;
           scheduleRetry();
@@ -3193,15 +3188,17 @@
         return;
       }
 
-      container.innerHTML = '';
-      $(container).formRender({ formData: formData });
-      applyDynamicFormLayout(container);
+      containers.forEach(container => {
+        container.innerHTML = '';
+        $(container).formRender({ formData: formData });
+        applyDynamicFormLayout(container);
 
-      try {
-        evalNewIncomeFormLogic(config.form.logic, { exe: exe });
-      } catch (error) {
-        message.error(error && error.message ? error.message : String(error));
-      }
+        try {
+          evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+        } catch (error) {
+          message.error(error && error.message ? error.message : String(error));
+        }
+      });
     };
 
     render();
@@ -3214,11 +3211,7 @@
       retryTimers.forEach(timer => clearTimeout(timer));
       clearTimeout(modalTimer);
     };
-  }, [newIncomeTypeDynamicForm, collectionChargeVisible, movementEditVisible]);
-
-  React.useEffect(() => {
-    ensureNewIncomeTypeFormLoaded();
-  }, [collectionChargeVisible, incomeTypeOptions, newIncomeTypeCode, newIncomeTypeDynamicForm]);
+  }, [newIncomeTypeDynamicForm, collectionChargeVisible, movementEditVisible, activeTab]);
 
   React.useEffect(() => {
     const config = reversalFormConfig;
@@ -6877,7 +6870,7 @@
     );
   };
 
-  const renderNewIncomeContent = (collectionMode, editMode) => (
+  const renderNewIncomeContent = (collectionMode, editMode, formScope) => (
     <Card size="small" className="cashier-supervisor-new-income-card">
       <div className="cashier-supervisor-new-income-actions">
         <Button
@@ -7063,7 +7056,7 @@
                       {dynamicForm.loading && <div>{t('Loading form...')}</div>}
                       {dynamicForm.error && <div className="cashier-supervisor-dynamic-form-error">{dynamicForm.error}</div>}
                       <form
-                        id={`cashier-payment-form-${payment.key}`}
+                        id={`cashier-payment-form-${payment.key}-${formScope}`}
                         ref={element => {
                           if (element) newIncomeFormRefs.current[payment.key] = element;
                           else delete newIncomeFormRefs.current[payment.key];
@@ -7089,7 +7082,7 @@
                     {newIncomeTypeDynamicForm.error}
                   </div>
                 )}
-                <form id="cashier-income-type-form" ref={newIncomeTypeFormRef} />
+                <form id={`cashier-income-type-form-${formScope}`} ref={newIncomeTypeFormRef} />
               </div>
             </>
           )}
@@ -7097,6 +7090,12 @@
       </div>
     </Card>
   );
+
+  // Keep the three flows isolated at their entry points while sharing only the
+  // proven field and validation layout.
+  const renderNewIncomeForm = () => renderNewIncomeContent(false, false, 'new');
+  const renderPremiumPaymentForm = () => renderNewIncomeContent(true, false, 'premium');
+  const renderMovementEditForm = () => renderNewIncomeContent(false, true, 'edit');
 
   return (
     <div className="cashier-supervisor-shell" ref={shellRef}>
@@ -7182,7 +7181,7 @@
             {activeTab === 'premiums'
               ? premiumCollectionTabContent
               : activeTab === 'new-income'
-                ? renderNewIncomeContent()
+                ? renderNewIncomeForm()
                 : activeTab === 'movements'
                   ? movementsTabContent
                   : activeTab === 'balances'
@@ -7701,7 +7700,7 @@
           width={1100}
           destroyOnClose={false}
         >
-          {renderNewIncomeContent(false, true)}
+          {renderMovementEditForm()}
         </Modal>
 
         <Modal
@@ -7742,7 +7741,7 @@
               {
                 key: 'payment',
                 label: t('Payment information'),
-                children: renderNewIncomeContent(true)
+                children: renderPremiumPaymentForm()
               },
               {
                 key: 'allocation',
