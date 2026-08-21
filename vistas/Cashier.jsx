@@ -152,6 +152,14 @@
     </span>
   );
 
+  const EditMovementIcon = () => (
+    <span role="img" aria-label="edit" className="anticon anticon-edit">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M257.7 752c-2.6 0-5.2-.3-7.8-.8l-141.2-28.2c-18.1-3.6-31.4-19.5-31.4-38 0-2.6.3-5.2.8-7.8l28.2-141.2c1.4-7.1 4.8-13.7 10-18.9L620.7 12.7l202.6 202.6-504.6 504.6c-16.3 16.3-38.1 25.4-61 25.4zM694.2 158.6L158.6 694.2l84.9 17 535.6-535.6-84.9-17zM783.6 286.1L581 83.5l62.2-62.2c12.5-12.5 32.8-12.5 45.3 0l157.3 157.3c12.5 12.5 12.5 32.8 0 45.3l-62.2 62.2z"></path>
+      </svg>
+    </span>
+  );
+
   const PolicyIcon = () => (
     <span style={tabIconStyle}>
       <FileTextOutlined />
@@ -242,6 +250,9 @@
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
   const [movementViewVisible, setMovementViewVisible] = React.useState(false);
   const [movementViewRecord, setMovementViewRecord] = React.useState(null);
+  const [movementEditVisible, setMovementEditVisible] = React.useState(false);
+  const [movementEditRecord, setMovementEditRecord] = React.useState(null);
+  const [movementEditLoading, setMovementEditLoading] = React.useState(false);
   const [balanceRows, setBalanceRows] = React.useState([]);
   const [balanceLoading, setBalanceLoading] = React.useState(false);
   const [transitAccountRows, setTransitAccountRows] = React.useState([]);
@@ -2171,17 +2182,23 @@
   }
 
   function getPaymentFormId(methodCode) {
-    const option = paymentMethodOptions.find(item => item && item.value === methodCode);
+    const code = getTrimmedString(methodCode);
+    const option = paymentMethodOptions.find(item => item && getTrimmedString(item.value) === code);
     return option && Number(option.formId) > 0 ? Number(option.formId) : 0;
   }
 
+  function getIncomeTypeOption(incomeTypeCode) {
+    const code = getTrimmedString(incomeTypeCode);
+    return incomeTypeOptions.find(item => item && getTrimmedString(item.value) === code);
+  }
+
   function getIncomeTypeFormId(incomeTypeCode) {
-    const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
+    const option = getIncomeTypeOption(incomeTypeCode);
     return option && Number(option.formId) > 0 ? Number(option.formId) : 0;
   }
 
   function isTransitIncomeType(incomeTypeCode) {
-    const option = incomeTypeOptions.find(item => item && item.value === incomeTypeCode);
+    const option = getIncomeTypeOption(incomeTypeCode);
     const internalType = getTrimmedString(option && option.internalType).toUpperCase();
     return ['TRANSIT', 'DEPOPAYMENT'].includes(internalType);
   }
@@ -2198,7 +2215,7 @@
     }
   }
 
-  function loadNewIncomeDynamicForm(paymentKey, formId) {
+  function loadNewIncomeDynamicForm(paymentKey, formId, savedValues) {
     if (!formId) return;
 
     setNewIncomeDynamicForms(forms => ({
@@ -2212,7 +2229,8 @@
           throw new Error(response && response.msg ? response.msg : t('The payment form could not be loaded.'));
         }
 
-        const form = getRows(response)[0];
+        const loadedForm = getRows(response)[0];
+        const form = mergeDynamicFormValues(loadedForm, savedValues);
         if (!form) {
           throw new Error(t('The payment form was not found.'));
         }
@@ -2290,6 +2308,15 @@
     }
 
     setNewIncomeTypeDynamicForm(null);
+  }
+
+  function ensureNewIncomeTypeFormLoaded() {
+    if (!collectionChargeVisible || !newIncomeTypeCode || newIncomeTypeDynamicForm) return;
+
+    const formId = getIncomeTypeFormId(newIncomeTypeCode);
+    if (formId <= 0) return;
+
+    updateNewIncomeType(newIncomeTypeCode);
   }
 
   function searchNewIncomeDestinationAccounts(value) {
@@ -2694,6 +2721,56 @@
     return Array.isArray(definition) ? definition : null;
   }
 
+  function mergeDynamicFormValues(form, savedValues) {
+    if (!form || !savedValues) return form;
+
+    let values = savedValues;
+    if (typeof values === 'string') {
+      try {
+        values = JSON.parse(values);
+      } catch (error) {
+        return form;
+      }
+    }
+
+    const savedDefinition = Array.isArray(values)
+      ? values
+      : (values && Array.isArray(values.fields) ? values.fields : []);
+    if (savedDefinition.length === 0) return form;
+
+    const savedByName = {};
+    savedDefinition.forEach(field => {
+      if (field && field.name && Object.prototype.hasOwnProperty.call(field, 'userData')) {
+        savedByName[field.name] = field;
+      }
+    });
+
+    const definition = getDynamicFormDefinition(form);
+    if (!definition) return form;
+
+    const merged = definition.map(field => {
+      const savedField = field && savedByName[field.name];
+      if (!savedField) return field;
+
+      const userData = Array.isArray(savedField.userData)
+        ? savedField.userData
+        : [savedField.userData];
+      const nextField = { ...field, userData: userData.map(value => String(value === null || value === undefined ? '' : value)) };
+
+      if (Array.isArray(field.values)) {
+        const selectedValues = userData.map(value => String(value));
+        nextField.values = field.values.map(option => ({
+          ...option,
+          selected: selectedValues.indexOf(String(option && option.value)) >= 0
+        }));
+      }
+
+      return nextField;
+    });
+
+    return { ...form, json: JSON.stringify(merged) };
+  }
+
   function applyDynamicFormLayout(container) {
     if (!container) return;
 
@@ -3078,25 +3155,70 @@
 
   React.useEffect(() => {
     const config = newIncomeTypeDynamicForm;
-    const container = document.getElementById('cashier-income-type-form')
-      || newIncomeTypeFormRef.current;
+    if (!config || config.loading || !config.form) return undefined;
 
-    if (!config || config.loading || !config.form || !container) return;
-    if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return;
+    let cancelled = false;
+    let attempts = 0;
+    const retryTimers = [];
+    const scheduleRetry = () => {
+      const timer = setTimeout(render, 100);
+      retryTimers.push(timer);
+    };
+    const render = () => {
+      if (cancelled) return;
 
-    const formData = getDynamicFormDefinition(config.form);
-    if (!formData) return;
+      if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') {
+        if (attempts < 10) {
+          attempts += 1;
+          scheduleRetry();
+        }
+        return;
+      }
 
-    container.innerHTML = '';
-    $(container).formRender({ formData: formData });
-    applyDynamicFormLayout(container);
+      const container = document.getElementById('cashier-income-type-form')
+        || newIncomeTypeFormRef.current;
+      if (!container) {
+        if (attempts < 10) {
+          attempts += 1;
+          scheduleRetry();
+        }
+        return;
+      }
 
-    try {
-      evalNewIncomeFormLogic(config.form.logic, { exe: exe });
-    } catch (error) {
-      message.error(error && error.message ? error.message : String(error));
-    }
-  }, [newIncomeTypeDynamicForm]);
+      const formData = getDynamicFormDefinition(config.form);
+      if (!formData) {
+        setNewIncomeTypeDynamicForm(current => current && current.formId === config.formId
+          ? { ...current, error: t('The income type form definition is invalid.') }
+          : current);
+        return;
+      }
+
+      container.innerHTML = '';
+      $(container).formRender({ formData: formData });
+      applyDynamicFormLayout(container);
+
+      try {
+        evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+      } catch (error) {
+        message.error(error && error.message ? error.message : String(error));
+      }
+    };
+
+    render();
+    const initialTimer = setTimeout(render, 0);
+    retryTimers.push(initialTimer);
+    const modalTimer = setTimeout(render, 80);
+
+    return () => {
+      cancelled = true;
+      retryTimers.forEach(timer => clearTimeout(timer));
+      clearTimeout(modalTimer);
+    };
+  }, [newIncomeTypeDynamicForm, collectionChargeVisible, movementEditVisible]);
+
+  React.useEffect(() => {
+    ensureNewIncomeTypeFormLoaded();
+  }, [collectionChargeVisible, incomeTypeOptions, newIncomeTypeCode, newIncomeTypeDynamicForm]);
 
   React.useEffect(() => {
     const config = reversalFormConfig;
@@ -4666,6 +4788,184 @@
     return getMovementChildren(group)[0] || {};
   }
 
+  async function handleMovementEditSave() {
+    if (!movementEditRecord || !validateDynamicIncomeForms()) return;
+
+    try {
+      const formValues = await newIncomeForm.validateFields();
+      if (!getTrimmedString(formValues.incomeType)) {
+        message.error(t('Select an income type.'));
+        return;
+      }
+      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
+        message.error(t('Complete the payment method and amount for every payment.'));
+        return;
+      }
+
+      const first = getMovementFirst(movementEditRecord);
+      const destinationAccountId = await resolveNewIncomeDestinationAccount(formValues);
+      const originalItem = getMovementEditableItem(movementEditRecord);
+      const transferId = Number(movementEditRecord.id || first.id || originalItem.id || 0);
+      const originalSplitPayments = Array.isArray(originalItem && originalItem.SplitPayments)
+        ? originalItem.SplitPayments
+        : [];
+      const splitPayments = newIncomePayments.map((payment, index) => {
+        const originalPayment = originalSplitPayments[index] || {};
+        const paymentOption = paymentMethodOptions.find(option => option && option.value === payment.methodCode);
+        const formId = getPaymentFormId(payment.methodCode);
+
+        return {
+          ...originalPayment,
+          paymentMethod: payment.methodCode,
+          paymentMethodName: paymentOption && paymentOption.label ? paymentOption.label : payment.methodCode,
+          amount: parseIncomeAmount(payment.amount),
+          currency: getTrimmedString(formValues.currency) || originalPayment.currency,
+          formId: formId,
+          jValues: formId > 0 ? getDynamicIncomeFormJson(payment.key) : null
+        };
+      });
+
+      const entity = {
+        id: transferId,
+        currency: getTrimmedString(formValues.currency) || originalItem.currency,
+        amount: getNewIncomeTotal(),
+        SplitPayments: splitPayments,
+        incomeType: originalItem.incomeType,
+        sourceExternal: originalItem.sourceExternal,
+        destinationAccountId: destinationAccountId,
+        jIncomeTypeForm: getIncomeTypeFormJson(),
+        concept: originalItem.concept,
+        transferWorkspaceId: originalItem.transferWorkspaceId,
+        isExternal: originalItem.isExternal
+      };
+
+      setMovementEditLoading(true);
+      const response = await exe('RepoTransfer', {
+        operation: 'UPDATE',
+        entity: entity,
+        execute: false
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The movement could not be updated.'));
+      }
+
+      message.success(t('Movement updated successfully.'));
+      closeMovementEdit();
+      loadMovements({ pagination: movementPagination });
+    } catch (error) {
+      message.error(error && error.message ? error.message : t('The movement could not be updated.'));
+    } finally {
+      setMovementEditLoading(false);
+    }
+  }
+
+  function getMovementEditableItem(group) {
+    const items = [group].concat(getMovementChildren(group)).filter(item => item);
+    return items.find(item => Array.isArray(item.SplitPayments) && item.SplitPayments.length > 0)
+      || getMovementFirst(group);
+  }
+
+  function isPremiumMovement(group) {
+    return [group].concat(getMovementChildren(group)).some(item =>
+      getTrimmedString(item && item.transactionCode).toUpperCase() === 'PREMIUMPAY'
+    );
+  }
+
+  function getMovementEditDestinationOption(item) {
+    const account = item && item.DestinationAccount;
+    const accountId = Number(item && item.destinationAccountId || account && (account.id || account.accountId) || 0);
+    if (!Number.isFinite(accountId) || accountId <= 0) return null;
+
+    const options = account ? mapTransitAccountOptions([{ ...account, id: accountId }]) : [];
+    if (options.length > 0) return options[0];
+
+    return {
+      value: accountId,
+      label: String(accountId),
+      accountLabel: String(accountId),
+      shortAccountLabel: String(accountId),
+      account: account || { id: accountId }
+    };
+  }
+
+  async function openMovementEdit(group) {
+    const first = getMovementFirst(group);
+    const transferId = Number(group && group.id || first.id || 0);
+    const executed = Boolean((group && (group.executed || group.status)) || first.executed || first.status);
+
+    if (!Number.isFinite(transferId) || transferId <= 0 || executed || isMovementReverted(group)) {
+      message.warning(t('Only pending movements can be edited.'));
+      return;
+    }
+    if (isPremiumMovement(group)) {
+      message.warning(t('Premium payment movements cannot be edited.'));
+      return;
+    }
+
+    const item = getMovementEditableItem(group);
+    const splitPayments = Array.isArray(item && item.SplitPayments) ? item.SplitPayments : [];
+    const incomeType = getTrimmedString(item && item.incomeType)
+      || getTrimmedString(item && item.IncomeType && (item.IncomeType.code || item.IncomeType.value));
+    const transitIncome = isTransitIncomeType(incomeType);
+    const destinationOption = getMovementEditDestinationOption(item);
+    const paymentRows = splitPayments.length > 0 ? splitPayments : [{ amount: item && item.amount }];
+
+    clearNewIncomeForm();
+    setMovementEditRecord(group);
+    setNewIncomeTypeCode(incomeType || undefined);
+    setNewIncomeDestinationAccountOptions(transitIncome && destinationOption ? [destinationOption] : []);
+    newIncomeForm.setFieldsValue({
+      incomeType: incomeType || undefined,
+      destination: transitIncome
+        ? (destinationOption ? destinationOption.value : undefined)
+        : getTrimmedString(item && item.sourceExternal) || undefined,
+      currency: getTrimmedString(item && item.currency) || 'USD'
+    });
+    setNewIncomePayments(paymentRows.map((payment, index) => ({
+      key: `movement-${transferId}-${index}`,
+      methodCode: getTrimmedString(payment && payment.paymentMethod),
+      amount: limitIncomeAmountDecimals(payment && payment.amount) || ''
+    })));
+    setNewIncomeDynamicForms({});
+    setNewIncomeTypeDynamicForm(null);
+    setNewIncomeActiveFormKey(null);
+    setMovementEditVisible(true);
+
+    paymentRows.forEach((payment, index) => {
+      const methodCode = getTrimmedString(payment && payment.paymentMethod);
+      const formId = Number(payment && payment.formId) || getPaymentFormId(methodCode);
+      if (formId > 0) {
+        loadNewIncomeDynamicForm(`movement-${transferId}-${index}`, formId, payment && (payment.jValues || payment.jValue || payment.formValues));
+      }
+    });
+
+    const incomeTypeFormId = getIncomeTypeFormId(incomeType);
+    const savedIncomeTypeForm = item && item.jIncomeTypeForm;
+    if (incomeTypeFormId > 0) {
+      setNewIncomeTypeDynamicForm({ formId: incomeTypeFormId, form: null, loading: true, error: '' });
+      try {
+        const response = await exe('GetForms', { filter: `id=${incomeTypeFormId}` });
+        if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('The income type form could not be loaded.'));
+        const loadedForm = getRows(response)[0];
+        if (!loadedForm) throw new Error(t('The income type form was not found.'));
+        setNewIncomeTypeDynamicForm({
+          formId: incomeTypeFormId,
+          form: mergeDynamicFormValues(loadedForm, savedIncomeTypeForm),
+          loading: false,
+          error: ''
+        });
+      } catch (error) {
+        setNewIncomeTypeDynamicForm({ formId: incomeTypeFormId, form: null, loading: false, error: error && error.message ? error.message : String(error) });
+      }
+    }
+  }
+
+  function closeMovementEdit() {
+    setMovementEditVisible(false);
+    setMovementEditRecord(null);
+    clearNewIncomeForm();
+  }
+
   function openMovementView(group) {
     setMovementViewRecord(group || null);
     setMovementViewVisible(Boolean(group));
@@ -4919,9 +5219,21 @@
     const transferId = Number(group && group.id || first.id || 0);
     const reverted = isMovementReverted(group);
     const executed = Boolean(first.executed || first.status);
+    const premiumMovement = isPremiumMovement(group);
 
     return (
       <Space size={4} className="cashier-supervisor-movement-actions">
+        {!executed && !reverted && !premiumMovement && (
+          <Tooltip title={t('Edit movement')}>
+            <Button
+              type="link"
+              size="small"
+              aria-label={t('Edit movement')}
+              onClick={() => openMovementEdit(group)}
+              icon={<EditMovementIcon />}
+            />
+          </Tooltip>
+        )}
         <Popconfirm
           title={t('Are you sure?')}
           placement="top"
@@ -6565,19 +6877,24 @@
     );
   };
 
-  const renderNewIncomeContent = (collectionMode) => (
+  const renderNewIncomeContent = (collectionMode, editMode) => (
     <Card size="small" className="cashier-supervisor-new-income-card">
       <div className="cashier-supervisor-new-income-actions">
         <Button
           type="primary"
           icon={<ExecuteMovementIcon />}
-          onClick={collectionMode ? handleCollectionNext : handleNewIncomeExecute}
+          loading={editMode ? movementEditLoading : false}
+          onClick={collectionMode ? handleCollectionNext : (editMode ? handleMovementEditSave : handleNewIncomeExecute)}
         >
-          {t(collectionMode ? 'Next' : 'Execute')}
+          {t(collectionMode ? 'Next' : (editMode ? 'Save' : 'Execute'))}
         </Button>
         {!collectionMode && (
-          <Button className="cashier-supervisor-outline-button" icon={<ClearOutlined />} onClick={clearNewIncomeForm}>
-            {t('Clear')}
+          <Button
+            className="cashier-supervisor-outline-button"
+            icon={<ClearOutlined />}
+            onClick={editMode ? closeMovementEdit : clearNewIncomeForm}
+          >
+            {t(editMode ? 'Cancel' : 'Clear')}
           </Button>
         )}
       </div>
@@ -6649,7 +6966,7 @@
                   getTrimmedString(item && item.internalType).toUpperCase() !== 'PREMIUM'
                   && isVisibleNewIncomeType(item)
                 )}
-              disabled={collectionChargeVisible}
+              disabled={collectionChargeVisible || editMode}
               onChange={updateNewIncomeType}
             />
           </Form.Item>
@@ -6708,6 +7025,7 @@
             <Select
               style={{ width: '100%' }}
               options={currencyOptions}
+              disabled={Boolean(editMode)}
             />
           </Form.Item>
           <Form.Item
@@ -6759,7 +7077,7 @@
             onChange={key => setNewIncomeActiveFormKey(String(key))}
             destroyInactiveTabPane={false}
           />
-          {!transitCollectionMode && newIncomeTypeDynamicForm && (
+          {newIncomeTypeDynamicForm && (
             <>
               <div className="cashier-supervisor-section-title">
                 {t('Income type form')}
@@ -7373,6 +7691,17 @@
               </div>
             </div>
           </Form>
+        </Modal>
+
+        <Modal
+          title={t('Edit movement')}
+          open={movementEditVisible}
+          onCancel={closeMovementEdit}
+          footer={null}
+          width={1100}
+          destroyOnClose={false}
+        >
+          {renderNewIncomeContent(false, true)}
         </Modal>
 
         <Modal
