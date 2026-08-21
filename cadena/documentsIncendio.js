@@ -101,6 +101,15 @@ try {
     return formatdate(date.toISOString().slice(0, 10));
   }
 
+  function getPanamaCurrentDateIso() {
+    const panamaOffsetMs = 5 * 60 * 60 * 1000;
+    const panamaNow = new Date(Date.now() - panamaOffsetMs);
+    const year = panamaNow.getUTCFullYear();
+    const month = String(panamaNow.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(panamaNow.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
   function pushIfValid(list, value) {
     const num = Number(value);
     if (Number.isFinite(num) && num > 0 && !list.includes(num)) {
@@ -453,7 +462,7 @@ try {
   Cotizacion.TotalACobrar = formateaNumero(dataCotizacion.anualTotal ?? 0);
   Cotizacion.Descripcion = dataCotizacion.description || "";
   
-  Cotizacion.FechaActual = formatdate(new Date().toISOString().slice(0, 10));
+  Cotizacion.FechaActual = formatdate(getPanamaCurrentDateIso());
   Cotizacion.Action = '';
   
   Cotizacion.Tomador = Tomador;

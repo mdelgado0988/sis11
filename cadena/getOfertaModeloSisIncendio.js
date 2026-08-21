@@ -16,6 +16,15 @@
 let deduciblesConfig = [];
 let limiteConfig = [];
 
+function getPanamaCurrentDateIso() {
+  const panamaOffsetMs = 5 * 60 * 60 * 1000;
+  const panamaNow = new Date(Date.now() - panamaOffsetMs);
+  const year = panamaNow.getUTCFullYear();
+  const month = String(panamaNow.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(panamaNow.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 try {
   //{id : 149} - filter / context en el simulador de fórmula  
   var Cotizacion = {};
@@ -371,7 +380,7 @@ try {
   Cotizacion.Impuesto = formateaNumero(dataCotizacion.tax ?? 0);
   Cotizacion.TotalACobrar = formateaNumero(dataCotizacion.anualTotal ?? 0);
   Cotizacion.Descripcion = dataCotizacion.description || "";  
-  Cotizacion.FechaActual = formatdate(new Date().toISOString().slice(0, 10));
+  Cotizacion.FechaActual = formatdate(getPanamaCurrentDateIso());
   Cotizacion.Action ='';  
   Cotizacion.Tomador = Tomador;
   Cotizacion.Asegurado = Asegurado;
