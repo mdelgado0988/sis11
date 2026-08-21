@@ -14,18 +14,21 @@
  *   amount?: number,
  *   payments: [{ policyId: number, amount: number }],
  *   supplementaryPayments?: [{ policyId: number, amount: number }],
+ *   sourceTransitAccountId?: number,
+ *   transitIncomeType?: string,
  *   transferEntity?: object
  * }
  * @notes:
  *   - The payment is distributed by policy without validating a payer or fiscal receipt.
  *   - Each policy amount is applied to its pending installments in due-date order.
  *   - Supplementary payments are registered directly in the selected policy transit account.
+ *   - When sourceTransitAccountId is provided, a second negative transfer is created and executed
+ *     against the transit account after the premium allocation succeeds.
  *   - The transfer entity can be provided by the payment form to preserve split-payment details.
  */
 
-const commandContext = context || {};
-
 try {
+  const commandContext = context || {};
   const input = getContextInput(commandContext);
   validateInput(input);
 
@@ -33,6 +36,7 @@ try {
   const payments = getPaymentRows(input);
   const supplementaryPayments = getSupplementaryPaymentRows(input);
   const requestedAmount = getMoney(input.amount);
+  const sourceTransitAccountId = getPositiveInteger(input.sourceTransitAccountId);
   const calculatedAmount = roundMoney(
     payments.reduce((total, item) => total + item.amount, 0)
     + supplementaryPayments.reduce((total, item) => total + item.amount, 0)
@@ -41,6 +45,13 @@ try {
 
   if (Math.abs(totalAmount - calculatedAmount) > 0.01) {
     throw new Error('El monto total no coincide con la suma de los montos asignados a las pólizas.');
+  }
+
+  if (sourceTransitAccountId > 0) {
+    const availableBalance = loadTransitAccountBalance(sourceTransitAccountId);
+    if (totalAmount > availableBalance + 0.01) {
+      throw new Error(`La cuenta en tránsito no tiene saldo suficiente. Disponible: ${roundMoney(availableBalance)}, solicitado: ${roundMoney(totalAmount)}.`);
+    }
   }
 
   const details = [];
@@ -91,6 +102,10 @@ try {
       : 'No fue posible aplicar el pago.');
   }
 
+  const transitTransfer = sourceTransitAccountId > 0
+    ? createTransitDebitTransfer(input, workspaceId, totalAmount, sourceTransitAccountId, details)
+    : null;
+
   return {
     ok: true,
     msg: 'Pago de primas aplicado correctamente',
@@ -99,6 +114,7 @@ try {
       appliedAmount: totals.appliedAmount,
       transitAmount: totals.transitAmount,
       difference: totals.difference,
+      transitTransfer: transitTransfer,
       policies: details.map(item => ({
         policyId: item.policy.id,
         amount: item.amount,
@@ -225,6 +241,77 @@ function loadPayPlan(policyId) {
   return rows;
 }
 
+function loadTransitAccountBalance(accountId) {
+  doCmd({
+    cmd: 'LoadEntities',
+    data: {
+      entity: 'AccountMov',
+      fields: 'amount,transactionCode',
+      filter: `accountId = ${accountId}`,
+      noTracking: true
+    }
+  });
+
+  const rows = getRows(LoadEntities && LoadEntities.outData);
+  return roundMoney(rows.reduce((total, item) => {
+    const transactionCode = getTrimmedString(item && item.transactionCode).toUpperCase();
+    if (transactionCode === 'PREMIUMPAY' || transactionCode === 'MONEYOUT') return total;
+
+    const amount = Number(item && item.amount);
+    return total + (Number.isFinite(amount) ? amount : 0);
+  }, 0));
+}
+
+function getTransitIncomeType(input) {
+  const requestedCode = getTrimmedString(input && input.transitIncomeType);
+  if (requestedCode) return requestedCode;
+
+  doCmd({
+    cmd: 'RepoIncomeTypeCatalog',
+    data: {
+      operation: 'GET',
+      filter: "internalType = 'DEPOPAYMENT'",
+      entity: null,
+      bulkJson: null,
+      include: null,
+      size: 0,
+      page: 0,
+      showColumnsIfEmpty: false
+    }
+  });
+
+  const options = getRows(RepoIncomeTypeCatalog && RepoIncomeTypeCatalog.outData);
+  const option = options.find(item =>
+    getTrimmedString(item && item.internalType).toUpperCase() === 'DEPOPAYMENT'
+  );
+  const code = getTrimmedString(option && (option.code || option.value));
+  if (!code) {
+    throw new Error('El tipo de ingreso DEPOPAYMENT no está configurado.');
+  }
+
+  return code;
+}
+
+function getOtherPaymentMethodName() {
+  doCmd({
+    cmd: 'RepoPaymentMethodCatalog',
+    data: {
+      operation: 'GET',
+      filter: "code = 'OT'",
+      entity: null,
+      bulkJson: null,
+      include: null,
+      size: 0,
+      page: 0,
+      showColumnsIfEmpty: false
+    }
+  });
+
+  const options = getRows(RepoPaymentMethodCatalog && RepoPaymentMethodCatalog.outData);
+  const option = options.find(item => getTrimmedString(item && item.code).toUpperCase() === 'OT');
+  return getTrimmedString(option && option.name) || 'OT';
+}
+
 function distributePayment(payPlan, amount) {
   const availableAmount = roundMoney(amount);
   let remainingAmount = availableAmount;
@@ -326,7 +413,7 @@ function createTransfer(input, workspaceId, amount) {
     ? input.transferEntity
     : null;
   const entity = sourceEntity
-      ? {
+    ? {
         ...sourceEntity,
         currency: sourceEntity.currency || currency,
         amount: amount,
@@ -380,6 +467,99 @@ function createTransfer(input, workspaceId, amount) {
     throw new Error(DoTransfer && DoTransfer.msg
       ? DoTransfer.msg
       : 'No se pudo ejecutar la transferencia.');
+  }
+
+  return getRows(DoTransfer.outData)[0] || transfer;
+}
+
+function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId, details) {
+  const currency = getTrimmedString(input && input.currency) || 'USD';
+  const paymentMethodName = getOtherPaymentMethodName();
+  const sourceEntity = input && input.transferEntity && typeof input.transferEntity === 'object'
+    && !Array.isArray(input.transferEntity)
+    ? input.transferEntity
+    : {};
+  const policyCodes = Array.from(new Set(details
+    .map(item => getTrimmedString(item && item.policy && (item.policy.code || item.policy.id)))
+    .filter(code => code.length > 0)));
+  const concept = `Pago de póliza ${policyCodes.join(', ')} (de TRÁNSITO)`;
+  const transferAmount = roundMoney(amount);
+
+  const entity = {
+    currency: currency,
+    amount: -transferAmount,
+    sourceAccountId: null,
+    destinationAccountId: transitAccountId,
+    concept: concept,
+    paymentMethod: 'OT',
+    paymentMethodName: paymentMethodName,
+    SplitPayments: [{
+      paymentMethod: 'OT',
+      paymentMethodName: paymentMethodName,
+      amount: -transferAmount,
+      currency: currency,
+      id: 0,
+      transferId: 0
+    }],
+    sourceName: null,
+    destinationName: getTrimmedString(sourceEntity.destinationName) || null,
+    source: null,
+    destination: null,
+    AllocationMovements: null,
+    id: 0,
+    transactionCode: null,
+    producer: null,
+    lifePolicyId: null,
+    date: new Date().toISOString(),
+    status: 0,
+    executed: false,
+    isExternal: true,
+    sourceExternal: null,
+    allocationId: null,
+    Allocation: null,
+    operatingAccountId: 0,
+    claimPaymentId: null,
+    ClaimPayment: null,
+    SourceAccount: null,
+    DestinationAccount: null,
+    Movements: null,
+    reversalDate: null,
+    incomeType: getTransitIncomeType(input),
+    IncomeType: null,
+    jIncomeTypeForm: null,
+    transferWorkspaceId: workspaceId,
+    user: getTrimmedString(sourceEntity.user) || null
+  };
+
+  doCmd({
+    cmd: 'RepoTransfer',
+    data: {
+      operation: 'ADD',
+      entity: entity,
+      otherReceivables: []
+    }
+  });
+
+  if (!RepoTransfer || RepoTransfer.ok === false) {
+    throw new Error(RepoTransfer && RepoTransfer.msg
+      ? RepoTransfer.msg
+      : 'No se pudo registrar la salida de la cuenta en tránsito.');
+  }
+
+  const transfer = getRows(RepoTransfer.outData)[0];
+  if (!transfer || getPositiveInteger(transfer.id) <= 0) {
+    throw new Error('La salida de la cuenta en tránsito no devolvió un identificador válido.');
+  }
+
+  doCmd({
+    cmd: 'DoTransfer',
+    data: { transferId: transfer.id, transfer: null }
+  });
+
+  if (!DoTransfer || DoTransfer.ok === false) {
+    throw new Error(DoTransfer && DoTransfer.msg
+      ? DoTransfer.msg
+      : 'No se pudo ejecutar la salida de la cuenta en tránsito.');
   }
 
   return getRows(DoTransfer.outData)[0] || transfer;

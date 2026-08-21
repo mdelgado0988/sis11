@@ -290,6 +290,9 @@
   const [collectionFilterVisible, setCollectionFilterVisible] = React.useState(false);
   const [collectionSelectedRowKeys, setCollectionSelectedRowKeys] = React.useState([]);
   const [collectionChargeVisible, setCollectionChargeVisible] = React.useState(false);
+  const [transitCollectionMode, setTransitCollectionMode] = React.useState(false);
+  const [transitCollectionAccount, setTransitCollectionAccount] = React.useState(null);
+  const [transitCollectionPolicyRow, setTransitCollectionPolicyRow] = React.useState(null);
   const [collectionExpectedAmount, setCollectionExpectedAmount] = React.useState(0);
   const [collectionChargeStep, setCollectionChargeStep] = React.useState('payment');
   const [collectionPolicyRows, setCollectionPolicyRows] = React.useState([]);
@@ -2834,7 +2837,9 @@
     if (!validateDynamicIncomeForms()) return;
 
     try {
-      const formValues = await newIncomeForm.validateFields();
+      const formValues = transitCollectionMode
+        ? newIncomeForm.getFieldsValue()
+        : await newIncomeForm.validateFields();
       if (!getTrimmedString(formValues.incomeType)) {
         message.error(t('Select an income type.'));
         return;
@@ -4086,6 +4091,10 @@
   }
 
   function getSelectedCollectionRows() {
+    if (transitCollectionMode && transitCollectionPolicyRow) {
+      return [transitCollectionPolicyRow];
+    }
+
     const selectedKeys = collectionSelectedRowKeys.map(key => String(key));
     return collectionRows.filter(row => selectedKeys.indexOf(getCollectionRowKey(row)) >= 0);
   }
@@ -4125,6 +4134,9 @@
     const expectedAmount = Math.max(amount, 0);
 
     clearNewIncomeForm();
+    setTransitCollectionMode(false);
+    setTransitCollectionAccount(null);
+    setTransitCollectionPolicyRow(null);
     setCollectionChargeStep('payment');
     setCollectionPolicyRows([]);
     setCollectionSupplementaryRows([]);
@@ -4142,6 +4154,77 @@
     newIncomeForm.setFieldsValue({ incomeType: premiumIncomeType.value });
     updateNewIncomeType(premiumIncomeType.value);
     setCollectionChargeVisible(true);
+  }
+
+  async function openTransitPremiumCollection() {
+    const account = transitAccountRows.find(row =>
+      Number(row && row.id) === Number(selectedTransitAccountId)
+    );
+    const policyId = Number(account && (account.lifePolicyId || account.policyId));
+    const availableAmount = Number(getTransitAccountBalance(account).toFixed(2));
+
+    if (!account || !Number.isFinite(policyId) || policyId <= 0) {
+      message.warning(t('The selected transit account does not have a valid policy.'));
+      return;
+    }
+
+    if (availableAmount <= 0) {
+      message.warning(t('The selected transit account has no available balance.'));
+      return;
+    }
+
+    try {
+      const response = await exe('ExeChain', {
+        chain: 'cmdPremiumCollectionCashier',
+        context: JSON.stringify({ policyId: policyId, page: 1, size: 1, onlyOverdue: false })
+      });
+      const payload = response && response.outData && typeof response.outData === 'object'
+        ? response.outData
+        : {};
+      const policyRows = Array.isArray(payload.data) ? payload.data : [];
+      const policyRow = policyRows[0];
+
+      if (!policyRow) {
+        message.warning(t('The policy associated with the transit account has no pending premiums.'));
+        return;
+      }
+
+      const policyPending = getCollectionPolicyPending(policyRow);
+      const collectionAmount = Math.min(availableAmount, policyPending);
+      if (collectionAmount <= 0) {
+        message.warning(t('The policy associated with the transit account has no pending premiums.'));
+        return;
+      }
+
+      clearNewIncomeForm();
+      setTransitCollectionMode(true);
+      setTransitCollectionAccount({ ...account, availableAmount: availableAmount });
+      setTransitCollectionPolicyRow(policyRow);
+      setCollectionChargeStep('payment');
+      setCollectionPolicyRows([]);
+      setCollectionSupplementaryRows([]);
+      setCollectionExpectedAmount(collectionAmount);
+      const transitPaymentKey = Date.now();
+      setNewIncomePayments([{ key: transitPaymentKey, methodCode: 'OT', amount: collectionAmount.toFixed(2) }]);
+      updateNewIncomePaymentMethod(transitPaymentKey, 'OT');
+
+      const premiumIncomeType = incomeTypeOptions.find(item =>
+        getTrimmedString(item && item.internalType).toUpperCase() === 'PREMIUM'
+      );
+      if (!premiumIncomeType) {
+        message.error(t('The premium collection income type is not configured.'));
+        return;
+      }
+
+      newIncomeForm.setFieldsValue({
+        incomeType: premiumIncomeType.value,
+        currency: getTrimmedString(account.currency) || 'USD'
+      });
+      updateNewIncomeType(premiumIncomeType.value);
+      setCollectionChargeVisible(true);
+    } catch (error) {
+      message.error(error && error.message ? error.message : t('The policy premiums could not be loaded.'));
+    }
   }
 
   function getCollectionPaymentAmount() {
@@ -4220,7 +4303,7 @@
 
     const excessAmount = Number(Math.max(remainingAmount, 0).toFixed(2));
     const firstPolicy = policyRows[0];
-    const supplementaryRows = excessAmount > 0 && firstPolicy
+    const supplementaryRows = !transitCollectionMode && excessAmount > 0 && firstPolicy
       ? [{
           key: `supplementary-${Date.now()}`,
           policyId: firstPolicy.policyId,
@@ -4235,10 +4318,12 @@
   }
 
   async function handleCollectionNext() {
-    if (!validateDynamicIncomeForms()) return;
+    if (!transitCollectionMode && !validateDynamicIncomeForms()) return;
 
     try {
-      const formValues = await newIncomeForm.validateFields();
+      const formValues = transitCollectionMode
+        ? newIncomeForm.getFieldsValue()
+        : await newIncomeForm.validateFields();
       if (!getTrimmedString(formValues && formValues.incomeType)) {
         message.error(t('Select an income type.'));
         return;
@@ -4249,7 +4334,23 @@
         return;
       }
 
-      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
+      if (transitCollectionMode) {
+        const amount = getCollectionPaymentAmount();
+        const availableAmount = Number(transitCollectionAccount && transitCollectionAccount.availableAmount) || 0;
+        const policyPending = getCollectionPolicyPending(transitCollectionPolicyRow);
+
+        if (amount > availableAmount + 0.01) {
+          message.error(t('The amount cannot exceed the transit account balance.'));
+          return;
+        }
+
+        if (amount > policyPending + 0.01) {
+          message.error(t('The amount cannot exceed the pending premium of the policy.'));
+          return;
+        }
+      }
+
+      if (!transitCollectionMode && newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
         message.error(t('Complete the payment method and amount for every payment.'));
         return;
       }
@@ -4262,16 +4363,21 @@
 
   function canExecuteCollectionPayment() {
     const paymentTotal = getCollectionPaymentAmount();
+    const policyTotal = getCollectionPolicyTotal();
     const supplementaryExpected = getCollectionSupplementaryExpected();
     const supplementaryTotal = getCollectionSupplementaryTotal();
     const difference = Number((supplementaryExpected - supplementaryTotal).toFixed(2));
     const hasInvalidPolicyAmount = collectionPolicyRows.some(row =>
       Number(row && row.amount) > Number(row && row.pendingAmount) + 0.01
     );
+    const transitAmount = Number(transitCollectionAccount && transitCollectionAccount.availableAmount) || 0;
+    const transitValid = !transitCollectionMode
+      || (paymentTotal <= transitAmount + 0.01 && Math.abs(policyTotal - paymentTotal) <= 0.01);
 
     return paymentTotal > 0
       && !hasInvalidPolicyAmount
-      && Math.abs(difference) <= 0.01;
+      && Math.abs(difference) <= 0.01
+      && transitValid;
   }
 
   async function handleCollectionPaymentExecute() {
@@ -4291,6 +4397,19 @@
     if (collectionPolicyRows.some(row => Number(row.amount) > Number(row.pendingAmount) + 0.01)) {
       message.error(t('A policy amount cannot exceed its pending balance.'));
       return;
+    }
+
+    if (transitCollectionMode) {
+      const transitAmount = Number(transitCollectionAccount && transitCollectionAccount.availableAmount) || 0;
+      if (paymentTotal > transitAmount + 0.01) {
+        message.error(t('The amount cannot exceed the transit account balance.'));
+        return;
+      }
+
+      if (Math.abs(policyTotal - paymentTotal) > 0.01 || supplementaryTotal > 0) {
+        message.error(t('The transit premium distribution must be applied entirely to the policy.'));
+        return;
+      }
     }
 
     const payments = collectionPolicyRows
@@ -4318,9 +4437,16 @@
     }
 
     try {
-      const formValues = await newIncomeForm.validateFields();
-      const destinationAccountId = await resolveNewIncomeDestinationAccount(formValues);
-      const transferEntity = getNewIncomeTransferEntity(formValues, destinationAccountId);
+      const formValues = transitCollectionMode
+        ? newIncomeForm.getFieldsValue()
+        : await newIncomeForm.validateFields();
+      const destinationAccountId = transitCollectionMode
+        ? 0
+        : await resolveNewIncomeDestinationAccount(formValues);
+      const transferEntity = getNewIncomeTransferEntity(
+        formValues,
+        transitCollectionMode ? 208 : destinationAccountId
+      );
 
       setCollectionPaymentExecuting(true);
       const response = await exe('ExeChain', {
@@ -4331,6 +4457,9 @@
           amount: paymentTotal,
           payments: payments,
           supplementaryPayments: supplementaryPayments,
+          sourceTransitAccountId: transitCollectionMode
+            ? Number(transitCollectionAccount && transitCollectionAccount.id)
+            : 0,
           transferEntity: transferEntity
         })
       });
@@ -4342,12 +4471,16 @@
         throw new Error(result && result.msg ? result.msg : t('The premium payment could not be executed.'));
       }
 
+      const refreshTransitAccounts = transitCollectionMode;
       message.success(t('Premium payment executed successfully.'));
       setCollectionChargeVisible(false);
       setCollectionChargeStep('payment');
       setCollectionPolicyRows([]);
       setCollectionSupplementaryRows([]);
       setCollectionSelectedRowKeys([]);
+      setTransitCollectionMode(false);
+      setTransitCollectionAccount(null);
+      setTransitCollectionPolicyRow(null);
       clearNewIncomeForm();
       loadCollection({
         pagination: {
@@ -4356,6 +4489,24 @@
         },
         filters: collectionFilters
       });
+
+      if (refreshTransitAccounts) {
+        setActiveTab('movements');
+        loadMovements({
+          pagination: {
+            current: 1,
+            pageSize: movementPagination.pageSize
+          },
+          filters: movementFilters
+        });
+        loadTransitAccounts({
+          filters: transitAccountFilters,
+          pagination: {
+            current: transitAccountPagination.current,
+            pageSize: transitAccountPagination.pageSize
+          }
+        });
+      }
     } catch (error) {
       message.error(error && error.message ? error.message : t('The premium payment could not be executed.'));
     } finally {
@@ -4382,6 +4533,7 @@
   }
 
   function getCollectionSupplementaryExpected() {
+    if (transitCollectionMode) return 0;
     return Number(Math.max(getCollectionPaymentAmount() - getCollectionPolicyTotal(), 0).toFixed(2));
   }
 
@@ -4885,6 +5037,26 @@
         </Tooltip>
       </div>
     ));
+  }
+
+  function renderMovementReference(group) {
+    const reference = getTrimmedString(group && group.concept);
+    if (!reference) return '-';
+
+    return (
+      <Tooltip title={reference}>
+        <span style={{
+          display: 'block',
+          width: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          cursor: 'default'
+        }}>
+          {reference}
+        </span>
+      </Tooltip>
+    );
   }
 
   function getMovementPaymentMethodValues(group) {
@@ -5619,11 +5791,11 @@
         <Button type="link" size="small" onClick={() => openMovementView(group)}>{t('View')}</Button>
       </div>
     ) },
-    { title: t('Date'), dataIndex: 'date', key: 'date', width: 125, render: formatDateIso },
-    { title: t('Status'), key: 'status', width: 105, render: (_, group) => renderMovementStatus(group) },
-    { title: t('Origin'), key: 'sourceExternal', width: 135, render: (_, group) => renderMovementOrigin(group) },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 105, render: formatDateIso },
+    { title: t('Status'), key: 'status', width: 95, render: (_, group) => renderMovementStatus(group) },
+    { title: t('Origin'), key: 'sourceExternal', width: 125, render: (_, group) => renderMovementOrigin(group) },
     { title: t('Destination'), key: 'destinationAccount', width: 190, render: (_, group) => renderMovementDestination(group) },
-    { title: t('Reference'), dataIndex: 'concept', key: 'concept', width: 120 },
+    { title: t('Reference'), key: 'concept', width: 150, render: (_, group) => renderMovementReference(group) },
     { title: t('Received'), dataIndex: 'amount', key: 'received', width: 110, align: 'right', render: formatMoney },
     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
@@ -5892,6 +6064,14 @@
         >
           {t('Return money')}
         </Button>
+        <Button
+          type="primary"
+          icon={<PolicyIcon />}
+          disabled={!transitHasSearched || !selectedTransitAccountId}
+          onClick={openTransitPremiumCollection}
+        >
+          {t('Collect premium')}
+        </Button>
         <Button className="cashier-supervisor-success-button" icon={<TransferAccountIcon />} onClick={openAccountTransferModal}>
           {t('Transfer between accounts')}
         </Button>
@@ -6148,7 +6328,9 @@
     const policyTotal = getCollectionPolicyTotal();
     const expectedSupplementary = getCollectionSupplementaryExpected();
     const supplementaryTotal = getCollectionSupplementaryTotal();
-    const difference = Number((expectedSupplementary - supplementaryTotal).toFixed(2));
+    const difference = transitCollectionMode
+      ? Number((paymentTotal - policyTotal).toFixed(2))
+      : Number((expectedSupplementary - supplementaryTotal).toFixed(2));
     const policyOptions = collectionPolicyRows.map(row => ({
       value: row && row.policyId,
       label: getTrimmedString(row && row.policy)
@@ -6320,31 +6502,39 @@
             bordered
           />
         </div>
-        <div className="cashier-supervisor-section-title">{t('Complementary premiums')}</div>
-        {expectedSupplementary > 0 ? (
+        {!transitCollectionMode && (
           <>
-            <div className="cashier-supervisor-collection-supplementary-table">
-              <Table
-                rowKey="key"
-                columns={supplementaryColumns}
-                dataSource={collectionSupplementaryRows}
-                size="small"
-                pagination={false}
-                bordered
-              />
-            </div>
-            <Button type="link" onClick={addCollectionSupplementaryRow}>
-              + {t('Add row')}
-            </Button>
+            <div className="cashier-supervisor-section-title">{t('Complementary premiums')}</div>
+            {expectedSupplementary > 0 ? (
+              <>
+                <div className="cashier-supervisor-collection-supplementary-table">
+                  <Table
+                    rowKey="key"
+                    columns={supplementaryColumns}
+                    dataSource={collectionSupplementaryRows}
+                    size="small"
+                    pagination={false}
+                    bordered
+                  />
+                </div>
+                <Button type="link" onClick={addCollectionSupplementaryRow}>
+                  + {t('Add row')}
+                </Button>
+              </>
+            ) : (
+              <div>{t('There is no complementary premium to distribute.')}</div>
+            )}
           </>
-        ) : (
-          <div>{t('There is no complementary premium to distribute.')}</div>
         )}
         <div className="cashier-supervisor-collection-allocation-summary">
           <div><strong>{t('Payment total')}:</strong> {formatMoney(paymentTotal)}</div>
           <div><strong>{t('Premiums')}:</strong> {formatMoney(policyTotal)}</div>
-          <div><strong>{t('Complementary expected')}:</strong> {formatMoney(expectedSupplementary)}</div>
-          <div><strong>{t('Complementary assigned')}:</strong> {formatMoney(supplementaryTotal)}</div>
+          {!transitCollectionMode && (
+            <>
+              <div><strong>{t('Complementary expected')}:</strong> {formatMoney(expectedSupplementary)}</div>
+              <div><strong>{t('Complementary assigned')}:</strong> {formatMoney(supplementaryTotal)}</div>
+            </>
+          )}
           <div className={difference === 0 ? '' : 'cashier-supervisor-collection-allocation-error'}>
             <strong>{t('Difference')}:</strong> {formatMoney(difference)}
           </div>
@@ -6373,7 +6563,28 @@
       <div className="cashier-supervisor-new-income-columns">
         <div className="cashier-supervisor-new-income-form">
         <div className="cashier-supervisor-section-title">{t('Payment method(s)')}</div>
-        {newIncomePayments.map(payment => (
+        {transitCollectionMode ? (
+          <div className="cashier-supervisor-payment-entry">
+            <div className="cashier-supervisor-payment-method-row">
+              <Select
+                value="OT"
+                options={paymentMethodOptions.filter(option => option && option.value === 'OT')}
+                disabled
+              />
+              <Input
+                value={newIncomePayments[0] && newIncomePayments[0].amount}
+                prefix="$"
+                inputMode="decimal"
+                onChange={event => {
+                  const nextValue = limitIncomeAmountDecimals(event && event.target ? event.target.value : '');
+                  if (nextValue !== null) {
+                    updateNewIncomePayment(newIncomePayments[0].key, 'amount', nextValue);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        ) : newIncomePayments.map(payment => (
           <div key={payment.key} className="cashier-supervisor-payment-entry">
             <div className="cashier-supervisor-payment-method-row">
               <Select
@@ -6526,7 +6737,7 @@
             onChange={key => setNewIncomeActiveFormKey(String(key))}
             destroyInactiveTabPane={false}
           />
-          {newIncomeTypeDynamicForm && (
+          {!transitCollectionMode && newIncomeTypeDynamicForm && (
             <>
               <div className="cashier-supervisor-section-title">
                 {t('Income type form')}
@@ -7161,6 +7372,9 @@
           open={collectionChargeVisible}
           onCancel={() => {
             setCollectionChargeVisible(false);
+            setTransitCollectionMode(false);
+            setTransitCollectionAccount(null);
+            setTransitCollectionPolicyRow(null);
             setCollectionChargeStep('payment');
             setCollectionPolicyRows([]);
             setCollectionSupplementaryRows([]);
