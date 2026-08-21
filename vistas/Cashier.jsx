@@ -2353,7 +2353,7 @@
 
   function mapTransitAccountOptions(rows) {
     return (Array.isArray(rows) ? rows : []).map(account => {
-      const id = Number(account && account.id);
+      const id = Number(account && (account.id || account.accountId));
       const accNo = getTrimmedString(account && account.accNo);
       const name = getTrimmedString(account && account.name);
       const policyCode = getTrimmedString(account && account.policyCode);
@@ -2395,7 +2395,9 @@
     const currentPage = Number(pagination && pagination.current) || 1;
     const pageSize = Number(pagination && pagination.pageSize) || 10;
     const contactId = Number(source.contact);
-    const transferCurrency = accountTransferSearchTarget
+    const isAccountTransferSearch = accountTransferSearchTarget === 'sourceAccount'
+      || accountTransferSearchTarget === 'destinationAccount';
+    const transferCurrency = isAccountTransferSearch
       ? getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase()
       : '';
 
@@ -2450,10 +2452,25 @@
   }
 
   function selectNewIncomeDestinationAccount(account) {
-    const id = Number(account && account.id);
+    const id = Number(account && (account.id || account.accountId));
     if (!Number.isFinite(id) || id <= 0) return;
 
-    if (accountTransferSearchTarget) {
+    if (accountTransferSearchTarget === 'newIncomeDestination') {
+      const options = mapTransitAccountOptions([account]);
+      const selectedOption = options[0];
+      if (!selectedOption) return;
+
+      setNewIncomeDestinationAccountOptions(current => [selectedOption].concat(
+        current.filter(item => Number(item && item.value) !== id)
+      ));
+      newIncomeForm.setFieldsValue({ destination: selectedOption.value });
+      setAccountTransferSearchTarget(null);
+      setNewIncomeAccountSearchVisible(false);
+      return;
+    }
+
+    if (accountTransferSearchTarget === 'sourceAccount'
+      || accountTransferSearchTarget === 'destinationAccount') {
       const targetField = accountTransferSearchTarget;
       const targetName = targetField === 'sourceAccount' ? 'sourceName' : 'destinationName';
       const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
@@ -2476,8 +2493,13 @@
     }
 
     const options = mapTransitAccountOptions([account]);
-    setNewIncomeDestinationAccountOptions(current => options.concat(current.filter(item => Number(item.value) !== id)));
-    newIncomeForm.setFieldsValue({ destination: id });
+    const selectedOption = options[0];
+    if (!selectedOption) return;
+
+    setNewIncomeDestinationAccountOptions(current => [selectedOption].concat(
+      current.filter(item => Number(item && item.value) !== id)
+    ));
+    newIncomeForm.setFieldsValue({ destination: selectedOption.value });
     setNewIncomeAccountSearchVisible(false);
   }
 
@@ -6659,7 +6681,7 @@
                   <Button
                     icon={<InstallmentsIcon />}
                     aria-label={t('Search accounts')}
-                    onClick={openNewIncomeAccountSearch}
+                    onClick={() => openNewIncomeAccountSearch('newIncomeDestination')}
                     style={{ width: 40 }}
                   />
                 </Input.Group>
