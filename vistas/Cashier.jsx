@@ -4864,6 +4864,20 @@
     );
   }
 
+  function openDetailedCashDeskAuditReport() {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('Select a cash desk first.'));
+      return;
+    }
+
+    window.open(
+      `#/reportview/${encodeURIComponent('Arqueo de Caja Detallado')}/TransferWorkSpaceId=${workspaceId}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }
+
   function getMovementEditDestinationOption(item) {
     const account = item && item.DestinationAccount;
     const accountId = Number(item && item.destinationAccountId || account && (account.id || account.accountId) || 0);
@@ -6259,9 +6273,29 @@
               {t('Close')}
             </Button>
           </Popconfirm>
-          <Button className="cashier-supervisor-outline-button" icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
-            {t('Cash count')}
-          </Button>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomLeft"
+            disabled={!selectedCashierRow}
+            menu={{
+              items: [
+                {
+                  key: 'cash-desk-audit',
+                  label: t('Cash count'),
+                  onClick: openCashDeskAudit
+                },
+                {
+                  key: 'detailed-cash-desk-audit',
+                  label: t('Detailed cash desk audit'),
+                  onClick: openDetailedCashDeskAuditReport
+                }
+              ]
+            }}
+          >
+            <Button className="cashier-supervisor-outline-button" icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
+              {t('Cash count')}
+            </Button>
+          </Dropdown>
         </Space>
         <Button className="cashier-supervisor-outline-button" icon={<FilterOutlined />} onClick={() => setTransferFilterVisible(true)}>
           {t('Filter')}
@@ -7462,7 +7496,11 @@
               />
             </Form.Item>
 
-            <Form.Item label={t('Reference')} name="reference">
+            <Form.Item
+              label={t('Reference')}
+              name="reference"
+              rules={[{ required: true, message: t('Enter a reference.') }]}
+            >
               <Input />
             </Form.Item>
             </Form>
