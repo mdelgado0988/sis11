@@ -266,6 +266,7 @@
   const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
   const [transitFilterForm] = Form.useForm();
   const [refundMoneyVisible, setRefundMoneyVisible] = React.useState(false);
+  const [refundMoneySubmitting, setRefundMoneySubmitting] = React.useState(false);
   const [refundMoneyForm] = Form.useForm();
   const [accountTransferVisible, setAccountTransferVisible] = React.useState(false);
   const [accountTransferForm] = Form.useForm();
@@ -325,6 +326,7 @@
   const policySearchTimer = React.useRef(null);
   const [currencyOptions, setCurrencyOptions] = React.useState([]);
   const [paymentMethodOptions, setPaymentMethodOptions] = React.useState([]);
+  const [allPaymentMethodOptions, setAllPaymentMethodOptions] = React.useState([]);
   const [incomeTypeOptions, setIncomeTypeOptions] = React.useState([]);
   const [externalSourceOptions, setExternalSourceOptions] = React.useState([]);
   const [newIncomeDestinationAccountOptions, setNewIncomeDestinationAccountOptions] = React.useState([]);
@@ -1687,16 +1689,43 @@
       ? selectedCurrency
       : currencyOptions[0] && currencyOptions[0].value;
 
+    const beneficiary = getTrimmedString(selectedAccount.contactName || selectedAccount.holderName || selectedAccount.holder);
     refundMoneyForm.setFieldsValue({
       currency: currency,
       sourceAccount: Number(selectedAccount.id),
       sourcePercentage: 100,
       amount: Math.max(0, getAuditNumber(selectedAccount.movementBalance)),
       paymentMethod: undefined,
-      beneficiary: currentUserEmail || '',
+      beneficiary: beneficiary,
       reference: ''
     });
     setRefundMoneyVisible(true);
+  }
+
+  function updateRefundPercentage(value) {
+    const percentage = Number(value);
+    const selectedAccount = transitAccountRows.find(row =>
+      Number(row && row.id) === Number(selectedTransitAccountId)
+    );
+    const availableAmount = Math.max(0, getAuditNumber(selectedAccount && selectedAccount.movementBalance));
+
+    if (!Number.isFinite(percentage)) return;
+
+    refundMoneyForm.setFieldsValue({
+      sourcePercentage: percentage,
+      amount: Number((availableAmount * percentage / 100).toFixed(2))
+    });
+  }
+
+  function generateRefundReference() {
+    const values = refundMoneyForm.getFieldsValue();
+    const amount = getAuditNumber(values && values.amount);
+    const currency = getTrimmedString(values && values.currency);
+    const beneficiary = getTrimmedString(values && values.beneficiary);
+
+    refundMoneyForm.setFieldsValue({
+      reference: `${t('Refund of')} ${amount.toFixed(2)} ${currency} ${t('to')} ${beneficiary}`.trim()
+    });
   }
 
   function closeRefundMoneyModal() {
@@ -1704,8 +1733,67 @@
     refundMoneyForm.resetFields();
   }
 
-  function submitRefundMoneyRequest() {
-    message.info(t('The refund request form is ready for processing.'));
+  async function submitRefundMoneyRequest(values) {
+    const selectedAccount = transitAccountRows.find(row =>
+      Number(row && row.id) === Number(selectedTransitAccountId)
+    );
+    const lifePolicyId = Number(selectedAccount && (selectedAccount.lifePolicyId || selectedAccount.policyId));
+    const sourceAccountId = Number(values && values.sourceAccount);
+    const contactId = Number(selectedAccount && (selectedAccount.holderId || selectedAccount.contactId));
+    const total = getAuditNumber(values && values.amount);
+    const percentage = getAuditNumber(values && values.sourcePercentage);
+
+    if (!selectedAccount || !Number.isFinite(lifePolicyId) || lifePolicyId <= 0) {
+      message.error(t('The selected transit account does not have a valid policy.'));
+      return;
+    }
+
+    if (!Number.isFinite(sourceAccountId) || sourceAccountId <= 0) {
+      message.error(t('The source account is invalid.'));
+      return;
+    }
+
+    if (!Number.isFinite(contactId) || contactId <= 0) {
+      message.error(t('The policy holder is invalid.'));
+      return;
+    }
+
+    if (!Number.isFinite(total) || total <= 0) {
+      message.error(t('Enter a valid amount.'));
+      return;
+    }
+
+    setRefundMoneySubmitting(true);
+    try {
+      const response = await exe('DoPaymentRequest', {
+        lifePolicyId: lifePolicyId,
+        currency: getTrimmedString(values && values.currency),
+        total: total,
+        sourceAccountId: sourceAccountId,
+        paymentMethodCode: getTrimmedString(values && values.paymentMethod),
+        contactId: contactId,
+        perc: percentage,
+        reference: getTrimmedString(values && values.reference),
+        noWorkflow: true,
+        destinationAccountId: 0,
+        claimId: null
+      });
+
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The refund request could not be created.'));
+      }
+
+      message.success(response.msg || t('Refund request created successfully.'));
+      closeRefundMoneyModal();
+      loadTransitAccounts({
+        filters: transitAccountFilters,
+        pagination: transitAccountPagination
+      });
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setRefundMoneySubmitting(false);
+    }
   }
 
   function openAccountTransferModal() {
@@ -2053,8 +2141,14 @@
           value: item && item.code,
           label: `${item && item.symbol ? item.symbol : ''} ${getTrimmedString(item && item.name)}`.trim()
         })).filter(item => item.value));
+        const paymentMethods = getRows(paymentResponse);
+        setAllPaymentMethodOptions(paymentMethods.map(item => ({
+          value: item && item.code,
+          label: getTrimmedString(item && item.name),
+          formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
+        })).filter(item => item.value));
         const cashierPaymentMethodCodes = ['1', 'CH', 'TCD', 'OT'];
-        setPaymentMethodOptions(getRows(paymentResponse)
+        setPaymentMethodOptions(paymentMethods
           .filter(item => cashierPaymentMethodCodes.indexOf(getTrimmedString(item && item.code)) >= 0)
           .map(item => ({
             value: item && item.code,
@@ -7512,6 +7606,7 @@
           open={refundMoneyVisible}
           onCancel={closeRefundMoneyModal}
           onOk={() => refundMoneyForm.submit()}
+          confirmLoading={refundMoneySubmitting}
           okText={t('Request')}
           cancelText={t('Cancel')}
           destroyOnClose={false}
@@ -7536,11 +7631,9 @@
                 rules={[{ required: true, message: t('Select a source account.') }]}
               >
                 <Select
-                  showSearch
-                  optionFilterProp="label"
                   options={getTransitSourceAccountOptions()}
                   placeholder={t('Source account')}
-                  notFoundContent={t('Search and select a transit account first.')}
+                  disabled
                 />
               </Form.Item>
 
@@ -7552,8 +7645,19 @@
                 <InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} />
               </Form.Item>
 
-              <Form.Item label={t('Source account percentage')} name="sourcePercentage">
-                <Slider min={0} max={100} tooltip={{ formatter: value => `${value}%` }} />
+              <Form.Item
+                label={t('Source account percentage')}
+                name="sourcePercentage"
+                rules={[{ required: true, message: t('Enter a percentage.') }]}
+              >
+                <InputNumber
+                  min={0}
+                  max={100}
+                  precision={2}
+                  addonAfter="%"
+                  style={{ width: '100%' }}
+                  onChange={updateRefundPercentage}
+                />
               </Form.Item>
             </div>
 
@@ -7565,7 +7669,7 @@
               <Select
                 showSearch
                 optionFilterProp="label"
-                options={paymentMethodOptions}
+                options={allPaymentMethodOptions}
                 placeholder={t('Payment method')}
               />
             </Form.Item>
@@ -7578,8 +7682,23 @@
               <Input disabled />
             </Form.Item>
 
-            <Form.Item label={t('Reference')} name="reference">
-              <Input />
+            <Form.Item
+              label={t('Reference')}
+              name="reference"
+              rules={[{ required: true, message: t('Enter a reference.') }]}
+            >
+              <Input
+                addonAfter={(
+                  <Tooltip title={t('Generate an automatic refund reference')}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={generateRefundReference}
+                    />
+                  </Tooltip>
+                )}
+              />
             </Form.Item>
           </Form>
         </Modal>
