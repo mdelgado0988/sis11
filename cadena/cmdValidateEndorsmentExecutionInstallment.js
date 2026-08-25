@@ -2,12 +2,12 @@
 //noreplace
 
 /*
-  *@name: cmdValidateLoadingInstallment
-  *@Purpose: Valida y ajusta cuotas del endoso de recargos/descuentos
+  *@name: cmdValidateEndorsmentExecutionInstallment
+  *@Purpose: Rebuild payplan after endorsment Execution
   *@Autor: Michael Delgado
   *@Email: michael.delgado@axxis-systems.com
-  *@Created: 11/05/2026
-  *@Input: {policyId}
+  *@Created: 17/06/2026
+  *@Input: {changeId}
   *@Output: [{ resultado }]
 */
 
@@ -15,24 +15,42 @@ const n2 = (n) => Number(Number(n || 0).toFixed(2));
 
 try {
   
-  const change = context.change;
-  if (!change) {
-    return { ok: false, msg: "No se encontró el cambio", cuotas: JSON.stringify([]) };
+  const changeId = context.changeId;
+  if (!changeId) {
+    return { ok: false, msg: "No se encontro el cambio" };
   }
+
+  const change = loadOneEntity("Change", "id, lifePolicyId, jNewPayPlan, informative, Discriminator", `id = ${changeId}`);
+  if (!change) {
+    return { ok: false, msg: "No se encontro el cambio" };
+  }
+
+  const bill = loadOneEntity(
+    "Bill",
+    "id, changeId, coverages, surcharges, discounts, anualPremium, tax, anualTotal, installment, paymentMethod, periodicity, fee, jFees, jTaxes",
+    `changeId = ${change.id}`
+  );
+  if (!bill) {
+    return { ok: false, msg: "No se encontro la Bill del cambio" };
+  }
+
+  const billDiff = loadOneEntity(
+    "BillDiff",
+    "id, changeId, coverages, surcharges, discounts, annualPremium, tax, annualTotal, installment, jFees, jTaxes",
+    `changeId = ${change.id}`
+  ) ?? {};
 
   const cuotasCambio = safeJsonArray(change?.jNewPayPlan);
   const cuotasPoliza = getPolicyInstallments(change.lifePolicyId);
-  const cuotasBase = normalizarCuotasNuevas(
-    cuotasPoliza.length ? cuotasPoliza : cuotasCambio
-  );
+  const cuotasBase = cuotasPoliza.length ? cuotasPoliza : cuotasCambio;
 
   if (!cuotasBase.length) {
-    return { ok: false, msg: "No hay cuotas para validar", cuotas: JSON.stringify([]) };
+    return { ok: false, msg: "No hay cuotas para validar" };
   }
 
-  const totalBill = n2(change?.Bill?.annualTotal ?? 0);
-  const premiumBill = n2(change?.Bill?.anualPremium ?? 0);
-  const taxBill = n2(change?.Bill?.tax ?? 0);
+  const totalBill = n2(bill?.annualTotal ?? bill?.anualTotal ?? 0);
+  const premiumBill = n2(bill?.anualPremium ?? 0);
+  const taxBill = n2(bill?.tax ?? 0);
 
   const cuotasPagadas = cuotasBase.filter(q => Number(q.payed || 0) > 0);
   const cuotasPendientes = cuotasBase.filter(q => Number(q.payed || 0) <= 0);
@@ -49,12 +67,6 @@ try {
 
   if (cuotasPendientes.length > 0) {
     cuotasDistribuye = distribuirMontoEnCuotas(cuotasDistribuye, premiumBill, taxBill);
-    cuotasDistribuye.forEach(x => {
-      x.minimum = n2(x.minimum);
-      x.expected = n2(x.minimum);
-      x.dueAmount = n2(x.minimum);
-      x.pendingAmount = n2(x.minimum);
-    });
   } else {
     const diferencia = n2(totalBill - totalPagado);
     if (Math.abs(diferencia) > 0.01) {
@@ -69,16 +81,12 @@ try {
 
   cuotasDistribuye = normalizeDistributionTotals(cuotasDistribuye, totalBill);
 
-  const validation = validateDistribution(cuotasDistribuye, totalBill);
-  if (!validation.ok) {
-    return { ok: false, msg: validation.msg, cuotas: JSON.stringify([]) };
-  }
-
   const nuevoTotal = n2(
     cuotasDistribuye.reduce((sum, x) => sum + (Number(x.minimum) || 0), 0)
   );
 
   if (change?.id > 0) {
+    syncPolicyPayPlan(change, cuotasBase, cuotasDistribuye);
     updateChangePayPlan(change.id, cuotasDistribuye);
   }
 
@@ -159,10 +167,16 @@ function distribuirMontoEnCuotas(cuotas, montoPrima, montoImpuesto) {
             acumuladoImpuesto = n2(acumuladoImpuesto + impuesto);
         }
 
+        prima = n2(prima);
+        impuesto = n2(impuesto);
+
         const saldoCuota = n2(prima + impuesto);
         q.minimum = n2(
           Number(q.payed || 0) + saldoCuota
         );
+        q.expected = n2(q.minimum);
+        q.dueAmount = n2(q.minimum);
+        q.pendingAmount = n2(q.minimum);
 
         q.PayPlanDetail = [
             {
@@ -187,33 +201,6 @@ function distribuirMontoEnCuotas(cuotas, montoPrima, montoImpuesto) {
     return cuotas;
 }
 
-function normalizarCuotasNuevas(cuotas) {
-  const nuevas = cuotas.filter(q => Number(q && q.id || 0) === 0);
-
-  if (!nuevas.length) {
-    return cuotas;
-  }
-
-  const pendientes = cuotas.filter(q =>
-    Number(q && q.id || 0) !== 0 && (!q.payed || Number(q.payed) <= 0)
-  );
-
-  if (pendientes.length > 0) {
-    return cuotas.filter(q => Number(q && q.id || 0) !== 0);
-  }
-
-  // Cuando la cuota nueva es la única del plan, se conserva como primera cuota.
-  if (cuotas.length === 1) {
-    const cuotaNueva = cuotas[0];
-    cuotaNueva.numberInYear = 1;
-    cuotaNueva.contractYear = 1;
-    return cuotas;
-  }
-
-  // Sin cuotas pendientes no existe una cuota destino para redistribuirla.
-  return cuotas.filter(q => Number(q && q.id || 0) !== 0);
-}
-
 function normalizeDistributionTotals(cuotas, totalBill) {
   const normalized = (cuotas ?? []).map(cloneCuota);
   if (!normalized.length) {
@@ -231,7 +218,7 @@ function normalizeDistributionTotals(cuotas, totalBill) {
     q.pendingAmount = n2(q.pendingAmount ?? q.minimum);
 
     if (Array.isArray(q.PayPlanDetail) && q.PayPlanDetail.length > 0) {
-      q.PayPlanDetail = normalizePayPlanDetails(q);
+      q.PayPlanDetail = normalizePayPlanDetails(q, q.PayPlanDetail);
     }
 
     totalActual = n2(totalActual + q.minimum);
@@ -243,20 +230,20 @@ function normalizeDistributionTotals(cuotas, totalBill) {
 
   const diff = n2(totalBill - totalActual);
   if (Math.abs(diff) > 0.01 && adjustableIndexes.length > 0) {
-    const target = normalized[adjustableIndexes[adjustableIndexes.length - 1]];
+    const index = adjustableIndexes[adjustableIndexes.length - 1];
+    const target = normalized[index];
     target.minimum = n2(target.minimum + diff);
     target.expected = n2(target.minimum);
     target.dueAmount = n2(target.minimum);
     target.pendingAmount = n2(target.minimum);
-    target.PayPlanDetail = normalizePayPlanDetails(target);
+    target.PayPlanDetail = normalizePayPlanDetails(target, target.PayPlanDetail);
   }
 
   return normalized;
 }
 
-function normalizePayPlanDetails(payPlan) {
-  const baseDetails = Array.isArray(payPlan?.PayPlanDetail) ? payPlan.PayPlanDetail : [];
-  const normalized = baseDetails.map(detail => ({
+function normalizePayPlanDetails(payPlan, details) {
+  const normalized = (details ?? []).map(detail => ({
     amount: n2(detail?.amount),
     concept: detail?.concept ?? "",
     detail: detail?.detail ?? "",
@@ -268,50 +255,52 @@ function normalizePayPlanDetails(payPlan) {
     return normalized;
   }
 
-  const targetTotal = n2(payPlan?.minimum ?? 0);
-  const currentTotal = n2(normalized.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
-  const diff = n2(targetTotal - currentTotal);
+  const targetTotal = n2((payPlan?.minimum ?? 0) - (payPlan?.payed ?? 0));
+  let detailTotal = n2(normalized.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
+  const diff = n2(targetTotal - detailTotal);
 
   if (Math.abs(diff) > 0.01) {
     normalized[normalized.length - 1].amount = n2(normalized[normalized.length - 1].amount + diff);
+    detailTotal = n2(normalized.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
   }
 
   return normalized;
 }
 
-function validateDistribution(cuotas, totalBill) {
-  const totalCuotas = n2((cuotas ?? []).reduce((sum, x) => sum + (Number(x.minimum) || 0), 0));
-  const totalDetails = n2(
-    (cuotas ?? []).reduce((sum, cuota) => {
-      const detalleTotal = Array.isArray(cuota.PayPlanDetail)
-        ? cuota.PayPlanDetail.reduce((s, d) => s + (Number(d.amount) || 0), 0)
-        : 0;
-      return sum + detalleTotal;
-    }, 0)
-  );
-
-  if (Math.abs(totalCuotas - totalBill) > 0.01) {
-    return { ok: false, msg: `Las cuotas no cuadran con el billing. Cuotas=${totalCuotas.toFixed(2)} Bill=${n2(totalBill).toFixed(2)}` };
-  }
-
-  if (Math.abs(totalDetails - totalCuotas) > 0.01) {
-    return { ok: false, msg: `El detalle no cuadra con el maestro. Maestro=${totalCuotas.toFixed(2)} Detalle=${totalDetails.toFixed(2)}` };
-  }
-
-  for (const cuota of cuotas ?? []) {
-    const detailTotal = Array.isArray(cuota.PayPlanDetail)
-      ? cuota.PayPlanDetail.reduce((sum, d) => sum + (Number(d.amount) || 0), 0)
-      : 0;
-
-    if (Math.abs(n2(detailTotal) - n2(cuota.minimum)) > 0.01) {
-      return {
-        ok: false,
-        msg: `La cuota #${cuota.numberInYear ?? cuota.id ?? 0} no cuadra con su detalle. Maestro=${n2(cuota.minimum).toFixed(2)} Detalle=${n2(detailTotal).toFixed(2)}`
-      };
+function getPolicyInstallments(policyId) {
+  doCmd({
+    cmd: "LoadEntities",
+    data: {
+      entity: "PayPlan",
+      filter: `lifepolicyId = ${policyId}`,
+      noTracking: true,
+      fields: "id, lifePolicyId, concept, expected, minimum, payed, payedDate, dueDate, transferId, coveredUntil, allocationDate, contractYear, final, finalDate, numberInYear, allocationId, currency, cancellationDate, compensationDate, custom, created, penaltyInterest, normalDueDate, changeId"
     }
+  });
+
+  if (!LoadEntities.ok) {
+    throw new Error(LoadEntities.msg);
   }
 
-  return { ok: true, msg: "OK" };
+  return (LoadEntities.outData ?? []).map(cloneCuota);
+}
+
+function loadOneEntity(entity, fields, filter) {
+  doCmd({
+    cmd: "LoadEntity",
+    data: {
+      entity,
+      fields,
+      filter,
+      noTracking: true
+    }
+  });
+
+  if (!LoadEntity.ok) {
+    throw new Error(LoadEntity.msg);
+  }
+
+  return LoadEntity.outData ?? null;
 }
 
 function updateChangePayPlan(changeId, cuotas) {
@@ -330,13 +319,57 @@ function updateChangePayPlan(changeId, cuotas) {
   }
 }
 
-function getPolicyInstallments(policyId) {
+function syncPolicyPayPlan(change, currentCuotas, targetCuotas) {
+  const currentById = new Map(
+    (currentCuotas ?? [])
+      .filter(x => Number(x?.id || 0) > 0)
+      .map(x => [Number(x.id), x])
+  );
+
+  const sqlParts = [];
+  let newIndex = 0;
+
+  for (const target of targetCuotas ?? []) {
+    const targetId = Number(target?.id || 0);
+    const current = targetId > 0 ? currentById.get(targetId) : null;
+
+    if (current) {
+      if (!shouldTouchPayPlan(current, target)) {
+        continue;
+      }
+
+      sqlParts.push(buildUpdatePayPlanSql(current.id, change.id, target));
+      if (Number(current?.payed ?? 0) > 0.01) {
+        const currentDetails = loadPayPlanDetails(current.id);
+        syncPayPlanDetailsKeepingHistory(sqlParts, current.id, target, currentDetails);
+      } else {
+        sqlParts.push(`DELETE FROM PayPlanDetail WHERE payPlanId = ${current.id};`);
+        appendPayPlanDetailInserts(sqlParts, current.id, target);
+      }
+      continue;
+    }
+
+    newIndex += 1;
+    const varName = `@NewPayPlanId_${newIndex}`;
+    sqlParts.push(buildInsertPayPlanSql(varName, change, target));
+    appendPayPlanDetailInserts(sqlParts, varName, target);
+  }
+
+  if (!sqlParts.length) {
+    return;
+  }
+
+  executeSql(sqlParts.join("\n"));
+}
+
+function loadPayPlanDetails(payPlanId) {
   doCmd({
     cmd: "LoadEntities",
     data: {
-      entity: "PayPlan",
-      filter: `lifepolicyId = ${policyId}`,
-      fields: "id, lifePolicyId, concept, expected, minimum, payed, payedDate, dueDate, transferId, coveredUntil, allocationDate, contractYear, final, finalDate, numberInYear, allocationId, currency, cancellationDate, compensationDate, custom, created, penaltyInterest, normalDueDate, changeId"
+      entity: "PayPlanDetail",
+      filter: `payPlanId = ${payPlanId}`,
+      noTracking: true,
+      fields: "id, payPlanId, amount, concept, detail, [order], paid"
     }
   });
 
@@ -344,7 +377,244 @@ function getPolicyInstallments(policyId) {
     throw new Error(LoadEntities.msg);
   }
 
-  return (LoadEntities.outData ?? []).map(cloneCuota);
+  return (LoadEntities.outData ?? []).map(detail => ({
+    id: detail?.id,
+    payPlanId: detail?.payPlanId,
+    amount: detail?.amount,
+    concept: detail?.concept,
+    detail: detail?.detail,
+    order: detail?.order,
+    paid: detail?.paid
+  }));
+}
+
+function syncPayPlanDetailsKeepingHistory(sqlParts, payPlanId, target, currentDetails) {
+  const targetDetails = Array.isArray(target?.PayPlanDetail) ? target.PayPlanDetail : [];
+  if (!targetDetails.length) {
+    return;
+  }
+
+  const currentByOrder = new Map(
+    (currentDetails ?? [])
+      .filter(detail => Number(detail?.order ?? 0) > 0)
+      .map(detail => [Number(detail.order), detail])
+  );
+  const usedCurrentIds = new Set();
+
+  for (const detail of targetDetails) {
+    const order = Number(detail?.order ?? 0);
+    const current = currentByOrder.get(order);
+
+    if (current?.id) {
+      usedCurrentIds.add(Number(current.id));
+      sqlParts.push(
+        buildUpdatePayPlanDetailSql(current.id, detail, current.paid)
+      );
+      continue;
+    }
+
+    sqlParts.push(buildInsertPayPlanDetailSql(payPlanId, detail));
+  }
+
+  for (const current of currentDetails ?? []) {
+    const currentId = Number(current?.id ?? 0);
+    if (!currentId || usedCurrentIds.has(currentId)) {
+      continue;
+    }
+
+    if (Number(current?.paid ?? 0) <= 0.01) {
+      sqlParts.push(`DELETE FROM PayPlanDetail WHERE id = ${sqlNumber(currentId)};`);
+    }
+  }
+}
+
+function shouldTouchPayPlan(current, target) {
+  const currentPayed = n2(current?.payed ?? 0);
+  const currentMinimum = n2(current?.minimum ?? 0);
+  const hasPayment = currentPayed > 0.01;
+  const hasPartialPayment = hasPayment && Math.abs(currentPayed - currentMinimum) > 0.01;
+  const changedAmounts =
+    Math.abs(n2(current?.expected ?? 0) - n2(target?.expected ?? 0)) > 0.01 ||
+    Math.abs(n2(current?.minimum ?? 0) - n2(target?.minimum ?? 0)) > 0.01;
+
+  return changedAmounts && (!hasPayment || hasPartialPayment);
+}
+
+function buildUpdatePayPlanSql(payPlanId, changeId, target) {
+  return [
+    `UPDATE PayPlan`,
+    `SET expected = ${sqlMoney(target?.expected)},`,
+    `    minimum = ${sqlMoney(target?.minimum)},`,
+    `    changeId = ${sqlNumber(changeId)}`,
+    `WHERE id = ${sqlNumber(payPlanId)};`
+  ].join("\n");
+}
+
+function buildInsertPayPlanSql(varName, change, target) {
+  const created = target?.created || new Date().toISOString();
+  const fieldList = [
+    "lifePolicyId",
+    "numberInYear",
+    "contractYear",
+    "concept",
+    "expected",
+    "minimum",
+    "currency",
+    "payed",
+    "final",
+    "finalDate",
+    "allocationDate",
+    "payedDate",
+    "dueDate",
+    "coveredUntil",
+    "transferId",
+    "changeId",
+    "penaltyInterest",
+    "created",
+    "allocationId",
+    "cancellationDate",
+    "compensationDate",
+    "custom",
+    "normalDueDate"
+  ];
+
+  const values = [
+    sqlNumber(change?.lifePolicyId),
+    sqlNumber(target?.numberInYear),
+    sqlNumber(target?.contractYear),
+    sqlString(target?.concept),
+    sqlMoney(target?.expected),
+    sqlMoney(target?.minimum),
+    sqlString(target?.currency || "USD"),
+    sqlMoney(target?.payed ?? 0),
+    sqlBoolean(target?.final),
+    sqlDate(target?.finalDate),
+    sqlDate(target?.allocationDate),
+    sqlDate(target?.payedDate),
+    sqlDate(target?.dueDate),
+    sqlDate(target?.coveredUntil),
+    sqlNullableNumber(target?.transferId),
+    sqlNumber(change?.id),
+    sqlMoney(target?.penaltyInterest ?? 0),
+    sqlDate(created),
+    sqlNullableNumber(target?.allocationId),
+    sqlDate(target?.cancellationDate),
+    sqlDate(target?.compensationDate),
+    sqlBoolean(target?.custom),
+    sqlDate(target?.normalDueDate)
+  ];
+
+  return [
+    `DECLARE ${varName} INT;`,
+    `INSERT INTO PayPlan (${fieldList.join(", ")})`,
+    `VALUES (${values.join(", ")});`,
+    `SET ${varName} = SCOPE_IDENTITY();`
+  ].join("\n");
+}
+
+function appendPayPlanDetailInserts(sqlParts, payPlanRef, target) {
+  const details = Array.isArray(target?.PayPlanDetail) ? target.PayPlanDetail : [];
+  if (!details.length) {
+    return;
+  }
+
+  for (const detail of details) {
+    sqlParts.push(
+      buildInsertPayPlanDetailSql(payPlanRef, detail)
+    );
+  }
+}
+
+function buildInsertPayPlanDetailSql(payPlanRef, detail) {
+  const fields = [
+    "payPlanId",
+    "amount",
+    "concept",
+    "detail",
+    "[order]",
+    "paid"
+  ];
+
+  const values = [
+    payPlanRef,
+    sqlMoney(detail?.amount),
+    sqlString(detail?.concept),
+    sqlString(detail?.detail),
+    sqlNumber(detail?.order),
+    sqlMoney(detail?.paid ?? 0)
+  ];
+
+  return [
+    `INSERT INTO PayPlanDetail (${fields.join(", ")})`,
+    `VALUES (${values.join(", ")});`
+  ].join("\n");
+}
+
+function buildUpdatePayPlanDetailSql(detailId, detail, paid) {
+  return [
+    `UPDATE PayPlanDetail`,
+    `SET amount = ${sqlMoney(detail?.amount)},`,
+    `    concept = ${sqlString(detail?.concept)},`,
+    `    detail = ${sqlString(detail?.detail)},`,
+    `    [order] = ${sqlNumber(detail?.order)},`,
+    `    paid = ${sqlMoney(paid)}`,
+    `WHERE id = ${sqlNumber(detailId)};`
+  ].join("\n");
+}
+
+function executeSql(sql) {
+  doCmd({ cmd: "DoQuery", data: { sql } });
+
+  if (!DoQuery.ok) {
+    throw new Error(DoQuery.msg);
+  }
+}
+
+function sqlNumber(value) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? String(num) : "0";
+}
+
+function sqlMoney(value) {
+  const num = Number(value ?? 0);
+  if (!Number.isFinite(num)) {
+    return "0.00";
+  }
+
+  return num.toFixed(2);
+}
+
+function sqlNullableNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return "NULL";
+  }
+
+  return sqlNumber(value);
+}
+
+function sqlBoolean(value) {
+  return value ? "1" : "0";
+}
+
+function sqlDate(value) {
+  if (value === null || value === undefined || value === "") {
+    return "NULL";
+  }
+
+  return sqlString(value);
+}
+
+function sqlString(value) {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  const text = String(value).replace(/'/g, "''");
+  return `'${text}'`;
 }
 
 function safeJsonArray(raw) {

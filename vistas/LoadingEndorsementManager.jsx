@@ -475,7 +475,7 @@
 
                 let newCoverages = [...Coverages.filter( item => !covId.includes(item.id)), ...tempNewCoverages];
 
-                const effectiveDateTime = buildEffectiveDateTime(policyStart);
+                const effectiveDateTime = buildEffectiveDateTime(policyStart, effectiveDate);
 
                 const jOldCoverages = JSON.stringify(Coverages),
                     jNewCoverages = JSON.stringify(newCoverages);
@@ -576,25 +576,64 @@
         return new URL(window.location.href.replace('#/')).searchParams.get('policyId') || 0;
     }
 
-    function buildEffectiveDateTime(policyStart) {
+    function buildEffectiveDateTime(policyStart, selectedValue) {
+        const selectedDate = parseSelectedDate(selectedValue);
+        if (!selectedDate) return '';
+
         const now = new Date();
         const startDate = parseUtcDate(policyStart);
+        const selectedTime = Date.UTC(
+            selectedDate.getUTCFullYear(),
+            selectedDate.getUTCMonth(),
+            selectedDate.getUTCDate(),
+            now.getUTCHours(),
+            now.getUTCMinutes(),
+            now.getUTCSeconds(),
+            now.getUTCMilliseconds()
+        );
 
-        if (startDate && now.getTime() < startDate.getTime()) {
-            const utcNowDate = new Date(Date.UTC(
-                now.getUTCFullYear(),
-                now.getUTCMonth(),
-                now.getUTCDate(),
+        if (startDate && selectedTime < startDate.getTime()) {
+            return formatUtcDateTime7(new Date(Date.UTC(
+                selectedDate.getUTCFullYear(),
+                selectedDate.getUTCMonth(),
+                selectedDate.getUTCDate(),
                 startDate.getUTCHours(),
                 startDate.getUTCMinutes(),
                 startDate.getUTCSeconds(),
                 startDate.getUTCMilliseconds()
-            ));
-
-            return formatUtcDateTime7(utcNowDate);
+            )));
         }
 
-        return formatUtcDateTime7(now);
+        return formatUtcDateTime7(new Date(selectedTime));
+    }
+
+    function parseSelectedDate(value) {
+        if (!value) return null;
+
+        if (typeof value.toDate === 'function') {
+            const asDate = value.toDate();
+            return asDate instanceof Date && !Number.isNaN(asDate.getTime()) ? asDate : null;
+        }
+
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            const parts = raw.split('-');
+            const date = new Date(Date.UTC(
+                Number(parts[0]),
+                Number(parts[1]) - 1,
+                Number(parts[2]),
+                0,
+                0,
+                0,
+                0
+            ));
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
+        const parsed = new Date(raw);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 
     function parseUtcDate(value) {

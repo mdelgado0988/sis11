@@ -33,7 +33,7 @@ try {
   }
 
   const cuotasPago = getPayedInstallment(change.lifePolicyId);  
-  const cuotas = safeJsonArray(change?.jNewPayPlan);
+  let cuotas = safeJsonArray(change?.jNewPayPlan);
 
   const cuotasPagoFinal = cuotasPago.map(x => ({
       id: x.id,
@@ -65,7 +65,11 @@ try {
   //Cuando el endoso no trae cuotas pagadas porque las haya borrado las agregamos para mantener consistencia.
   if(noHayCuotasPagadas(cuotas) && cuotasPagoFinal.length > 0){
      cuotas.push(...cuotasPagoFinal); 
-  }  
+  }
+
+  // Las cuotas nuevas llegan con id = 0. Si existen cuotas pendientes,
+  // se eliminan para que su importe sea absorbido por la redistribución.
+  cuotas = normalizarCuotasNuevas(cuotas);
 
   const totalMinimum = Number(
     cuotas.reduce((sum, x) => sum + (Number(x.minimum - (x.payed || 0)) || 0), 0).toFixed(2)
@@ -210,6 +214,33 @@ function distribuirMontoEnCuotas(cuotas, montoPrima, montoImpuesto) {
     });
 
     return cuotas;
+}
+
+function normalizarCuotasNuevas(cuotas) {
+    const nuevas = cuotas.filter(q => Number(q && q.id || 0) === 0);
+
+    if (!nuevas.length) {
+        return cuotas;
+    }
+
+    const pendientes = cuotas.filter(q =>
+        Number(q && q.id || 0) !== 0 && (!q.payed || Number(q.payed) <= 0)
+    );
+
+    if (pendientes.length > 0) {
+        return cuotas.filter(q => Number(q && q.id || 0) !== 0);
+    }
+
+    // Cuando la cuota nueva es la única del plan, se conserva como primera cuota.
+    if (cuotas.length === 1) {
+        const cuotaNueva = cuotas[0];
+        cuotaNueva.numberInYear = 1;
+        cuotaNueva.contractYear = 1;
+        return cuotas;
+    }
+
+    // Sin cuotas pendientes no existe una cuota destino para redistribuirla.
+    return cuotas.filter(q => Number(q && q.id || 0) !== 0);
 }
 
 function retornaCuotasPoliza(cuotasPoliza) {

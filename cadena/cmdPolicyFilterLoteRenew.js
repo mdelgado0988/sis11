@@ -32,6 +32,7 @@ let cteQuery = '';
 const policyId = getPositiveInteger(row.policyId);
 const venceEn = getNonNegativeInteger(row.venceEn);
 const hasExplicitExpirationRange = Boolean(row.venceDesde || row.venceHasta);
+const renewalStatus = getTrimmedString(row.estadoRenovacion).toUpperCase();
 
 if(row.policyId && policyId <= 0){
     return buildResult(false, 'El identificador de póliza no es válido');
@@ -52,6 +53,15 @@ if(row.sucursal){
 if(row.tipoPoliza){
     filtro += ` AND pol.[policyType]=${sqlString(row.tipoPoliza)}`;
 }
+if(renewalStatus === 'SIN_ACCION'){
+    filtro += ' AND reno.id IS NULL';
+}
+if(renewalStatus === 'EN_PROGRESO'){
+    filtro += ' AND reno.id IS NOT NULL AND reno.activeDate IS NULL';
+}
+if(renewalStatus === 'RENOVADA'){
+    filtro += ' AND reno.id IS NOT NULL AND reno.activeDate IS NOT NULL';
+}
 if(row.venceDesde){
     filtro += ` AND pol.[end] >= ${sqlString(row.venceDesde)}`;
 }
@@ -68,8 +78,9 @@ if(row.venceHastaExclusive){
 // Applying both conditions would exclude valid policies unintentionally.
 if(!hasExplicitExpirationRange && row.venceEn && venceEn >= 0){
   // Calculate the current Panama day from UTC and compare UTC boundaries.
+  // The relative filter includes already expired policies and limits only
+  // the upper bound to the configured number of days ahead.
   const panamaDayUtc = "DATEADD(HOUR, 5, CAST(CAST(DATEADD(HOUR, -5, SYSUTCDATETIME()) AS DATE) AS DATETIME2))";
-  filtro += ` AND pol.[end] >= ${panamaDayUtc}`;
   filtro += ` AND pol.[end] < DATEADD(DAY, ${venceEn + 1}, ${panamaDayUtc})`;
 }
 
@@ -121,10 +132,13 @@ JOIN Product pro ON pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]
 JOIN Insured aseg ON pol.[id] = aseg.[lifePolicyId] AND aseg.[role] =0
 JOIN Contact con ON aseg.[contactId] = con.[id]
-OUTER APPLY (SELECT TOP (1) reno.activeDate, reno.id
-             FROM LifePolicy reno 
-             WHERE reno.originalPolicyId = pol.id
-             ORDER BY reno.id DESC) reno
+LEFT JOIN (
+    SELECT originalPolicyId, MAX(id) AS latestRenewalId
+    FROM LifePolicy
+    WHERE originalPolicyId IS NOT NULL
+    GROUP BY originalPolicyId
+) latestRenewal ON latestRenewal.originalPolicyId = pol.id
+LEFT JOIN LifePolicy reno ON reno.id = latestRenewal.latestRenewalId
 LEFT JOIN BatchCreated btC ON pol.[id] = btC.[lifePolicyId]
 
 OUTER APPLY (SELECT JSON_VALUE(j.userData, '$[0]') AS estadoRenovacion
@@ -182,17 +196,13 @@ let dataPaginada = Array.isArray(queryResponse.outData) ? queryResponse.outData 
 let queryCountSql = `
 SELECT COUNT(1) AS total
 FROM LifePolicy pol
-JOIN Product pro ON pol.[productCode] = pro.[code]
-JOIN Lob lob ON pol.[lob] = lob.[code]
-JOIN Insured aseg ON pol.[id] = aseg.[lifePolicyId] AND aseg.[role] =0
-JOIN Contact con ON aseg.[contactId] = con.[id]
-CROSS APPLY (
-    SELECT SUM(pay.[minimum]) AS [pending]
-    FROM PayPlan pay
-    WHERE pay.[lifePolicyId] = pol.[id]
-      AND pay.[payedDate] IS NULL
-      AND pay.[payed] = 0
-) CalculoPago
+LEFT JOIN (
+    SELECT originalPolicyId, MAX(id) AS latestRenewalId
+    FROM LifePolicy
+    WHERE originalPolicyId IS NOT NULL
+    GROUP BY originalPolicyId
+) latestRenewal ON latestRenewal.originalPolicyId = pol.id
+LEFT JOIN LifePolicy reno ON reno.id = latestRenewal.latestRenewalId
 
 WHERE pol.[entityState] = 'ACTIVE'
 AND pol.[active] = 1
@@ -234,6 +244,10 @@ function getPositiveInteger(value){
 function getNonNegativeInteger(value){
     const number = Number(value);
     return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function getTrimmedString(value){
+    return value === null || value === undefined ? '' : String(value).trim();
 }
 
 function buildResult(ok, msg){

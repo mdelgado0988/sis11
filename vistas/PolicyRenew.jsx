@@ -618,6 +618,7 @@
                 <Form
                     form={form}
                     name="advanced_search"
+                    initialValues={{ estadoRenovacion: 'SIN_ACCION' }}
                     className="renovacion-filter-form ant-advanced-search-form"
                     //onFinish={handleFinish}
                     layout="vertical" // Layout vertical funciona mejor en responsivo
@@ -720,13 +721,15 @@
                             />
                         </Form.Item>
                     </Col>
-                    {/*<Col {...gridConfig}>
+                    <Col {...gridConfig}>
                         <Form.Item name="estadoRenovacion" label="Estado de Renovación">
-                        <Select placeholder="No-Especificado" allowClear>
-                            <Option value="PEND">Pendiente</Option>
-                        </Select>
+                            <Select placeholder="Mostrar">
+                                <Option value="SIN_ACCION">Sin Acción</Option>
+                                <Option value="EN_PROGRESO">En Progreso</Option>
+                                <Option value="RENOVADA">Renovada</Option>
+                            </Select>
                         </Form.Item>
-                    </Col>*/}
+                    </Col>
                     </Row>
                 </Form>
                 </Card>
@@ -1155,6 +1158,16 @@
             return `${yyyy}-${mm}-${dd} ${hh}:00:00.000`;
         }
 
+        const getFilterValues = () => {
+            const values = form.getFieldsValue();
+            if (!values.estadoRenovacion) {
+                form.setFieldsValue({ estadoRenovacion: 'SIN_ACCION' });
+                return { ...values, estadoRenovacion: 'SIN_ACCION' };
+            }
+
+            return values;
+        };
+
         const handleSearch = () => {
             const newPagination = { ...pagination, current: 1 };
             setPagination(newPagination);
@@ -1163,7 +1176,7 @@
                 loading: true,
                 total: 0,
                 data: tableData,
-                formulario: form.getFieldsValue(),
+                formulario: getFilterValues(),
             };
             loadDataPolizas(params);
         };
@@ -1174,7 +1187,7 @@
                 pagination: newPagination,
                 loading: true,
                 data: tableData,
-                formulario: form.getFieldsValue(),
+                formulario: getFilterValues(),
             };
             loadDataPolizas(params);
         }
@@ -1190,6 +1203,7 @@
             if(form.plan) extraParametros += `, producto:'${form.plan}'`;
             if(form.sucursal) extraParametros += `, sucursal:'${form.sucursal}'`;
             if(form.tipoPoliza) extraParametros += `, tipoPoliza:'${form.tipoPoliza}'`;
+            if(form.estadoRenovacion) extraParametros += `, estadoRenovacion:'${form.estadoRenovacion}'`;
             if(form.venceDesde) {
                 const venceDesdeUtc = formatPanamaUtcBoundary(form.venceDesde, false);
                 if (venceDesdeUtc) extraParametros += `, venceDesde:'${venceDesdeUtc}'`;
@@ -1297,7 +1311,8 @@
                 return Promise.reject(new Error(`La póliza ${policy.poliza || ''} no tiene un id válido`));
             }
 
-            return validatePolicyRenewalAvailability(sourcePolicyId, policy.poliza)
+            return ensureReceiptTypeCode(sourcePolicyId)
+                .then(() => validatePolicyRenewalAvailability(sourcePolicyId, policy.poliza))
                 .then(() => exe('AddPolicyVersion', {
                     // Each renewal starts a new policy version at version 1.
                     policyVersion: 1,
@@ -1316,23 +1331,88 @@
                         throw new Error(`No se recibió el id de la oferta generada para la póliza ${policy.poliza}`);
                     }
 
-                    setBatchGenerationText(`Actualizando vigencia de la oferta ${policy.poliza}`);
+                    setBatchGenerationText(`Limpiando recargos de la oferta ${policy.poliza}`);
 
                     return exe("ExeChain", {
-                        chain: "cmdUpdatePolicyRenewalPeriod",
-                        context: `{ policyId: ${newPolicyId}, renewalPolicyId: ${sourcePolicyId} }`
-                    }).then(periodResponse => {
-                        if (!periodResponse || periodResponse.ok === false) {
+                        chain: "cmdClearPolicyLoadings",
+                        context: `{ policyId: ${newPolicyId} }`
+                    }).then(clearResponse => {
+                        if (!clearResponse || clearResponse.ok === false) {
                             throw new Error(
-                                periodResponse && periodResponse.msg
-                                    ? periodResponse.msg
-                                    : `No fue posible actualizar la vigencia de la oferta ${policy.poliza}`
+                                clearResponse && clearResponse.msg
+                                    ? clearResponse.msg
+                                    : `No fue posible limpiar los recargos de la oferta ${policy.poliza}`
                             );
                         }
 
-                        return newPolicyId;
+                        setBatchGenerationText(`Actualizando vigencia de la oferta ${policy.poliza}`);
+
+                        return exe("ExeChain", {
+                            chain: "cmdUpdatePolicyRenewalPeriod",
+                            context: `{ policyId: ${newPolicyId}, renewalPolicyId: ${sourcePolicyId} }`
+                        }).then(periodResponse => {
+                            if (!periodResponse || periodResponse.ok === false) {
+                                throw new Error(
+                                    periodResponse && periodResponse.msg
+                                        ? periodResponse.msg
+                                        : `No fue posible actualizar la vigencia de la oferta ${policy.poliza}`
+                                );
+                            }
+
+                            return newPolicyId;
+                        });
                     });
+
                 });
+        }
+
+        const ensureReceiptTypeCode = (policyId) => {
+            return exe('LoadEntity', {
+                entity: 'LifePolicy',
+                filter: `id = ${policyId}`,
+                fields: 'id,receiptTypeCode',
+                noTracking: true
+            }).then(response => {
+                if (!response || !response.ok) {
+                    throw new Error(
+                        response && response.msg
+                            ? response.msg
+                            : `No fue posible validar el tipo de recibo de la póliza ${policyId}`
+                    );
+                }
+
+                const sourcePolicy = Array.isArray(response.outData)
+                    ? response.outData[0]
+                    : response.outData;
+                if (!sourcePolicy) {
+                    throw new Error(`No se encontró la póliza ${policyId}`);
+                }
+
+                const receiptTypeCode = sourcePolicy.receiptTypeCode;
+                const isMissingReceiptType = receiptTypeCode === null
+                    || receiptTypeCode === undefined
+                    || String(receiptTypeCode).trim() === '';
+
+                if (!isMissingReceiptType) {
+                    return response;
+                }
+
+                return exe('SetField', {
+                    entity: 'LifePolicy',
+                    entityId: policyId,
+                    fieldValue: '[receiptTypeCode]=1'
+                }).then(updateResponse => {
+                    if (!updateResponse || updateResponse.ok === false) {
+                        throw new Error(
+                            updateResponse && updateResponse.msg
+                                ? updateResponse.msg
+                                : `No fue posible asignar el tipo de recibo de la póliza ${policyId}`
+                        );
+                    }
+
+                    return updateResponse;
+                });
+            });
         }
 
         const validatePolicyRenewalAvailability = (policyId, policyCode) => {
