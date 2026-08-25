@@ -13,6 +13,8 @@
     Popconfirm,
     Popover,
     Radio,
+    Row,
+    Col,
     Select,
     Slider,
     Space,
@@ -253,6 +255,13 @@
   const [movementEditVisible, setMovementEditVisible] = React.useState(false);
   const [movementEditRecord, setMovementEditRecord] = React.useState(null);
   const [movementEditLoading, setMovementEditLoading] = React.useState(false);
+  const [premiumReversalVisible, setPremiumReversalVisible] = React.useState(false);
+  const [premiumReversalRows, setPremiumReversalRows] = React.useState([]);
+  const [premiumReversalLoading, setPremiumReversalLoading] = React.useState(false);
+  const [premiumReversalPagination, setPremiumReversalPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [premiumReversalTotal, setPremiumReversalTotal] = React.useState(0);
+  const [premiumReversalFilters, setPremiumReversalFilters] = React.useState({});
+  const [premiumReversalFilterForm] = Form.useForm();
   const [balanceRows, setBalanceRows] = React.useState([]);
   const [balanceLoading, setBalanceLoading] = React.useState(false);
   const [transitAccountRows, setTransitAccountRows] = React.useState([]);
@@ -570,6 +579,19 @@
         padding: 5px 8px !important;
         font-size: 13px;
         line-height: 20px;
+      }
+
+      .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-thead > tr > th,
+      .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-tbody > tr > td {
+        padding: 3px 6px !important;
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-body {
+        overflow-x: scroll !important;
+        overflow-y: scroll !important;
+        scrollbar-gutter: stable;
       }
 
       .cashier-supervisor-status-bar {
@@ -4416,10 +4438,10 @@
 
       const exportRows = exportType === 'remittance'
         ? rows.map(row => ({
-          cnpoliza: row.poliza || '',
-          ctenedor: row.holderId || '',
-          crecibo: row.recibo || '',
-          monto: Number(row.pendiente || 0)
+          Codigo_Poliza: row.poliza || '',
+          ID_Cliente: row.holderId || '',
+          Numero_Recibo: row.recibo || '',
+          Monto_Pago: Number(row.pendiente || 0)
         }))
         : rows.map(row => ({
           [t('Policy')]: row.poliza || '',
@@ -5755,6 +5777,194 @@
     return uniqueValues.map((item, index) => <div key={`${item}-${index}`}>{item}</div>);
   }
 
+  function getPremiumReversalPaymentMethods(record) {
+    const splitPayments = Array.isArray(record && record.SplitPayments) ? record.SplitPayments : [];
+    const values = splitPayments
+      .map(item => getTrimmedString(item && (item.paymentMethodName || item.paymentMethod)))
+      .filter(value => value);
+    return Array.from(new Set(values)).join(', ') || '-';
+  }
+
+  function getPremiumReversalDestinationNames(record) {
+    const values = [record].concat(getMovementChildren(record))
+      .map(item => {
+        const account = item && (item.DestinationAccount || item.destinationAccount);
+        return getTrimmedString(account && (account.name || account.accNo))
+          || getTrimmedString(item && item.destinationName)
+          || getTrimmedString(item && item.destinationAccountId);
+      })
+      .filter(value => value);
+
+    return Array.from(new Set(values)).join(', ') || '-';
+  }
+
+  function getPremiumReversalPolicyIds(record) {
+    const directValue = record && (record.lifePolicyId || record.policyId || record.LifePolicyId);
+    const values = [directValue]
+      .concat(getPolicyValues(record))
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .reduce((result, value) => result.concat(String(value).split(/[\r\n,]+/)), [])
+      .map(value => Number(String(value).trim()))
+      .filter(value => Number.isInteger(value) && value > 0);
+
+    return Array.from(new Set(values));
+  }
+
+  function getPremiumReversalType(record) {
+    const incomeType = record && record.IncomeType;
+    return getTrimmedString(incomeType && incomeType.name)
+      || getTrimmedString(record && record.transactionCode)
+      || '-';
+  }
+
+  function renderPremiumReversalText(value, maxWidth) {
+    const text = getTrimmedString(value) || '-';
+    return (
+      <Tooltip title={text} trigger={['click', 'hover']}>
+        <span
+          style={{
+            display: 'inline-block',
+            maxWidth: maxWidth || 180,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            verticalAlign: 'middle'
+          }}
+        >
+          {text}
+        </span>
+      </Tooltip>
+    );
+  }
+
+  function loadPremiumReversalMovements(params = {}) {
+    const source = params.filters || premiumReversalFilters || {};
+    const pagination = params.pagination || premiumReversalPagination;
+    const pageSize = Number(pagination && pagination.pageSize) || 15;
+    const currentPage = Number(pagination && pagination.current) || 1;
+    const workspaceId = Number(source.workspaceId);
+    const rawAmount = source.amount;
+    const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== '';
+    const amount = Number(rawAmount);
+    const transferId = Number(source.transferId);
+    const cashier = getTrimmedString(source.cashier).toLowerCase();
+    const transferFilterParts = [
+      'isExternal = 1',
+      'status = 1',
+      'executed = 1',
+      'allocationId IS NOT NULL',
+      'exists (select 1 from TransferWorkSpace t where t.id = [Transfer].transferWorkSpaceId AND t.closed = 1)'
+    ];
+
+    if (Number.isInteger(workspaceId) && workspaceId > 0) {
+      transferFilterParts.push(`transferWorkspaceId = ${workspaceId}`);
+    }
+    if (Number.isInteger(transferId) && transferId > 0) {
+      transferFilterParts.push(`id = ${transferId}`);
+    }
+    if (hasAmount && Number.isFinite(amount)) {
+      transferFilterParts.push(`amount >= ${amount}`);
+      transferFilterParts.push(`amount <= ${amount}`);
+    }
+    if (source.fromDate) {
+      transferFilterParts.push(`date >= '${escapeSqlString(source.fromDate)}'`);
+    }
+    if (source.toDate) {
+      transferFilterParts.push(`date <= '${escapeSqlString(source.toDate)}'`);
+    }
+
+    setPremiumReversalLoading(true);
+    exe('RepoTransfer', {
+      operation: 'GET',
+      filter: transferFilterParts.join(' AND '),
+      include: ['SplitPayments', 'IncomeType', 'Allocation', 'Allocation.InstallmentPremiums'],
+      size: cashier ? 0 : pageSize,
+      page: cashier ? 0 : Math.max(currentPage - 1, 0)
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Premium reversals could not be loaded.'));
+        }
+
+        const allGroups = getRows(response);
+        const rows = allGroups.map((group, index) => {
+          const children = getMovementChildren(group);
+          const first = children[0] || {};
+          const policyValues = getPolicyValues(group);
+          const policies = policyValues.join('\n');
+
+          return {
+            ...first,
+            ...group,
+            id: group.id || first.id || `allocation-${index}`,
+            amount: Number(group.amount !== undefined && group.amount !== null ? group.amount : first.amount || 0),
+            lifePolicyId: policies
+          };
+        });
+        if (cashier) {
+          const filteredRows = rows.filter(item => getTrimmedString(item && item.user).toLowerCase().indexOf(cashier) >= 0);
+          const start = (currentPage - 1) * pageSize;
+          setPremiumReversalRows(filteredRows.slice(start, start + pageSize));
+          setPremiumReversalTotal(filteredRows.length);
+          setPremiumReversalPagination({ current: currentPage, pageSize: pageSize });
+          return;
+        }
+
+        setPremiumReversalRows(rows);
+        setPremiumReversalTotal(getResponseTotal(response, rows));
+        setPremiumReversalPagination({ current: currentPage, pageSize: pageSize });
+      })
+      .catch(error => {
+        setPremiumReversalRows([]);
+        setPremiumReversalTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => {
+        setPremiumReversalLoading(false);
+      });
+  }
+
+  function openPremiumReversalModal() {
+    setPremiumReversalFilters({});
+    premiumReversalFilterForm.resetFields();
+    setPremiumReversalVisible(true);
+  }
+
+  function applyPremiumReversalFilters(values) {
+    const workspaceId = Number(values && values.workspaceId);
+    const transferId = Number(values && values.transferId);
+    const rawAmount = values && values.amount;
+    const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== '';
+    const nextFilters = {
+      workspaceId: Number.isInteger(workspaceId) && workspaceId > 0 ? workspaceId : null,
+      cashier: getTrimmedString(values && values.cashier),
+      transferId: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+      amount: hasAmount && Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : null,
+      fromDate: formatTransferFilterBoundary(values && values.dateFrom, false),
+      toDate: formatTransferFilterBoundary(values && values.dateTo, true)
+    };
+    setPremiumReversalFilters(nextFilters);
+    loadPremiumReversalMovements({
+      filters: nextFilters,
+      pagination: { current: 1, pageSize: premiumReversalPagination.pageSize }
+    });
+  }
+
+  function clearPremiumReversalFilters() {
+    premiumReversalFilterForm.resetFields();
+    setPremiumReversalFilters({});
+    setPremiumReversalRows([]);
+    setPremiumReversalTotal(0);
+    setPremiumReversalPagination({ current: 1, pageSize: premiumReversalPagination.pageSize });
+  }
+
+  function handlePremiumReversalTableChange(pagination) {
+    loadPremiumReversalMovements({
+      filters: premiumReversalFilters,
+      pagination: { current: pagination.current, pageSize: pagination.pageSize }
+    });
+  }
+
   function loadMovements(params = {}) {
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
     if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
@@ -6090,6 +6300,7 @@
     const reversalPayload = reversalCommand === 'UnDoPaymentAllocation'
       ? {
           allocationId: allocationId,
+          workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null,
           reversalCause: cause,
           reversalSubcause: subcause,
           jReversalFormValues: reversalFormValues
@@ -6114,6 +6325,12 @@
         setReversalVisible(false);
         setReversalRecord(null);
         loadMovements({ pagination: movementPagination });
+        if (premiumReversalVisible) {
+          loadPremiumReversalMovements({
+            filters: premiumReversalFilters,
+            pagination: premiumReversalPagination
+          });
+        }
       })
       .catch(error => message.error(error && error.message ? error.message : String(error)))
       .finally(() => setReversalLoading(false));
@@ -6239,7 +6456,7 @@
       width: 125,
       align: 'center',
       render: (_, record) => (
-        <span
+      <span
           style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           onClick={event => event.stopPropagation()}
         >
@@ -6402,6 +6619,110 @@
       align: 'right',
       render: value => <span style={{ color: Number(value) < 0 ? '#ff4d4f' : undefined }}>{formatMoney(value)}</span>
     }
+  ];
+
+  const premiumReversalColumns = [
+    {
+      title: t('Actions'),
+      key: 'actions',
+      width: 70,
+      align: 'center',
+      render: (_, record) => {
+        const first = getMovementFirst(record);
+        const executed = Boolean(first && (first.executed || first.status));
+        const reverted = isMovementReverted(record);
+        const isReversal = [record].concat(getMovementChildren(record)).some(item =>
+          Boolean(item && (item.reversalOfId || item.ReversalOf))
+        );
+
+        return (
+          <Tooltip title={t('Revert movement')}>
+            <Button
+              type="link"
+              size="small"
+              aria-label={t('Revert movement')}
+              disabled={!executed || reverted || isReversal}
+              onClick={() => openReversalModal(record)}
+              icon={<RevertMovementIcon />}
+            />
+          </Tooltip>
+        );
+      }
+    },
+    { title: t('ID'), dataIndex: 'id', key: 'id', width: 80, align: 'center' },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 110, render: formatDateIso },
+    {
+      title: t('Origin'),
+      key: 'origin',
+      width: 125,
+      render: (_, record) => renderPremiumReversalText(record && (record.sourceName || record.sourceExternal || record.sourceAccountId), 105)
+    },
+    {
+      title: t('Destination'),
+      key: 'destination',
+      width: 150,
+      render: (_, record) => renderPremiumReversalText(getPremiumReversalDestinationNames(record), 130)
+    },
+    {
+      title: t('Reference'),
+      key: 'reference',
+      width: 160,
+      render: (_, record) => renderPremiumReversalText(record && (record.reference || record.concept), 140)
+    },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
+    { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
+    { title: t('Type'), key: 'type', width: 135, render: (_, record) => renderPremiumReversalText(getPremiumReversalType(record), 115) },
+    { title: t('Payment method'), key: 'paymentMethod', width: 125, render: (_, record) => renderPremiumReversalText(getPremiumReversalPaymentMethods(record), 105) },
+    {
+      title: t('Policy ID'),
+      key: 'lifePolicyId',
+      width: 105,
+      align: 'center',
+      render: (_, record) => {
+        const policyIds = getPremiumReversalPolicyIds(record);
+        return policyIds.length > 0
+          ? (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, lineHeight: 1.1 }}>
+              {policyIds.map(policyId => (
+                <Button
+                  key={policyId}
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto', lineHeight: 1.1, fontSize: 11 }}
+                  onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+                >
+                  {policyId}
+                </Button>
+              ))}
+            </div>
+          )
+          : '-';
+      }
+    },
+    {
+      title: t('Allocation'),
+      dataIndex: 'allocationId',
+      key: 'allocationId',
+      width: 105,
+      align: 'center',
+      render: value => {
+        const allocationId = Number(value);
+        return Number.isInteger(allocationId) && allocationId > 0
+          ? (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => window.open(`#/allocation?id=${allocationId}`, '_blank', 'noopener,noreferrer')}
+            >
+              {allocationId}
+            </Button>
+          )
+          : '-';
+      }
+    },
+    { title: t('Cash desk ID'), dataIndex: 'transferWorkspaceId', key: 'transferWorkspaceId', width: 105, align: 'center', render: value => value || '-' },
+    { title: t('User'), dataIndex: 'user', key: 'user', width: 180, render: value => renderPremiumReversalText(value, 160) }
   ];
 
   const movementColumns = [
@@ -6567,7 +6888,7 @@
                 },
                 {
                   key: 'detailed-cash-desk-audit',
-                  label: t('Detailed cash desk audit'),
+                  label: t('Cash Closing Reportt'),
                   onClick: openDetailedCashDeskAuditReport
                 }
               ]
@@ -6901,6 +7222,13 @@
           disabled={!selectedCashierRow}
         >
           {t('Filter')}
+        </Button>
+        <Button
+          className="cashier-supervisor-outline-button"
+          icon={<RevertMovementIcon />}
+          onClick={openPremiumReversalModal}
+        >
+          {t('Premium reversals')}
         </Button>
         <Dropdown
           trigger={['click']}
@@ -8285,6 +8613,78 @@
                 )
               }
             ]}
+          />
+        </Modal>
+
+        <Modal
+          title={t('Premium reversals')}
+          open={premiumReversalVisible}
+          onCancel={() => setPremiumReversalVisible(false)}
+          footer={null}
+          width={1160}
+          destroyOnClose={false}
+        >
+          <Form
+            form={premiumReversalFilterForm}
+            layout="vertical"
+            onFinish={applyPremiumReversalFilters}
+          >
+            <Row gutter={12}>
+              <Col span={6}>
+                <Form.Item label={t('Cash desk ID')} name="workspaceId">
+                  <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item label={t('Cashier')} name="cashier">
+                  <Input allowClear />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item label={t('Transfer ID')} name="transferId">
+                  <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item label={t('Amount')} name="amount">
+                  <InputNumber precision={2} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item label={t('Start date')} name="dateFrom">
+                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" allowClear />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item label={t('End date')} name="dateTo">
+                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" allowClear />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Space>
+              <Button onClick={clearPremiumReversalFilters}>{t('Clear')}</Button>
+              <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
+                {t('Search')}
+              </Button>
+            </Space>
+          </Form>
+          <Table
+            rowKey="id"
+            columns={premiumReversalColumns}
+            dataSource={premiumReversalRows}
+            size="small"
+            bordered
+            className="cashier-premium-reversal-table"
+            loading={premiumReversalLoading}
+            pagination={{
+              current: premiumReversalPagination.current,
+              pageSize: premiumReversalPagination.pageSize,
+              total: premiumReversalTotal,
+              showSizeChanger: true,
+              pageSizeOptions: ['15', '25', '50', '100']
+            }}
+            onChange={handlePremiumReversalTableChange}
+            scroll={{ x: 1500, y: 420 }}
           />
         </Modal>
 

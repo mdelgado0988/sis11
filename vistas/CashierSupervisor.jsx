@@ -2,6 +2,7 @@
   const {
     Button,
     Card,
+    Checkbox,
     Col,
     DatePicker,
     Descriptions,
@@ -10,16 +11,15 @@
     Dropdown,
     Layout,
     InputNumber,
-    Menu,
     Row,
     Select,
     Space,
+    Spin,
     Table,
-    Tabs,
     Tag,
+    Tooltip,
     message
   } = A;
-  const { TabPane } = Tabs;
   const { Option } = Select;
 
   const tabIconStyle = {
@@ -93,17 +93,50 @@
     </TabIcon>
   );
 
+  const RefreshIcon = () => (
+    <TabIcon label="refresh">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M480 128c-194.4 0-352 157.6-352 352s157.6 352 352 352c98.1 0 187-40.1 250.8-104.8l-56.6-56.6C626.8 718.6 557.3 752 480 752c-150.2 0-272-121.8-272-272s121.8-272 272-272c73.4 0 139.9 29.1 189 76.4L576 368h224V144l-74.2 74.2C662.6 162.5 577.1 128 480 128z"></path>
+      </svg>
+    </TabIcon>
+  );
+
+  const ExportIcon = () => (
+    <TabIcon label="export">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M480 96l192 192h-96v224h-192V288h-96L480 96zm-288 544h96v96h384v-96h96v192H192V640z"></path>
+      </svg>
+    </TabIcon>
+  );
+
   const [form] = Form.useForm();
   const [searchVisible, setSearchVisible] = React.useState(false);
   const [branches, setBranches] = React.useState([]);
   const [cashiers, setCashiers] = React.useState([]);
   const [cashierLoading, setCashierLoading] = React.useState(false);
   const [selectedCashierRow, setSelectedCashierRow] = React.useState(null);
+  const [activeTab, setActiveTab] = React.useState('cash-desks');
   const [transferRows, setTransferRows] = React.useState([]);
   const [transferLoading, setTransferLoading] = React.useState(false);
   const [transferPagination, setTransferPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transferTotal, setTransferTotal] = React.useState(0);
   const [transferScrollY, setTransferScrollY] = React.useState(420);
+  const [movementRows, setMovementRows] = React.useState([]);
+  const [movementLoading, setMovementLoading] = React.useState(false);
+  const [movementExportLoading, setMovementExportLoading] = React.useState(false);
+  const [movementPagination, setMovementPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [movementTotal, setMovementTotal] = React.useState(0);
+  const [movementFilters, setMovementFilters] = React.useState({});
+  const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
+  const [movementFilterForm] = Form.useForm();
+  const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
+  const [movementReports, setMovementReports] = React.useState([]);
+  const [movementIncomeTypes, setMovementIncomeTypes] = React.useState([]);
+  const [paidPremiumRows, setPaidPremiumRows] = React.useState([]);
+  const [paidPremiumLoading, setPaidPremiumLoading] = React.useState(false);
+  const [paidPremiumExportLoading, setPaidPremiumExportLoading] = React.useState(false);
+  const [paidPremiumPagination, setPaidPremiumPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [paidPremiumTotal, setPaidPremiumTotal] = React.useState(0);
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
@@ -235,6 +268,56 @@
         flex: 0 0 auto;
       }
 
+      .cashier-supervisor-tab-bar {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 2px;
+        border-bottom: 1px solid #d9d9d9;
+      }
+
+      .cashier-supervisor-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid transparent;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: #262626;
+        cursor: pointer;
+        padding: 9px 14px;
+        font: inherit;
+        line-height: 20px;
+      }
+
+      .cashier-supervisor-tab:hover {
+        color: #1677ff;
+        background: #fafafa;
+      }
+
+      .cashier-supervisor-tab:disabled {
+        color: #bfbfbf;
+        cursor: not-allowed;
+        background: transparent;
+      }
+
+      .cashier-supervisor-tab.active {
+        color: #1677ff;
+        border-bottom-color: #1677ff;
+      }
+
+      .cashier-supervisor-tab-content {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: auto;
+      }
+
+      .cashier-supervisor-tab-content > .ant-card {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
       .cashier-supervisor-view .ant-tabs {
         flex: 1 1 auto;
         display: flex;
@@ -295,6 +378,82 @@
       .cashier-supervisor-view .cashier-supervisor-table .ant-table-body {
         overflow: auto !important;
       }
+
+      .cashier-supervisor-paid-premium-summary {
+        padding: 8px 14px 10px 34px;
+        background: #fafafa;
+        font-size: 12px;
+        line-height: 20px;
+      }
+
+      .cashier-supervisor-paid-premium-summary-title {
+        font-weight: 600;
+        color: #262626;
+      }
+
+      .cashier-supervisor-paid-premium-summary-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+        color: #434343;
+      }
+
+      .cashier-supervisor-paid-premium-summary-complementary {
+        margin-top: 2px;
+      }
+
+      .cashier-supervisor-reference-cell {
+        display: block;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: help;
+      }
+
+      .cashier-supervisor-destination-cell {
+        display: block;
+        max-width: 145px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: help;
+      }
+
+      .cashier-supervisor-user-email {
+        color: #1677ff;
+        cursor: pointer;
+        white-space: normal;
+      }
+
+      .cashier-supervisor-payment-methods {
+        font-size: 11px;
+        line-height: 1.2;
+        white-space: normal;
+        word-break: break-word;
+        cursor: pointer;
+        color: #1677ff;
+      }
+
+      .cashier-supervisor-shell .ant-checkbox-inner {
+        border-color: #5b6573;
+      }
+
+      .cashier-supervisor-shell .ant-checkbox:hover .ant-checkbox-inner,
+      .cashier-supervisor-shell .ant-checkbox-wrapper:hover .ant-checkbox-inner {
+        border-color: #1f2937;
+      }
+
+      .cashier-supervisor-shell .ant-radio-inner {
+        border-color: #5b6573;
+        border-width: 2px;
+      }
+
+      .cashier-supervisor-shell .ant-radio:hover .ant-radio-inner,
+      .cashier-supervisor-shell .ant-radio-wrapper:hover .ant-radio-inner {
+        border-color: #1f2937;
+      }
     `;
     document.head.appendChild(style);
 
@@ -306,6 +465,8 @@
 
   React.useEffect(() => {
     loadBranches();
+    loadSupervisorMovementIncomeTypes();
+    loadSupervisorMovementReports();
     applyCurrentMonthDefaults();
 
     const previousBodyOverflow = document.body.style.overflow;
@@ -359,6 +520,29 @@
     };
   }, []);
 
+  React.useEffect(() => {
+    setMovementRows([]);
+    setMovementTotal(0);
+    setMovementSelectedRowKeys([]);
+    setPaidPremiumRows([]);
+    setPaidPremiumTotal(0);
+    if (selectedCashierRow && selectedCashierRow.id) {
+      loadSupervisorMovements({
+        pagination: { current: 1, pageSize: movementPagination.pageSize },
+        filters: movementFilters
+      });
+      loadSupervisorPaidPremiums({
+        pagination: { current: 1, pageSize: paidPremiumPagination.pageSize }
+      });
+    }
+  }, [selectedCashierRow && selectedCashierRow.id]);
+
+  React.useEffect(() => {
+    if (!selectedCashierRow && activeTab !== 'cash-desks') {
+      setActiveTab('cash-desks');
+    }
+  }, [selectedCashierRow, activeTab]);
+
   const premiumRows = [
     { id: 1, payment: 'ROC-000001', policy: 'POL-000001', installment: 1, premium: 120, expenses: 0, tax: 8.4, interest: 0, total: 128.4 },
     { id: 2, payment: 'ROC-000002', policy: 'POL-000002', installment: 1, premium: 95, expenses: 0, tax: 6.65, interest: 0, total: 101.65 }
@@ -398,6 +582,662 @@
       return String(value);
     }
     return date.toLocaleString('es-ES');
+  }
+
+  function getSupervisorMovementChildren(group) {
+    if (!group) return [];
+    if (Array.isArray(group.AllocationMovements)) return group.AllocationMovements;
+    if (Array.isArray(group.movements)) return group.movements;
+    if (Array.isArray(group.Movements)) return group.Movements;
+    return [];
+  }
+
+  function getSupervisorMovementFirst(group) {
+    return getSupervisorMovementChildren(group)[0] || group || {};
+  }
+
+  function getSupervisorMovementValues(group, field) {
+    const values = [group].concat(getSupervisorMovementChildren(group))
+      .map(item => item && item[field])
+      .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
+      .map(value => String(value));
+    return Array.from(new Set(values));
+  }
+
+  function getSupervisorMovementNames(group, relation, field) {
+    const values = [group].concat(getSupervisorMovementChildren(group))
+      .map(item => item && item[relation] && item[relation][field])
+      .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
+      .map(value => String(value));
+    return Array.from(new Set(values));
+  }
+
+  function getSupervisorDestinationAccounts(group) {
+    const values = [group].concat(getSupervisorMovementChildren(group))
+      .map(item => {
+        const account = item && item.DestinationAccount;
+        const id = Number(account && (account.id || account.accountId) || item && item.destinationAccountId || 0);
+        const accNo = account && account.accNo ? String(account.accNo) : '';
+        const name = account && account.name ? String(account.name) : '';
+        return { id, accNo, name };
+      })
+      .filter(item => item.id > 0 || item.accNo || item.name);
+
+    return values.filter((value, index, items) => items.findIndex(item =>
+      (value.id > 0 && item.id === value.id) ||
+      (value.id <= 0 && value.accNo && item.accNo === value.accNo) ||
+      (value.id <= 0 && !value.accNo && item.name === value.name)
+    ) === index);
+  }
+
+  function getSupervisorPolicyIds(group) {
+    const values = [];
+    const add = value => {
+      const id = Number(value);
+      if (Number.isFinite(id) && id > 0 && values.indexOf(id) < 0) values.push(id);
+    };
+
+    [group].concat(getSupervisorMovementChildren(group)).forEach(item => {
+      add(item && item.lifePolicyId);
+      add(item && item.policyId);
+
+      const allocations = [item && item.Allocation, item && item.allocation]
+        .filter(allocation => allocation);
+      allocations.forEach(allocation => {
+        const installments = allocation.InstallmentPremiums || allocation.installmentPremiums;
+        if (Array.isArray(installments)) {
+          installments.forEach(installment => add(installment && installment.lifePolicyId));
+        }
+      });
+
+      const installments = item && (item.InstallmentPremiums || item.installmentPremiums);
+      if (Array.isArray(installments)) {
+        installments.forEach(installment => add(installment && installment.lifePolicyId));
+      }
+    });
+    return values;
+  }
+
+  function renderSupervisorMovementValues(group, field) {
+    const values = getSupervisorMovementValues(group, field);
+    return values.length ? values.join(', ') : '-';
+  }
+
+  function renderSupervisorMovementReference(group) {
+    const reference = renderSupervisorMovementValues(group, 'concept');
+    if (reference === '-') return reference;
+
+    return (
+      <Tooltip title={reference}>
+        <span className="cashier-supervisor-reference-cell">{reference}</span>
+      </Tooltip>
+    );
+  }
+
+  function renderSupervisorMovementUser(group) {
+    const values = [group].concat(getSupervisorMovementChildren(group))
+      .map(item => String(item && item.user || '').trim())
+      .filter(value => value);
+    const uniqueValues = Array.from(new Set(values));
+    if (uniqueValues.length === 0) return '-';
+
+    const displayValues = uniqueValues.map(value => value.split('@')[0]);
+    return (
+      <Tooltip trigger={['click']} title={uniqueValues.join(', ')}>
+        <span className="cashier-supervisor-user-email">
+          {displayValues.join(', ')}
+        </span>
+      </Tooltip>
+    );
+  }
+
+  function renderSupervisorPolicies(group) {
+    const policies = getSupervisorPolicyIds(group);
+    if (!policies.length) return '-';
+    return (
+      <div style={{ fontSize: 11, lineHeight: 1.2 }}>
+        {policies.map(policyId => (
+          <div key={policyId}>
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
+              onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+            >
+              {policyId}
+            </Button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderSupervisorMovementStatus(group) {
+    const item = getSupervisorMovementFirst(group);
+    const reverted = Boolean(item && (item.reversalDate || item.reversalOfId || item.reversed));
+    return <Tag color={reverted ? 'error' : 'success'}>{t(reverted ? 'Reverted' : 'Executed')}</Tag>;
+  }
+
+  function renderSupervisorMovementDestination(group) {
+    const accounts = getSupervisorDestinationAccounts(group);
+    if (accounts.length > 0) {
+      const labels = accounts.map(account => account.name || account.accNo || account.id);
+      return (
+        <Tooltip title={labels.join(', ')}>
+          <div className="cashier-supervisor-destination-cell">
+            {accounts.map((account, index) => {
+              const label = account.name || account.accNo || account.id;
+              const content = account.id > 0
+                ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, height: 'auto', lineHeight: 1.2, display: 'inline', maxWidth: '100%' }}
+                    onClick={() => window.open(`#/account/${account.id}`, '_blank', 'noopener,noreferrer')}
+                  >
+                    {label}
+                  </Button>
+                )
+                : label;
+
+              return (
+                <span key={`${account.id || account.accNo || label}-${index}`}>
+                  {index > 0 ? ', ' : ''}{content}
+                </span>
+              );
+            })}
+          </div>
+        </Tooltip>
+      );
+    }
+
+    return renderSupervisorMovementValues(group, 'destinationAccountId');
+  }
+
+  function getSupervisorPaymentMethodValues(group) {
+    const values = [];
+    const items = [group].concat(getSupervisorMovementChildren(group));
+
+    items.forEach(item => {
+      const splitPayments = item && Array.isArray(item.SplitPayments) ? item.SplitPayments : [];
+      splitPayments.forEach(payment => {
+        const name = payment && (payment.paymentMethodName || (payment.PaymentMethod && payment.PaymentMethod.name));
+        if (name) values.push(String(name));
+      });
+
+      const directName = item && item.PaymentMethod && item.PaymentMethod.name;
+      if (directName) values.push(String(directName));
+    });
+
+    return Array.from(new Set(values));
+  }
+
+  function getSupervisorPaymentMethodAbbreviation(value) {
+    const normalized = String(value || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+
+    if (normalized === 'CHEQUE') return 'CHE';
+    if (normalized === 'TARJETA DE CREDITO') return 'TC';
+    if (normalized === 'EFECTIVO') return 'EFE';
+
+    return normalized.replace(/[^A-Z0-9]/g, '').slice(0, 3) || '-';
+  }
+
+  function renderSupervisorMovementPaymentMethods(group) {
+    const values = getSupervisorPaymentMethodValues(group);
+    if (values.length === 0) return '-';
+
+    return (
+      <Tooltip trigger={['click']} title={values.join(', ')}>
+        <span className="cashier-supervisor-payment-methods">
+          {values.map(getSupervisorPaymentMethodAbbreviation).join(', ')}
+        </span>
+      </Tooltip>
+    );
+  }
+
+  function getSupervisorAllocationIds(group) {
+    const values = [group].concat(getSupervisorMovementChildren(group))
+      .map(item => Number(item && (item.allocationId || item.Allocation && item.Allocation.id) || 0))
+      .filter(value => Number.isFinite(value) && value > 0);
+    return Array.from(new Set(values));
+  }
+
+  function renderSupervisorAllocations(group) {
+    const allocations = getSupervisorAllocationIds(group);
+    if (!allocations.length) return '-';
+
+    return allocations.map(allocationId => (
+      <div key={allocationId}>
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
+          onClick={() => window.open(`#/allocation?id=${allocationId}`, '_blank', 'noopener,noreferrer')}
+        >
+          {allocationId}
+        </Button>
+      </div>
+    ));
+  }
+
+  function getSupervisorAppliedInstallments(group) {
+    const values = [];
+    const items = [group].concat(getSupervisorMovementChildren(group));
+
+    items.forEach(item => {
+      const allocations = [item && item.Allocation, item && item.allocation]
+        .filter(allocation => allocation);
+      allocations.forEach(allocation => {
+        const installments = allocation.InstallmentPremiums || allocation.installmentPremiums;
+        if (Array.isArray(installments)) values.push(...installments);
+      });
+
+      const installments = item && (item.InstallmentPremiums || item.installmentPremiums);
+      if (Array.isArray(installments)) values.push(...installments);
+    });
+
+    return values.filter((value, index, items) => items.findIndex(item =>
+      (value && value.id && item && item.id === value.id) ||
+      (value && !value.id && item && item.payPlanId === value.payPlanId && item.lifePolicyId === value.lifePolicyId)
+    ) === index);
+  }
+
+  const paidPremiumInstallmentColumns = [
+    { title: t('Installment'), key: 'installment', width: 90, align: 'center', render: (_, item) => item && (item.numberInYear || item.number || item.payPlanId) || '-' },
+    {
+      title: t('Policy ID'),
+      key: 'policyId',
+      width: 100,
+      align: 'center',
+      render: (_, item) => {
+        const policyId = Number(item && item.lifePolicyId);
+        return policyId > 0
+          ? (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto', fontSize: 11 }}
+              onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+            >
+              {policyId}
+            </Button>
+          )
+          : '-';
+      }
+    },
+    { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 115, align: 'center', render: formatDate },
+    {
+      title: t('Amount applied'),
+      key: 'amountApplied',
+      width: 125,
+      align: 'right',
+      render: (_, item) => formatMoney(item && item.amount !== undefined && item.amount !== null
+        ? item.amount
+        : item && item.minimum !== undefined && item.minimum !== null ? item.minimum : 0)
+    }
+  ];
+
+  function renderPaidPremiumSummary(group) {
+    const installments = getSupervisorAppliedInstallments(group);
+    const sortedInstallments = installments.slice().sort((first, second) => {
+      const firstPolicyId = Number(first && first.lifePolicyId || 0);
+      const secondPolicyId = Number(second && second.lifePolicyId || 0);
+      if (firstPolicyId !== secondPolicyId) return firstPolicyId - secondPolicyId;
+
+      const firstReference = Number(first && (first.id || first.payPlanId || first.numberInYear) || 0);
+      const secondReference = Number(second && (second.id || second.payPlanId || second.numberInYear) || 0);
+      return firstReference - secondReference;
+    });
+    const currencyValues = getSupervisorMovementValues(group, 'currency');
+    const currency = currencyValues.length ? currencyValues[0] : '';
+
+    return (
+      <div className="cashier-supervisor-paid-premium-summary">
+        <div className="cashier-supervisor-paid-premium-summary-title">
+          {t('Installment Premiums')}:
+        </div>
+        {sortedInstallments.map((installment, index) => {
+          const amount = Number(installment && installment.moneyInAmount !== undefined
+            ? installment.moneyInAmount
+            : 0) || 0;
+          const policyId = Number(installment && installment.lifePolicyId || 0);
+          const reference = installment && (installment.id || installment.payPlanId || installment.numberInYear);
+
+          return (
+            <div key={`${reference || 'installment'}-${index}`} className="cashier-supervisor-paid-premium-summary-line">
+              <span>{t('Ref')}:{reference || '-'}</span>
+              <span>{t('Amount')}:{formatMoney(amount)}</span>
+              <span>{currency}</span>
+              <span>{t('Policy')}:</span>
+              {policyId > 0 ? (
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
+                  onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+                >
+                  {policyId}
+                </Button>
+              ) : '-'}
+            </div>
+          );
+        })}
+        <div className="cashier-supervisor-paid-premium-summary-title cashier-supervisor-paid-premium-summary-complementary">
+          {t('Supplementary Premiums')}:
+        </div>
+      </div>
+    );
+  }
+
+  function renderSupervisorMovementIncomeTypes(group) {
+    const values = getSupervisorMovementNames(group, 'IncomeType', 'name');
+    return values.length ? values.join(', ') : renderSupervisorMovementValues(group, 'incomeType');
+  }
+
+  function getSupervisorMovementFilterValues() {
+    const values = movementFilterForm.getFieldsValue();
+    return {
+      pending: values && values.pending === true,
+      transferId: values && values.transferId,
+      amount: values && values.amount,
+      incomeType: values && values.incomeType
+    };
+  }
+
+  function loadSupervisorMovementReports() {
+    exe('RepoConfigProfile', { operation: 'GET', filter: null, size: 0, page: 0 })
+      .then(response => {
+        if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Reports could not be loaded.'));
+        const profile = getRows(response)[0] || {};
+        let config = profile.configJson || profile.config || {};
+        if (typeof config === 'string') {
+          try { config = JSON.parse(config); } catch (error) { config = {}; }
+        }
+        const reports = config && config.Cashier && Array.isArray(config.Cashier.reports) ? config.Cashier.reports : [];
+        setMovementReports(reports.filter(report => report && report.name && report.report));
+      })
+      .catch(error => {
+        setMovementReports([]);
+        message.error(error && error.message ? error.message : String(error));
+      });
+  }
+
+  function loadSupervisorMovementIncomeTypes() {
+    exe('RepoIncomeTypeCatalog', { operation: 'GET' })
+      .then(response => {
+        if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Income types could not be loaded.'));
+        setMovementIncomeTypes(getRows(response).map(item => ({
+          value: item && item.code,
+          label: getTrimmedString(item && (item.name || item.code))
+        })).filter(item => item.value !== undefined && item.value !== null && item.value !== ''));
+      })
+      .catch(error => {
+        setMovementIncomeTypes([]);
+        message.error(error && error.message ? error.message : String(error));
+      });
+  }
+
+  function loadSupervisorMovements(params = {}) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      setMovementRows([]);
+      setMovementTotal(0);
+      return;
+    }
+
+    const pagination = params.pagination || movementPagination;
+    const filters = params.filters || movementFilters;
+    const rawAmount = filters && filters.amount;
+    const amount = Number(rawAmount);
+    const hasAmount = rawAmount !== undefined && rawAmount !== null && rawAmount !== '' && Number.isFinite(amount);
+    const transferId = Number(filters && filters.transferId);
+
+    setMovementLoading(true);
+    exe('FilterTransfer', {
+      workspaceId,
+      groupByAllocation: true,
+      size: Number(pagination.pageSize) || 15,
+      page: Math.max((Number(pagination.current) || 1) - 1, 0),
+      currency: null,
+      allocated: null,
+      external: null,
+      executed: filters && filters.pending === true ? false : null,
+      concept: null,
+      minAmount: hasAmount ? amount : null,
+      maxAmount: hasAmount ? amount : null,
+      month: null,
+      claimPaymentId: null,
+      allocationId: null,
+      fromDate: null,
+      toDate: null,
+      id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+      paymentMethod: null,
+      incomeType: getTrimmedString(filters && filters.incomeType) || null
+    })
+      .then(response => {
+        if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
+        const rows = getRows(response).filter(group => !(filters && filters.pending === true && getSupervisorMovementFirst(group).reversalDate));
+        setMovementRows(rows);
+        setMovementTotal(getResponseTotal(response, rows));
+        setMovementPagination({ current: Number(pagination.current) || 1, pageSize: Number(pagination.pageSize) || 15 });
+        setMovementSelectedRowKeys([]);
+      })
+      .catch(error => {
+        setMovementRows([]);
+        setMovementTotal(0);
+        setMovementSelectedRowKeys([]);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setMovementLoading(false));
+  }
+
+  function loadSupervisorPaidPremiums(params = {}) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      setPaidPremiumRows([]);
+      setPaidPremiumTotal(0);
+      return;
+    }
+
+    const pagination = params.pagination || paidPremiumPagination;
+    setPaidPremiumLoading(true);
+    exe('FilterTransfer', {
+      workspaceId,
+      groupByAllocation: true,
+      size: Number(pagination.pageSize) || 15,
+      page: Math.max((Number(pagination.current) || 1) - 1, 0),
+      currency: null,
+      allocated: true,
+      external: null,
+      executed: true,
+      concept: null,
+      minAmount: null,
+      maxAmount: null,
+      month: null,
+      claimPaymentId: null,
+      allocationId: null,
+      fromDate: null,
+      toDate: null,
+      id: null,
+      paymentMethod: null,
+      incomeType: null
+    })
+      .then(response => {
+        if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Paid premiums could not be loaded.'));
+        const rows = getRows(response).filter(group => getSupervisorAllocationIds(group).length > 0);
+        setPaidPremiumRows(rows);
+        setPaidPremiumTotal(getResponseTotal(response, rows));
+        setPaidPremiumPagination({ current: Number(pagination.current) || 1, pageSize: Number(pagination.pageSize) || 15 });
+      })
+      .catch(error => {
+        setPaidPremiumRows([]);
+        setPaidPremiumTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setPaidPremiumLoading(false));
+  }
+
+  async function ensureSupervisorExcelLibrary() {
+    if (typeof XLSX !== 'undefined') return true;
+
+    const response = await exe('ExeChain', {
+      chain: 'cmdLoadLibrariesGroupedBordereau',
+      context: '{}'
+    });
+    const libraries = response && response.outData ? response.outData : {};
+    const xlsxLibrary = libraries.XLSX || libraries.xlsx || libraries.xlsxJs;
+
+    if (typeof xlsxLibrary === 'string') {
+      eval(xlsxLibrary);
+    } else if (xlsxLibrary) {
+      window.XLSX = xlsxLibrary;
+    }
+
+    return typeof XLSX !== 'undefined';
+  }
+
+  function getSupervisorExportDestination(group) {
+    return getSupervisorDestinationAccounts(group)
+      .map(account => account.name || account.accNo || account.id)
+      .join(', ');
+  }
+
+  async function exportPaidPremiums() {
+    if (!paidPremiumRows.length) {
+      message.info(t('There are no records to export.'));
+      return;
+    }
+
+    setPaidPremiumExportLoading(true);
+    try {
+      if (!await ensureSupervisorExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const exportRows = paidPremiumRows.map(group => {
+        const item = getSupervisorMovementFirst(group);
+        return {
+          [t('ID')]: item.id || group.id || '',
+          [t('Date')]: formatDate(group.date || item.date),
+          [t('Status')]: item.reversalDate || item.reversalOfId || item.reversed
+            ? t('Reverted')
+            : t('Executed'),
+          [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
+          [t('Destination')]: getSupervisorExportDestination(group),
+          [t('Reference')]: getSupervisorMovementValues(group, 'concept').join(', '),
+          [t('Received')]: Number(item.amount || 0),
+          [t('Amount')]: Number(group.amount || item.amount || 0),
+          [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
+          [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
+          [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
+          [t('Policy')]: getSupervisorPolicyIds(group).join(', '),
+          [t('Cashier ID')]: group.transferWorkspaceId || item.transferWorkspaceId || '',
+          [t('User')]: getSupervisorMovementValues(group, 'user').join(', '),
+          [t('Allocation')]: getSupervisorAllocationIds(group).join(', ')
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Paid premiums');
+      XLSX.writeFile(workbook, `paid-premiums-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setPaidPremiumExportLoading(false);
+    }
+  }
+
+  async function exportSupervisorMovements() {
+    if (!movementRows.length) {
+      message.info(t('There are no records to export.'));
+      return;
+    }
+
+    setMovementExportLoading(true);
+    try {
+      if (!await ensureSupervisorExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+      const filters = movementFilters || {};
+      const rawAmount = filters.amount;
+      const amount = Number(rawAmount);
+      const hasAmount = rawAmount !== undefined && rawAmount !== null && rawAmount !== '' && Number.isFinite(amount);
+      const transferId = Number(filters.transferId);
+      const exportResponse = await exe('FilterTransfer', {
+        workspaceId,
+        groupByAllocation: true,
+        size: Math.max(Number(movementTotal) || movementRows.length, movementRows.length),
+        page: 0,
+        currency: null,
+        allocated: null,
+        external: null,
+        executed: filters.pending === true ? false : null,
+        concept: null,
+        minAmount: hasAmount ? amount : null,
+        maxAmount: hasAmount ? amount : null,
+        month: null,
+        claimPaymentId: null,
+        allocationId: null,
+        fromDate: null,
+        toDate: null,
+        id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+        paymentMethod: null,
+        incomeType: getTrimmedString(filters.incomeType) || null
+      });
+      if (!exportResponse || exportResponse.ok === false) {
+        throw new Error(exportResponse && exportResponse.msg ? exportResponse.msg : t('Movements could not be loaded.'));
+      }
+
+      const exportGroups = getRows(exportResponse)
+        .filter(group => !(filters.pending === true && getSupervisorMovementFirst(group).reversalDate));
+      const exportRows = exportGroups.map(group => {
+        const item = getSupervisorMovementFirst(group);
+        return {
+          [t('ID')]: item.id || group.id || '',
+          [t('Date')]: formatDate(group.date || item.date),
+          [t('Status')]: item.reversalDate || item.reversalOfId || item.reversed
+            ? t('Reverted')
+            : t('Executed'),
+          [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
+          [t('Destination')]: getSupervisorExportDestination(group),
+          [t('Reference')]: getSupervisorMovementValues(group, 'concept').join(', '),
+          [t('Received')]: Number(item.amount || 0),
+          [t('Amount')]: Number(group.amount || item.amount || 0),
+          [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
+          [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
+          [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
+          [t('Policy')]: getSupervisorPolicyIds(group).join(', '),
+          [t('Cashier ID')]: group.transferWorkspaceId || item.transferWorkspaceId || '',
+          [t('User')]: getSupervisorMovementValues(group, 'user').join(', '),
+          [t('Allocation')]: getSupervisorAllocationIds(group).join(', ')
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Cash desk details');
+      XLSX.writeFile(workbook, `cash-desk-details-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setMovementExportLoading(false);
+    }
+  }
+
+  function openSupervisorMovementReport(report) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const reportName = getTrimmedString(report && report.report);
+    if (!workspaceId || !reportName) return;
+    const ids = movementSelectedRowKeys.map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0);
+    const transferId = ids.length ? `[${ids.join(',')}]` : '0';
+    window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`, '_blank', 'noopener,noreferrer');
   }
 
   function getMonthRange(dateLike) {
@@ -639,12 +1479,9 @@
           pageSize: pageSize
         });
 
-        if (rows.length > 0) {
-          const selected = selectedCashierRow && rows.find(item => Number(item && item.id) === Number(selectedCashierRow && selectedCashierRow.id));
-          setSelectedCashierRow(selected || rows[0]);
-        } else {
-          setSelectedCashierRow(null);
-        }
+        // The supervisor view starts without a selected cash desk.
+        // Selection is made explicitly by clicking a row.
+        setSelectedCashierRow(null);
       })
       .catch(error => {
         setTransferRows([]);
@@ -689,6 +1526,17 @@
 
     const workspaceId = selectedCashierRow.id;
     const url = `${window.location.origin}/#/reportview/ReporteDeIngresosCaja/workspaceId=${workspaceId}&transferId=0`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleOpenDetailedCashDeskAuditReport() {
+    if (!selectedCashierRow || !selectedCashierRow.id) {
+      message.warning(t('Please select a cash desk first'));
+      return;
+    }
+
+    const workspaceId = selectedCashierRow.id;
+    const url = `${window.location.origin}/#/reportview/${encodeURIComponent('Arqueo de Caja Detallado')}/TransferWorkSpaceId=${workspaceId}`;
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
@@ -740,19 +1588,34 @@
           </Tag>
         );
       }
-    },
-    {
-      title: t('Details'),
-      key: 'details',
-      width: 100,
-      align: 'center',
-      render: (_, record) => (
-        <Button type="link" size="small" onClick={() => setSelectedCashierRow(record)}>
-          {t('View')}
-        </Button>
-      )
     }
   ];
+
+  const supervisorMovementColumns = [
+    {
+      title: t('ID'),
+      key: 'id',
+      width: 90,
+      align: 'center',
+      render: (_, group) => getSupervisorMovementFirst(group).id || group.id || '-'
+    },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 105, render: formatDate },
+    { title: t('Status'), key: 'status', width: 95, render: (_, group) => renderSupervisorMovementStatus(group) },
+    { title: t('Origin'), key: 'origin', width: 125, render: (_, group) => renderSupervisorMovementValues(group, 'sourceExternal') },
+    { title: t('Destination'), key: 'destination', width: 170, render: (_, group) => renderSupervisorMovementDestination(group) },
+    { title: t('Reference'), key: 'reference', width: 180, render: (_, group) => renderSupervisorMovementReference(group) },
+    { title: t('Received'), key: 'received', width: 105, align: 'right', render: (_, group) => formatMoney(getSupervisorMovementFirst(group).amount) },
+    { title: t('Amount'), key: 'amount', width: 105, align: 'right', render: (_, group) => formatMoney(group.amount || getSupervisorMovementFirst(group).amount) },
+    { title: t('Currency'), key: 'currency', width: 80, align: 'center', render: (_, group) => renderSupervisorMovementValues(group, 'currency') },
+    { title: t('Payment method'), key: 'paymentMethod', width: 120, render: (_, group) => renderSupervisorMovementPaymentMethods(group) },
+    { title: t('Type'), key: 'type', width: 180, render: (_, group) => renderSupervisorMovementIncomeTypes(group) },
+    { title: t('Policy'), key: 'policy', width: 110, align: 'center', render: (_, group) => renderSupervisorPolicies(group) },
+    { title: t('Cashier ID'), dataIndex: 'transferWorkspaceId', key: 'transferWorkspaceId', width: 90, align: 'center' },
+    { title: t('User'), key: 'user', width: 160, render: (_, group) => renderSupervisorMovementUser(group) },
+    { title: t('Allocation'), key: 'allocation', width: 90, align: 'center', render: (_, group) => renderSupervisorAllocations(group) }
+  ];
+
+  const supervisorMovementDetailColumns = supervisorMovementColumns;
 
   const premiumColumns = [
     { title: t('Payment'), dataIndex: 'payment', key: 'payment', width: 130 },
@@ -772,6 +1635,121 @@
     { title: t('Balance in favor'), dataIndex: 'balance', key: 'balance', width: 150, align: 'right', render: formatMoney },
     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: formatMoney }
   ];
+
+  function applySupervisorMovementFilters(values) {
+    const filters = {
+      pending: values && values.pending === true,
+      transferId: values && values.transferId,
+      amount: values && values.amount,
+      incomeType: values && values.incomeType
+    };
+    setMovementFilters(filters);
+    setMovementFilterVisible(false);
+    loadSupervisorMovements({
+      filters,
+      pagination: { current: 1, pageSize: movementPagination.pageSize }
+    });
+  }
+
+  function clearSupervisorMovementFilters() {
+    movementFilterForm.resetFields();
+    applySupervisorMovementFilters({});
+  }
+
+  const supervisorMovementContent = (
+    <Spin spinning={movementExportLoading} tip={t('Exporting...')}>
+    <Card size="small">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Button
+          className="cashier-supervisor-outline-button"
+          onClick={() => setMovementFilterVisible(true)}
+          disabled={!selectedCashierRow}
+        >
+          {t('Filter')}
+        </Button>
+        <Dropdown
+          trigger={['click']}
+          placement="bottomLeft"
+          menu={{
+            items: movementReports.map((report, index) => ({
+              key: `${report.report}-${index}`,
+              label: t(report.name),
+              onClick: () => openSupervisorMovementReport(report)
+            }))
+          }}
+        >
+          <Button className="cashier-supervisor-outline-button" disabled={!selectedCashierRow || movementReports.length === 0}>
+            <ReportIcon /> {t('Reports')}
+          </Button>
+        </Dropdown>
+        <Button
+          className="cashier-supervisor-outline-button"
+          onClick={() => loadSupervisorMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } })}
+          loading={movementLoading}
+          disabled={!selectedCashierRow}
+        >
+          {t('Refresh')}
+        </Button>
+        <Button
+          type="primary"
+          onClick={exportSupervisorMovements}
+          loading={movementExportLoading}
+          disabled={!selectedCashierRow || movementRows.length === 0}
+        >
+          <ExportIcon /> {t('Export')}
+        </Button>
+      </div>
+      <Table
+        rowKey="id"
+        columns={supervisorMovementColumns}
+        dataSource={movementRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table"
+        loading={movementLoading}
+        rowSelection={{
+          type: 'radio',
+          selectedRowKeys: movementSelectedRowKeys,
+          onChange: keys => setMovementSelectedRowKeys(keys.length > 0 ? [keys[0]] : [])
+        }}
+        pagination={{
+          current: movementPagination.current,
+          pageSize: movementPagination.pageSize,
+          total: movementTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100']
+        }}
+        onChange={pagination => loadSupervisorMovements({
+          filters: movementFilters,
+          pagination: { current: pagination.current, pageSize: pagination.pageSize }
+        })}
+        onRow={record => ({
+          onClick: event => {
+            if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper')) return;
+            const key = record && record.id;
+            if (key !== undefined && key !== null) {
+              setMovementSelectedRowKeys([key]);
+            }
+          }
+        })}
+        scroll={{ x: 2200, y: transferScrollY }}
+        expandable={{
+          rowExpandable: record => getSupervisorMovementChildren(record).length > 0,
+          expandedRowRender: record => (
+            <Table
+              rowKey={(item, index) => `${item && item.id || 'movement'}-${index}`}
+              columns={supervisorMovementDetailColumns}
+              dataSource={getSupervisorMovementChildren(record)}
+              size="small"
+              pagination={false}
+              className="cashier-supervisor-installment-menu-table"
+            />
+          )
+        }}
+      />
+    </Card>
+    </Spin>
+  );
 
   function renderStatusBar() {
     const row = selectedCashierRow || {};
@@ -801,6 +1779,135 @@
     );
   }
 
+  const cashDeskTabContent = (
+    <Card size="small" title={t('Cash desk list')}>
+      <div className="cashier-supervisor-toolbar">
+        <Space wrap>
+          <Button type="primary" onClick={() => setSearchVisible(true)}>
+            <SearchIcon /> {t('Search')}
+          </Button>
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'cash-desk-audit',
+                  label: t('Detailed cash desk audit'),
+                  onClick: handleOpenCashDeskAudit
+                },
+                {
+                  key: 'cash-desk-audit-cashier-route',
+                  label: t('Cash Closing Report'),
+                  onClick: handleOpenDetailedCashDeskAuditReport
+                },
+                {
+                  key: 'cash-desk-detailed-breakdown',
+                  label: t('Cash Desk Detailed Breakdown'),
+                  onClick: handleOpenCashDeskDetailedBreakdown
+                }
+              ]
+            }}
+            trigger={['click']}
+          >
+            <Button>
+              <ReportIcon /> {t('Reports')}
+            </Button>
+          </Dropdown>
+        </Space>
+      </div>
+
+      <Table
+        rowKey="id"
+        columns={cashierColumns}
+        dataSource={transferRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table"
+        loading={transferLoading}
+        pagination={{
+          current: transferPagination.current,
+          pageSize: transferPagination.pageSize,
+          total: transferTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '25', '50', '100']
+        }}
+        onChange={handleTableChange}
+        scroll={{ x: 900, y: transferScrollY }}
+        rowClassName={record => selectedCashierRow && selectedCashierRow.id === record.id ? 'cashier-supervisor-selected-row' : ''}
+        onRow={record => ({
+          onClick: () => setSelectedCashierRow(record)
+        })}
+      />
+    </Card>
+  );
+
+  const premiumTabContent = (
+    <Card size="small" title={t('Paid premium list')}>
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Space>
+          <Button
+            className="cashier-supervisor-outline-button"
+            onClick={() => loadSupervisorPaidPremiums({
+              pagination: { current: 1, pageSize: paidPremiumPagination.pageSize }
+            })}
+            loading={paidPremiumLoading}
+            disabled={!selectedCashierRow}
+          >
+            <RefreshIcon />
+            {t('Refresh')}
+          </Button>
+          <Button
+            type="primary"
+            onClick={exportPaidPremiums}
+            loading={paidPremiumExportLoading}
+            disabled={!selectedCashierRow || paidPremiumRows.length === 0}
+          >
+            <ExportIcon />
+            {t('Export')}
+          </Button>
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        columns={supervisorMovementColumns}
+        dataSource={paidPremiumRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table"
+        loading={paidPremiumLoading}
+        pagination={{
+          current: paidPremiumPagination.current,
+          pageSize: paidPremiumPagination.pageSize,
+          total: paidPremiumTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100']
+        }}
+        onChange={pagination => loadSupervisorPaidPremiums({
+          pagination: { current: pagination.current, pageSize: pagination.pageSize }
+        })}
+        scroll={{ x: 2200, y: transferScrollY }}
+        expandable={{
+          rowExpandable: record => getSupervisorAppliedInstallments(record).length > 0,
+          expandedRowRender: record => renderPaidPremiumSummary(record)
+        }}
+      />
+    </Card>
+  );
+
+  const depositTabContent = (
+    <Card size="small" title={t('Deposit list')}>
+      <Table
+        rowKey="id"
+        columns={depositColumns}
+        dataSource={depositRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table"
+        pagination={{ pageSize: 20, showSizeChanger: false }}
+        scroll={{ x: 800 }}
+      />
+    </Card>
+  );
+
   return (
     <div className="cashier-supervisor-shell" ref={shellRef}>
         <Layout className="cashier-supervisor-layout">
@@ -809,117 +1916,30 @@
           </div>
 
           <div className="cashier-supervisor-center" ref={mainViewportRef}>
-            <div className="cashier-supervisor-view">
-          <Tabs defaultActiveKey="cash-desks" type="card">
-            <TabPane
-              key="cash-desks"
-              tab={<span><CashierIcon /> {t('Cash desks')}</span>}
-            >
-              <Card size="small" title={t('Cash desk list')}>
-                <div className="cashier-supervisor-toolbar">
-                  <Space wrap>
-                    <Button type="primary" onClick={() => setSearchVisible(true)}>
-                      <SearchIcon /> {t('Search')}
-                    </Button>
-                    <Dropdown
-                      overlay={(
-                        <Menu>
-                          <Menu.Item key="cash-desk-audit" onClick={handleOpenCashDeskAudit}>
-                            {t('Cash Desk Audit')}
-                          </Menu.Item>
-                          <Menu.Item key="cash-desk-detailed-breakdown" onClick={handleOpenCashDeskDetailedBreakdown}>
-                            {t('Cash Desk Detailed Breakdown')}
-                          </Menu.Item>
-                        </Menu>
-                      )}
-                      trigger={['click']}
-                    >
-                      <Button>
-                        <ReportIcon /> {t('Reports')}
-                      </Button>
-                    </Dropdown>
-                  </Space>
-                </div>
-
-                <Table
-                  rowKey="id"
-                  columns={cashierColumns}
-                  dataSource={transferRows}
-                  size="small"
-                  bordered
-                  className="cashier-supervisor-table"
-                  loading={transferLoading}
-                  pagination={{
-                    current: transferPagination.current,
-                    pageSize: transferPagination.pageSize,
-                    total: transferTotal,
-                    showSizeChanger: true,
-                    pageSizeOptions: ['10', '25', '50', '100']
-                  }}
-                  onChange={handleTableChange}
-                  scroll={{ x: 900, y: transferScrollY }}
-                  rowClassName={record => selectedCashierRow && selectedCashierRow.id === record.id ? 'cashier-supervisor-selected-row' : ''}
-                  onRow={record => ({
-                    onClick: () => setSelectedCashierRow(record)
-                  })}
-                />
-              </Card>
-            </TabPane>
-
-            <TabPane
-              key="details"
-              tab={<span><SummaryIcon /> {t('Cash desk details')}</span>}
-            >
-              <Card size="small" title={t('Selected cash desk summary')}>
-                <Descriptions bordered size="small" column={3}>
-                  <Descriptions.Item label={t('Branch')}>{selectedCashierRow ? getBranchLabel(selectedCashierRow) : '-'}</Descriptions.Item>
-                  <Descriptions.Item label={t('Cashier')}>{selectedCashierRow ? getCashierLabel(selectedCashierRow) : '-'}</Descriptions.Item>
-                  <Descriptions.Item label={t('Cash date')}>{selectedCashierRow ? formatDate(selectedCashierRow.date) : '-'}</Descriptions.Item>
-                  <Descriptions.Item label={t('Cash desk')}>{selectedCashierRow && selectedCashierRow.id || '-'}</Descriptions.Item>
-                  <Descriptions.Item label={t('Status')}>
-                    {selectedCashierRow ? t(selectedCashierRow.closed ? 'Closed' : 'Open') : '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('Posted')}>{selectedCashierRow && selectedCashierRow.posted ? t(selectedCashierRow.posted) : '-'}</Descriptions.Item>
-                </Descriptions>
-              </Card>
-            </TabPane>
-
-            <TabPane
-              key="premiums"
-              tab={<span><PremiumIcon /> {t('Paid premiums')}</span>}
-            >
-              <Card size="small" title={t('Paid premium list')}>
-                <Table
-                  rowKey="id"
-                  columns={premiumColumns}
-                  dataSource={premiumRows}
-                  size="small"
-                  bordered
-                  className="cashier-supervisor-table"
-                  pagination={{ pageSize: 20, showSizeChanger: false }}
-                  scroll={{ x: 900 }}
-                />
-              </Card>
-            </TabPane>
-
-            <TabPane
-              key="deposits"
-              tab={<span><DepositIcon /> {t('Premium deposits')}</span>}
-            >
-              <Card size="small" title={t('Deposit list')}>
-                <Table
-                  rowKey="id"
-                  columns={depositColumns}
-                  dataSource={depositRows}
-                  size="small"
-                  bordered
-                  className="cashier-supervisor-table"
-                  pagination={{ pageSize: 20, showSizeChanger: false }}
-                  scroll={{ x: 800 }}
-                />
-              </Card>
-            </TabPane>
-          </Tabs>
+          <div className="cashier-supervisor-view">
+          <div className="cashier-supervisor-tab-bar" role="tablist">
+            <button type="button" role="tab" aria-selected={activeTab === 'cash-desks'} className={`cashier-supervisor-tab${activeTab === 'cash-desks' ? ' active' : ''}`} onClick={() => setActiveTab('cash-desks')}>
+              <CashierIcon /> {t('Cash desks')}
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'details'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'details' ? ' active' : ''}`} onClick={() => setActiveTab('details')}>
+              <SummaryIcon /> {t('Cash desk details')}
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'premiums'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'premiums' ? ' active' : ''}`} onClick={() => setActiveTab('premiums')}>
+              <PremiumIcon /> {t('Paid premiums')}
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'deposits'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'deposits' ? ' active' : ''}`} onClick={() => setActiveTab('deposits')}>
+              <DepositIcon /> {t('Premium deposits')}
+            </button>
+          </div>
+          <div className="cashier-supervisor-tab-content" role="tabpanel">
+            {activeTab === 'cash-desks'
+              ? cashDeskTabContent
+              : activeTab === 'details'
+                ? supervisorMovementContent
+                : activeTab === 'premiums'
+                  ? premiumTabContent
+                  : depositTabContent}
+          </div>
             </div>
           </div>
         </Layout>
@@ -1001,6 +2021,40 @@
               <Button onClick={handleClearTransfers}>
                 {t('Clear')}
               </Button>
+            </Space>
+          </Form>
+        </Panel>
+
+        <Panel
+          title={t('Movement filters')}
+          className="cashier-supervisor-drawer"
+          placement="right"
+          width={360}
+          onClose={() => setMovementFilterVisible(false)}
+          visible={movementFilterVisible}
+        >
+          <Form form={movementFilterForm} layout="vertical" onFinish={applySupervisorMovementFilters}>
+            <Form.Item name="pending" valuePropName="checked">
+              <Checkbox>{t('Pending to execute')}</Checkbox>
+            </Form.Item>
+            <Form.Item label={t('Transfer ID')} name="transferId">
+              <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label={t('Amount')} name="amount">
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label={t('Income type')} name="incomeType">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={movementIncomeTypes}
+                placeholder={t('Select an income type')}
+              />
+            </Form.Item>
+            <Space>
+              <Button onClick={clearSupervisorMovementFilters}>{t('Clear')}</Button>
+              <Button type="primary" onClick={() => movementFilterForm.submit()}>{t('Apply')}</Button>
             </Space>
           </Form>
         </Panel>

@@ -14,6 +14,7 @@
  *           and then validates the workspace owner.
  *           If allocationId is provided, the command first resolves the workspace from Allocation.transferWorkspaceId
  *           and then validates the workspace owner.
+ *           The SUPERVISOR user bypasses the workspace ownership validation.
  *           If more than one identifier is provided, they must resolve to the same workspace.
  * @Output { ok, msg }
  */
@@ -26,6 +27,14 @@ try {
 
   if (!sysUser) {
     return { ok: false, msg: "No se recibió el usuario de contexto." };
+  }
+
+  if (sysUser === "supervisor") {
+    return {
+      ok: true,
+      msg: "OK",
+      skipped: true
+    };
   }
 
   const hasWorkspaceId = isValidId(transferWorkspaceIdInput);

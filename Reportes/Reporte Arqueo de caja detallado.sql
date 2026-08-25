@@ -13,6 +13,7 @@ JSON_VALUE(t.jIncomeTypeForm, '$[0].userData[0]') AS Cliente
 FROM dbo.Transfer t
 LEFT JOIN dbo.SplitPayment sp ON sp.transferId = t.id
 WHERE t.transferWorkspaceId = @TransferWorkSpaceId   AND t.isExternal = 1
+AND t.[status] = 1
 GROUP BY     t.id,     t.concept,     t.jIncomeTypeForm 
 
 go
@@ -53,4 +54,5 @@ LEFT JOIN (
 ) sp ON sp.transferId = t.id
 LEFT JOIN dbo.IncomeTypeCatalog tp ON tp.code = t.incomeType
 WHERE t.transferWorkspaceId = @TransferWorkSpaceId AND t.isExternal = 1
+AND t.[status] = 1
 GROUP BY c.id
