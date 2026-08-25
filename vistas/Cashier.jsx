@@ -1422,6 +1422,22 @@
     return String(value === undefined || value === null ? '' : value).trim();
   }
 
+  function getRefundPaymentMethodOptions() {
+    return allPaymentMethodOptions.filter(option => {
+      const code = getTrimmedString(option && option.value).toUpperCase();
+      const label = getTrimmedString(option && option.label)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase();
+
+      const isCheque = code === 'CH' || label === 'CHEQUE';
+      const isAccountTransfer = label.indexOf('TRANSFERENCIA') >= 0
+        && label.indexOf('CUENTA') >= 0;
+
+      return isCheque || isAccountTransfer;
+    });
+  }
+
   function escapeSqlString(value) {
     return getTrimmedString(value).replace(/'/g, "''");
   }
@@ -1733,6 +1749,152 @@
     refundMoneyForm.resetFields();
   }
 
+  function getRefundIncomeType() {
+    return incomeTypeOptions.find(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'REFUND'
+    );
+  }
+
+  function getRefundFixedFundsOption() {
+    return externalSourceOptions.find(item => {
+      const code = getTrimmedString(item && item.value).toUpperCase();
+      const label = getTrimmedString(item && item.label).toUpperCase();
+      return code === 'CAJADOP' || label === 'FONDOS FIJOS';
+    });
+  }
+
+  async function resolveRefundDestinationAccount() {
+    const fixedFundsOption = getRefundFixedFundsOption();
+    if (!fixedFundsOption) {
+      throw new Error(t('The Fixed funds destination is not configured.'));
+    }
+
+    const destinationAccountId = await resolveNewIncomeDestinationAccount({
+      incomeType: 'REFUND',
+      destination: fixedFundsOption.value
+    });
+
+    return {
+      option: fixedFundsOption,
+      accountId: destinationAccountId
+    };
+  }
+
+  async function findCreatedRefundRequestId(lifePolicyId, reference, currency, total) {
+    const response = await exe('LoadEntities', {
+      entity: 'PayoutRequest',
+      fields: 'id, lifePolicyId, total, currency, reference',
+      filter: `lifePolicyId = ${lifePolicyId} AND reference = '${escapeSqlString(reference)}'`,
+      noTracking: true
+    });
+
+    if (!response || response.ok === false) return 0;
+
+    const rows = getRows(response).filter(row => {
+      const rowCurrency = getTrimmedString(row && row.currency).toUpperCase();
+      const rowTotal = getAuditNumber(row && row.total);
+      return rowCurrency === getTrimmedString(currency).toUpperCase()
+        && Math.abs(rowTotal - total) < 0.01;
+    });
+
+    return rows.reduce((lastId, row) => {
+      const rowId = Number(row && row.id);
+      return Number.isFinite(rowId) && rowId > lastId ? rowId : lastId;
+    }, 0);
+  }
+
+  async function createRefundTransfer(values, selectedAccount, lifePolicyId, total, requestId) {
+    const refundIncomeType = getRefundIncomeType();
+    if (!refundIncomeType) {
+      throw new Error(t('The REFUND income type is not configured.'));
+    }
+
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const sourceAccountId = Number(values && values.sourceAccount);
+    const currency = getTrimmedString(values && values.currency);
+    const paymentMethod = getTrimmedString(values && values.paymentMethod);
+    const reference = getTrimmedString(values && values.reference);
+    const transferReference = `Sol. ${requestId} ${reference}`.trim();
+    const beneficiary = getTrimmedString(values && values.beneficiary);
+    const incomeType = getTrimmedString(refundIncomeType.value || refundIncomeType.code);
+    const refundDestination = await resolveRefundDestinationAccount();
+    const paymentMethodOption = getRefundPaymentMethodOptions().find(item =>
+      getTrimmedString(item && item.value) === paymentMethod
+    );
+    const paymentMethodName = getTrimmedString(paymentMethodOption && paymentMethodOption.label) || paymentMethod;
+
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      throw new Error(t('Select an open cash desk first.'));
+    }
+
+    const fixedFundsOption = refundDestination.option;
+    const destinationAccountId = refundDestination.accountId;
+
+    const transferResponse = await exe('RepoTransfer', {
+      operation: 'ADD',
+      entity: {
+        currency: currency,
+        amount: Number(total.toFixed(2)),
+        sourceAccountId: sourceAccountId,
+        sourceName: getTrimmedString(selectedAccount && selectedAccount.name),
+        destinationAccountId: destinationAccountId,
+        destinationName: beneficiary,
+        sourceExternal: fixedFundsOption.value,
+        concept: transferReference,
+        paymentMethod: paymentMethod,
+        paymentMethodName: paymentMethodName,
+        SplitPayments: [{
+          paymentMethod: paymentMethod,
+          paymentMethodName: paymentMethodName,
+          amount: Number(total.toFixed(2)),
+          currency: currency,
+          id: 0,
+          transferId: 0
+        }],
+        transactionCode: 'REFUND',
+        lifePolicyId: lifePolicyId,
+        date: getCurrentUtcDateTime(),
+        status: 0,
+        executed: false,
+        isExternal: true,
+        incomeType: incomeType,
+        transferWorkspaceId: workspaceId,
+        user: currentUserEmail || null
+      },
+      otherReceivables: []
+    });
+
+    if (!transferResponse || transferResponse.ok === false) {
+      throw new Error(transferResponse && transferResponse.msg
+        ? transferResponse.msg
+        : t('The refund transfer could not be created.'));
+    }
+
+    const transferRows = getRows(transferResponse);
+    const transfer = transferRows[0]
+      || (transferResponse.outData && !Array.isArray(transferResponse.outData)
+        ? transferResponse.outData
+        : null);
+    const transferId = Number(transfer && (transfer.id || transfer.transferId));
+
+    if (!Number.isFinite(transferId) || transferId <= 0) {
+      throw new Error(t('The refund transfer was created, but its identifier could not be identified.'));
+    }
+
+    const executionResponse = await exe('DoTransfer', {
+      transferId: transferId,
+      transfer: null
+    });
+
+    if (!executionResponse || executionResponse.ok === false) {
+      throw new Error(executionResponse && executionResponse.msg
+        ? executionResponse.msg
+        : t('The refund transfer could not be executed.'));
+    }
+
+    return transferId;
+  }
+
   async function submitRefundMoneyRequest(values) {
     const selectedAccount = transitAccountRows.find(row =>
       Number(row && row.id) === Number(selectedTransitAccountId)
@@ -1765,6 +1927,7 @@
 
     setRefundMoneySubmitting(true);
     try {
+      const refundDestination = await resolveRefundDestinationAccount();
       const response = await exe('DoPaymentRequest', {
         lifePolicyId: lifePolicyId,
         currency: getTrimmedString(values && values.currency),
@@ -1775,7 +1938,7 @@
         perc: percentage,
         reference: getTrimmedString(values && values.reference),
         noWorkflow: true,
-        destinationAccountId: 0,
+        destinationAccountId: refundDestination.accountId,
         claimId: null
       });
 
@@ -1783,7 +1946,31 @@
         throw new Error(response && response.msg ? response.msg : t('The refund request could not be created.'));
       }
 
-      message.success(response.msg || t('Refund request created successfully.'));
+      const requestRows = getRows(response);
+      const request = requestRows[0]
+        || (response.outData && !Array.isArray(response.outData) ? response.outData : null);
+      const requestMessage = getTrimmedString(response && response.msg);
+      const requestMatch = requestMessage.match(/Solicitud\s+(\d+)\s+creada/i);
+      const requestIdFromMessage = requestMatch ? Number(requestMatch[1]) : 0;
+      let requestId = Number(request && (request.id || request.requestId || response.id))
+        || requestIdFromMessage;
+
+      if (!Number.isFinite(requestId) || requestId <= 0) {
+        requestId = await findCreatedRefundRequestId(
+          lifePolicyId,
+          getTrimmedString(values && values.reference),
+          getTrimmedString(values && values.currency),
+          total
+        );
+      }
+
+      if (!Number.isFinite(requestId) || requestId <= 0) {
+        throw new Error(t('The refund request was created, but its identifier could not be identified.'));
+      }
+
+      await createRefundTransfer(values, selectedAccount, lifePolicyId, total, requestId);
+
+      message.success(response.msg || t('Refund request and transfer created successfully.'));
       closeRefundMoneyModal();
       loadTransitAccounts({
         filters: transitAccountFilters,
@@ -2299,7 +2486,7 @@
 
   function isVisibleNewIncomeType(option) {
     const internalType = getTrimmedString(option && option.internalType).toUpperCase();
-    return !internalType.startsWith('DEPOSIT-');
+    return !internalType.startsWith('DEPOSIT-') && internalType !== 'REFUND';
   }
 
   function activateNewIncomePaymentForm(paymentKey, control) {
@@ -7669,7 +7856,7 @@
               <Select
                 showSearch
                 optionFilterProp="label"
-                options={allPaymentMethodOptions}
+                options={getRefundPaymentMethodOptions()}
                 placeholder={t('Payment method')}
               />
             </Form.Item>
