@@ -1226,29 +1226,31 @@
             })
             .then(r => {
                 if( r.ok){
-                    const polizaPaginada = r.outData.data;
-                    const listaPoliza = [];
-                    let indiceResultado = 0;
+                    const respuesta = r.outData || {};
+                    const polizaPaginada = Array.isArray(respuesta.data) ? respuesta.data : [];
+                    const idsPolizas = {};
+                    const listaPoliza = polizaPaginada.filter((item) => {
+                        const idPoliza = item && item.lifePolicyId !== undefined && item.lifePolicyId !== null
+                            ? String(item.lifePolicyId)
+                            : '';
 
-                    if (r.outData.total > 0) {
-                        setSearchTotal(r.outData.total);
-                        for (let index = 0; index < r.outData.total; index++) {
-                            const factor = ((index + 1) / params.pagination.pageSize);
-                            if (factor > (params.pagination.current - 1) && factor <= params.pagination.current && (indiceResultado < polizaPaginada.length)) {
-                                listaPoliza.push(polizaPaginada[indiceResultado]);
-                                indiceResultado += 1;
-                            } else {
-                                //listaPoliza.push({ id: ("Loading data... " + index) });
-                            }
+                        if (!idPoliza || idsPolizas[idPoliza]) {
+                            return false;
                         }
-                    }
+
+                        idsPolizas[idPoliza] = true;
+                        return true;
+                    });
+                    const totalPolizas = Number(respuesta.total || r.total || 0);
+
+                    setSearchTotal(totalPolizas);
 
                     const fin = performance.now();
                     const duracionMs = (fin - inicio).toFixed(2);
                     setTiempo(`${duracionMs} milisegundos`);
                   
                     setTableData(listaPoliza);
-                    setPagination({ ...params.pagination, total: r.total });
+                    setPagination({ ...params.pagination, total: totalPolizas });
                 } else{
                     notification.error({ message: 'Error', description: r.msg, duration: 10 });
                 }

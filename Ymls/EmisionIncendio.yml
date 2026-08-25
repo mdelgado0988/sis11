@@ -79,65 +79,65 @@ Lines:
 ## ***** Cancelacion ***** ##
 #Primas
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'PrimaxCobrar',getColumn:_Policy.lob)
-    debit: '_primaPorCobrar < 0 ? -_primaPorCobrar : 0'
-    credit: '_primaPorCobrar > 0 ? _primaPorCobrar : 0'
+    debit: '_primaPorCobrar > 0 ? _primaPorCobrar : 0'
+    credit: '_primaPorCobrar < 0 ? -_primaPorCobrar : 0'
     comments: "'Primas por cobrar correspondientes al mes de '+ _anioMes"
     order: _lineNumber
     condition: _primaPorCobrar != 0 && (_cancelacion)
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'Prima',getColumn:_Policy.lob)
-    debit: '_prima > 0 ? _prima : 0'
-    credit: '_prima < 0 ? -_prima : 0'
+    debit: '_prima < 0 ? -_prima : 0'
+    credit: '_prima > 0 ? _prima : 0'
     comments: "'Primas emitidas (suscritas) del mes de ' + _anioMes"
     order: _lineNumber
     condition: _prima != 0 && (_cancelacion)
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'ImpuestoPrimas',getColumn:_Policy.lob)
-    debit: '_impuestoPrimasIncendio > 0 ? _impuestoPrimasIncendio : 0'
-    credit: '_impuestoPrimasIncendio < 0 ? -_impuestoPrimasIncendio : 0'
+    debit: '_impuestoPrimasIncendio < 0 ? -_impuestoPrimasIncendio : 0'
+    credit: '_impuestoPrimasIncendio > 0 ? _impuestoPrimasIncendio : 0'
     comments: "'Impuesto sobre primas emitidas de incendio ' + _anioMes"
     order: _lineNumber
     condition: _impuestoPrimasIncendio != 0 && (_cancelacion)
 # Impuestos.    
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'GastosPrimas',getColumn:_Policy.lob)
-    debit: '_gastoPrimaIncendio < 0 ? -_gastoPrimaIncendio : 0'
-    credit: '_gastoPrimaIncendio > 0 ? _gastoPrimaIncendio : 0'
+    debit: '_gastoPrimaIncendio > 0 ? _gastoPrimaIncendio : 0'
+    credit: '_gastoPrimaIncendio < 0 ? -_gastoPrimaIncendio : 0'
     comments: "'Gasto de impuesto 2% de primas de incendio de ' + _anioMes"
     order: _lineNumber
     condition: _gastoPrimaIncendio != 0 && (_cancelacion)
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'DaniosxPagar',getColumn:_Policy.lob)
-    debit: '_daniosPorPagar > 0 ? _daniosPorPagar : 0'
-    credit: '_daniosPorPagar < 0 ? -_daniosPorPagar : 0'
+    debit: '_daniosPorPagar < 0 ? -_daniosPorPagar : 0'
+    credit: '_daniosPorPagar > 0 ? _daniosPorPagar : 0'
     comments: "'Impuesto sobre primas emitidas de incendio de ' + _anioMes"
     order: _lineNumber
     condition: _daniosPorPagar != 0 && (_cancelacion)
 # Comisiones Agentes.    
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'Comision',getColumn:_Policy.lob)
-    debit: '_commisiones < 0 ? -_commisiones : 0'
-    credit: '_commisiones > 0 ? _commisiones : 0'
+    debit: '_commisiones > 0 ? _commisiones : 0'
+    credit: '_commisiones < 0 ? -_commisiones : 0'
     comments: "'Honorarios de corredores de seguros - Incendio ' + _anioMes"
     order: _lineNumber
     condition: _commisiones != 0 && (_cancelacion)
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'ReservasxPagar',getColumn:_Policy.lob)
-    debit: '_reservasPorPagar > 0 ? _reservasPorPagar : 0'
-    credit: '_reservasPorPagar < 0 ? -_reservasPorPagar : 0'
+    debit: '_reservasPorPagar < 0 ? -_reservasPorPagar : 0'
+    credit: '_reservasPorPagar > 0 ? _reservasPorPagar : 0'
     comments: "'Honorarios de corredores de seguros - Incendio ' + _anioMes"
     order: _lineNumber
     condition: _reservasPorPagar != 0 && (_cancelacion)
 # Reaseguro.
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'ReaseguroCedido',getColumn:_Policy.lob)
-    debit: '_reaseguroCedido < 0 ? -_reaseguroCedido : 0'
-    credit: '_reaseguroCedido > 0 ? _reaseguroCedido : 0'
+    debit: '_reaseguroCedido > 0 ? _reaseguroCedido : 0'
+    credit: '_reaseguroCedido < 0 ? -_reaseguroCedido : 0'
     comments: "'Primas cedidas de incendio del mes de '+ _anioMes"
     order: _lineNumber
     condition: _reaseguroCedido != 0 && (_cancelacion)
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'ReaseguroComision',getColumn:_Policy.lob)
-    debit: '_reaseguroComision > 0 ? _reaseguroComision : 0'
-    credit: '_reaseguroComision < 0 ? -_reaseguroComision : 0'
+    debit: '_reaseguroComision < 0 ? -_reaseguroComision : 0'
+    credit: '_reaseguroComision > 0 ? _reaseguroComision : 0'
     comments: "'Comisiones por cesion de primas de incendio de ' + _anioMes"
     order: _lineNumber
     condition: _reaseguroComision != 0 && (_cancelacion)
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'ReaseguroxPagar',getColumn:_Policy.lob)
-    debit: '_reaseguroPorPagar > 0 ? _reaseguroPorPagar : 0'
-    credit: '_reaseguroPorPagar < 0 ? -_reaseguroPorPagar : 0'
+    debit: '_reaseguroPorPagar < 0 ? -_reaseguroPorPagar : 0'
+    credit: '_reaseguroPorPagar > 0 ? _reaseguroPorPagar : 0'
     comments: "'Reaseguros por pagar producción de incendio de ' + _anioMes"
     order: _lineNumber
     condition: _reaseguroPorPagar != 0 && (_cancelacion)

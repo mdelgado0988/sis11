@@ -108,7 +108,7 @@ function buildBatchErrorList(batchId, errorRows, processType) {
     const policyReference = processType === 'issuance'
       ? (errorRow && (errorRow[0] || errorRow[1] || ''))
       : (errorRow && (errorRow[1] || errorRow[0] || ''));
-    const message = errorRow && (errorRow[5] || errorRow[4] || errorRow[3] || '');
+    const message = errorRow && (errorRow[6] || '');
 
     return {
       IdProceso: batchId,

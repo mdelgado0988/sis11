@@ -102,7 +102,7 @@ GROUP BY TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT)
 
 querySql =`
 ${cteQuery}
-SELECT 
+SELECT DISTINCT 
     pol.[id] AS 'codigo',
     pol.[code] AS 'poliza',
     YEAR(pol.[start]) AS 'anio',
@@ -118,7 +118,7 @@ SELECT
     END AS 'tipoPoliza',
     pol.[start] AS 'inicia',
     pol.[end] AS 'vence',
-    TRIM(CONCAT_WS(' ', con.[name], con.[surname1], con.[surname2])) AS 'asegurado',
+    insuredData.asegurado AS 'asegurado',
     DATEDIFF(DAY, GETDATE(), pol.[end]) AS 'diasV',
     ISNULL(reno.id,0) AS 'oferta',
     CalculoPago.[pending] AS 'pendiente',
@@ -130,8 +130,15 @@ SELECT
 FROM LifePolicy pol
 JOIN Product pro ON pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]
-JOIN Insured aseg ON pol.[id] = aseg.[lifePolicyId] AND aseg.[role] =0
-JOIN Contact con ON aseg.[contactId] = con.[id]
+OUTER APPLY (
+    SELECT TOP 1
+        TRIM(CONCAT_WS(' ', con.[name], con.[surname1], con.[surname2])) AS asegurado
+    FROM Insured aseg
+    JOIN Contact con ON aseg.[contactId] = con.[id]
+    WHERE aseg.[lifePolicyId] = pol.[id]
+      AND aseg.[role] = 0
+    ORDER BY aseg.[id]
+) insuredData
 LEFT JOIN (
     SELECT originalPolicyId, MAX(id) AS latestRenewalId
     FROM LifePolicy
@@ -141,7 +148,7 @@ LEFT JOIN (
 LEFT JOIN LifePolicy reno ON reno.id = latestRenewal.latestRenewalId
 LEFT JOIN BatchCreated btC ON pol.[id] = btC.[lifePolicyId]
 
-OUTER APPLY (SELECT JSON_VALUE(j.userData, '$[0]') AS estadoRenovacion
+OUTER APPLY (SELECT TOP 1 JSON_VALUE(j.userData, '$[0]') AS estadoRenovacion
             FROM insuredObject io
             CROSS APPLY OPENJSON(io.jValues)
             WITH (
@@ -190,7 +197,20 @@ if (!queryResponse || !queryResponse.ok) {
     return buildResult(false, queryResponse && queryResponse.msg ? queryResponse.msg : 'No fue posible consultar las pólizas');
 }
 
-let dataPaginada = Array.isArray(queryResponse.outData) ? queryResponse.outData : [];
+const dataRespuesta = Array.isArray(queryResponse.outData) ? queryResponse.outData : [];
+const idsPolizas = {};
+const dataPaginada = dataRespuesta.filter((item) => {
+    const codigo = item && item.codigo !== undefined && item.codigo !== null
+        ? String(item.codigo)
+        : '';
+
+    if (!codigo || idsPolizas[codigo]) {
+        return false;
+    }
+
+    idsPolizas[codigo] = true;
+    return true;
+});
 
 
 let queryCountSql = `

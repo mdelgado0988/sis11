@@ -70,8 +70,10 @@ if (!resultadoCumulo.ok) {
   };
 }
 
-const registro = resultadoCumulo.outData?.[0];
-if (!registro) {
+const registros = Array.isArray(resultadoCumulo.outData)
+  ? resultadoCumulo.outData
+  : [];
+if (!registros.length) {
   return {
     ok: false,
     accion: cumulo.accion,
@@ -85,16 +87,17 @@ if (!registro) {
   };
 }
 
-const total = toNumber(registro.total);
+const total = registros.reduce((sum, item) => sum + toNumber(item.policyTotal || item.total), 0);
 return {
   ok: true,
   accion: cumulo.accion,
   msg: buildMessage({
     tipo: selection.tipo,
-    descripcion: registro.descripcion || selection.descripcion,
+    descripcion: registros[0].descripcion || selection.descripcion,
     contrato,
     total
   }),
+  total,
   bloquea: cumulo.accion === "restriccion" && cumulo.monto <= total
 };
 
@@ -202,9 +205,98 @@ function loadCumuloByLocation({ lob, pais, estado, ciudad, corregimiento, codigo
     ? `AND codeValue = '${escapeSql(codigo)}'`
     : `AND buildingCode = '${escapeSql(codigo)}'`;
 
+  const policyLocationFilter = tipo === "barriada"
+    ? `EXISTS (
+        SELECT 1
+        FROM InsuredObject objLocation
+        CROSS APPLY OPENJSON(objLocation.jValues)
+            WITH (
+                name varchar(50) '$.name',
+                userData varchar(50) '$.userData[0]'
+            ) AS locationField
+        WHERE objLocation.lifePolicyId = pol.id
+          AND objLocation.objectDefinitionId IN (19,45,46,47)
+          AND locationField.name = '${fieldName}'
+          AND EXISTS (
+              SELECT 1
+              FROM [Table] locationTable
+              CROSS APPLY OPENJSON(locationTable.data)
+                  WITH (codeValue varchar(50) '$[0]') AS locationData
+              WHERE locationTable.[name] = '${tableName}'
+                AND locationData.codeValue = locationField.userData
+                AND locationData.codeValue = '${escapeSql(codigo)}'
+          )
+    )`
+    : `EXISTS (
+        SELECT 1
+        FROM InsuredObject objLocation
+        CROSS APPLY OPENJSON(objLocation.jValues)
+            WITH (
+                name varchar(50) '$.name',
+                userData varchar(50) '$.userData[0]'
+            ) AS locationField
+        WHERE objLocation.lifePolicyId = pol.id
+          AND objLocation.objectDefinitionId IN (19,45,46,47)
+          AND locationField.name = '${fieldName}'
+          AND EXISTS (
+              SELECT 1
+              FROM [Table] locationTable
+              CROSS APPLY OPENJSON(locationTable.data)
+                  WITH (
+                      pais varchar(50) '$[0]',
+                      estado varchar(50) '$[1]',
+                      ciudad varchar(50) '$[2]',
+                      corregimiento varchar(50) '$[3]',
+                      buildingCode varchar(50) '$[4]'
+                  ) AS locationData
+              WHERE locationTable.[name] = '${tableName}'
+                AND locationData.pais = '${escapeSql(pais)}'
+                AND locationData.estado = '${escapeSql(estado)}'
+                AND locationData.ciudad = '${escapeSql(ciudad)}'
+                AND locationData.corregimiento = '${escapeSql(corregimiento)}'
+                AND locationData.buildingCode = locationField.userData
+                AND locationData.buildingCode = '${escapeSql(codigo)}'
+          )
+    )`;
+
   const sql = tipo === "barriada"
     ? `
-WITH TargetLocation AS
+WITH CoverageConfig AS
+(
+    SELECT DISTINCT
+        cfgRow.lobCode,
+        cfgRow.productCode,
+        cfgRow.coverageCode
+    FROM [Table] cfg
+    CROSS APPLY OPENJSON(cfg.data)
+        WITH (
+            lobCode varchar(50) '$[0]',
+            productCode varchar(100) '$[1]',
+            coverageCode varchar(50) '$[3]',
+            isCoverage varchar(20) '$[5]'
+        ) AS cfgRow
+    WHERE cfg.[name] = 'cfgCoberturaProductoRea'
+      AND UPPER(LTRIM(RTRIM(cfgRow.isCoverage))) = 'SI'
+),
+CoverageTotals AS
+(
+    SELECT
+        pol.id AS lifePolicyId,
+        SUM(ISNULL(cov.limit, 0)) AS insuredSum
+    FROM LifePolicy pol
+    JOIN LifeCoverage cov
+        ON cov.lifePolicyId = pol.id
+    JOIN CoverageConfig cfg
+        ON cfg.lobCode = CONVERT(varchar(50), pol.lob)
+       AND cfg.productCode = pol.productCode
+       AND cfg.coverageCode = CONVERT(varchar(50), cov.code)
+    WHERE pol.lob = '${escapeSql(lob)}'
+      AND pol.active = 1
+      AND pol.activeDate IS NOT NULL
+      AND ${policyLocationFilter}
+    GROUP BY pol.id
+),
+TargetLocation AS
 (
     SELECT
         codeValue,
@@ -221,28 +313,61 @@ WITH TargetLocation AS
 SELECT
     tl.codeValue AS code,
     tl.descValue AS descripcion,
-    SUM(pol.insuredSum) AS total,
-    FORMAT(SUM(pol.insuredSum), '#,##0.00', 'en-US') AS cumulo
+    pol.id AS policyId,
+    pol.code AS policyCode,
+    coverageTotal.insuredSum AS policyTotal,
+    SUM(coverageTotal.insuredSum) OVER () AS total,
+    FORMAT(SUM(coverageTotal.insuredSum) OVER (), '#,##0.00', 'en-US') AS cumulo
 FROM LifePolicy pol
-JOIN InsuredObject obj
-    ON obj.lifePolicyId = pol.id
-   AND obj.objectDefinitionId IN (19,45,46,47)
-CROSS APPLY OPENJSON(obj.jValues)
-    WITH (
-        name varchar(50) '$.name',
-        userData varchar(50) '$.userData[0]'
-    ) field
-JOIN TargetLocation tl
-    ON field.userData = tl.codeValue
+JOIN CoverageTotals coverageTotal
+    ON coverageTotal.lifePolicyId = pol.id
+CROSS JOIN TargetLocation tl
 WHERE pol.lob = '${escapeSql(lob)}'
   AND pol.active = 1
   AND pol.activeDate IS NOT NULL
-  AND field.name = '${fieldName}'
 GROUP BY
     tl.codeValue,
-    tl.descValue;`
+    tl.descValue,
+    pol.id,
+    pol.code,
+    coverageTotal.insuredSum;`
     : `
-WITH TargetLocation AS
+WITH CoverageConfig AS
+(
+    SELECT DISTINCT
+        cfgRow.lobCode,
+        cfgRow.productCode,
+        cfgRow.coverageCode
+    FROM [Table] cfg
+    CROSS APPLY OPENJSON(cfg.data)
+        WITH (
+            lobCode varchar(50) '$[0]',
+            productCode varchar(100) '$[1]',
+            coverageCode varchar(50) '$[3]',
+            isCoverage varchar(20) '$[5]'
+        ) AS cfgRow
+    WHERE cfg.[name] = 'cfgCoberturaProductoRea'
+      AND UPPER(LTRIM(RTRIM(cfgRow.isCoverage))) = 'SI'
+),
+CoverageTotals AS
+(
+    SELECT
+        pol.id AS lifePolicyId,
+        SUM(ISNULL(cov.limit, 0)) AS insuredSum
+    FROM LifePolicy pol
+    JOIN LifeCoverage cov
+        ON cov.lifePolicyId = pol.id
+    JOIN CoverageConfig cfg
+        ON cfg.lobCode = CONVERT(varchar(50), pol.lob)
+       AND cfg.productCode = pol.productCode
+       AND cfg.coverageCode = CONVERT(varchar(50), cov.code)
+    WHERE pol.lob = '${escapeSql(lob)}'
+      AND pol.active = 1
+      AND pol.activeDate IS NOT NULL
+      AND ${policyLocationFilter}
+    GROUP BY pol.id
+),
+TargetLocation AS
 (
     SELECT
         pais,
@@ -275,30 +400,28 @@ SELECT
     tl.corregimiento,
     tl.buildingCode,
     tl.descBuilding AS descripcion,
-    SUM(pol.insuredSum) AS total,
-    FORMAT(SUM(pol.insuredSum), '#,##0.00', 'en-US') AS cumulo
+    pol.id AS policyId,
+    pol.code AS policyCode,
+    coverageTotal.insuredSum AS policyTotal,
+    SUM(coverageTotal.insuredSum) OVER () AS total,
+    FORMAT(SUM(coverageTotal.insuredSum) OVER (), '#,##0.00', 'en-US') AS cumulo
 FROM LifePolicy pol
-JOIN InsuredObject obj
-    ON obj.lifePolicyId = pol.id
-   AND obj.objectDefinitionId IN (19,45,46,47)
-CROSS APPLY OPENJSON(obj.jValues)
-    WITH (
-        name varchar(50) '$.name',
-        userData varchar(50) '$.userData[0]'
-    ) field
-JOIN TargetLocation tl
-    ON field.userData = tl.buildingCode
+JOIN CoverageTotals coverageTotal
+    ON coverageTotal.lifePolicyId = pol.id
+CROSS JOIN TargetLocation tl
 WHERE pol.lob = '${escapeSql(lob)}'
   AND pol.active = 1
   AND pol.activeDate IS NOT NULL
-  AND field.name = '${fieldName}'
 GROUP BY
     tl.pais,
     tl.estado,
     tl.ciudad,
     tl.corregimiento,
     tl.buildingCode,
-    tl.descBuilding;`;
+    tl.descBuilding,
+    pol.id,
+    pol.code,
+    coverageTotal.insuredSum;`;
 
   doCmd({
     cmd: "DoQuery",
