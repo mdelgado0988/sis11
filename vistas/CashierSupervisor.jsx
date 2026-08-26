@@ -5,12 +5,12 @@
     Checkbox,
     Col,
     DatePicker,
-    Descriptions,
     Drawer: Panel,
     Form,
     Dropdown,
     Layout,
     InputNumber,
+    Modal,
     Row,
     Select,
     Space,
@@ -130,6 +130,10 @@
   const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
   const [movementFilterForm] = Form.useForm();
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
+  const [accountingMovementsVisible, setAccountingMovementsVisible] = React.useState(false);
+  const [accountingMovementsLoading, setAccountingMovementsLoading] = React.useState(false);
+  const [accountingMovementsRows, setAccountingMovementsRows] = React.useState([]);
+  const [accountingMovementTitle, setAccountingMovementTitle] = React.useState('');
   const [movementReports, setMovementReports] = React.useState([]);
   const [movementIncomeTypes, setMovementIncomeTypes] = React.useState([]);
   const [paidPremiumRows, setPaidPremiumRows] = React.useState([]);
@@ -141,12 +145,11 @@
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
+  const loadedSupervisorTabsRef = React.useRef({});
 
   React.useEffect(() => {
     const styleId = 'cashier-supervisor-style';
-    if (document.getElementById(styleId)) return;
-
-    const style = document.createElement('style');
+    const style = document.getElementById(styleId) || document.createElement('style');
     style.id = styleId;
     style.textContent = `
       .cashier-supervisor-view .cashier-supervisor-toolbar {
@@ -497,11 +500,95 @@
 
       .cashier-supervisor-reference-cell {
         display: block;
-        max-width: 160px;
+        width: 100%;
+        max-width: none;
+        box-sizing: border-box;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         cursor: help;
+      }
+
+      .cashier-supervisor-accounting-text {
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: help;
+      }
+
+      .cashier-supervisor-accounting-table .ant-table-container,
+      .cashier-supervisor-accounting-table .ant-table-content,
+      .cashier-supervisor-accounting-table .ant-table-body {
+        overflow-x: hidden !important;
+      }
+
+      .cashier-supervisor-accounting-table .ant-table-thead > tr > th,
+      .cashier-supervisor-accounting-table .ant-table-tbody > tr > td {
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-accounting-table .ant-table-container {
+        border: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-accounting-table .ant-table-thead > tr > th {
+        background: #eef0f3;
+        border-inline-end: 1px solid #cbd1d8 !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-accounting-table .ant-table-tbody > tr > td {
+        border-inline-end: 0 !important;
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-accounting-lines-table .ant-table-container,
+      .cashier-supervisor-accounting-lines-table .ant-table-content {
+        overflow: visible !important;
+      }
+
+      .cashier-supervisor-accounting-lines-table .ant-table-body {
+        max-height: none !important;
+        overflow-x: hidden !important;
+        overflow-y: visible !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-accounting-table {
+        display: block !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-container,
+      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-content,
+      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-body {
+        max-height: none !important;
+        overflow: visible !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-body {
+        overflow-x: hidden !important;
+        overflow-y: visible !important;
+      }
+
+      .cashier-supervisor-accounting-lines-table,
+      .cashier-supervisor-accounting-lines-table .ant-table-container,
+      .cashier-supervisor-accounting-lines-table .ant-table-content,
+      .cashier-supervisor-accounting-lines-table .ant-table-body {
+        overflow: hidden !important;
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+      }
+
+      .cashier-supervisor-accounting-lines-table .ant-table-body::-webkit-scrollbar,
+      .cashier-supervisor-accounting-lines-table .ant-table-content::-webkit-scrollbar {
+        width: 0 !important;
+        height: 0 !important;
+        display: none !important;
       }
 
       .cashier-supervisor-destination-cell {
@@ -547,7 +634,9 @@
         border-color: #1f2937;
       }
     `;
-    document.head.appendChild(style);
+    if (!style.parentNode) {
+      document.head.appendChild(style);
+    }
 
     return () => {
       const currentStyle = document.getElementById(styleId);
@@ -616,19 +705,33 @@
     setMovementRows([]);
     setMovementTotal(0);
     setMovementSelectedRowKeys([]);
+    setAccountingMovementsVisible(false);
+    setAccountingMovementsRows([]);
+    setAccountingMovementTitle('');
     setPaidPremiumRows([]);
     setPaidPremiumTotal(0);
     setPaidPremiumSelectedRowKey(null);
-    if (selectedCashierRow && selectedCashierRow.id) {
+    loadedSupervisorTabsRef.current = {};
+  }, [selectedCashierRow && selectedCashierRow.id]);
+
+  React.useEffect(() => {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) return;
+
+    const tabKey = `${workspaceId}:${activeTab}`;
+    if (loadedSupervisorTabsRef.current[tabKey]) return;
+
+    if (activeTab === 'details') {
       loadSupervisorMovements({
         pagination: { current: 1, pageSize: movementPagination.pageSize },
         filters: movementFilters
       });
+    } else if (activeTab === 'premiums') {
       loadSupervisorPaidPremiums({
         pagination: { current: 1, pageSize: paidPremiumPagination.pageSize }
       });
     }
-  }, [selectedCashierRow && selectedCashierRow.id]);
+  }, [selectedCashierRow && selectedCashierRow.id, activeTab]);
 
   React.useEffect(() => {
     if (!selectedCashierRow && activeTab !== 'cash-desks') {
@@ -756,8 +859,18 @@
     return values.length ? values.join(', ') : '-';
   }
 
+  function getSupervisorMovementReferenceText(group) {
+    const rawReference = group && group.concept !== undefined && group.concept !== null
+      && String(group.concept).trim() !== ''
+      ? String(group.concept)
+      : '-';
+    return rawReference !== '-' && rawReference.toUpperCase().includes('IW')
+      ? t('Premium Payment')
+      : rawReference;
+  }
+
   function renderSupervisorMovementReference(group) {
-    const reference = renderSupervisorMovementValues(group, 'concept');
+    const reference = getSupervisorMovementReferenceText(group);
     if (reference === '-') return reference;
 
     return (
@@ -765,6 +878,89 @@
         <span className="cashier-supervisor-reference-cell">{reference}</span>
       </Tooltip>
     );
+  }
+
+  function getSupervisorAccountingReferences(group) {
+    const references = [];
+    const seen = new Set();
+    const add = (entity, value) => {
+      const id = Number(value);
+      if (!Number.isFinite(id) || id <= 0) return;
+      const key = `${entity}|${id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        references.push({ entity, entityId: id });
+      }
+    };
+
+    const allocationIds = getSupervisorAllocationIds(group);
+    if (allocationIds.length > 0) {
+      allocationIds.forEach(id => add('ALLOCATION', id));
+    } else {
+      [group].concat(getSupervisorMovementChildren(group)).forEach(item => {
+        add('Transfer', item && (item.id || item.transferId));
+      });
+    }
+
+    return references;
+  }
+
+  function markSupervisorMovementsUnaccounted(rows) {
+    return (Array.isArray(rows) ? rows : []).map(group => ({
+      ...group,
+      accounted: false
+    }));
+  }
+
+  async function enrichSupervisorMovementsWithAccounting(groups) {
+    const rows = Array.isArray(groups) ? groups : [];
+    const references = rows.reduce((all, group) => all.concat(getSupervisorAccountingReferences(group)), []);
+    const uniqueReferences = references.filter((reference, index, items) => items.findIndex(item =>
+      item.entity === reference.entity && item.entityId === reference.entityId
+    ) === index);
+
+    if (uniqueReferences.length === 0) {
+      return markSupervisorMovementsUnaccounted(rows);
+    }
+
+    const filters = uniqueReferences.reduce((parts, reference) => {
+      const current = parts.find(item => item.entity === reference.entity);
+      if (current) current.ids.push(reference.entityId);
+      else parts.push({ entity: reference.entity, ids: [reference.entityId] });
+      return parts;
+    }, []).map(item => `[entity] = '${item.entity}' AND [entityId] IN (${item.ids.join(',')})`);
+
+    const response = await exe('LoadEntities', {
+      entity: '[Transaction]',
+      fields: '[id],[entity],[entityId]',
+      filter: filters.length > 1 ? `(${filters.join(' OR ')})` : filters[0],
+      noTracking: true
+    });
+
+    if (!response || response.ok === false) {
+      throw new Error(response && response.msg ? response.msg : t('Accounting entries could not be loaded.'));
+    }
+
+    const transactions = getRows(response);
+    const transactionMap = transactions.reduce((map, transaction) => {
+      const entity = String(transaction && transaction.entity || '').toUpperCase();
+      const entityId = Number(transaction && transaction.entityId);
+      if (!entity || !Number.isFinite(entityId) || entityId <= 0) return map;
+      const key = `${entity}|${entityId}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(transaction);
+      return map;
+    }, new Map());
+
+    return rows.map(group => {
+      const linkedTransactions = getSupervisorAccountingReferences(group)
+        .reduce((all, reference) => all.concat(transactionMap.get(`${reference.entity.toUpperCase()}|${reference.entityId}`) || []), [])
+        .filter((transaction, index, items) => items.findIndex(item => item.id === transaction.id) === index);
+      return {
+        ...group,
+        accounted: linkedTransactions.length > 0
+      };
+    });
   }
 
   function renderSupervisorMovementUser(group) {
@@ -1114,10 +1310,15 @@
       .then(response => {
         if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
         const rows = getRows(response).filter(group => !(filters && filters.pending === true && getSupervisorMovementFirst(group).reversalDate));
-        setMovementRows(rows);
-        setMovementTotal(getResponseTotal(response, rows));
+        const baseRows = markSupervisorMovementsUnaccounted(rows);
+        setMovementRows(baseRows);
+        setMovementTotal(getResponseTotal(response, baseRows));
         setMovementPagination({ current: Number(pagination.current) || 1, pageSize: Number(pagination.pageSize) || 15 });
         setMovementSelectedRowKeys([]);
+        loadedSupervisorTabsRef.current[`${workspaceId}:details`] = true;
+        return enrichSupervisorMovementsWithAccounting(rows)
+          .then(enrichedRows => setMovementRows(enrichedRows))
+          .catch(() => setMovementRows(baseRows));
       })
       .catch(error => {
         setMovementRows([]);
@@ -1167,6 +1368,7 @@
         setPaidPremiumSelectedRowKey(currentKey => rows.some(row => String(row.id) === String(currentKey)) ? currentKey : null);
         setPaidPremiumTotal(getResponseTotal(response, rows));
         setPaidPremiumPagination({ current: Number(pagination.current) || 1, pageSize: Number(pagination.pageSize) || 15 });
+        loadedSupervisorTabsRef.current[`${workspaceId}:premiums`] = true;
       })
       .catch(error => {
         setPaidPremiumRows([]);
@@ -1224,7 +1426,7 @@
             : t('Executed'),
           [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
           [t('Destination')]: getSupervisorExportDestination(group),
-          [t('Reference')]: getSupervisorMovementValues(group, 'concept').join(', '),
+          [t('Reference')]: getSupervisorMovementReferenceText(group),
           [t('Received')]: Number(item.amount || 0),
           [t('Amount')]: Number(group.amount || item.amount || 0),
           [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
@@ -1291,8 +1493,14 @@
         throw new Error(exportResponse && exportResponse.msg ? exportResponse.msg : t('Movements could not be loaded.'));
       }
 
-      const exportGroups = getRows(exportResponse)
+      const exportSourceGroups = getRows(exportResponse)
         .filter(group => !(filters.pending === true && getSupervisorMovementFirst(group).reversalDate));
+      let exportGroups;
+      try {
+        exportGroups = await enrichSupervisorMovementsWithAccounting(exportSourceGroups);
+      } catch (error) {
+        exportGroups = markSupervisorMovementsUnaccounted(exportSourceGroups);
+      }
       const exportRows = exportGroups.map(group => {
         const item = getSupervisorMovementFirst(group);
         return {
@@ -1303,7 +1511,8 @@
             : t('Executed'),
           [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
           [t('Destination')]: getSupervisorExportDestination(group),
-          [t('Reference')]: getSupervisorMovementValues(group, 'concept').join(', '),
+          [t('Reference')]: getSupervisorMovementReferenceText(group),
+          [t('Posted')]: group.accounted ? t('Yes') : t('No'),
           [t('Received')]: Number(item.amount || 0),
           [t('Amount')]: Number(group.amount || item.amount || 0),
           [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
@@ -1334,6 +1543,55 @@
     const ids = movementSelectedRowKeys.map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0);
     const transferId = ids.length ? `[${ids.join(',')}]` : '0';
     window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`, '_blank', 'noopener,noreferrer');
+  }
+
+  async function openAccountingMovements() {
+    const selectedKey = movementSelectedRowKeys[0];
+    const selectedGroup = movementRows.find(row => String(row && row.id) === String(selectedKey));
+    if (!selectedGroup) {
+      message.warning(t('Select a movement first.'));
+      return;
+    }
+
+    const references = getSupervisorAccountingReferences(selectedGroup);
+    setAccountingMovementTitle(getSupervisorMovementReferenceText(selectedGroup));
+    setAccountingMovementsRows([]);
+    setAccountingMovementsVisible(true);
+    setAccountingMovementsLoading(true);
+
+    try {
+      if (references.length === 0) {
+        return;
+      }
+
+      const filters = references.reduce((parts, reference) => {
+        const current = parts.find(item => item.entity === reference.entity);
+        if (current) current.ids.push(reference.entityId);
+        else parts.push({ entity: reference.entity, ids: [reference.entityId] });
+        return parts;
+      }, []).map(item => `[entity] = '${item.entity}' AND [entityId] IN (${item.ids.join(',')})`);
+
+      const response = await exe('RepoTransaction', {
+        operation: 'GET',
+        filter: filters.length > 1 ? `(${filters.join(' OR ')})` : filters[0],
+        include: ['Lines', 'Lines.Account'],
+        size: 0,
+        page: 0,
+        entity: null,
+        bulkJson: null
+      });
+
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('Accounting entries could not be loaded.'));
+      }
+
+      setAccountingMovementsRows(getRows(response));
+    } catch (error) {
+      setAccountingMovementsRows([]);
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setAccountingMovementsLoading(false);
+    }
   }
 
   function getMonthRange(dateLike) {
@@ -1375,6 +1633,38 @@
       return [data];
     }
     return [];
+  }
+
+  function getAccountingTransactionLines(transaction) {
+    if (!transaction) return [];
+    if (Array.isArray(transaction.Lines)) return transaction.Lines;
+    if (Array.isArray(transaction.lines)) return transaction.lines;
+    return [];
+  }
+
+  function getAccountingAccountName(line) {
+    const account = line && (line.Account || line.accountData || line.accountInfo);
+    return account && (account.name || account.description || account.code) || '-';
+  }
+
+  function getAccountingTransactionTotal(transaction, field) {
+    const transactions = transaction ? [transaction] : [];
+    return (Array.isArray(transactions) ? transactions : []).reduce((total, transaction) => (
+      total + getAccountingTransactionLines(transaction).reduce((lineTotal, line) => (
+        lineTotal + Number(line && line[field] || 0)
+      ), 0)
+    ), 0);
+  }
+
+  function renderAccountingText(value) {
+    const text = value === undefined || value === null || String(value).trim() === '' ? '-' : String(value);
+    if (text === '-') return text;
+
+    return (
+      <Tooltip title={text}>
+        <span className="cashier-supervisor-accounting-text">{text}</span>
+      </Tooltip>
+    );
   }
 
   function getTrimmedString(value) {
@@ -1721,19 +2011,39 @@
     { title: t('Status'), key: 'status', width: 95, render: (_, group) => renderSupervisorMovementStatus(group) },
     { title: t('Origin'), key: 'origin', width: 125, render: (_, group) => renderSupervisorMovementValues(group, 'sourceExternal') },
     { title: t('Destination'), key: 'destination', width: 170, render: (_, group) => renderSupervisorMovementDestination(group) },
-    { title: t('Reference'), key: 'reference', width: 180, render: (_, group) => renderSupervisorMovementReference(group) },
-    { title: t('Received'), key: 'received', width: 105, align: 'right', render: (_, group) => formatMoney(getSupervisorMovementFirst(group).amount) },
+    { title: t('Reference'), key: 'reference', width: 280, render: (_, group) => renderSupervisorMovementReference(group) },
     { title: t('Amount'), key: 'amount', width: 105, align: 'right', render: (_, group) => formatMoney(group.amount || getSupervisorMovementFirst(group).amount) },
     { title: t('Currency'), key: 'currency', width: 80, align: 'center', render: (_, group) => renderSupervisorMovementValues(group, 'currency') },
     { title: t('Payment method'), key: 'paymentMethod', width: 120, render: (_, group) => renderSupervisorMovementPaymentMethods(group) },
     { title: t('Type'), key: 'type', width: 180, render: (_, group) => renderSupervisorMovementIncomeTypes(group) },
     { title: t('Policy'), key: 'policy', width: 110, align: 'center', render: (_, group) => renderSupervisorPolicies(group) },
-    { title: t('Cashier ID'), dataIndex: 'transferWorkspaceId', key: 'transferWorkspaceId', width: 90, align: 'center' },
     { title: t('User'), key: 'user', width: 160, render: (_, group) => renderSupervisorMovementUser(group) },
-    { title: t('Allocation'), key: 'allocation', width: 90, align: 'center', render: (_, group) => renderSupervisorAllocations(group) }
+    { title: t('Allocation'), key: 'allocation', width: 90, align: 'center', render: (_, group) => renderSupervisorAllocations(group) },
+    { title: t('Posted'), key: 'accounted', width: 105, align: 'center', render: (_, group) => (
+      <Tag color={group.accounted ? 'success' : 'error'}>{group.accounted ? t('Yes') : t('No')}</Tag>
+    ) }
   ];
 
-  const supervisorMovementDetailColumns = supervisorMovementColumns;
+  const accountingColumnKeys = new Set(['accounted']);
+  const supervisorMovementDetailColumns = supervisorMovementColumns.filter(column => !accountingColumnKeys.has(column.key));
+  const supervisorPaidPremiumColumns = supervisorMovementDetailColumns;
+
+  const accountingLineColumns = [
+    { title: t('Account'), dataIndex: 'account', key: 'account', width: 100, render: renderAccountingText },
+    { title: t('Account name'), key: 'accountName', width: 200, render: (_, line) => renderAccountingText(getAccountingAccountName(line)) },
+    { title: t('Comments'), dataIndex: 'comments', key: 'comments', width: 250, render: renderAccountingText },
+    { title: t('Debit'), dataIndex: 'debit', key: 'debit', width: 100, align: 'right', render: formatMoney },
+    { title: t('Credit'), dataIndex: 'credit', key: 'credit', width: 100, align: 'right', render: formatMoney }
+  ];
+
+  const accountingMovementColumns = [
+    { title: t('Transaction ID'), dataIndex: 'id', key: 'id', width: 100, align: 'center' },
+    { title: t('Creation date'), dataIndex: 'date', key: 'date', width: 145, render: formatDateTime },
+    { title: t('Accounting date'), dataIndex: 'effectiveDate', key: 'effectiveDate', width: 145, render: formatDateTime },
+    { title: t('Description'), dataIndex: 'description', key: 'description', width: 300, render: renderAccountingText },
+    { title: t('Debit'), key: 'debit', width: 100, align: 'right', render: (_, transaction) => formatMoney(getAccountingTransactionTotal(transaction, 'debit')) },
+    { title: t('Credit'), key: 'credit', width: 100, align: 'right', render: (_, transaction) => formatMoney(getAccountingTransactionTotal(transaction, 'credit')) }
+  ];
 
   const premiumColumns = [
     { title: t('Payment'), dataIndex: 'payment', key: 'payment', width: 130 },
@@ -1775,6 +2085,7 @@
   }
 
   const supervisorMovementContent = (
+    <>
     <Spin spinning={movementExportLoading} tip={t('Exporting...')}>
     <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
@@ -1804,6 +2115,14 @@
           </Button>
         </Dropdown>
         <Button
+          className="cashier-supervisor-accounting-button"
+          onClick={openAccountingMovements}
+          loading={accountingMovementsLoading}
+          disabled={!selectedCashierRow || movementSelectedRowKeys.length === 0}
+        >
+          <ReportIcon /> {t('Accounting movements')}
+        </Button>
+        <Button
           className="cashier-supervisor-outline-button"
           onClick={() => loadSupervisorMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } })}
           loading={movementLoading}
@@ -1831,11 +2150,6 @@
         bordered
         className="cashier-supervisor-table"
         loading={movementLoading}
-        rowSelection={{
-          type: 'radio',
-          selectedRowKeys: movementSelectedRowKeys,
-          onChange: keys => setMovementSelectedRowKeys(keys.length > 0 ? [keys[0]] : [])
-        }}
         pagination={{
           current: movementPagination.current,
           pageSize: movementPagination.pageSize,
@@ -1843,6 +2157,9 @@
           showSizeChanger: true,
           pageSizeOptions: ['15', '25', '50', '100']
         }}
+        rowClassName={record => movementSelectedRowKeys.some(key => String(key) === String(record && record.id))
+          ? 'cashier-supervisor-selected-row'
+          : ''}
         onChange={pagination => loadSupervisorMovements({
           filters: movementFilters,
           pagination: { current: pagination.current, pageSize: pagination.pageSize }
@@ -1873,6 +2190,44 @@
       />
     </Card>
     </Spin>
+    <Modal
+      title={`${t('Accounting movements')}${accountingMovementTitle && accountingMovementTitle !== '-' ? ` - ${accountingMovementTitle}` : ''}`}
+      open={accountingMovementsVisible}
+      onCancel={() => setAccountingMovementsVisible(false)}
+      footer={null}
+      width={1100}
+      bodyStyle={{ height: 520, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto', overflowX: 'hidden' }}
+      destroyOnClose
+    >
+      <Table
+        rowKey="id"
+        columns={accountingMovementColumns}
+        dataSource={accountingMovementsRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table cashier-supervisor-accounting-table cashier-supervisor-accounting-master-table"
+        loading={accountingMovementsLoading}
+        pagination={false}
+        tableLayout="fixed"
+        locale={{ emptyText: t('No accounting entries found.') }}
+        expandable={{
+          expandedRowRender: transaction => (
+            <Table
+              rowKey={(line, index) => `${transaction && transaction.id || 'transaction'}-${line && line.id || index}`}
+              columns={accountingLineColumns}
+              dataSource={getAccountingTransactionLines(transaction)}
+              size="small"
+              bordered
+              pagination={false}
+              tableLayout="fixed"
+              className="cashier-supervisor-installment-menu-table cashier-supervisor-accounting-table cashier-supervisor-accounting-lines-table"
+              locale={{ emptyText: t('No accounting lines found.') }}
+            />
+          )
+        }}
+      />
+    </Modal>
+    </>
   );
 
   function renderStatusBar() {
@@ -2005,7 +2360,7 @@
       </div>
       <Table
         rowKey="id"
-        columns={supervisorMovementColumns}
+        columns={supervisorPaidPremiumColumns}
         dataSource={paidPremiumRows}
         size="small"
         bordered
