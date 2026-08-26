@@ -13,7 +13,7 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 1
-and t.cplan = 'INC_cont' 
+and t.cplan = 'BPVC' 
 and t.cendoso = 37
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -37,7 +37,7 @@ inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
 where c.cramo = 1
 --AND pl.istatplan = 'V'
-and C.cplan = 'INC_cont' 
+and C.cplan = 'BPVC' 
 
 SELECT * FROM #Coberturas
 order by 1,2,4
@@ -55,11 +55,11 @@ order by cpregunta
 --select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
 --SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Les06'
---select * from tarifasvar where variable = 'modelorec'
-
+--select * from tarifasvar where variable = 'CalMPAnt'
+EXECUTE dbo.Proc_GetPrimaAnte @p_cramo=1, @p_cplan = N'{XPLAN}', @p_ccober={CCOBER},  @p_cprocesV={CPROCES_V}
 return;
 
-declare @ramo int = 1
+declare @ramo int = 31
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -87,7 +87,9 @@ order by 2
 ----AND pl.istatplan = 'V'
 --order by 2
 
-select xabreviatura, xdescripcion_l, cramo from maramos where cramo = 52
+select xabreviatura, xdescripcion_l, cramo from maramos 
+--where cramo = 52
+order by xdescripcion_l
 
 return;
 
@@ -146,8 +148,7 @@ and r.xdescripcion like '%contrato%'
 AND r.xnombrep NOT LIKE '%endoso%'
 order by r.cramo, r.cplan
 
-SELECT pl.xplan, rep.xdescripcion, rep.xnombrep, rep.xformula_sel, rep.xtipodoc, rep.cramo, ISNULL(rep.bok, 0) AS Expr1, rep.creporte, rep.xcampos, rep.orden
-,rep.xformula1, rep.cplan, rep.cprog, rep.itipo, RTRIM(ISNULL((CASE WHEN LEN(rep.cerror)=0 THEN 0 ELSE rep.cerror END), '0')) cerror, rep.iestado
+SELECT pl.xplan, rtrim(rep.xdescripcion) Reporte, CONCAT('Reporte: ', RTRIM(rep.xnombrep) ,', Condición: Plan: ', rtrim(rep.cplan), ' - Cob: ', rtrim(rep.xformula1) )
 FROM  dbo.maplancob mapla 
 INNER JOIN dbo.marepteccia rep ON rep.cramo = mapla.cramo AND (mapla.ccobertura=rep.xformula1  OR  mapla.ccobertura=rep.xformula2 OR mapla.ccobertura=rep.xformula3 OR mapla.ccobertura=rep.xformula4 OR mapla.ccobertura=rep.xformula5) 
 		and rep.cplan = mapla.cplan 

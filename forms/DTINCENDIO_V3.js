@@ -281,11 +281,13 @@ async function cargarCatalogos(){
     });
 
     //await loadDataTable({reference:'#txtSA',tableName:'SumasPorRango',indexCode:1,indexDisplay:1,filterFunction: (item) => item[0] === policy.productCode});
-    const TablaTipoObjeto = await loadDataTable({reference:'#cmbTipoObjeto',tableName:'TablaTipoObjeto',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbCategoriaActividad',tableName:'TablaCategoriaActividad',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbUsoBien',tableName:'TablaUsoBien',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbTipoMaterial',tableName:'TablaTipoMaterial',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbZonaCresta',tableName:'ZonaCresta',indexCode:0,indexDisplay:1});
+    const [TablaTipoObjeto] = await Promise.all([
+      loadDataTable({reference:'#cmbTipoObjeto',tableName:'TablaTipoObjeto',indexCode:0,indexDisplay:1}),
+      loadDataTable({reference:'#cmbCategoriaActividad',tableName:'TablaCategoriaActividad',indexCode:0,indexDisplay:1}),
+      loadDataTable({reference:'#cmbUsoBien',tableName:'TablaUsoBien',indexCode:0,indexDisplay:1}),
+      loadDataTable({reference:'#cmbTipoMaterial',tableName:'TablaTipoMaterial',indexCode:0,indexDisplay:1}),
+      loadDataTable({reference:'#cmbZonaCresta',tableName:'ZonaCresta',indexCode:0,indexDisplay:1})
+    ]);
 
     await loadTableQuery({reference:'#cmbPais',tableCommand:'RepoCountryCatalog',filter:`[code]='591'`});
     const countryCode = $("#cmbPais").val();
@@ -297,8 +299,10 @@ async function cargarCatalogos(){
     const cityCode = $("#cmbMunicipio").attr('user-data');
     await loadTableQuery({reference:'#cmbSector',tableCommand:'RepoSectorCatalog',filter:`[cityCode]='${cityCode}'`});
 
-    cargaBarriada(false);
-    cargaEdificio(false);
+    await Promise.all([
+      cargaBarriada(false),
+      cargaEdificio(false)
+    ]);
     
     const codeBarriada =$("#cmbBarriadas").val();
     if (codeBarriada && String(codeBarriada) !== '0') {

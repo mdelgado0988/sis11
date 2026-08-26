@@ -4,7 +4,7 @@
  * @name cmdClearPolicyLoadings
  * @author Codex
  * @version 1.0
- * @purpose Remove loadings and discounts from the coverages of a renewed policy.
+ * @purpose Reset renewal coverage/policy premium values and remove loadings.
  * @context.policyId Identifier of the newly generated policy.
  *
  * JIRA GLOB-1172:
@@ -21,10 +21,32 @@ try {
   doCmd({
     cmd: "DoQuery",
     data: {
-      sql: "DELETE FROM LifeCoverageLoading " +
-        "WHERE lifeCoverageId IN (" +
-        "SELECT id FROM LifeCoverage WHERE lifePolicyId = " + policyId + "); " +
-        "UPDATE LifeCoverage SET loading = 0 WHERE lifePolicyId = " + policyId + ";"
+      sql: "UPDATE [LifeCoverage] SET " +
+        "[limit] = 0, " +
+        "[deductible] = 0, " +
+        "[basePremium] = 0, " +
+        "[loading] = 0, " +
+        "[startBasePremium] = 0, " +
+        "[extraPremium] = 0, " +
+        "[internalPremium] = 0, " +
+        "[baseLimit] = 0, " +
+        "[manualPremium] = 0, " +
+        "[manualLimit] = 0 " +
+        "WHERE [lifePolicyId] = " + policyId + "; " +
+        "UPDATE [LifePolicy] SET " +
+        "[anualPremium] = 0, " +
+        "[anualTotal] = 0, " +
+        "[coverages] = 0, " +
+        "[discounts] = 0, " +
+        "[fee] = 0, " +
+        "[installment] = 0, " +
+        "[surcharges] = 0, " +
+        "[plannedPremium] = 0, " +
+        "[grossValue] = 0 " +
+        "WHERE [id] = " + policyId + "; " +
+        "DELETE l FROM [LifeCoverageLoading] l " +
+        "INNER JOIN [LifeCoverage] c ON c.[id] = l.[lifeCoverageId] " +
+        "WHERE c.[lifePolicyId] = " + policyId + ";"
     }
   });
 
