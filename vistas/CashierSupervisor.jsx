@@ -771,6 +771,20 @@
     return `${day}-${month}-${year}`;
   }
 
+  function formatDateSlash(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+
+    return `${day}/${month}/${year}`;
+  }
+
   function formatDateTime(value) {
     if (!value) return '-';
     const date = new Date(value);
@@ -2039,7 +2053,7 @@
   const accountingMovementColumns = [
     { title: t('Transaction ID'), dataIndex: 'id', key: 'id', width: 100, align: 'center' },
     { title: t('Creation date'), dataIndex: 'date', key: 'date', width: 145, render: formatDateTime },
-    { title: t('Accounting date'), dataIndex: 'effectiveDate', key: 'effectiveDate', width: 145, render: formatDateTime },
+    { title: t('Accounting date'), dataIndex: 'effectiveDate', key: 'effectiveDate', width: 145, render: formatDateSlash },
     { title: t('Description'), dataIndex: 'description', key: 'description', width: 300, render: renderAccountingText },
     { title: t('Debit'), key: 'debit', width: 100, align: 'right', render: (_, transaction) => formatMoney(getAccountingTransactionTotal(transaction, 'debit')) },
     { title: t('Credit'), key: 'credit', width: 100, align: 'right', render: (_, transaction) => formatMoney(getAccountingTransactionTotal(transaction, 'credit')) }
