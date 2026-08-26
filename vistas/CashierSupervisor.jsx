@@ -1647,6 +1647,17 @@
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
+  function handleOpenReceiptDetailReport() {
+    if (!selectedCashierRow || !selectedCashierRow.id) {
+      message.warning(t('Please select a cash desk first'));
+      return;
+    }
+
+    const workspaceId = selectedCashierRow.id;
+    const url = `${window.location.origin}/#/reportview/DetalleRecibosCaja/workspaceId=${workspaceId}&transferId=0`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   function handleTableChange(pagination) {
     loadTransferWorkspaces({
       pagination: {
@@ -1921,6 +1932,11 @@
                   key: 'bank-deposit-summary',
                   label: t('Bank deposit summary'),
                   onClick: handleOpenBankDepositSummary
+                },
+                {
+                  key: 'receipt-detail-report',
+                  label: t('Receipt detail report'),
+                  onClick: handleOpenReceiptDetailReport
                 }
               ]
             }}
