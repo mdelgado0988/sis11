@@ -137,6 +137,7 @@
   const [paidPremiumExportLoading, setPaidPremiumExportLoading] = React.useState(false);
   const [paidPremiumPagination, setPaidPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
   const [paidPremiumTotal, setPaidPremiumTotal] = React.useState(0);
+  const [paidPremiumSelectedRowKey, setPaidPremiumSelectedRowKey] = React.useState(null);
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
@@ -149,11 +150,43 @@
     style.id = styleId;
     style.textContent = `
       .cashier-supervisor-view .cashier-supervisor-toolbar {
-        background: #f5f7fb;
+        background: transparent;
         border: 1px solid #e6ebf2;
         border-radius: 6px;
         padding: 10px 12px;
         margin-bottom: 14px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar .cashier-supervisor-outline-button,
+      .cashier-supervisor-view .cashier-supervisor-toolbar .cashier-supervisor-outline-button:disabled {
+        border-color: #8f9aa7 !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar .cashier-supervisor-outline-button:disabled {
+        border-color: #7d8793 !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar .ant-btn:disabled {
+        border-color: #6f7b88 !important;
+        opacity: 1;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-detail-filter-button {
+        border-color: #1677ff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-export-button,
+      .cashier-supervisor-view .cashier-supervisor-detail-export-button {
+        background: #60b13d !important;
+        border-color: #4f9336 !important;
+        color: #fff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-reports-button,
+      .cashier-supervisor-view .cashier-supervisor-detail-report-button {
+        background: #dd603d !important;
+        border-color: #bd4d35 !important;
+        color: #fff !important;
       }
 
       .cashier-supervisor-view .ant-form-item {
@@ -221,7 +254,7 @@
       }
 
       .cashier-supervisor-view .cashier-supervisor-selected-row > td {
-        background: #e6f4ff !important;
+        background: #86b4ff !important;
       }
 
       .cashier-supervisor-view .ant-table-tbody > tr {
@@ -230,6 +263,33 @@
 
       .cashier-supervisor-view .ant-table-tbody > tr:hover > td {
         background: #f5faff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-selected-row:hover > td {
+        background: #86b4ff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-cash-desk-table .ant-table-tbody > tr:not(.cashier-supervisor-selected-row):hover > td {
+        background: #b7d7ff !important;
+        background-color: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-cash-desk-row:hover > td {
+        background: #b7d7ff !important;
+        background-color: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-view .ant-table-tbody > tr:hover:not(.ant-table-row-selected):not(.cashier-supervisor-selected-row) > td {
+        background: #b7d7ff !important;
+        background-color: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-view .ant-table-tbody > tr.ant-table-row-selected > td,
+      .cashier-supervisor-view .ant-table-tbody > tr.cashier-supervisor-selected-row > td,
+      .cashier-supervisor-view .ant-table-tbody > tr.ant-table-row-selected:hover > td,
+      .cashier-supervisor-view .ant-table-tbody > tr.cashier-supervisor-selected-row:hover > td {
+        background: #86b4ff !important;
+        background-color: #86b4ff !important;
       }
 
       .cashier-supervisor-shell {
@@ -558,6 +618,7 @@
     setMovementSelectedRowKeys([]);
     setPaidPremiumRows([]);
     setPaidPremiumTotal(0);
+    setPaidPremiumSelectedRowKey(null);
     if (selectedCashierRow && selectedCashierRow.id) {
       loadSupervisorMovements({
         pagination: { current: 1, pageSize: movementPagination.pageSize },
@@ -1072,6 +1133,7 @@
     if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
       setPaidPremiumRows([]);
       setPaidPremiumTotal(0);
+      setPaidPremiumSelectedRowKey(null);
       return;
     }
 
@@ -1102,12 +1164,14 @@
         if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Paid premiums could not be loaded.'));
         const rows = getRows(response).filter(group => getSupervisorAllocationIds(group).length > 0);
         setPaidPremiumRows(rows);
+        setPaidPremiumSelectedRowKey(currentKey => rows.some(row => String(row.id) === String(currentKey)) ? currentKey : null);
         setPaidPremiumTotal(getResponseTotal(response, rows));
         setPaidPremiumPagination({ current: Number(pagination.current) || 1, pageSize: Number(pagination.pageSize) || 15 });
       })
       .catch(error => {
         setPaidPremiumRows([]);
         setPaidPremiumTotal(0);
+        setPaidPremiumSelectedRowKey(null);
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setPaidPremiumLoading(false));
@@ -1703,11 +1767,14 @@
     <Spin spinning={movementExportLoading} tip={t('Exporting...')}>
     <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Space wrap>
         <Button
-          className="cashier-supervisor-outline-button"
+          type="primary"
+          className="cashier-supervisor-detail-filter-button"
           onClick={() => setMovementFilterVisible(true)}
           disabled={!selectedCashierRow}
         >
+          <SearchIcon />
           {t('Filter')}
         </Button>
         <Dropdown
@@ -1721,7 +1788,7 @@
             }))
           }}
         >
-          <Button className="cashier-supervisor-outline-button" disabled={!selectedCashierRow || movementReports.length === 0}>
+          <Button className="cashier-supervisor-reports-button" disabled={!selectedCashierRow || movementReports.length === 0}>
             <ReportIcon /> {t('Reports')}
           </Button>
         </Dropdown>
@@ -1731,16 +1798,19 @@
           loading={movementLoading}
           disabled={!selectedCashierRow}
         >
+          <RefreshIcon />
           {t('Refresh')}
         </Button>
         <Button
           type="primary"
+          className="cashier-supervisor-export-button"
           onClick={exportSupervisorMovements}
           loading={movementExportLoading}
           disabled={!selectedCashierRow || movementRows.length === 0}
         >
           <ExportIcon /> {t('Export')}
         </Button>
+        </Space>
       </div>
       <Table
         rowKey="id"
@@ -1856,7 +1926,7 @@
             }}
             trigger={['click']}
           >
-            <Button>
+            <Button className="cashier-supervisor-reports-button">
               <ReportIcon /> {t('Reports')}
             </Button>
           </Dropdown>
@@ -1869,7 +1939,7 @@
         dataSource={transferRows}
         size="small"
         bordered
-        className="cashier-supervisor-table"
+        className="cashier-supervisor-table cashier-supervisor-cash-desk-table"
         loading={transferLoading}
         pagination={{
           current: transferPagination.current,
@@ -1880,7 +1950,9 @@
         }}
         onChange={handleTableChange}
         scroll={{ x: 900, y: transferScrollY }}
-        rowClassName={record => selectedCashierRow && selectedCashierRow.id === record.id ? 'cashier-supervisor-selected-row' : ''}
+        rowClassName={record => selectedCashierRow && selectedCashierRow.id === record.id
+          ? 'cashier-supervisor-selected-row'
+          : 'cashier-supervisor-cash-desk-row'}
         onRow={record => ({
           onClick: () => setSelectedCashierRow(record)
         })}
@@ -1905,6 +1977,7 @@
           </Button>
           <Button
             type="primary"
+            className="cashier-supervisor-export-button"
             onClick={exportPaidPremiums}
             loading={paidPremiumExportLoading}
             disabled={!selectedCashierRow || paidPremiumRows.length === 0}
@@ -1933,6 +2006,12 @@
           pagination: { current: pagination.current, pageSize: pagination.pageSize }
         })}
         scroll={{ x: 2200, y: transferScrollY }}
+        rowClassName={record => String(record.id) === String(paidPremiumSelectedRowKey)
+          ? 'cashier-supervisor-selected-row'
+          : ''}
+        onRow={record => ({
+          onClick: () => setPaidPremiumSelectedRowKey(record.id)
+        })}
         expandable={{
           rowExpandable: record => getSupervisorAppliedInstallments(record).length > 0,
           expandedRowRender: record => renderPaidPremiumSummary(record)

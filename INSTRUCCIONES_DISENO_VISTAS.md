@@ -15,3 +15,36 @@
 - Usar un fondo ligeramente más oscuro en los encabezados para diferenciarlos del cuerpo.
 - En las filas, eliminar los bordes verticales y conservar únicamente los bordes horizontales.
 - Mantener siempre los bordes verticales de los encabezados para separar claramente las columnas.
+
+## Referencia visual aprobada
+
+- Usar bordes de `1px` y colores discretos para separar visualmente las secciones sin hacerlas pesadas.
+- Las barras de botones deben usar fondo transparente, borde `1px solid #e6ebf2`, radio de `6px`, padding vertical de `10px` y horizontal de `12px`.
+- Los botones secundarios o de reportes deben usar un borde ligeramente más oscuro, de referencia `#8f9aa7`.
+- Los botones deshabilitados deben conservar un borde visible, de referencia `#6f7b88`, y no deben perder contraste por opacidad; usar `opacity: 1` cuando sea necesario.
+- Las grillas deben usar un borde exterior de referencia `#cbd1d8` con grosor de `1px`.
+- Los encabezados de las grillas deben usar un fondo sutilmente más oscuro, de referencia `#eef0f3`, y conservar separadores verticales de `1px solid #cbd1d8`.
+- Las filas deben conservar únicamente separadores horizontales de `1px solid #cbd1d8`, sin bordes verticales.
+- Para grillas compactas, usar como referencia padding de `5px 8px`, fuente de `12px` y line-height de `18px`, salvo que el diseño requiera otra densidad.
+
+## Barras de botones
+
+- Aplicar el mismo tratamiento visual a las barras de botones de todas las pestañas de una vista.
+- Las acciones principales de búsqueda o filtrado deben usar el estilo `primary` de Ant Design.
+- Los botones de exportación deben usar un fondo verde suavizado, de referencia `#60b13d`, con borde `#4f9336` y texto blanco.
+- Los botones de reportes deben usar un fondo rojo tipo Adobe PDF suavizado, de referencia `#dd603d`, con borde `#bd4d35` y texto blanco.
+- Los botones secundarios, como actualizar o cancelar, deben conservar fondo neutro y un borde ligeramente más oscuro, de referencia `#8f9aa7`.
+- Los botones deshabilitados deben mantener un borde visible, de referencia `#6f7b88`, y evitar una opacidad que los haga imperceptibles.
+- Los botones de Filtrar o Buscar deben mostrar un icono de lupa de Ant Design.
+- Los botones de Actualizar o Refrescar deben mostrar un icono de recarga de Ant Design.
+- Mantener los iconos alineados con la etiqueta y conservar el estilo nativo de Ant Design.
+
+## Estados de filas en grillas
+
+- Aplicar los estados visuales de hover y selección a todas las grillas de la vista, incluidas las tablas anidadas o de detalle.
+- Usar para el hover un azul suave basado en el color `primary` de Ant Design, con referencia `#b7d7ff`.
+- Usar para la fila seleccionada un azul más intenso, con referencia `#86b4ff`.
+- La selección debe prevalecer sobre el hover cuando el cursor esté sobre una fila seleccionada.
+- Cubrir tanto la selección nativa de Ant Design mediante `.ant-table-row-selected` como la selección personalizada mediante clases propias, por ejemplo `.cashier-supervisor-selected-row`.
+- Mantener el cursor tipo mano en las filas que puedan seleccionarse.
+- Aplicar los colores con prioridad suficiente para evitar que los estilos predeterminados de Ant Design o de una tabla específica oculten el estado visual.
