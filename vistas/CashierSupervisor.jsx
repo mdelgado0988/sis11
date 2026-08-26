@@ -124,7 +124,7 @@
   const [movementRows, setMovementRows] = React.useState([]);
   const [movementLoading, setMovementLoading] = React.useState(false);
   const [movementExportLoading, setMovementExportLoading] = React.useState(false);
-  const [movementPagination, setMovementPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [movementPagination, setMovementPagination] = React.useState({ current: 1, pageSize: 25 });
   const [movementTotal, setMovementTotal] = React.useState(0);
   const [movementFilters, setMovementFilters] = React.useState({});
   const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
@@ -135,7 +135,7 @@
   const [paidPremiumRows, setPaidPremiumRows] = React.useState([]);
   const [paidPremiumLoading, setPaidPremiumLoading] = React.useState(false);
   const [paidPremiumExportLoading, setPaidPremiumExportLoading] = React.useState(false);
-  const [paidPremiumPagination, setPaidPremiumPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [paidPremiumPagination, setPaidPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
   const [paidPremiumTotal, setPaidPremiumTotal] = React.useState(0);
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
@@ -311,6 +311,14 @@
         display: flex;
         flex-direction: column;
         overflow: auto;
+      }
+
+      .cashier-supervisor-tab-content > .ant-spin-nested-loading,
+      .cashier-supervisor-tab-content > .ant-spin-nested-loading > .ant-spin-container {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
       }
 
       .cashier-supervisor-tab-content > .ant-card {
