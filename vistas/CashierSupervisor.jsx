@@ -167,6 +167,23 @@
         line-height: 18px;
       }
 
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-container {
+        border: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-thead > tr > th {
+        background: #eef0f3;
+        border-inline-end: 1px solid #cbd1d8 !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr > td {
+        border-inline-end: 0 !important;
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
       .cashier-supervisor-status-bar {
         display: flex;
         flex-wrap: wrap;
@@ -272,14 +289,14 @@
         display: flex;
         flex: 0 0 auto;
         gap: 2px;
-        border-bottom: 1px solid #d9d9d9;
+        border-bottom: 1px solid #b8c0ca;
       }
 
       .cashier-supervisor-tab {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        border: 1px solid transparent;
+        border: 1px solid #cbd1d8;
         border-bottom: 2px solid transparent;
         background: transparent;
         color: #262626;
@@ -287,6 +304,8 @@
         padding: 9px 14px;
         font: inherit;
         line-height: 20px;
+        border-radius: 4px 4px 0 0;
+        margin-bottom: -1px;
       }
 
       .cashier-supervisor-tab:hover {
@@ -302,6 +321,8 @@
 
       .cashier-supervisor-tab.active {
         color: #1677ff;
+        background: #fff;
+        border-color: #aeb8c4;
         border-bottom-color: #1677ff;
       }
 
@@ -311,6 +332,9 @@
         display: flex;
         flex-direction: column;
         overflow: auto;
+        border: 1px solid #cbd1d8;
+        border-top: 0;
+        border-radius: 0 0 4px 4px;
       }
 
       .cashier-supervisor-tab-content > .ant-spin-nested-loading,
