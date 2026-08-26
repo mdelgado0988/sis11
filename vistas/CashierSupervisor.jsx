@@ -486,7 +486,7 @@
 
     const updateScrollHeight = () => {
       const availableHeight = Math.max(320, Math.floor(window.innerHeight - 12));
-      const computed = Math.max(180, Math.floor(availableHeight - 360));
+      const computed = Math.max(180, Math.floor(availableHeight - 340));
       setTransferScrollY(computed);
     };
 
@@ -1540,6 +1540,17 @@
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
+  function handleOpenBankDepositSummary() {
+    if (!selectedCashierRow || !selectedCashierRow.id) {
+      message.warning(t('Please select a cash desk first'));
+      return;
+    }
+
+    const workspaceId = selectedCashierRow.id;
+    const url = `${window.location.origin}/#/reportview/DepositoBancoCaja/workspaceId=${workspaceId}&transferId=0`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   function handleTableChange(pagination) {
     loadTransferWorkspaces({
       pagination: {
@@ -1780,7 +1791,7 @@
   }
 
   const cashDeskTabContent = (
-    <Card size="small" title={t('Cash desk list')}>
+    <Card size="small">
       <div className="cashier-supervisor-toolbar">
         <Space wrap>
           <Button type="primary" onClick={() => setSearchVisible(true)}>
@@ -1803,6 +1814,11 @@
                   key: 'cash-desk-detailed-breakdown',
                   label: t('Cash Desk Detailed Breakdown'),
                   onClick: handleOpenCashDeskDetailedBreakdown
+                },
+                {
+                  key: 'bank-deposit-summary',
+                  label: t('Bank deposit summary'),
+                  onClick: handleOpenBankDepositSummary
                 }
               ]
             }}
@@ -1841,7 +1857,7 @@
   );
 
   const premiumTabContent = (
-    <Card size="small" title={t('Paid premium list')}>
+    <Card size="small">
       <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
         <Space>
           <Button
