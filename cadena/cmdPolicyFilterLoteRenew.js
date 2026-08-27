@@ -3,6 +3,8 @@
 /** 
 *Author: Mike Ortiz
 *Creation Date: 2025-12-04
+*Name: cmdPolicyFilterLoteRenew
+*Category: VIEW
 *Last Modification Author: Mike Ortiz
 *Last Modification Date: 2025-12-04
 *Version Number: 1
@@ -21,10 +23,7 @@
 * filters from the view represent Panama calendar dates and arrive as UTC
 * boundaries, so the query must not use the server or browser local zone.
 */
-/*
-Name: cmdPolicyFilterLoteRenew
-Category: VIEW
-*/
+
 const row = context && context.row ? context.row : {};
 let filtro = '';
 let querySql = '';

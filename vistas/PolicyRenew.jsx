@@ -1907,7 +1907,7 @@
     //Tab 3 de detalle del lote
     /********************************************/
 
-    const ActionToolbarDetail = ({ loading, processActive, processType, onCalculate, onRenew, onRefresh, onViewResults, percent, loteId}) => {
+    const ActionToolbarDetail = ({ loading, processActive, processType, onCalculate, onRenew, onRefresh, onExport, exportLoading, onViewResults, percent, loteId}) => {
         const quoteMenu = (
           <Menu onClick={(item) => onCalculate(item.key)}>
             <Menu.Item key="selection">Cotizar selección</Menu.Item>
@@ -1978,6 +1978,16 @@
                   style={{ color: '#1890ff' }}
                 >
                   Actualizar
+                </Button>
+
+                <Button
+                  className="policy-renew-export-button"
+                  onClick={() => onExport()}
+                  icon={<FileAddOutlined />}
+                  loading={exportLoading}
+                  disabled={exportLoading || !loteId}
+                >
+                  Exportar
                 </Button>
 
                 {loteId > 0 && (
@@ -2153,7 +2163,7 @@
 
     const TabContent3 = ({loteId, wfId,tableData, loadDataLoteDetalle, searchTotal, handleTableChange, 
                            loading, processActive, processType, handleRefresh, percent, handleCalculate, handleRenew, selectedRowDetailKeys, onSelectChange, pagination,
-                          handleViewResults, onViewPolicy}) => {
+                          handleViewResults, onViewPolicy, onExport, exportLoading}) => {
 
          const onRowSelection = {
           selectedRowDetailKeys,
@@ -2174,6 +2184,8 @@
                   onCalculate={handleCalculate}
                   onRenew={handleRenew}
                   onRefresh={handleRefresh}
+                  onExport={onExport}
+                  exportLoading={exportLoading}
                   onViewResults={handleViewResults}
                   percent={percent}
                   loteId={loteId}
@@ -2298,6 +2310,7 @@
       const [tableDataResults, setTableDataResults] = useState([]);
       const [loadingResults, setLoadingResults] = useState(false);
       const [resultsModalVisible, setResultsModalVisible] = useState(false);
+      const [exportDetailLoading, setExportDetailLoading] = useState(false);
 
       useEffect(() => {
         // A detail selection belongs only to the currently opened renewal batch.
@@ -2413,6 +2426,105 @@
           };
           loadDataLoteDetalle(params);
       }
+
+      const ensureDetailExcelLibrary = () => {
+          if (typeof XLSX !== 'undefined') {
+              return Promise.resolve(true);
+          }
+
+          return exe('ExeChain', {
+              chain: 'cmdLoadLibrariesGroupedBordereau',
+              context: '{}'
+          }).then(response => {
+              const libraries = response && response.outData ? response.outData : {};
+              const xlsxLibrary = libraries.XLSX || libraries.xlsx || libraries.xlsxJs;
+
+              if (typeof xlsxLibrary === 'string') {
+                  eval(xlsxLibrary);
+              } else if (xlsxLibrary) {
+                  window.XLSX = xlsxLibrary;
+              }
+
+              return typeof XLSX !== 'undefined';
+          });
+      };
+
+      const handleExportDetail = () => {
+          if (!loteId) {
+              notification.warning({
+                  message: 'Advertencia',
+                  description: 'Debe seleccionar un lote antes de exportar.'
+              });
+              return;
+          }
+
+          setExportDetailLoading(true);
+          const requestedSize = Number(searchTotalDetail) > 0 ? Number(searchTotalDetail) : 10000;
+          const context = `{ loteId: ${loteId}, currentPage:1, pageSize:${requestedSize} }`;
+
+          exe('ExeChain', {
+              chain: 'cmdPaginationBatchDetail',
+              context: context
+          })
+          .then(response => {
+              const result = response && response.outData ? response.outData : {};
+              const rows = Array.isArray(result.data)
+                  ? result.data
+                  : (Array.isArray(result) ? result : []);
+
+              if (!response || !response.ok) {
+                  throw new Error(response && response.msg ? response.msg : 'No fue posible exportar el detalle del lote.');
+              }
+
+              if (!rows.length) {
+                  notification.info({
+                      message: 'Información',
+                      description: 'No existen registros para exportar.'
+                  });
+                  return Promise.resolve();
+              }
+
+              return ensureDetailExcelLibrary().then(excelAvailable => {
+                  if (!excelAvailable) {
+                      throw new Error('La exportación a Excel no está disponible.');
+                  }
+
+                  const exportRows = rows.map(row => ({
+                      'Id Póliza': row.newLifePolicyId || row.lifePolicyId || '',
+                      'Póliza': row.poliza || '',
+                      'Producto': row.producto || '',
+                      'Inicia': renderDate(row.inicio),
+                      'Vence': renderDate(row.vence),
+                      'Prima Pura': Number(row.prima || 0).toFixed(2),
+                      'Recargo': Number(row.recargo || 0).toFixed(2),
+                      'Descuento': Number(row.descuento || 0).toFixed(2),
+                      'Prima Bruta': Number(row.primaNeta || 0).toFixed(2),
+                      'Impuesto': Number(row.impuesto || 0).toFixed(2),
+                      'Gastos': Number(row.gasto || 0).toFixed(2),
+                      'Facturado': Number(row.facturado || 0).toFixed(2),
+                      'Pagado': Number(row.pagado || 0).toFixed(2),
+                      'Pendiente': Number(row.pendiente || 0).toFixed(2),
+                      'Prima Renovación': Number(row.primaCotizada || 0).toFixed(2),
+                      '% Pagado': Number(row.porcentajepagado || 0).toFixed(2),
+                      '% Pendiente': Number(row.porcentajependiente || 0).toFixed(2),
+                      'Siniestros': row.siniestros || '',
+                      '¿Renovada?': row.renovar || ''
+                  }));
+
+                  const workbook = XLSX.utils.book_new();
+                  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+                  XLSX.utils.book_append_sheet(workbook, worksheet, 'Detalle de Lote');
+                  XLSX.writeFile(workbook, `detalle-lote-renovacion-${loteId}-${Date.now()}.xlsx`);
+              });
+          })
+          .catch(error => {
+              notification.error({
+                  message: 'Error',
+                  description: error && error.message ? error.message : String(error)
+              });
+          })
+          .finally(() => setExportDetailLoading(false));
+      };
 
       const handleViewPolicy = (record) => {
           const policyId = Number(record && (record.newLifePolicyId || record.lifePolicyId) || 0);
@@ -3496,6 +3608,8 @@
                                 processType={processType}
                                 percent={percent}
                                 handleRefresh={handleRefreshDetail}
+                                onExport={handleExportDetail}
+                                exportLoading={exportDetailLoading}
                                 handleCalculate={handleCalculate}
                                 handleRenew={handleRenew}
                                 selectedRowDetailKeys={selectedRowDetailKeys}
