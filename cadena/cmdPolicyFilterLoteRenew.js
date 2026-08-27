@@ -54,13 +54,37 @@ if(row.tipoPoliza){
     filtro += ` AND pol.[policyType]=${sqlString(row.tipoPoliza)}`;
 }
 if(renewalStatus === 'SIN_ACCION'){
-    filtro += ' AND reno.id IS NULL';
+    filtro += ` AND NOT EXISTS (
+        SELECT 1
+        FROM LifePolicy ren
+        WHERE ren.[originalPolicyId] = pol.[id]
+    )`;
 }
 if(renewalStatus === 'EN_PROGRESO'){
-    filtro += ' AND reno.id IS NOT NULL AND reno.activeDate IS NULL';
+    filtro += ` AND EXISTS (
+        SELECT 1
+        FROM LifePolicy ren
+        WHERE ren.[originalPolicyId] = pol.[id]
+          AND ren.[id] = (
+              SELECT MAX(renLast.[id])
+              FROM LifePolicy renLast
+              WHERE renLast.[originalPolicyId] = pol.[id]
+          )
+          AND ren.[activeDate] IS NULL
+    )`;
 }
 if(renewalStatus === 'RENOVADA'){
-    filtro += ' AND reno.id IS NOT NULL AND reno.activeDate IS NOT NULL';
+    filtro += ` AND EXISTS (
+        SELECT 1
+        FROM LifePolicy ren
+        WHERE ren.[originalPolicyId] = pol.[id]
+          AND ren.[id] = (
+              SELECT MAX(renLast.[id])
+              FROM LifePolicy renLast
+              WHERE renLast.[originalPolicyId] = pol.[id]
+          )
+          AND ren.[activeDate] IS NOT NULL
+    )`;
 }
 if(row.venceDesde){
     filtro += ` AND pol.[end] >= ${sqlString(row.venceDesde)}`;
@@ -85,32 +109,64 @@ if(!hasExplicitExpirationRange && row.venceEn && venceEn >= 0){
 }
 
 cteQuery = `
-WITH BatchCreated AS (
-SELECT 
-  MAX(B.id) AS batchId,
-  TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT) AS lifePolicyId,
-  MAX(TRY_CAST(JSON_VALUE(J.value, '$[3]') AS CHAR(2))) AS renovar
-FROM [Batch] AS B
-JOIN [ImportConfig] ic ON b.importConfigId = ic.id
-CROSS APPLY OPENJSON(B.jData) AS J
-WHERE 
-    ic.[category] = 'ANNIVERSARYLOTEVIEW'
-    AND  ISJSON(B.jData) > 0
-    AND TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT) IS NOT NULL
-GROUP BY TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT)
+WITH RenewalCandidates AS (
+    SELECT DISTINCT
+        pol.[id] AS codigo,
+        reno.[id] AS renewalId,
+        reno.[activeDate] AS renewalActiveDate
+    FROM LifePolicy pol
+    JOIN Product pro ON pro.[lobCode] = pol.[lob] AND pol.[productCode] = pro.[code]
+    JOIN Lob lob ON pol.[lob] = lob.[code]
+    OUTER APPLY (
+        SELECT TOP 1
+            lp.[id],
+            lp.[activeDate]
+        FROM LifePolicy lp
+        WHERE lp.[originalPolicyId] = pol.[id]
+        ORDER BY lp.[id] DESC
+    ) reno
+    WHERE pol.[entityState] = 'ACTIVE'
+    AND pol.[active] = 1
+    AND pol.[activeDate] IS NOT NULL
+    ${filtro}
+),
+PagedPolicies AS (
+    SELECT
+        codigo,
+        renewalId,
+        renewalActiveDate,
+        COUNT(*) OVER() AS totalRows
+    FROM RenewalCandidates
+    ORDER BY codigo
+    OFFSET (@pagenum - 1) * @pagesize ROWS
+    FETCH NEXT @pagesize ROWS ONLY
+),
+BatchCreated AS (
+    SELECT
+        MAX(B.id) AS batchId,
+        TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT) AS lifePolicyId
+    FROM [Batch] AS B
+    JOIN [ImportConfig] ic ON B.importConfigId = ic.id
+    CROSS APPLY OPENJSON(B.jData) AS J
+    INNER JOIN PagedPolicies page ON page.codigo = TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT)
+    WHERE ic.[category] = 'ANNIVERSARYLOTEVIEW'
+      AND ISJSON(B.jData) > 0
+      AND TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT) IS NOT NULL
+    GROUP BY TRY_CAST(JSON_VALUE(J.value, '$[2]') AS INT)
 )`;
 
 querySql =`
 ${cteQuery}
 SELECT DISTINCT 
-    pol.[id] AS 'codigo',
+    page.totalRows,
+    page.codigo AS 'codigo',
     pol.[code] AS 'poliza',
     YEAR(pol.[start]) AS 'anio',
     MONTH(pol.[start]) AS 'mes',
     lob.[name] AS 'ramo',
     pro.[name] AS 'plan',
-    CASE WHEN reno.id IS NOT NULL AND reno.activeDate IS NULL THEN 'En Proceso'
-        WHEN reno.id IS NOT NULL AND reno.activeDate IS NOT NULL THEN 'Renovada' ELSE 'Sin Acción' END AS 'estado',
+    CASE WHEN page.renewalId IS NOT NULL AND page.renewalActiveDate IS NULL THEN 'En Proceso'
+        WHEN page.renewalId IS NOT NULL AND page.renewalActiveDate IS NOT NULL THEN 'Renovada' ELSE 'Sin Acción' END AS 'estado',
     CASE 
         WHEN pol.[policyType] = 'I' THEN 'Individual'
         WHEN pol.[policyType] = 'G' THEN 'Grupal'
@@ -120,15 +176,16 @@ SELECT DISTINCT
     pol.[end] AS 'vence',
     insuredData.asegurado AS 'asegurado',
     DATEDIFF(DAY, GETDATE(), pol.[end]) AS 'diasV',
-    ISNULL(reno.id,0) AS 'oferta',
+    ISNULL(page.renewalId,0) AS 'oferta',
     CalculoPago.[pending] AS 'pendiente',
     pol.[created] AS 'fechaCreacion',
     pol.[id] AS 'lifePolicyId',
     COALESCE(btC.[batchId],0) batchId,
     CASE WHEN ISNULL(oa.estadoRenovacion, 'Sin Accion') = 'No Renovar' THEN 0 ELSE 1 END bRenovar,
     pol.originalPolicyId
-FROM LifePolicy pol
-JOIN Product pro ON pol.[productCode] = pro.[code]
+FROM PagedPolicies page
+JOIN LifePolicy pol ON pol.[id] = page.codigo
+JOIN Product pro ON pro.[lobCode] = pol.[lob] AND pol.[productCode] = pro.[code]
 JOIN Lob lob ON pol.[lob] = lob.[code]
 OUTER APPLY (
     SELECT TOP 1
@@ -139,13 +196,6 @@ OUTER APPLY (
       AND aseg.[role] = 0
     ORDER BY aseg.[id]
 ) insuredData
-LEFT JOIN (
-    SELECT originalPolicyId, MAX(id) AS latestRenewalId
-    FROM LifePolicy
-    WHERE originalPolicyId IS NOT NULL
-    GROUP BY originalPolicyId
-) latestRenewal ON latestRenewal.originalPolicyId = pol.id
-LEFT JOIN LifePolicy reno ON reno.id = latestRenewal.latestRenewalId
 LEFT JOIN BatchCreated btC ON pol.[id] = btC.[lifePolicyId]
 
 OUTER APPLY (SELECT TOP 1 JSON_VALUE(j.userData, '$[0]') AS estadoRenovacion
@@ -165,19 +215,12 @@ CROSS APPLY (
       AND pay.[payed] = 0
 ) CalculoPago
 
-WHERE pol.[entityState] = 'ACTIVE'
-AND pol.[active] = 1
-AND pol.[activeDate] IS NOT NULL
-${filtro}
 `;
 
 let paginationHeader = `
 DECLARE @pagenum  AS INT = ${row.currentPage}, @pagesize AS INT = ${row.pageSize}; `;
 
-let paginationFooter = `
-ORDER BY pol.[id]
-OFFSET (@pagenum - 1) * @pagesize ROWS 
-FETCH NEXT @pagesize ROWS ONLY; `;
+let paginationFooter = ';';
 
 let sqlCommand = `
 ${paginationHeader}
@@ -198,58 +241,51 @@ if (!queryResponse || !queryResponse.ok) {
 }
 
 const dataRespuesta = Array.isArray(queryResponse.outData) ? queryResponse.outData : [];
-const idsPolizas = {};
-const dataPaginada = dataRespuesta.filter((item) => {
-    const codigo = item && item.codigo !== undefined && item.codigo !== null
-        ? String(item.codigo)
-        : '';
+let totalDatos = dataRespuesta.length > 0
+    ? Number(dataRespuesta[0].totalRows || 0)
+    : 0;
 
-    if (!codigo || idsPolizas[codigo]) {
-        return false;
-    }
-
-    idsPolizas[codigo] = true;
-    return true;
-});
-
-
-let queryCountSql = `
+if (dataRespuesta.length === 0) {
+    const queryCountSql = `
 SELECT COUNT(1) AS total
 FROM LifePolicy pol
-LEFT JOIN (
-    SELECT originalPolicyId, MAX(id) AS latestRenewalId
-    FROM LifePolicy
-    WHERE originalPolicyId IS NOT NULL
-    GROUP BY originalPolicyId
-) latestRenewal ON latestRenewal.originalPolicyId = pol.id
-LEFT JOIN LifePolicy reno ON reno.id = latestRenewal.latestRenewalId
-
+JOIN Product pro ON pro.[lobCode] = pol.[lob] AND pol.[productCode] = pro.[code]
+JOIN Lob lob ON pol.[lob] = lob.[code]
+OUTER APPLY (
+    SELECT TOP 1
+        lp.[id],
+        lp.[activeDate]
+    FROM LifePolicy lp
+    WHERE lp.[originalPolicyId] = pol.[id]
+    ORDER BY lp.[id] DESC
+) reno
 WHERE pol.[entityState] = 'ACTIVE'
 AND pol.[active] = 1
 AND pol.[activeDate] IS NOT NULL
 ${filtro}
 `;
 
+    doCmd({
+        cmd:'DoQuery',
+        data: {
+            sql: queryCountSql
+        }
+    });
 
-doCmd({
-    cmd:'DoQuery',
-    data: {
-        sql: queryCountSql
+    const countResponse = typeof DoQuery === 'undefined' ? null : DoQuery;
+    if (!countResponse || !countResponse.ok) {
+        return buildResult(false, countResponse && countResponse.msg ? countResponse.msg : 'No fue posible contar las pólizas');
     }
-});
-const countResponse = typeof DoQuery === 'undefined' ? null : DoQuery;
-if (!countResponse || !countResponse.ok) {
-    return buildResult(false, countResponse && countResponse.msg ? countResponse.msg : 'No fue posible contar las pólizas');
-}
 
-let totalDatos = Array.isArray(countResponse.outData) && countResponse.outData[0]
-    ? Number(countResponse.outData[0].total || 0)
-    : 0;
+    totalDatos = Array.isArray(countResponse.outData) && countResponse.outData[0]
+        ? Number(countResponse.outData[0].total || 0)
+        : 0;
+}
 
 return {
     ok: true,
     total: totalDatos,
-    data: dataPaginada
+    data: dataRespuesta
 }
 
 function sqlString(value){

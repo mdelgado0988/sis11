@@ -1,4 +1,5 @@
 () => {
+    const { useMemo } = React;
     const { Form, Select, DatePicker, Input, Row, Col, Card, Collapse, Button, Space, Table, Tabs,  Layout , InputNumber, Radio, Divider,Empty,Tag, Tooltip, 
            notification, Popover, Modal, Spin, Skeleton, Progress, Badge, Dropdown, Menu } = A;
     const { Panel} = Collapse;
@@ -199,12 +200,143 @@
           color: #fff;
         }
 
+        .renovacion-shell .policy-renew-generate-button,
+        .renovacion-shell .policy-renew-generate-button:hover,
+        .renovacion-shell .policy-renew-generate-button:focus {
+          background: #315f8f;
+          border-color: #264d75;
+          color: #fff;
+        }
+
+        .renovacion-shell .policy-renew-generate-button:active {
+          background: #264d75;
+          border-color: #1f4163;
+          color: #fff;
+        }
+
+        .renovacion-shell .policy-renew-export-button,
+        .renovacion-shell .policy-renew-export-button:hover,
+        .renovacion-shell .policy-renew-export-button:focus {
+          background: #60b13d;
+          border-color: #4f9336;
+          color: #fff;
+        }
+
+        .renovacion-shell .policy-renew-export-button:active {
+          background: #4f9336;
+          border-color: #3f762b;
+          color: #fff;
+        }
+
+        /* Keep quote and renewal actions as regular rounded Ant Design buttons. */
+        .renovacion-shell .policy-renew-action-group {
+          border: 0;
+          overflow: visible;
+          gap: 8px;
+        }
+
+        .renovacion-shell .policy-renew-action-group > .ant-btn,
+        .renovacion-shell .policy-renew-action-group .ant-dropdown-button > .ant-btn,
+        .renovacion-shell .policy-renew-action-group .policy-renew-quote-button,
+        .renovacion-shell .policy-renew-action-group .policy-renew-button {
+          border-radius: 6px !important;
+          border-right: 1px solid currentColor;
+        }
+
+        .renovacion-shell .policy-renew-errors-button,
+        .renovacion-shell .policy-renew-errors-button:hover,
+        .renovacion-shell .policy-renew-errors-button:focus {
+          background: #ff4d4f !important;
+          border: 1px solid #ff4d4f !important;
+          border-radius: 6px !important;
+          color: #fff !important;
+          box-shadow: none !important;
+        }
+
+        .renovacion-shell .policy-renew-errors-button:hover,
+        .renovacion-shell .policy-renew-errors-button:focus {
+          background: #d9363e !important;
+          border-color: #d9363e !important;
+        }
+
+        .renovacion-shell .policy-renew-errors-button:active {
+          background: #a8071a !important;
+          border-color: #a8071a !important;
+        }
+
         .renovacion-view .ant-checkbox-inner {
           border-color: #5b6573;
         }
 
         .renovacion-view .ant-checkbox:hover .ant-checkbox-inner {
           border-color: #1f2937;
+        }
+
+        /* Shared visual standard for tabs, toolbars and renewal grids. */
+        .renovacion-shell .renovacion-card {
+          border: 1px solid #cbd1d8;
+          border-radius: 6px;
+          background: #fff;
+        }
+
+        .renovacion-shell .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+          border: 1px solid #cbd1d8;
+          border-bottom-color: #cbd1d8;
+          background: #fff;
+        }
+
+        .renovacion-shell .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+          border-bottom-color: #fff;
+          color: #1677ff;
+        }
+
+        .renovacion-shell .ant-tabs-content-holder {
+          border: 1px solid #cbd1d8;
+          border-top: 0;
+          border-radius: 0 0 6px 6px;
+        }
+
+        .renovacion-shell .renovacion-toolbar {
+          background: transparent !important;
+          border: 1px solid #e6ebf2;
+          border-radius: 6px;
+          padding: 10px 12px !important;
+        }
+
+        .renovacion-shell .renovacion-toolbar .ant-btn:not(.ant-btn-primary) {
+          border-color: #8f9aa7;
+        }
+
+        .renovacion-shell .renovacion-toolbar .ant-btn:disabled {
+          border-color: #6f7b88 !important;
+          opacity: 1;
+        }
+
+        .renovacion-shell .ant-table-container {
+          border: 1px solid #cbd1d8;
+        }
+
+        .renovacion-shell .ant-table-thead > tr > th {
+          background: #eef0f3 !important;
+          border-right: 1px solid #cbd1d8 !important;
+          border-bottom: 1px solid #cbd1d8 !important;
+        }
+
+        .renovacion-shell .ant-table-tbody > tr > td {
+          border-right: 0 !important;
+          border-bottom: 1px solid #cbd1d8 !important;
+        }
+
+        .renovacion-shell .ant-table-tbody > tr:hover > td {
+          background: #b7d7ff !important;
+        }
+
+        .renovacion-shell .ant-table-tbody > tr.ant-table-row-selected > td {
+          background: #86b4ff !important;
+        }
+
+        .renovacion-shell .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+          background: #86b4ff !important;
         }
 
         .renovacion-shell {
@@ -738,19 +870,22 @@
         );
     }
 
-    const ActionToolbar = ({ loading, onSearch, onGenerate, onClear, searchTotal = 0, tiempoEjecucion = '0 milisegundos' }) => {
+    const ActionToolbar = ({ loading, onSearch, onGenerate, onClear, onExport, exportLoading, searchTotal = 0, tiempoEjecucion = '0 milisegundos' }) => {
         return (
-            <Row style={{ marginBottom: 16, background: '#f0f2f5', padding: '8px', borderRadius: '4px' }} align="middle">
+            <Row className="renovacion-toolbar" style={{ marginBottom: 16, background: '#f0f2f5', padding: '8px', borderRadius: '4px' }} align="middle">
                 <Col flex="auto">
                     <Space wrap> {/* 'wrap' permite que los botones bajen de línea en pantallas muy pequeñas */}
                         <Button type="primary" icon={<SearchOutlined />} loading={loading} onClick={onSearch}>
                         Buscar
                         </Button>
-                        <Button icon={<FileAddOutlined />} onClick={onGenerate}>
+                        <Button className="policy-renew-generate-button" icon={<FileAddOutlined />} onClick={onGenerate}>
                         Generar Lote
                         </Button>
                         <Button icon={<ClearOutlined />} onClick={onClear}>
                         Limpiar Selección
+                        </Button>
+                        <Button className="policy-renew-export-button" icon={<FileAddOutlined />} loading={exportLoading} disabled={exportLoading} onClick={onExport}>
+                        Exportar
                         </Button>
                         {/*<Button icon={<SafetyCertificateOutlined />}>
                         Supervisor de Procesos
@@ -785,7 +920,7 @@
 
     const PolicyTable = ({ data, loading, searchTotal, pagination, handleTableChange, rowSelection }) => {
 
-        const columns = [
+        const columns = useMemo(() => [
             { title: 'Id', dataIndex: 'codigo', width: 80, align: 'center' },
             { title: 'Póliza', dataIndex: 'poliza', width: 150, ellipsis: true },
             { title: 'Año', dataIndex: 'anio', width: 60, align: 'center' },
@@ -802,7 +937,7 @@
             { title: 'Pendiente', dataIndex: 'pendiente', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
             { title: 'Fecha Creación', dataIndex: 'fechaCreacion', width: 80, render: renderDate, align: 'center' },
             { title: 'Lote', dataIndex: 'batchId', width: 80, align: 'center'}
-        ];
+        ], []);
 
         return (
             <Table
@@ -840,7 +975,7 @@
     
     const BatchTable = ({ data, loading,searchTotal, pagination, handleTableChange, handleViewDetail, reloadData, onOpenModal }) => {
 
-        const columns = [
+        const columns = useMemo(() => [
             { title: 'Id', dataIndex: 'id', width: 60 },
             { title: 'Nombre', dataIndex: 'name', width: 150, ellipsis: true },
             { title: 'Creacion', dataIndex: 'created', width: 80,render: renderDate },
@@ -1076,7 +1211,7 @@
               }
             }
             
-        ];
+        ], [t, handleViewDetail, reloadData, onOpenModal]);
               
         return (
           <div className="renovacion-view renovacion-batch-table">
@@ -1118,6 +1253,7 @@
         const [batchGenerationVisible, setBatchGenerationVisible] = useState(false);
         const [batchGenerationProgress, setBatchGenerationProgress] = useState(0);
         const [batchGenerationText, setBatchGenerationText] = useState('');
+        const [exportLoading, setExportLoading] = useState(false);
 
         const onSelectChange = (newSelectedRowKeys) => {
             console.log('selectedRowKeys changed: ', newSelectedRowKeys);
@@ -1192,6 +1328,111 @@
             loadDataPolizas(params);
         }
 
+        const ensureExcelLibrary = () => {
+            if (typeof XLSX !== 'undefined') {
+                return Promise.resolve(true);
+            }
+
+            return exe('ExeChain', {
+                chain: 'cmdLoadLibrariesGroupedBordereau',
+                context: '{}'
+            }).then(response => {
+                const libraries = response && response.outData ? response.outData : {};
+                const xlsxLibrary = libraries.XLSX || libraries.xlsx || libraries.xlsxJs;
+
+                if (typeof xlsxLibrary === 'string') {
+                    eval(xlsxLibrary);
+                } else if (xlsxLibrary) {
+                    window.XLSX = xlsxLibrary;
+                }
+
+                return typeof XLSX !== 'undefined';
+            });
+        };
+
+        const handleExport = () => {
+            if (!searchTotal) {
+                notification.warning({ message: 'Advertencia', description: 'Realice una búsqueda antes de exportar.' });
+                return;
+            }
+
+            setExportLoading(true);
+
+            const values = getFilterValues();
+            const requestedSize = Number(searchTotal) > 0 ? Number(searchTotal) : 10000;
+            const formValues = values || {};
+            let extraParametros = '';
+
+            if (formValues.noPoliza) extraParametros += `, policyId:${formValues.noPoliza}`;
+            if (formValues.ramo) extraParametros += `, ramo:'${formValues.ramo}'`;
+            if (formValues.plan) extraParametros += `, producto:'${formValues.plan}'`;
+            if (formValues.sucursal) extraParametros += `, sucursal:'${formValues.sucursal}'`;
+            if (formValues.tipoPoliza) extraParametros += `, tipoPoliza:'${formValues.tipoPoliza}'`;
+            if (formValues.estadoRenovacion) extraParametros += `, estadoRenovacion:'${formValues.estadoRenovacion}'`;
+            if (formValues.venceDesde) {
+                const venceDesdeUtc = formatPanamaUtcBoundary(formValues.venceDesde, false);
+                if (venceDesdeUtc) extraParametros += `, venceDesde:'${venceDesdeUtc}'`;
+            }
+            if (formValues.venceHasta) {
+                const venceHastaUtc = formatPanamaUtcBoundary(formValues.venceHasta, false);
+                const venceHastaExclusiveUtc = formatPanamaUtcBoundary(formValues.venceHasta, true);
+                if (venceHastaUtc) extraParametros += `, venceHasta:'${venceHastaUtc}'`;
+                if (venceHastaExclusiveUtc) extraParametros += `, venceHastaExclusive:'${venceHastaExclusiveUtc}'`;
+            }
+            if (formValues.venceEn) extraParametros += `, venceEn:${formValues.venceEn}`;
+
+            exe('ExeChain', {
+                    chain: 'cmdPolicyFilterLoteRenew',
+                    context: `{row:{currentPage:1, pageSize:${requestedSize}${extraParametros}}}`
+                })
+                .then(response => {
+                    if (!response || !response.ok) {
+                        throw new Error(response && response.msg ? response.msg : 'No fue posible exportar las pólizas.');
+                    }
+
+                    const result = response.outData || {};
+                    const sourceRows = Array.isArray(result.data) ? result.data : [];
+                    const rows = sourceRows;
+
+                    if (!rows.length) {
+                        notification.info({ message: 'Información', description: 'No existen registros para exportar.' });
+                        return Promise.resolve();
+                    }
+
+                    return ensureExcelLibrary().then(excelAvailable => {
+                        if (!excelAvailable) {
+                            throw new Error('La exportación a Excel no está disponible.');
+                        }
+
+                        const exportRows = rows.map(row => ({
+                            Id: row.codigo || '',
+                            Póliza: row.poliza || '',
+                            Año: row.anio || '',
+                            Mes: row.mes || '',
+                            Ramo: row.ramo || '',
+                            Producto: row.plan || '',
+                            Estado: row.estado || '',
+                            'Tipo Póliza': row.tipoPoliza || '',
+                            Inicia: renderDate(row.inicia),
+                            Vence: renderDate(row.vence),
+                            Asegurado: row.asegurado || '',
+                            'Días V.': row.diasV || '',
+                            Pendiente: row.pendiente === null || row.pendiente === undefined ? '' : row.pendiente,
+                            'Fecha Creación': renderDate(row.fechaCreacion),
+                            Lote: row.batchId || ''
+                        }));
+                        const workbook = XLSX.utils.book_new();
+                        const worksheet = XLSX.utils.json_to_sheet(exportRows);
+                        XLSX.utils.book_append_sheet(workbook, worksheet, 'Pólizas');
+                        XLSX.writeFile(workbook, `polizas-renovacion-${Date.now()}.xlsx`);
+                    });
+                })
+                .catch(error => {
+                    notification.error({ message: 'Error', description: error && error.message ? error.message : String(error) });
+                })
+                .finally(() => setExportLoading(false));
+        };
+
         const loadDataPolizas =(params = {}) => {
             setLoading(params.loading);
             const form = params.formulario || {};
@@ -1226,22 +1467,24 @@
             })
             .then(r => {
                 if( r.ok){
-                    const respuesta = r.outData || {};
-                    const polizaPaginada = Array.isArray(respuesta.data) ? respuesta.data : [];
-                    const idsPolizas = {};
-                    const listaPoliza = polizaPaginada.filter((item) => {
-                        const idPoliza = item && item.lifePolicyId !== undefined && item.lifePolicyId !== null
-                            ? String(item.lifePolicyId)
-                            : '';
-
-                        if (!idPoliza || idsPolizas[idPoliza]) {
-                            return false;
-                        }
-
-                        idsPolizas[idPoliza] = true;
-                        return true;
-                    });
-                    const totalPolizas = Number(respuesta.total || r.total || 0);
+                    const salida = r.outData || {};
+                    const respuesta = salida && salida.response && !Array.isArray(salida.response)
+                        ? salida.response
+                        : salida;
+                    const polizaPaginada = Array.isArray(respuesta)
+                        ? respuesta
+                        : (Array.isArray(respuesta.data) ? respuesta.data : []);
+                    const listaPoliza = polizaPaginada;
+                    const totalRows = polizaPaginada.length > 0 && polizaPaginada[0]
+                        ? Number(polizaPaginada[0].totalRows || 0)
+                        : 0;
+                    const totalPolizas = Number(
+                        totalRows > 0
+                            ? totalRows
+                            : (!Array.isArray(respuesta) && respuesta.total !== undefined
+                                ? respuesta.total
+                                : (r.total || 0))
+                    );
 
                     setSearchTotal(totalPolizas);
 
@@ -1597,6 +1840,8 @@
                     onSearch={handleSearch}
                     onGenerate={handleGenerate}
                     onClear={handleClearSelection}
+                    onExport={handleExport}
+                    exportLoading={exportLoading}
                     searchTotal={searchTotal}
                     tiempoEjecucion={tiempoEjecucion}
                 />
@@ -1635,7 +1880,7 @@
             {/* 1. Sección de Filtros Reutilizable */}
             <div style={{ marginTop: '20px' }}>
                 {/* 2. Barra de Herramientas Reutilizable */}
-                <div style={{ marginBottom: 16 }}>
+                <div className="renovacion-toolbar" style={{ marginBottom: 16 }}>
                     <Space size="large">
                         <Button type="text" onClick={handleSearchBatch} icon={<ReloadOutlined />} style={{ color: '#1890ff' }}>
                             Actualizar
@@ -1678,6 +1923,7 @@
 
         return (
           <Row
+            className="renovacion-toolbar"
             style={{ marginBottom: 16, background: '#f0f2f5', padding: '8px', borderRadius: '4px' }}
             align="middle"
             gutter={[16, 16]}
@@ -1715,6 +1961,8 @@
                   Re-Ejecutar
                 </Button> */}
                 <Button
+                  className="policy-renew-errors-button"
+                  danger
                   onClick={() => onViewResults()}
                   icon={<EyeOutlined />}
                 >
@@ -1757,11 +2005,11 @@
 
     const ResultRenewQuoteBatchTable = ({ data, loading, total, pagination, handleTableChange }) => {
 
-        const columns = [
+        const columns = useMemo(() => [
           { title: 'Id Proceso', dataIndex: 'idProceso', width: 120, align: 'center', render: (_, record) => record.idProceso || record.IdProceso || record.processId || record.ProcessId },
           { title: 'Poliza', dataIndex: 'poliza', width: 160, ellipsis: true, render: (_, record) => record.poliza || record.Poliza || record.policy || record.Policy },
           { title: 'Mensaje', dataIndex: 'mensaje', ellipsis: true, render: (_, record) => record.mensaje || record.Mensaje || record.message || record.Message }
-        ];
+        ], []);
 
         return (
           <Table
@@ -1810,7 +2058,7 @@
 
     const LoteDetalleTable = ({ tableData, loading, searchTotal, pagination, handleTableChange, rowSelection, total, onViewPolicy }) => {
 
-        const columns = [
+        const columns = useMemo(() => [
           {
             title: 'Id Póliza',
             dataIndex: 'newLifePolicyId',
@@ -1873,7 +2121,7 @@
               return text;           
               }
           }
-        ];
+        ], [onViewPolicy]);
 
         return (
           <div className="renovacion-view renovacion-detail-table">
@@ -3229,7 +3477,11 @@
                                   onOpenModal={onOpenModal}
                               />
                           </TabPane>
-                          <TabPane tab={<span><EyeOutlined />Detalle de Lote</span>} key="3" >
+                          <TabPane
+                              tab={<span><EyeOutlined />Detalle de Lote</span>}
+                              key="3"
+                              disabled={!loteId}
+                          >
                               <TabContent3
                                 loteId={loteId}
                                 wfId={wfId}
