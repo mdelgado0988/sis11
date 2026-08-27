@@ -1515,7 +1515,6 @@
           [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
           [t('Destination')]: getSupervisorExportDestination(group),
           [t('Reference')]: getSupervisorMovementReferenceText(group),
-          [t('Posted')]: group.accounted ? t('Yes') : t('No'),
           [t('Received')]: Number(item.amount || 0),
           [t('Amount')]: Number(group.amount || item.amount || 0),
           [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
@@ -1524,7 +1523,8 @@
           [t('Policy')]: getSupervisorPolicyIds(group).join(', '),
           [t('Cashier ID')]: group.transferWorkspaceId || item.transferWorkspaceId || '',
           [t('User')]: getSupervisorMovementValues(group, 'user').join(', '),
-          [t('Allocation')]: getSupervisorAllocationIds(group).join(', ')
+          [t('Allocation')]: getSupervisorAllocationIds(group).join(', '),
+          [t('Posted')]: group.accounted ? t('Yes') : t('No')
         };
       });
 
@@ -1648,6 +1648,11 @@
   function getAccountingAccountName(line) {
     const account = line && (line.Account || line.accountData || line.accountInfo);
     return account && (account.name || account.description || account.code) || '-';
+  }
+
+  function getAccountingLineNumber(line) {
+    if (!line) return '-';
+    return line.order !== undefined && line.order !== null ? line.order : '-';
   }
 
   function getAccountingTransactionTotal(transaction, field) {
@@ -2032,9 +2037,10 @@
   const supervisorPaidPremiumColumns = supervisorMovementDetailColumns;
 
   const accountingLineColumns = [
+    { title: t('Line'), key: 'line', width: '8%', align: 'center', render: (_, line) => renderAccountingText(getAccountingLineNumber(line)) },
     { title: t('Account'), dataIndex: 'account', key: 'account', width: '16%', render: renderAccountingText },
-    { title: t('Account name'), key: 'accountName', width: '28%', render: (_, line) => renderAccountingText(getAccountingAccountName(line)) },
-    { title: t('Comments'), dataIndex: 'comments', key: 'comments', width: '34%', render: renderAccountingText },
+    { title: t('Account name'), key: 'accountName', width: '24%', render: (_, line) => renderAccountingText(getAccountingAccountName(line)) },
+    { title: t('Comments'), dataIndex: 'comments', key: 'comments', width: '30%', render: renderAccountingText },
     { title: t('Debit'), dataIndex: 'debit', key: 'debit', width: '11%', align: 'right', render: formatMoney },
     { title: t('Credit'), dataIndex: 'credit', key: 'credit', width: '11%', align: 'right', render: formatMoney }
   ];
