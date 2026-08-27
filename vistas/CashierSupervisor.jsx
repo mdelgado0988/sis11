@@ -192,6 +192,19 @@
         color: #fff !important;
       }
 
+      .cashier-supervisor-view .cashier-supervisor-accounting-button {
+        background: #315f8f !important;
+        border-color: #264d75 !important;
+        color: #fff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-accounting-button:hover,
+      .cashier-supervisor-view .cashier-supervisor-accounting-button:focus {
+        background: #264d75 !important;
+        border-color: #1f4163 !important;
+        color: #fff !important;
+      }
+
       .cashier-supervisor-view .ant-form-item {
         margin-bottom: 10px;
       }
