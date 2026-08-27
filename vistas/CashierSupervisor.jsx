@@ -531,12 +531,6 @@
         cursor: help;
       }
 
-      .cashier-supervisor-accounting-table .ant-table-container,
-      .cashier-supervisor-accounting-table .ant-table-content,
-      .cashier-supervisor-accounting-table .ant-table-body {
-        overflow-x: hidden !important;
-      }
-
       .cashier-supervisor-accounting-table .ant-table-thead > tr > th,
       .cashier-supervisor-accounting-table .ant-table-tbody > tr > td {
         padding: 5px 8px !important;
@@ -561,47 +555,29 @@
         border-bottom: 1px solid #cbd1d8 !important;
       }
 
-      .cashier-supervisor-accounting-lines-table .ant-table-container,
-      .cashier-supervisor-accounting-lines-table .ant-table-content {
-        overflow: visible !important;
+      .cashier-supervisor-accounting-master-table .ant-table-expanded-row > .ant-table-cell {
+        padding: 0 !important;
+        background: #fff;
       }
 
-      .cashier-supervisor-accounting-lines-table .ant-table-body {
-        max-height: none !important;
-        overflow-x: hidden !important;
-        overflow-y: visible !important;
+      .cashier-supervisor-accounting-master-table .ant-table-expanded-row-fixed {
+        width: 100% !important;
+        margin: 0 !important;
       }
 
-      .cashier-supervisor-view .cashier-supervisor-accounting-table {
-        display: block !important;
+      .cashier-supervisor-accounting-lines-table {
+        width: 100%;
       }
 
-      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-container,
-      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-content,
-      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-body {
-        max-height: none !important;
-        overflow: visible !important;
+      .cashier-supervisor-accounting-lines-table .ant-table {
+        margin: 0 !important;
       }
 
-      .cashier-supervisor-view .cashier-supervisor-accounting-table .ant-table-body {
-        overflow-x: hidden !important;
-        overflow-y: visible !important;
-      }
-
-      .cashier-supervisor-accounting-lines-table,
+      .cashier-supervisor-accounting-lines-table .ant-table,
       .cashier-supervisor-accounting-lines-table .ant-table-container,
       .cashier-supervisor-accounting-lines-table .ant-table-content,
-      .cashier-supervisor-accounting-lines-table .ant-table-body {
-        overflow: hidden !important;
-        scrollbar-width: none !important;
-        -ms-overflow-style: none !important;
-      }
-
-      .cashier-supervisor-accounting-lines-table .ant-table-body::-webkit-scrollbar,
-      .cashier-supervisor-accounting-lines-table .ant-table-content::-webkit-scrollbar {
-        width: 0 !important;
-        height: 0 !important;
-        display: none !important;
+      .cashier-supervisor-accounting-lines-table table {
+        width: 100% !important;
       }
 
       .cashier-supervisor-destination-cell {
@@ -2056,11 +2032,11 @@
   const supervisorPaidPremiumColumns = supervisorMovementDetailColumns;
 
   const accountingLineColumns = [
-    { title: t('Account'), dataIndex: 'account', key: 'account', width: 100, render: renderAccountingText },
-    { title: t('Account name'), key: 'accountName', width: 200, render: (_, line) => renderAccountingText(getAccountingAccountName(line)) },
-    { title: t('Comments'), dataIndex: 'comments', key: 'comments', width: 250, render: renderAccountingText },
-    { title: t('Debit'), dataIndex: 'debit', key: 'debit', width: 100, align: 'right', render: formatMoney },
-    { title: t('Credit'), dataIndex: 'credit', key: 'credit', width: 100, align: 'right', render: formatMoney }
+    { title: t('Account'), dataIndex: 'account', key: 'account', width: '16%', render: renderAccountingText },
+    { title: t('Account name'), key: 'accountName', width: '28%', render: (_, line) => renderAccountingText(getAccountingAccountName(line)) },
+    { title: t('Comments'), dataIndex: 'comments', key: 'comments', width: '34%', render: renderAccountingText },
+    { title: t('Debit'), dataIndex: 'debit', key: 'debit', width: '11%', align: 'right', render: formatMoney },
+    { title: t('Credit'), dataIndex: 'credit', key: 'credit', width: '11%', align: 'right', render: formatMoney }
   ];
 
   const accountingMovementColumns = [
@@ -2248,6 +2224,7 @@
               pagination={false}
               tableLayout="fixed"
               className="cashier-supervisor-installment-menu-table cashier-supervisor-accounting-table cashier-supervisor-accounting-lines-table"
+              style={{ width: '100%' }}
               locale={{ emptyText: t('No accounting lines found.') }}
             />
           )
