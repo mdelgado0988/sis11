@@ -142,6 +142,7 @@
   const [paidPremiumPagination, setPaidPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
   const [paidPremiumTotal, setPaidPremiumTotal] = React.useState(0);
   const [paidPremiumSelectedRowKey, setPaidPremiumSelectedRowKey] = React.useState(null);
+  const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
@@ -514,7 +515,7 @@
       .cashier-supervisor-reference-cell {
         display: block;
         width: 100%;
-        max-width: none;
+        max-width: 120px;
         box-sizing: border-box;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -582,7 +583,7 @@
 
       .cashier-supervisor-destination-cell {
         display: block;
-        max-width: 145px;
+        max-width: 220px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -857,6 +858,41 @@
     return values;
   }
 
+  async function loadSupervisorPolicyCodes(groups) {
+    const policyIds = (Array.isArray(groups) ? groups : []).reduce((ids, group) => {
+      getSupervisorPolicyIds(group).forEach(policyId => {
+        if (ids.indexOf(policyId) < 0) ids.push(policyId);
+      });
+      return ids;
+    }, []);
+
+    if (policyIds.length === 0) return;
+
+    const response = await exe('LoadEntities', {
+      entity: 'LifePolicy',
+      fields: '[id],[code]',
+      filter: `[id] IN (${policyIds.join(',')})`,
+      noTracking: true
+    });
+
+    if (!response || response.ok === false) {
+      throw new Error(response && response.msg ? response.msg : t('Policies could not be loaded.'));
+    }
+
+    const codes = getRows(response).reduce((map, policy) => {
+      const id = Number(policy && policy.id);
+      const code = getTrimmedString(policy && policy.code);
+      if (Number.isFinite(id) && id > 0 && code) map[id] = code;
+      return map;
+    }, {});
+
+    setSupervisorPolicyCodes(current => ({ ...current, ...codes }));
+  }
+
+  function getSupervisorPolicyCode(policyId) {
+    return supervisorPolicyCodes[policyId] || policyId;
+  }
+
   function renderSupervisorMovementValues(group, field) {
     const values = getSupervisorMovementValues(group, field);
     return values.length ? values.join(', ') : '-';
@@ -996,7 +1032,7 @@
               style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
               onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
             >
-              {policyId}
+              {getSupervisorPolicyCode(policyId)}
             </Button>
           </div>
         ))}
@@ -1155,7 +1191,7 @@
               style={{ padding: 0, height: 'auto', fontSize: 11 }}
               onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
             >
-              {policyId}
+              {getSupervisorPolicyCode(policyId)}
             </Button>
           )
           : '-';
@@ -1212,7 +1248,7 @@
                   style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
                   onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
                 >
-                  {policyId}
+                  {getSupervisorPolicyCode(policyId)}
                 </Button>
               ) : '-'}
             </div>
@@ -1228,6 +1264,16 @@
   function renderSupervisorMovementIncomeTypes(group) {
     const values = getSupervisorMovementNames(group, 'IncomeType', 'name');
     return values.length ? values.join(', ') : renderSupervisorMovementValues(group, 'incomeType');
+  }
+
+  function renderSupervisorAmountWithCurrency(group) {
+    const item = getSupervisorMovementFirst(group);
+    const amount = group && group.amount !== undefined && group.amount !== null
+      ? group.amount
+      : item && item.amount;
+    const currencies = getSupervisorMovementValues(group, 'currency');
+    const currency = currencies.length ? currencies[0] : '';
+    return `${currency || '-'} ${formatMoney(amount || 0)}`;
   }
 
   function getSupervisorMovementFilterValues() {
@@ -1313,6 +1359,7 @@
       .then(response => {
         if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
         const rows = getRows(response).filter(group => !(filters && filters.pending === true && getSupervisorMovementFirst(group).reversalDate));
+        loadSupervisorPolicyCodes(rows).catch(() => {});
         const baseRows = markSupervisorMovementsUnaccounted(rows);
         setMovementRows(baseRows);
         setMovementTotal(getResponseTotal(response, baseRows));
@@ -1367,6 +1414,7 @@
       .then(response => {
         if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Paid premiums could not be loaded.'));
         const rows = getRows(response).filter(group => getSupervisorAllocationIds(group).length > 0);
+        loadSupervisorPolicyCodes(rows).catch(() => {});
         setPaidPremiumRows(rows);
         setPaidPremiumSelectedRowKey(currentKey => rows.some(row => String(row.id) === String(currentKey)) ? currentKey : null);
         setPaidPremiumTotal(getResponseTotal(response, rows));
@@ -1435,7 +1483,7 @@
           [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
           [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
           [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
-          [t('Policy')]: getSupervisorPolicyIds(group).join(', '),
+          [t('Policy')]: getSupervisorPolicyIds(group).map(getSupervisorPolicyCode).join(', '),
           [t('Cashier ID')]: group.transferWorkspaceId || item.transferWorkspaceId || '',
           [t('User')]: getSupervisorMovementValues(group, 'user').join(', '),
           [t('Allocation')]: getSupervisorAllocationIds(group).join(', ')
@@ -1520,7 +1568,7 @@
           [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
           [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
           [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
-          [t('Policy')]: getSupervisorPolicyIds(group).join(', '),
+          [t('Policy')]: getSupervisorPolicyIds(group).map(getSupervisorPolicyCode).join(', '),
           [t('Cashier ID')]: group.transferWorkspaceId || item.transferWorkspaceId || '',
           [t('User')]: getSupervisorMovementValues(group, 'user').join(', '),
           [t('Allocation')]: getSupervisorAllocationIds(group).join(', '),
@@ -2011,21 +2059,20 @@
     {
       title: t('ID'),
       key: 'id',
-      width: 90,
+      width: 70,
       align: 'center',
       render: (_, group) => getSupervisorMovementFirst(group).id || group.id || '-'
     },
-    { title: t('Date'), dataIndex: 'date', key: 'date', width: 105, render: formatDate },
-    { title: t('Status'), key: 'status', width: 95, render: (_, group) => renderSupervisorMovementStatus(group) },
-    { title: t('Origin'), key: 'origin', width: 125, render: (_, group) => renderSupervisorMovementValues(group, 'sourceExternal') },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 63, align: 'center', render: formatDate },
+    { title: t('Status'), key: 'status', width: 70, align: 'center', render: (_, group) => renderSupervisorMovementStatus(group) },
+    { title: t('Origin'), key: 'origin', width: 90, align: 'center', render: (_, group) => renderSupervisorMovementValues(group, 'sourceExternal') },
     { title: t('Destination'), key: 'destination', width: 170, render: (_, group) => renderSupervisorMovementDestination(group) },
-    { title: t('Reference'), key: 'reference', width: 280, render: (_, group) => renderSupervisorMovementReference(group) },
-    { title: t('Amount'), key: 'amount', width: 105, align: 'right', render: (_, group) => formatMoney(group.amount || getSupervisorMovementFirst(group).amount) },
-    { title: t('Currency'), key: 'currency', width: 80, align: 'center', render: (_, group) => renderSupervisorMovementValues(group, 'currency') },
-    { title: t('Payment method'), key: 'paymentMethod', width: 120, render: (_, group) => renderSupervisorMovementPaymentMethods(group) },
-    { title: t('Type'), key: 'type', width: 180, render: (_, group) => renderSupervisorMovementIncomeTypes(group) },
+    { title: t('Reference'), key: 'reference', width: 90, render: (_, group) => renderSupervisorMovementReference(group) },
+    { title: t('Amount'), key: 'amountCurrency', width: 70, align: 'right', render: (_, group) => renderSupervisorAmountWithCurrency(group) },
+    { title: t('Payment method'), key: 'paymentMethod', width: 100, render: (_, group) => renderSupervisorMovementPaymentMethods(group) },
+    { title: t('Type'), key: 'type', width: 100, render: (_, group) => renderSupervisorMovementIncomeTypes(group) },
     { title: t('Policy'), key: 'policy', width: 110, align: 'center', render: (_, group) => renderSupervisorPolicies(group) },
-    { title: t('User'), key: 'user', width: 160, render: (_, group) => renderSupervisorMovementUser(group) },
+    { title: t('User'), key: 'user', width: 100, render: (_, group) => renderSupervisorMovementUser(group) },
     { title: t('Allocation'), key: 'allocation', width: 90, align: 'center', render: (_, group) => renderSupervisorAllocations(group) },
     { title: t('Posted'), key: 'accounted', width: 105, align: 'center', render: (_, group) => (
       <Tag color={group.accounted ? 'success' : 'error'}>{group.accounted ? t('Yes') : t('No')}</Tag>
