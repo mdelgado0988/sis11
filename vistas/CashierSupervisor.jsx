@@ -2996,6 +2996,10 @@
           <span>{row.id || '-'}</span>
         </span>
         <span className="cashier-supervisor-status-item">
+          <strong>{t('Cash desk date')}:</strong>
+          <span>{row.date ? formatDate(row.date) : '-'}</span>
+        </span>
+        <span className="cashier-supervisor-status-item">
           <strong>{t('Cashier User')}:</strong>
           <span>{row.user ? getCashierLabel(row) : '-'}</span>
         </span>
