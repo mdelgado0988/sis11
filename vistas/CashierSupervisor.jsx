@@ -85,6 +85,15 @@
     </TabIcon>
   );
 
+  const BankIcon = () => (
+    <TabIcon label="bank deposits">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M128 384h768L512 144 128 384zm160-64L512 224l224 96H288z"></path>
+        <path d="M192 416h96v256h-96zm160 0h96v256h-96zm160 0h96v256h-96zm160 0h96v256h-96zM128 704h768v80H128zm-32 112h832v64H96z"></path>
+      </svg>
+    </TabIcon>
+  );
+
   const ReportIcon = () => (
     <TabIcon label="reports">
       <svg viewBox="64 64 896 896" width="1.15em" height="1.15em" fill="currentColor" aria-hidden="true">
@@ -134,6 +143,8 @@
   const [accountingMovementsLoading, setAccountingMovementsLoading] = React.useState(false);
   const [accountingMovementsRows, setAccountingMovementsRows] = React.useState([]);
   const [accountingMovementTitle, setAccountingMovementTitle] = React.useState('');
+  const [installmentDetailVisible, setInstallmentDetailVisible] = React.useState(false);
+  const [installmentDetailRecord, setInstallmentDetailRecord] = React.useState(null);
   const [movementReports, setMovementReports] = React.useState([]);
   const [movementIncomeTypes, setMovementIncomeTypes] = React.useState([]);
   const [supervisorPaymentMethodNames, setSupervisorPaymentMethodNames] = React.useState({});
@@ -147,6 +158,11 @@
   const [transitPremiumLoading, setTransitPremiumLoading] = React.useState(false);
   const [transitPremiumPagination, setTransitPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transitPremiumTotal, setTransitPremiumTotal] = React.useState(0);
+  const [bankDepositRows, setBankDepositRows] = React.useState([]);
+  const [bankDepositLoading, setBankDepositLoading] = React.useState(false);
+  const [bankDepositExportLoading, setBankDepositExportLoading] = React.useState(false);
+  const [bankDepositPagination, setBankDepositPagination] = React.useState({ current: 1, pageSize: 25 });
+  const [bankDepositTotal, setBankDepositTotal] = React.useState(0);
   const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
@@ -637,6 +653,35 @@
         width: 100% !important;
       }
 
+      .cashier-supervisor-cash-desk-detail-table .ant-table-expanded-row > .ant-table-cell {
+        padding: 0 !important;
+        background: #fff;
+      }
+
+      .cashier-supervisor-cash-desk-detail-table .ant-table-expanded-row-fixed {
+        width: 100% !important;
+        margin: 0 !important;
+      }
+
+      .cashier-supervisor-cash-desk-detail-lines-table {
+        width: 100%;
+      }
+
+      .cashier-supervisor-cash-desk-detail-lines-table .ant-table {
+        margin: 0 !important;
+      }
+
+      .cashier-supervisor-cash-desk-detail-lines-table .ant-table,
+      .cashier-supervisor-cash-desk-detail-lines-table .ant-table-container,
+      .cashier-supervisor-cash-desk-detail-lines-table .ant-table-content,
+      .cashier-supervisor-cash-desk-detail-lines-table table {
+        width: 100% !important;
+      }
+
+      .cashier-supervisor-cash-desk-detail-lines-table .ant-table-content {
+        overflow: visible !important;
+      }
+
       .cashier-supervisor-destination-cell {
         display: block;
         max-width: 220px;
@@ -644,6 +689,47 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         cursor: help;
+      }
+
+      .cashier-supervisor-installment-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 14px;
+        margin-bottom: 14px;
+      }
+
+      .cashier-supervisor-installment-detail-item {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+        padding: 7px 9px;
+        background: #fbfcff;
+        min-width: 0;
+      }
+
+      .cashier-supervisor-installment-detail-label {
+        display: block;
+        color: #5f6b7a;
+        font-size: 11px;
+        line-height: 16px;
+      }
+
+      .cashier-supervisor-installment-detail-value {
+        display: block;
+        color: #1f2937;
+        font-size: 12px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cashier-supervisor-installment-section-title {
+        background: #eef0f3;
+        border-radius: 6px;
+        color: #262626;
+        font-weight: 600;
+        margin: 0 0 8px 0;
+        padding: 7px 10px;
       }
 
       .cashier-supervisor-user-email {
@@ -783,6 +869,10 @@
       loadSupervisorTransitPremiums({
         pagination: { current: 1, pageSize: transitPremiumPagination.pageSize }
       });
+    } else if (activeTab === 'bank-deposits') {
+      loadSupervisorBankDeposits({
+        pagination: { current: 1, pageSize: bankDepositPagination.pageSize }
+      });
     }
   }, [selectedCashierRow && selectedCashierRow.id, activeTab]);
 
@@ -795,11 +885,6 @@
   const premiumRows = [
     { id: 1, payment: 'ROC-000001', policy: 'POL-000001', installment: 1, premium: 120, expenses: 0, tax: 8.4, interest: 0, total: 128.4 },
     { id: 2, payment: 'ROC-000002', policy: 'POL-000002', installment: 1, premium: 95, expenses: 0, tax: 6.65, interest: 0, total: 101.65 }
-  ];
-
-  const depositRows = [
-    { id: 1, paymentMethod: 'Cash', document: 'DOC-001', bank: 'Sample bank', balance: 50, amount: 180.5 },
-    { id: 2, paymentMethod: 'Transfer', document: 'DOC-002', bank: 'Sample bank', balance: 0, amount: 100 }
   ];
 
   function formatMoney(value) {
@@ -1169,6 +1254,39 @@
     return renderSupervisorMovementValues(group, 'destinationAccountId');
   }
 
+  function renderSupervisorCashDeskDetailDestination(item) {
+    const account = item && item.DestinationAccount;
+    const accountId = Number(account && (account.id || account.accountId) || item && item.destinationAccountId || 0);
+    const label = getTrimmedString(
+      account && (account.name || account.accNo)
+      || item && item.destinationName
+      || item && item.destination
+      || item && item.destinationAccountId
+      || ''
+    );
+
+    if (!label) return '-';
+
+    const content = accountId > 0
+      ? (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: 'auto', lineHeight: 1.2, display: 'inline', maxWidth: '100%' }}
+          onClick={() => window.open(`#/account/${accountId}`, '_blank', 'noopener,noreferrer')}
+        >
+          {label}
+        </Button>
+      )
+      : label;
+
+    return (
+      <Tooltip title={label}>
+        <span className="cashier-supervisor-destination-cell">{content}</span>
+      </Tooltip>
+    );
+  }
+
   function getSupervisorPaymentMethodValues(group) {
     const values = [];
     const items = [group].concat(getSupervisorMovementChildren(group));
@@ -1297,6 +1415,240 @@
       (value && value.id && item && item.id === value.id) ||
       (value && !value.id && item && item.payPlanId === value.payPlanId && item.lifePolicyId === value.lifePolicyId)
     ) === index);
+  }
+
+  function getSupervisorCashDeskDetailRows(group) {
+    const movements = getSupervisorMovementChildren(group);
+    const installments = getSupervisorAppliedInstallments(group);
+    const installmentsByPayPlanId = {};
+
+    installments.forEach(installment => {
+      const payPlanId = Number(installment && installment.payPlanId || 0);
+      if (payPlanId > 0) installmentsByPayPlanId[String(payPlanId)] = installment;
+    });
+
+    return movements.map((movement, index) => {
+      const reference = String(movement && (movement.reference || movement.concept) || '');
+      const referenceMatch = reference.match(/\bREF\s*(\d+)\b/i);
+      const referenceInstallment = referenceMatch
+        ? installmentsByPayPlanId[referenceMatch[1]]
+        : null;
+      const positionalInstallment = !referenceInstallment && movements.length === installments.length
+        ? installments[index]
+        : null;
+      const installment = referenceInstallment || positionalInstallment;
+      const directPolicyId = Number(movement && movement.lifePolicyId || 0);
+      const directPayPlanId = Number(movement && movement.payPlanId || 0);
+
+      return {
+        ...movement,
+        detailLifePolicyId: directPolicyId > 0
+          ? directPolicyId
+          : Number(installment && installment.lifePolicyId || 0),
+        detailPayPlanId: directPayPlanId > 0
+          ? directPayPlanId
+          : Number(installment && installment.payPlanId || 0),
+        detailInstallment: installment || null
+      };
+    });
+  }
+
+  function openInstallmentDetail(item) {
+    if (!item || !item.detailInstallment) {
+      message.info(t('Installment detail is not available.'));
+      return;
+    }
+
+    setInstallmentDetailRecord(item);
+    setInstallmentDetailVisible(true);
+  }
+
+  function renderPolicyIdLink(policyId) {
+    const id = Number(policyId || 0);
+    if (!Number.isFinite(id) || id <= 0) return '-';
+
+    return (
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
+        onClick={() => window.open(`#/lifepolicy/${id}`, '_blank', 'noopener,noreferrer')}
+      >
+        {getSupervisorPolicyCode(id)}
+      </Button>
+    );
+  }
+
+  function renderPayPlanDetailLink(item) {
+    const payPlanId = Number(item && item.detailPayPlanId || 0);
+    if (!Number.isFinite(payPlanId) || payPlanId <= 0) return '-';
+
+    return (
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 11 }}
+        onClick={() => openInstallmentDetail(item)}
+      >
+        {payPlanId}
+      </Button>
+    );
+  }
+
+  function getFirstNumericValue(source, fields) {
+    for (let index = 0; index < fields.length; index += 1) {
+      const value = source && source[fields[index]];
+      const number = Number(value);
+      if (value !== undefined && value !== null && value !== '' && Number.isFinite(number)) {
+        return number;
+      }
+    }
+    return null;
+  }
+
+  function getFirstTextValue(source, fields) {
+    for (let index = 0; index < fields.length; index += 1) {
+      const value = getTrimmedString(source && source[fields[index]]);
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function parseJsonValue(value) {
+    if (!value) return null;
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getNestedInstallmentBreakdownRows(installment) {
+    const candidates = [
+      installment && installment.breakdown,
+      installment && installment.Breakdown,
+      installment && installment.desglose,
+      installment && installment.Desglose,
+      installment && installment.detail,
+      installment && installment.Detail,
+      installment && installment.jDetail,
+      installment && installment.jBreakdown
+    ];
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const parsed = parseJsonValue(candidates[index]);
+      const rows = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object'
+          ? Object.keys(parsed).map(key => ({ concept: key, amount: parsed[key] }))
+          : [];
+
+      const mappedRows = rows
+        .map((row, rowIndex) => ({
+          key: `nested-${index}-${rowIndex}`,
+          concept: getFirstTextValue(row, ['concept', 'name', 'description', 'label', 'key']) || `${t('Item')} ${rowIndex + 1}`,
+          amount: getFirstNumericValue(row, ['amount', 'value', 'moneyInAmount', 'premium', 'total'])
+        }))
+        .filter(row => row.amount !== null);
+
+      if (mappedRows.length > 0) return mappedRows;
+    }
+
+    return [];
+  }
+
+  function getInstallmentBreakdownRows(record) {
+    const installment = record && record.detailInstallment || {};
+    const nestedRows = getNestedInstallmentBreakdownRows(installment);
+    if (nestedRows.length > 0) return nestedRows;
+
+    const movement = record || {};
+    const rows = [
+      {
+        key: 'income',
+        concept: t('Income'),
+        amount: getFirstNumericValue(installment, ['moneyInAmount', 'incomeAmount', 'fromIncome', 'transferred'])
+      },
+      {
+        key: 'transit',
+        concept: t('From transit'),
+        amount: getFirstNumericValue(installment, ['moneyTransitAmount', 'moneyFromTransit', 'transitAmount', 'fromTransit'])
+      },
+      {
+        key: 'compensation',
+        concept: t('Compensation'),
+        amount: getFirstNumericValue(installment, ['moneyCompensation', 'moneyCompensationAmount', 'compensationAmount', 'compensation'])
+      },
+      {
+        key: 'premium',
+        concept: t('Premium'),
+        amount: getFirstNumericValue(installment, ['premiumAmount', 'premium', 'appliedPremium'])
+      },
+      {
+        key: 'complementary',
+        concept: t('Supplementary premium'),
+        amount: getFirstNumericValue(installment, ['complementaryAmount', 'moneyComplementary', 'supplementaryAmount', 'supplementary'])
+      },
+      {
+        key: 'difference',
+        concept: t('Difference'),
+        amount: getFirstNumericValue(installment, ['difference', 'dif'])
+      }
+    ].filter(row => row.amount !== null);
+
+    if (rows.length > 0) return rows;
+
+    return [{
+      key: 'amount',
+      concept: t('Amount applied'),
+      amount: getFirstNumericValue(installment, ['amount', 'minimum', 'moneyInAmount']) || Number(movement && movement.amount || 0)
+    }];
+  }
+
+  function renderInstallmentDetailModalContent() {
+    const record = installmentDetailRecord || {};
+    const installment = record.detailInstallment || {};
+    const summary = [
+      { label: t('Policy'), value: renderPolicyIdLink(record.detailLifePolicyId || installment.lifePolicyId) },
+      { label: t('Pay plan ID'), value: record.detailPayPlanId || installment.payPlanId || '-' },
+      { label: t('Installment'), value: installment.numberInYear || installment.number || '-' },
+      { label: t('Due date'), value: formatDate(installment.dueDate || installment.date) },
+      { label: t('Currency'), value: installment.currency || record.currency || '-' },
+      { label: t('Amount applied'), value: renderGridMoney(getFirstNumericValue(installment, ['moneyInAmount', 'amount', 'minimum']) || record.amount || 0) },
+      { label: t('Reference'), value: getFirstTextValue(record, ['reference', 'concept']) || '-' },
+      { label: t('Destination'), value: getFirstTextValue(record && record.DestinationAccount, ['name', 'accNo']) || getFirstTextValue(record, ['destinationName', 'destinationAccountId']) || '-' }
+    ];
+
+    const breakdownColumns = [
+      { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: '65%' },
+      { title: t('Amount'), dataIndex: 'amount', key: 'amount', align: 'right', width: '35%', render: renderGridMoney }
+    ];
+
+    return (
+      <div>
+        <div className="cashier-supervisor-installment-section-title">{t('Installment information')}</div>
+        <div className="cashier-supervisor-installment-detail-grid">
+          {summary.map(item => (
+            <div key={item.label} className="cashier-supervisor-installment-detail-item">
+              <span className="cashier-supervisor-installment-detail-label">{item.label}</span>
+              <span className="cashier-supervisor-installment-detail-value">{item.value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="cashier-supervisor-installment-section-title">{t('Breakdown')}</div>
+        <Table
+          rowKey="key"
+          columns={breakdownColumns}
+          dataSource={getInstallmentBreakdownRows(record)}
+          size="small"
+          bordered
+          pagination={false}
+          tableLayout="fixed"
+          className="cashier-supervisor-table cashier-supervisor-installment-menu-table"
+        />
+      </div>
+    );
   }
 
   const paidPremiumInstallmentColumns = [
@@ -1599,6 +1951,46 @@
       .finally(() => setTransitPremiumLoading(false));
   }
 
+  function loadSupervisorBankDeposits(params = {}) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      setBankDepositRows([]);
+      setBankDepositTotal(0);
+      return;
+    }
+
+    const pagination = params.pagination || bankDepositPagination;
+    const pageSize = Number(pagination.pageSize) || 25;
+    const currentPage = Number(pagination.current) || 1;
+    setBankDepositLoading(true);
+
+    exe('RepoTransfer', {
+      operation: 'GET',
+      filter: `transferWorkspaceId = ${workspaceId} AND [status] = 1 AND [executed] = 1 AND EXISTS (SELECT 1 FROM IncomeTypeCatalog it WHERE it.code = [Transfer].incomeType AND it.internalType LIKE 'DEPOSIT%')`,
+      include: ['SplitPayments', 'IncomeType', 'DestinationAccount'],
+      size: pageSize,
+      page: Math.max(currentPage - 1, 0)
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Bank deposits could not be loaded.'));
+        }
+
+        const rows = getRows(response);
+        loadSupervisorPolicyCodes(rows).catch(() => {});
+        setBankDepositRows(rows);
+        setBankDepositTotal(getResponseTotal(response, rows));
+        setBankDepositPagination({ current: currentPage, pageSize: pageSize });
+        loadedSupervisorTabsRef.current[`${workspaceId}:bank-deposits`] = true;
+      })
+      .catch(error => {
+        setBankDepositRows([]);
+        setBankDepositTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setBankDepositLoading(false));
+  }
+
   async function ensureSupervisorExcelLibrary() {
     if (typeof XLSX !== 'undefined') return true;
 
@@ -1667,6 +2059,45 @@
       message.error(error && error.message ? error.message : String(error));
     } finally {
       setPaidPremiumExportLoading(false);
+    }
+  }
+
+  async function exportBankDeposits() {
+    if (!bankDepositRows.length) {
+      message.info(t('There are no records to export.'));
+      return;
+    }
+
+    setBankDepositExportLoading(true);
+    try {
+      if (!await ensureSupervisorExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const exportRows = bankDepositRows.map(group => {
+        const item = getSupervisorMovementFirst(group);
+        return {
+          [t('ID')]: item.id || group.id || '',
+          [t('Date')]: formatDate(group.date || item.date),
+          [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
+          [t('Destination')]: getSupervisorExportDestination(group),
+          [t('Reference')]: getSupervisorMovementReferenceText(group),
+          [t('Amount')]: Number(group.amount || item.amount || 0),
+          [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
+          [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
+          [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
+          [t('User')]: getSupervisorMovementValues(group, 'user').join(', ')
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Bank deposits');
+      XLSX.writeFile(workbook, `bank-deposits-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setBankDepositExportLoading(false);
     }
   }
 
@@ -2251,6 +2682,33 @@
   const accountingColumnKeys = new Set(['accounted']);
   const supervisorMovementDetailColumns = supervisorMovementColumns.filter(column => !accountingColumnKeys.has(column.key));
   const supervisorPaidPremiumColumns = supervisorMovementDetailColumns;
+  const supervisorCashDeskDetailColumns = supervisorMovementDetailColumns
+    .filter(column => column.key !== 'paymentMethod' && column.key !== 'type' && column.key !== 'policy')
+    .map(column => column.key === 'destination'
+      ? { ...column, render: (_, item) => renderSupervisorCashDeskDetailDestination(item) }
+      : column)
+    .reduce((columns, column) => {
+      columns.push(column);
+      if (column.key === 'id') {
+        columns.push(
+          {
+            title: t('Life policy ID'),
+            key: 'detailLifePolicyId',
+            width: 90,
+            align: 'center',
+            render: (_, item) => renderPolicyIdLink(item && item.detailLifePolicyId)
+          },
+          {
+            title: t('Pay plan ID'),
+            key: 'detailPayPlanId',
+            width: 90,
+            align: 'center',
+            render: (_, item) => renderPayPlanDetailLink(item)
+          }
+        );
+      }
+      return columns;
+    }, []);
   const supervisorTransitPremiumColumns = [
     {
       title: t('ID'),
@@ -2297,14 +2755,6 @@
     { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 110, align: 'right', render: renderGridMoney },
     { title: t('Interest'), dataIndex: 'interest', key: 'interest', width: 110, align: 'right', render: renderGridMoney },
     { title: t('Total'), dataIndex: 'total', key: 'total', width: 120, align: 'right', render: renderGridMoney }
-  ];
-
-  const depositColumns = [
-    { title: t('Payment method'), dataIndex: 'paymentMethod', key: 'paymentMethod', width: 160 },
-    { title: t('Document'), dataIndex: 'document', key: 'document', width: 140 },
-    { title: t('Bank'), dataIndex: 'bank', key: 'bank', width: 160 },
-    { title: t('Balance in favor'), dataIndex: 'balance', key: 'balance', width: 150, align: 'right', render: renderGridMoney },
-    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: renderGridMoney }
   ];
 
   function applySupervisorMovementFilters(values) {
@@ -2391,7 +2841,7 @@
         dataSource={movementRows}
         size="small"
         bordered
-        className="cashier-supervisor-table"
+        className="cashier-supervisor-table cashier-supervisor-cash-desk-detail-table"
         loading={movementLoading}
         pagination={{
           current: movementPagination.current,
@@ -2422,11 +2872,14 @@
           expandedRowRender: record => (
             <Table
               rowKey={(item, index) => `${item && item.id || 'movement'}-${index}`}
-              columns={supervisorMovementDetailColumns}
-              dataSource={getSupervisorMovementChildren(record)}
+              columns={supervisorCashDeskDetailColumns}
+              dataSource={getSupervisorCashDeskDetailRows(record)}
               size="small"
               pagination={false}
-              className="cashier-supervisor-installment-menu-table"
+              bordered
+              tableLayout="fixed"
+              className="cashier-supervisor-installment-menu-table cashier-supervisor-cash-desk-detail-lines-table"
+              style={{ width: '100%' }}
             />
           )
         }}
@@ -2470,6 +2923,16 @@
           )
         }}
       />
+    </Modal>
+    <Modal
+      title={t('Installment detail')}
+      open={installmentDetailVisible}
+      onCancel={() => setInstallmentDetailVisible(false)}
+      footer={null}
+      width={760}
+      destroyOnClose
+    >
+      {renderInstallmentDetailModalContent()}
     </Modal>
     </>
   );
@@ -2675,17 +3138,52 @@
     </Card>
   );
 
-  const depositTabContent = (
-    <Card size="small" title={t('Deposit list')}>
+  const bankDepositTabContent = (
+    <Card size="small">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Space>
+          <Button
+            className="cashier-supervisor-outline-button"
+            onClick={() => loadSupervisorBankDeposits({
+              pagination: { current: 1, pageSize: bankDepositPagination.pageSize }
+            })}
+            loading={bankDepositLoading}
+            disabled={!selectedCashierRow}
+          >
+            <RefreshIcon />
+            {t('Refresh')}
+          </Button>
+          <Button
+            type="primary"
+            className="cashier-supervisor-export-button"
+            onClick={exportBankDeposits}
+            loading={bankDepositExportLoading}
+            disabled={!selectedCashierRow}
+          >
+            <ExportIcon />
+            {t('Export')}
+          </Button>
+        </Space>
+      </div>
       <Table
         rowKey="id"
-        columns={depositColumns}
-        dataSource={depositRows}
+        columns={supervisorTransitPremiumColumns}
+        dataSource={bankDepositRows}
         size="small"
         bordered
-        className="cashier-supervisor-table"
-        pagination={{ pageSize: 20, showSizeChanger: false }}
-        scroll={{ x: 800 }}
+        className="cashier-supervisor-table cashier-supervisor-transit-premium-table"
+        loading={bankDepositLoading}
+        pagination={{
+          current: bankDepositPagination.current,
+          pageSize: bankDepositPagination.pageSize,
+          total: bankDepositTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100']
+        }}
+        onChange={pagination => loadSupervisorBankDeposits({
+          pagination: { current: pagination.current, pageSize: pagination.pageSize }
+        })}
+        scroll={{ x: 1320, y: transferScrollY }}
       />
     </Card>
   );
@@ -2712,8 +3210,8 @@
             <button type="button" role="tab" aria-selected={activeTab === 'transit-premiums'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'transit-premiums' ? ' active' : ''}`} onClick={() => setActiveTab('transit-premiums')}>
               <DepositIcon /> {t('Transit premiums')}
             </button>
-            <button type="button" role="tab" aria-selected={activeTab === 'deposits'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'deposits' ? ' active' : ''}`} onClick={() => setActiveTab('deposits')}>
-              <DepositIcon /> {t('Premium deposits')}
+            <button type="button" role="tab" aria-selected={activeTab === 'bank-deposits'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'bank-deposits' ? ' active' : ''}`} onClick={() => setActiveTab('bank-deposits')}>
+              <BankIcon /> {t('Bank deposits')}
             </button>
           </div>
           <div className="cashier-supervisor-tab-content" role="tabpanel">
@@ -2725,7 +3223,7 @@
                   ? premiumTabContent
                   : activeTab === 'transit-premiums'
                     ? transitPremiumTabContent
-                  : depositTabContent}
+                  : bankDepositTabContent}
           </div>
             </div>
           </div>
