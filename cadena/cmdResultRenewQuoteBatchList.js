@@ -36,11 +36,15 @@ return batchErrorsResult;
 
 function getBatchRelated(batchId) {
 
+    const batchPrefix = processType === 'issuance'
+      ? 'RENEWALISSUANCE'
+      : 'QUOTELOTE';
+
     doCmd({
         cmd: 'RepoBatch',
         data: {
             operation: 'GET',
-            filter: `name like '%QUOTELOTE-%-${batchId}%'`
+            filter: `name like '%${batchPrefix}-%-${batchId}%'`
         }
     });
 

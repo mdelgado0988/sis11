@@ -1,6 +1,8 @@
 USE SIS11
 GO
 
+--Reportes de Polizas por Vencer
+
 DECLARE @Anio INT = 2026;
 DECLARE @Mes INT = 8;
 DECLARE @lob VARCHAR(50) = '0';
@@ -22,7 +24,7 @@ SELECT
     pol.code AS [Póliza],
     pol.groupPolicyId AS [Id Maestra],
 
-    pol.productCode AS [Plan],
+    COALESCE(NULLIF(LTRIM(RTRIM(productCatalog.name)), ''), pol.productCode) AS [Plan],
 
     YEAR(pol.[start]) AS fanopol,
 
@@ -34,6 +36,8 @@ SELECT
     lob.name AS [Ramo],
 
     insured.contactId AS [Id Asegurado],
+    COALESCE(insured.identificacion, 'No Tiene') AS [Identificación Asegurado],
+    COALESCE(insured.cobis, 'No Tiene') AS [COBIS Asegurado],
     COALESCE(NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
         NULLIF(LTRIM(RTRIM(cession.name)), ''),
         NULLIF(LTRIM(RTRIM(cession.middleName)), ''),
@@ -72,12 +76,14 @@ SELECT
 
     0 AS isRen,
 
-    CONVERT(VARCHAR(10), CAST(payPlan.fechaCobPrin AS DATETIME2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS fechaCobPrin
+    CONVERT(VARCHAR(10), CAST(pol.[start] AS DATETIME2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS fechaCobPrin
 
 FROM dbo.LifePolicy pol
 
 INNER JOIN dbo.Contact holder ON holder.id = pol.holderId
-LEFT JOIN dbo.Product productCatalog ON productCatalog.code = pol.productCode
+LEFT JOIN dbo.Product productCatalog
+    ON productCatalog.code = pol.productCode
+   AND productCatalog.lobCode = pol.lob
 LEFT JOIN dbo.Lob lob ON lob.code = pol.lob
 LEFT JOIN dbo.Proceso prc ON prc.id = pol.processId
 LEFT JOIN dbo.Contact cession ON cession.id = pol.cessionBeneficiary
@@ -90,7 +96,13 @@ OUTER APPLY (
             NULLIF(LTRIM(RTRIM(insuredContact.surname1)), ''),
             NULLIF(LTRIM(RTRIM(insuredContact.surname2)), '')
         ) AS asegurado,
-        insuredContact.id AS contactId
+        insuredContact.id AS contactId,
+        CASE
+            WHEN insuredContact.isPerson = 1
+                THEN NULLIF(LTRIM(RTRIM(insuredContact.cnp)), '')
+            ELSE NULLIF(LTRIM(RTRIM(insuredContact.nif)), '')
+        END AS identificacion,
+        NULLIF(LTRIM(RTRIM(insuredContact.nationalId)), '') AS cobis
     FROM dbo.Insured insured
     INNER JOIN dbo.Contact insuredContact
         ON insuredContact.id = insured.contactId
@@ -131,13 +143,6 @@ OUTER APPLY (
     WHERE city.stateCode = COALESCE(addressData.state, holder.state)
       AND city.code = COALESCE(addressData.city, holder.city)
 ) cityCatalog
-
-OUTER APPLY (
-    SELECT
-        MIN(pp.payedDate) AS fechaCobPrin
-    FROM dbo.PayPlan pp
-    WHERE pp.lifePolicyId = pol.id
-) payPlan
 
 WHERE pol.entityState = 'ACTIVE'
   AND pol.active = 1 AND pol.activeDate IS NOT NULL

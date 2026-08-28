@@ -14,6 +14,7 @@ const { loteId, currentPage, pageSize } = context;
 const sqlCommand = `DECLARE @pagenum  AS INT = ${currentPage}, @pagesize AS INT = ${pageSize}, @loteId AS INT = ${loteId};
 
 SELECT 
+    b.id AS loteId,
     JSON_VALUE(item.value, '$[0]') AS anniversaryId,
     JSON_VALUE(item.value, '$[2]') AS lifePolicyId,
     COALESCE(
@@ -37,7 +38,10 @@ SELECT
     nlp.[start] inicio,
     nlp.[end] vence,
     nlp.anualPremium primaCotizada,
-    CASE WHEN nlp.[activeDate] IS NULL THEN 'No' ELSE 'Si' END AS renovar
+    nlp.[created] AS fechaIngreso,
+    nlp.[activeDate] AS fechaEmision,
+    nlp.[fiscalNumber] AS recibo,
+    CASE WHEN nlp.[activeDate] IS NULL THEN 'En Proceso' ELSE 'Renovada' END AS estadoRenovacion
 FROM [Batch] b
 CROSS APPLY OPENJSON(b.jData) AS item
 INNER JOIN LifePolicy lp ON lp.id = TRY_CAST(JSON_VALUE(item.value, '$[2]') AS INT)
@@ -70,6 +74,7 @@ doCmd({
 //return DoQuery?.outData
 
 const dataPaginada = DoQuery?.outData?.map(x => ({
+  loteId: x.loteId,
   lifePolicyId: x.lifePolicyId,
   newLifePolicyId: x.newLifePolicyId,
   anniversaryId: x.anniversaryId,
@@ -90,7 +95,10 @@ const dataPaginada = DoQuery?.outData?.map(x => ({
   inicio: x.inicio,
   vence: x.vence,
   primaCotizada: x.primaCotizada,
-  renovar: x.renovar
+  recibo: x.recibo,
+  fechaIngreso: x.fechaIngreso,
+  fechaEmision: x.fechaEmision,
+  estadoRenovacion: x.estadoRenovacion
 })) || [];
 
 //return dataPaginada;

@@ -138,6 +138,16 @@
   const [movementFilters, setMovementFilters] = React.useState({});
   const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
   const [movementFilterForm] = Form.useForm();
+  const [quickSearchRows, setQuickSearchRows] = React.useState([]);
+  const [quickSearchLoading, setQuickSearchLoading] = React.useState(false);
+  const [quickSearchExportLoading, setQuickSearchExportLoading] = React.useState(false);
+  const [quickSearchPagination, setQuickSearchPagination] = React.useState({ current: 1, pageSize: 25 });
+  const [quickSearchTotal, setQuickSearchTotal] = React.useState(0);
+  const [quickSearchFilters, setQuickSearchFilters] = React.useState({});
+  const [quickSearchFilterVisible, setQuickSearchFilterVisible] = React.useState(false);
+  const [quickSearchFilterForm] = Form.useForm();
+  const [quickSearchPayerOptions, setQuickSearchPayerOptions] = React.useState([]);
+  const [quickSearchPayerLoading, setQuickSearchPayerLoading] = React.useState(false);
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
   const [accountingMovementsVisible, setAccountingMovementsVisible] = React.useState(false);
   const [accountingMovementsLoading, setAccountingMovementsLoading] = React.useState(false);
@@ -167,6 +177,7 @@
   const [bankDepositTotal, setBankDepositTotal] = React.useState(0);
   const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
+  const quickSearchPayerSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
   const loadedSupervisorTabsRef = React.useRef({});
@@ -600,6 +611,16 @@
         cursor: help;
       }
 
+      .cashier-supervisor-quick-search-type-cell {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: help;
+      }
+
       .cashier-supervisor-transit-reference-cell {
         display: block;
         width: 100%;
@@ -835,6 +856,9 @@
       if (cashierSearchTimeoutRef.current) {
         clearTimeout(cashierSearchTimeoutRef.current);
       }
+      if (quickSearchPayerSearchTimeoutRef.current) {
+        clearTimeout(quickSearchPayerSearchTimeoutRef.current);
+      }
       window.removeEventListener('resize', updateScrollHeight);
       if (resizeObserver) {
         resizeObserver.disconnect();
@@ -893,7 +917,7 @@
   }, [selectedCashierRow && selectedCashierRow.id, activeTab]);
 
   React.useEffect(() => {
-    if (!selectedCashierRow && activeTab !== 'cash-desks') {
+    if (!selectedCashierRow && activeTab !== 'cash-desks' && activeTab !== 'quick-search') {
       setActiveTab('cash-desks');
     }
   }, [selectedCashierRow, activeTab]);
@@ -1812,6 +1836,17 @@
     return values.length ? values.join(', ') : renderSupervisorMovementValues(group, 'incomeType');
   }
 
+  function renderSupervisorQuickSearchType(group) {
+    const value = renderSupervisorMovementIncomeTypes(group);
+    const displayValue = value || '-';
+
+    return (
+      <Tooltip title={displayValue} placement="topLeft">
+        <span className="cashier-supervisor-quick-search-type-cell">{displayValue}</span>
+      </Tooltip>
+    );
+  }
+
   function renderSupervisorAmountWithCurrency(group) {
     const item = getSupervisorMovementFirst(group);
     const amount = group && group.amount !== undefined && group.amount !== null
@@ -1927,6 +1962,192 @@
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setMovementLoading(false));
+  }
+
+  function searchQuickSearchPayers(value) {
+    const text = getTrimmedString(value);
+    if (quickSearchPayerSearchTimeoutRef.current) {
+      clearTimeout(quickSearchPayerSearchTimeoutRef.current);
+    }
+
+    const numericId = /^\d+$/.test(text) && text.length > 0;
+    if ((!numericId && text.length < 3) || text.length === 0) {
+      setQuickSearchPayerOptions([]);
+      setQuickSearchPayerLoading(false);
+      return;
+    }
+
+    quickSearchPayerSearchTimeoutRef.current = setTimeout(() => {
+      setQuickSearchPayerLoading(true);
+      const escaped = escapeSqlString(text);
+      const filter = numericId
+        ? `id=${Number(text)}`
+        : `(name like N'${escaped}%' OR surname1 like N'${escaped}%' OR surname2 like N'${escaped}%' OR cnp like N'${escaped}%' OR nif like N'${escaped}%')`;
+
+      exe('LoadEntities', {
+        entity: 'Contact',
+        fields: 'id,name,surname1,surname2,cnp,nif,isPerson',
+        filter,
+        noTracking: true
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Payers could not be loaded.'));
+          }
+          const options = getRows(response).map(item => {
+            const firstName = getTrimmedString(item && item.name);
+            const surname1 = getTrimmedString(item && item.surname1);
+            const surname2 = getTrimmedString(item && item.surname2);
+            const name = [firstName, surname1, surname2].filter(value => value).join(' ');
+            const identification = getTrimmedString(item && (item.cnp || item.nif));
+            const id = Number(item && item.id);
+            return {
+              value: id,
+              id,
+              name: name || String(id),
+              identification
+            };
+          }).filter(item => Number.isFinite(item.id) && item.id > 0);
+          setQuickSearchPayerOptions(options);
+        })
+        .catch(error => {
+          setQuickSearchPayerOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setQuickSearchPayerLoading(false));
+    }, 350);
+  }
+
+  function buildQuickSearchFilter(filters) {
+    const conditions = ['transferWorkspaceId IS NOT NULL'];
+    const transferId = Number(filters && filters.transferId);
+    const incomeType = getTrimmedString(filters && filters.incomeType);
+    const rawMinAmount = filters && filters.minAmount;
+    const rawMaxAmount = filters && filters.maxAmount;
+    const minAmount = Number(rawMinAmount);
+    const maxAmount = Number(rawMaxAmount);
+    const dateFrom = formatDateForFilter(filters && filters.dateFrom);
+    const dateTo = formatDateForFilter(filters && filters.dateTo);
+    const payerId = Number(filters && filters.payerId);
+    const payerName = escapeSqlString(filters && filters.payerName);
+
+    if (Number.isInteger(transferId) && transferId > 0) {
+      conditions.push(`id=${transferId}`);
+    }
+    if (incomeType) {
+      conditions.push(`incomeType='${escapeSqlString(incomeType)}'`);
+    }
+    if (rawMinAmount !== undefined && rawMinAmount !== null && rawMinAmount !== '' && Number.isFinite(minAmount)) {
+      conditions.push(`[amount] >= ${minAmount}`);
+    }
+    if (rawMaxAmount !== undefined && rawMaxAmount !== null && rawMaxAmount !== '' && Number.isFinite(maxAmount)) {
+      conditions.push(`[amount] <= ${maxAmount}`);
+    }
+    if (dateFrom) {
+      conditions.push(`[date] >= '${dateFrom}'`);
+    }
+    if (dateTo) {
+      conditions.push(`[date] <= '${dateTo}T23:59:59'`);
+    }
+    if (Number.isInteger(payerId) && payerId > 0) {
+      const payerConditions = [`[jIncomeTypeForm] LIKE N'%${payerId}%'`];
+      if (payerName) {
+        payerConditions.push(`[jIncomeTypeForm] LIKE N'%${payerName}%'`);
+      }
+      conditions.push(`(${payerConditions.join(' OR ')})`);
+    }
+
+    return conditions.join(' AND ');
+  }
+
+  function loadSupervisorQuickSearch(params = {}) {
+    const pagination = params.pagination || quickSearchPagination;
+    const filters = params.filters || quickSearchFilters;
+    const pageSize = Number(pagination && pagination.pageSize) || 25;
+    const currentPage = Number(pagination && pagination.current) || 1;
+
+    setQuickSearchLoading(true);
+    exe('RepoTransfer', {
+      operation: 'GET',
+      filter: buildQuickSearchFilter(filters),
+      include: ['SplitPayments', 'IncomeType', 'DestinationAccount', 'Allocation', 'Allocation.InstallmentPremiums'],
+      size: pageSize,
+      page: Math.max(currentPage - 1, 0)
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
+        }
+        const rows = getRows(response);
+        loadSupervisorPolicyCodes(rows).catch(() => {});
+        setQuickSearchRows(rows);
+        setQuickSearchTotal(getResponseTotal(response, rows));
+        setQuickSearchPagination({ current: currentPage, pageSize });
+      })
+      .catch(error => {
+        setQuickSearchRows([]);
+        setQuickSearchTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setQuickSearchLoading(false));
+  }
+
+  async function exportSupervisorQuickSearch() {
+    if (!quickSearchRows.length) {
+      message.info(t('There are no records to export.'));
+      return;
+    }
+
+    setQuickSearchExportLoading(true);
+    try {
+      if (!await ensureSupervisorExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const exportResponse = await exe('RepoTransfer', {
+        operation: 'GET',
+        filter: buildQuickSearchFilter(quickSearchFilters),
+        include: ['SplitPayments', 'IncomeType', 'DestinationAccount', 'Allocation', 'Allocation.InstallmentPremiums'],
+        size: Math.max(Number(quickSearchTotal) || 0, quickSearchRows.length),
+        page: 0
+      });
+
+      if (!exportResponse || exportResponse.ok === false) {
+        throw new Error(exportResponse && exportResponse.msg ? exportResponse.msg : t('Movements could not be loaded.'));
+      }
+
+      const exportRows = getRows(exportResponse).map(group => {
+        const item = getSupervisorMovementFirst(group);
+        return {
+          [t('ID')]: item.id || group.id || '',
+          [t('Date')]: formatDate(group.date || item.date),
+          [t('Status')]: item.reversalDate || item.reversalOfId || item.reversed
+            ? t('Reverted')
+            : t('Executed'),
+          [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
+          [t('Destination')]: getSupervisorExportDestination(group),
+          [t('Reference')]: getSupervisorMovementReferenceText(group),
+          [t('Received')]: Number(item.amount || 0),
+          [t('Amount')]: Number(group.amount || item.amount || 0),
+          [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
+          [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
+          [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
+          [t('Policy')]: getSupervisorPolicyIds(group).map(getSupervisorPolicyCode).join(', '),
+          [t('Cashier ID')]: group.transferWorkspaceId || item.transferWorkspaceId || '',
+          [t('User')]: getSupervisorMovementValues(group, 'user').join(', '),
+          [t('Allocation')]: getSupervisorAllocationIds(group).join(', ')
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Quick search');
+      XLSX.writeFile(workbook, `quick-search-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setQuickSearchExportLoading(false);
+    }
   }
 
   function loadSupervisorPaidPremiums(params = {}) {
@@ -2792,6 +3013,13 @@
 
   const accountingColumnKeys = new Set(['accounted']);
   const supervisorMovementDetailColumns = supervisorMovementColumns.filter(column => !accountingColumnKeys.has(column.key));
+  const supervisorQuickSearchColumns = supervisorMovementDetailColumns.map(column => column.key === 'type'
+    ? {
+      ...column,
+      width: 120,
+      render: (_, group) => renderSupervisorQuickSearchType(group)
+    }
+    : column);
   const supervisorPaidPremiumColumns = supervisorMovementDetailColumns;
   const supervisorCashDeskDetailColumns = supervisorMovementDetailColumns
     .filter(column => column.key !== 'paymentMethod' && column.key !== 'type' && column.key !== 'policy')
@@ -2886,6 +3114,78 @@
   function clearSupervisorMovementFilters() {
     movementFilterForm.resetFields();
     applySupervisorMovementFilters({});
+  }
+
+  function applySupervisorQuickSearchFilters(values) {
+    const payer = quickSearchPayerOptions.find(item => String(item.value) === String(values && values.payer));
+    const transferId = values && values.transferId;
+    const incomeType = getTrimmedString(values && values.incomeType);
+    const minAmount = values && values.minAmount;
+    const maxAmount = values && values.maxAmount;
+    const dateFrom = values && values.dateFrom;
+    const dateTo = values && values.dateTo;
+    const hasTransferId = Number.isInteger(Number(transferId)) && Number(transferId) > 0;
+    const hasAmountFrom = minAmount !== undefined && minAmount !== null && minAmount !== '';
+    const hasAmountTo = maxAmount !== undefined && maxAmount !== null && maxAmount !== '';
+    const hasDateFrom = dateFrom !== undefined && dateFrom !== null;
+    const hasDateTo = dateTo !== undefined && dateTo !== null;
+    const hasPayer = payer && Number(payer.id) > 0;
+
+    if (!hasTransferId && !incomeType && !hasAmountFrom && !hasAmountTo && !hasDateFrom && !hasDateTo && !hasPayer) {
+      message.warning(t('Enter at least one filter before searching.'));
+      return;
+    }
+
+    if (hasAmountFrom !== hasAmountTo) {
+      message.warning(t('Select both the minimum and maximum amount.'));
+      return;
+    }
+
+    if (hasAmountFrom && Number(minAmount) > Number(maxAmount)) {
+      message.warning(t('The minimum amount cannot be greater than the maximum amount.'));
+      return;
+    }
+
+    if (hasDateFrom !== hasDateTo) {
+      message.warning(t('Select both the start and end date.'));
+      return;
+    }
+
+    if (hasDateFrom && hasDateTo) {
+      const startTime = typeof dateFrom.valueOf === 'function' ? dateFrom.valueOf() : new Date(dateFrom).getTime();
+      const endTime = typeof dateTo.valueOf === 'function' ? dateTo.valueOf() : new Date(dateTo).getTime();
+      if (Number.isFinite(startTime) && Number.isFinite(endTime) && startTime > endTime) {
+        message.warning(t('The start date cannot be later than the end date.'));
+        return;
+      }
+    }
+
+    const filters = {
+      transferId,
+      incomeType: values && values.incomeType,
+      minAmount,
+      maxAmount,
+      payerId: payer && payer.id,
+      payerName: payer && payer.name,
+      dateFrom,
+      dateTo
+    };
+    setQuickSearchFilters(filters);
+    setQuickSearchFilterVisible(false);
+    loadSupervisorQuickSearch({
+      filters,
+      pagination: { current: 1, pageSize: quickSearchPagination.pageSize }
+    });
+  }
+
+  function clearSupervisorQuickSearchFilters() {
+    quickSearchFilterForm.resetFields();
+    setQuickSearchPayerOptions([]);
+    setQuickSearchFilters({});
+    setQuickSearchRows([]);
+    setQuickSearchTotal(0);
+    setQuickSearchPagination({ current: 1, pageSize: quickSearchPagination.pageSize });
+    setQuickSearchFilterVisible(false);
   }
 
   const supervisorMovementContent = (
@@ -3038,6 +3338,57 @@
     </>
   );
 
+  const supervisorQuickSearchContent = (
+    <Spin spinning={quickSearchLoading || quickSearchExportLoading} tip={quickSearchExportLoading ? t('Exporting...') : undefined}>
+      <Card size="small">
+        <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+          <Space wrap>
+            <Button
+              type="primary"
+              className="cashier-supervisor-detail-filter-button"
+              onClick={() => setQuickSearchFilterVisible(true)}
+            >
+              <SearchIcon />
+              {t('Filter')}
+            </Button>
+            <Button
+              type="primary"
+              className="cashier-supervisor-export-button"
+              onClick={exportSupervisorQuickSearch}
+              loading={quickSearchExportLoading}
+              disabled={quickSearchRows.length === 0}
+            >
+              <ExportIcon />
+              {t('Export')}
+            </Button>
+          </Space>
+        </div>
+        <Table
+          rowKey="id"
+          columns={supervisorQuickSearchColumns}
+          dataSource={quickSearchRows}
+          size="small"
+          bordered
+          className="cashier-supervisor-table cashier-supervisor-cash-desk-detail-table"
+          loading={quickSearchLoading}
+          pagination={{
+            current: quickSearchPagination.current,
+            pageSize: quickSearchPagination.pageSize,
+            total: quickSearchTotal,
+            showSizeChanger: true,
+            pageSizeOptions: ['15', '25', '50', '100']
+          }}
+          onChange={pagination => loadSupervisorQuickSearch({
+            filters: quickSearchFilters,
+            pagination: { current: pagination.current, pageSize: pagination.pageSize }
+          })}
+          scroll={{ x: 1540, y: transferScrollY }}
+          locale={{ emptyText: t('Use the filter to search movements.') }}
+        />
+      </Card>
+    </Spin>
+  );
+
   function renderStatusBar() {
     const row = selectedCashierRow || {};
     const status = selectedCashierRow ? (selectedCashierRow.closed ? 'Closed' : 'Open') : '-';
@@ -3170,9 +3521,9 @@
           </Button>
         </Space>
       </div>
-      <Table
-        rowKey="id"
-        columns={supervisorPaidPremiumColumns}
+        <Table
+          rowKey="id"
+          columns={supervisorPaidPremiumColumns}
         dataSource={paidPremiumRows}
         size="small"
         bordered
@@ -3188,7 +3539,7 @@
         onChange={pagination => loadSupervisorPaidPremiums({
           pagination: { current: pagination.current, pageSize: pagination.pageSize }
         })}
-        scroll={{ x: 2200, y: transferScrollY }}
+        scroll={{ x: 1540, y: transferScrollY }}
         rowClassName={record => String(record.id) === String(paidPremiumSelectedRowKey)
           ? 'cashier-supervisor-selected-row'
           : ''}
@@ -3328,6 +3679,9 @@
             <button type="button" role="tab" aria-selected={activeTab === 'bank-deposits'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'bank-deposits' ? ' active' : ''}`} onClick={() => setActiveTab('bank-deposits')}>
               <BankIcon /> {t('Bank deposits')}
             </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'quick-search'} className={`cashier-supervisor-tab${activeTab === 'quick-search' ? ' active' : ''}`} onClick={() => setActiveTab('quick-search')}>
+              <SearchIcon /> {t('Quick search')}
+            </button>
           </div>
           <div className="cashier-supervisor-tab-content" role="tabpanel">
             {activeTab === 'cash-desks'
@@ -3338,7 +3692,9 @@
                   ? premiumTabContent
                   : activeTab === 'transit-premiums'
                   ? transitPremiumTabContent
-                  : bankDepositTabContent}
+                  : activeTab === 'bank-deposits'
+                    ? bankDepositTabContent
+                    : supervisorQuickSearchContent}
           </div>
           <Modal
             title={t('Installment detail')}
@@ -3465,6 +3821,83 @@
             <Space>
               <Button onClick={clearSupervisorMovementFilters}>{t('Clear')}</Button>
               <Button type="primary" onClick={() => movementFilterForm.submit()}>{t('Apply')}</Button>
+            </Space>
+          </Form>
+        </Panel>
+
+        <Panel
+          title={t('Quick search filters')}
+          className="cashier-supervisor-drawer"
+          placement="right"
+          width={380}
+          onClose={() => setQuickSearchFilterVisible(false)}
+          visible={quickSearchFilterVisible}
+        >
+          <Form form={quickSearchFilterForm} layout="vertical" onFinish={applySupervisorQuickSearchFilters}>
+            <Form.Item label={t('Transfer ID')} name="transferId">
+              <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label={t('Income type')} name="incomeType">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={movementIncomeTypes}
+                placeholder={t('Select an income type')}
+              />
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label={t('Min amount')} name="minAmount">
+                  <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label={t('Maximum amount')} name="maxAmount">
+                  <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Form.Item label={t('Payer')} name="payer">
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                loading={quickSearchPayerLoading}
+                onSearch={searchQuickSearchPayers}
+                optionLabelProp="label"
+                placeholder={t('Type a payer name, identification or id')}
+                notFoundContent={quickSearchPayerLoading ? t('Loading') : t('Type at least 3 characters')}
+              >
+                {quickSearchPayerOptions.map(item => (
+                  <Option key={item.id} value={item.id} label={item.name}>
+                    <div>
+                      <div>{item.name}</div>
+                      <div style={{ fontSize: 11, color: '#8c8c8c' }}>
+                        {`${t('ID')}: ${item.id}${item.identification ? ` | ${item.identification}` : ''}`}
+                      </div>
+                    </div>
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label={t('Start date')} name="dateFrom">
+                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label={t('End date')} name="dateTo">
+                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Space>
+              <Button onClick={clearSupervisorQuickSearchFilters}>{t('Clear')}</Button>
+              <Button type="primary" onClick={() => quickSearchFilterForm.submit()}>
+                <SearchIcon /> {t('Search')}
+              </Button>
             </Space>
           </Form>
         </Panel>

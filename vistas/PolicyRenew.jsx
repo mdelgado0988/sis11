@@ -2069,6 +2069,7 @@
     const LoteDetalleTable = ({ tableData, loading, searchTotal, pagination, handleTableChange, rowSelection, total, onViewPolicy }) => {
 
         const columns = useMemo(() => [
+          { title: 'Número de lote', dataIndex: 'loteId', width: 110, align: 'center' },
           {
             title: 'Id Póliza',
             dataIndex: 'newLifePolicyId',
@@ -2096,6 +2097,7 @@
               </Tag>
             )
           },
+          { title: 'Recibo', dataIndex: 'recibo', width: 110, align: 'center' },
           { title: '% Pagado', dataIndex: 'porcentajepagado', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
           { title: '% Pendiente', dataIndex: 'porcentajependiente', width: 90, align: 'right', render: (text) => Number(text).toFixed(2) },
           { title: 'Siniestros', dataIndex: 'siniestros', width: 90, align: 'center' },
@@ -2113,9 +2115,9 @@
               />
             )
           },
-          { title: '¿Renovada?', dataIndex: 'renovar', width: 100, align: 'center',
+          { title: 'Estado Renovación', dataIndex: 'estadoRenovacion', width: 120, align: 'center',
            render: (text) => {
-               if (text === "Si")
+               if (text === "Renovada")
                 return (
                   <Tag color="green">
                     {text}
@@ -2128,9 +2130,11 @@
                   </Tag>
                 );
             
-              return text;           
+              return text;
               }
-          }
+          },
+          { title: 'Fecha de Ingreso', dataIndex: 'fechaIngreso', width: 120, align: 'center', render: renderDate },
+          { title: 'Fecha de Emisión', dataIndex: 'fechaEmision', width: 120, align: 'center', render: renderDate }
         ], [onViewPolicy]);
 
         return (
@@ -2462,6 +2466,48 @@
           const requestedSize = Number(searchTotalDetail) > 0 ? Number(searchTotalDetail) : 10000;
           const context = `{ loteId: ${loteId}, currentPage:1, pageSize:${requestedSize} }`;
 
+          const loadExportErrors = (exportProcessType) => {
+              const errorContext = `{ loteId: ${loteId}, processType:'${exportProcessType}', currentPage:1, pageSize:${requestedSize} }`;
+
+              return exe('ExeChain', {
+                  chain: 'cmdResultRenewQuoteBatchList',
+                  context: errorContext
+              }).then(errorResponse => {
+                  if (!errorResponse || errorResponse.ok === false) {
+                      return [];
+                  }
+
+                  const errorResult = errorResponse.outData || {};
+                  return Array.isArray(errorResult.data)
+                      ? errorResult.data
+                      : (Array.isArray(errorResult) ? errorResult : []);
+              });
+          };
+
+          const normalizeExportMatchValue = (value) => String(value === null || value === undefined ? '' : value)
+              .trim()
+              .toLowerCase();
+
+          const getExportRowErrors = (row, errorRows) => {
+              const rowKeys = [
+                  row && row.lifePolicyId,
+                  row && row.newLifePolicyId,
+                  row && row.poliza
+              ]
+                  .map(normalizeExportMatchValue)
+                  .filter(value => value !== '');
+
+              return errorRows
+                  .filter(errorRow => {
+                      const errorKey = normalizeExportMatchValue(errorRow && errorRow.Poliza);
+                      return errorKey !== '' && rowKeys.indexOf(errorKey) >= 0;
+                  })
+                  .map(errorRow => String(errorRow && errorRow.Mensaje ? errorRow.Mensaje : '').trim())
+                  .filter(message => message !== '')
+                  .filter((message, index, messages) => messages.indexOf(message) === index)
+                  .join(' | ');
+          };
+
           exe('ExeChain', {
               chain: 'cmdPaginationBatchDetail',
               context: context
@@ -2484,12 +2530,19 @@
                   return Promise.resolve();
               }
 
-              return ensureDetailExcelLibrary().then(excelAvailable => {
+              return Promise.all([
+                  loadExportErrors('quotation'),
+                  loadExportErrors('issuance')
+              ]).then(errorResults => {
+                  const exportErrors = (errorResults[0] || []).concat(errorResults[1] || []);
+
+                  return ensureDetailExcelLibrary().then(excelAvailable => {
                   if (!excelAvailable) {
                       throw new Error('La exportación a Excel no está disponible.');
                   }
 
                   const exportRows = rows.map(row => ({
+                      'Número de lote': row.loteId || loteId || '',
                       'Id Póliza': row.newLifePolicyId || row.lifePolicyId || '',
                       'Póliza': row.poliza || '',
                       'Producto': row.producto || '',
@@ -2505,16 +2558,21 @@
                       'Pagado': Number(row.pagado || 0).toFixed(2),
                       'Pendiente': Number(row.pendiente || 0).toFixed(2),
                       'Prima Renovación': Number(row.primaCotizada || 0).toFixed(2),
+                      'Recibo': row.recibo || '',
                       '% Pagado': Number(row.porcentajepagado || 0).toFixed(2),
                       '% Pendiente': Number(row.porcentajependiente || 0).toFixed(2),
                       'Siniestros': row.siniestros || '',
-                      '¿Renovada?': row.renovar || ''
+                      'Estado Renovación': row.estadoRenovacion || '',
+                      'Fecha de Ingreso': renderDate(row.fechaIngreso),
+                      'Fecha de Emisión': renderDate(row.fechaEmision),
+                      'Errores': getExportRowErrors(row, exportErrors)
                   }));
 
                   const workbook = XLSX.utils.book_new();
                   const worksheet = XLSX.utils.json_to_sheet(exportRows);
                   XLSX.utils.book_append_sheet(workbook, worksheet, 'Detalle de Lote');
                   XLSX.writeFile(workbook, `detalle-lote-renovacion-${loteId}-${Date.now()}.xlsx`);
+                  });
               });
           })
           .catch(error => {
