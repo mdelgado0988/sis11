@@ -814,8 +814,8 @@
     }
 
     const updateScrollHeight = () => {
-      const availableHeight = Math.max(320, Math.floor(window.innerHeight - 12));
-      const computed = Math.max(180, Math.floor(availableHeight - 340));
+      const availableHeight = Math.max(300, Math.floor(window.innerHeight - 12));
+      const computed = Math.max(180, Math.floor(availableHeight - 300));
       setTransferScrollY(computed);
     };
 
