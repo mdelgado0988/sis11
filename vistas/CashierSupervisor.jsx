@@ -157,6 +157,7 @@
   const [paidPremiumSelectedRowKey, setPaidPremiumSelectedRowKey] = React.useState(null);
   const [transitPremiumRows, setTransitPremiumRows] = React.useState([]);
   const [transitPremiumLoading, setTransitPremiumLoading] = React.useState(false);
+  const [transitPremiumExportLoading, setTransitPremiumExportLoading] = React.useState(false);
   const [transitPremiumPagination, setTransitPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transitPremiumTotal, setTransitPremiumTotal] = React.useState(0);
   const [bankDepositRows, setBankDepositRows] = React.useState([]);
@@ -1527,7 +1528,7 @@
   }
 
   function renderPayPlanDetailLink(item) {
-    const payPlanId = Number(item && item.detailPayPlanId || 0);
+    const payPlanId = Number(item && (item.detailPayPlanId || getInstallmentPayPlanId(item.detailInstallment)) || 0);
     if (!Number.isFinite(payPlanId) || payPlanId <= 0) return '-';
 
     return (
@@ -1540,6 +1541,18 @@
         {payPlanId}
       </Button>
     );
+  }
+
+  function getInstallmentPayPlanId(installment) {
+    const value = installment && (
+      installment.payPlanId ||
+      installment.PayPlanId ||
+      installment.payplanId ||
+      installment.PayPlan && installment.PayPlan.id ||
+      installment.payPlan && installment.payPlan.id
+    );
+    const payPlanId = Number(value || 0);
+    return Number.isFinite(payPlanId) && payPlanId > 0 ? payPlanId : 0;
   }
 
   function getFirstNumericValue(source, fields) {
@@ -1760,9 +1773,17 @@
           const policyId = Number(installment && installment.lifePolicyId || 0);
           const reference = installment && (installment.id || installment.payPlanId || installment.numberInYear);
 
+          const payPlanItem = {
+            ...group,
+            detailInstallment: installment,
+            detailLifePolicyId: policyId,
+            detailPayPlanId: getInstallmentPayPlanId(installment)
+          };
+
           return (
             <div key={`${reference || 'installment'}-${index}`} className="cashier-supervisor-paid-premium-summary-line">
               <span>{t('Ref')}:{reference || '-'}</span>
+              <span>{t('Pay plan ID')}:{renderPayPlanDetailLink(payPlanItem)}</span>
               <span>{t('Amount')}:{formatMoney(amount)}</span>
               <span>{currency}</span>
               <span>{t('Policy')}:</span>
@@ -2146,6 +2167,48 @@
       message.error(error && error.message ? error.message : String(error));
     } finally {
       setBankDepositExportLoading(false);
+    }
+  }
+
+  async function exportTransitPremiums() {
+    if (!transitPremiumRows.length) {
+      message.info(t('There are no records to export.'));
+      return;
+    }
+
+    setTransitPremiumExportLoading(true);
+    try {
+      if (!await ensureSupervisorExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const exportRows = transitPremiumRows.map(group => {
+        const item = getSupervisorMovementFirst(group);
+        return {
+          [t('ID')]: item.id || group.id || '',
+          [t('Date')]: formatDate(group.date || item.date),
+          [t('Status')]: item.reversalDate || item.reversalOfId || item.reversed
+            ? t('Reverted')
+            : t('Executed'),
+          [t('Origin')]: getSupervisorMovementValues(group, 'sourceExternal').join(', '),
+          [t('Destination')]: getSupervisorExportDestination(group),
+          [t('Reference')]: getSupervisorMovementReferenceText(group),
+          [t('Amount')]: Number(group.amount || item.amount || 0),
+          [t('Currency')]: getSupervisorMovementValues(group, 'currency').join(', '),
+          [t('Payment method')]: getSupervisorPaymentMethodValues(group).join(', '),
+          [t('Type')]: getSupervisorMovementNames(group, 'IncomeType', 'name').join(', ') || getSupervisorMovementValues(group, 'incomeType').join(', '),
+          [t('User')]: getSupervisorMovementValues(group, 'user').join(', ')
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transit premiums');
+      XLSX.writeFile(workbook, `transit-premiums-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setTransitPremiumExportLoading(false);
     }
   }
 
@@ -2972,16 +3035,6 @@
         }}
       />
     </Modal>
-    <Modal
-      title={t('Installment detail')}
-      open={installmentDetailVisible}
-      onCancel={() => setInstallmentDetailVisible(false)}
-      footer={null}
-      width={760}
-      destroyOnClose
-    >
-      {renderInstallmentDetailModalContent()}
-    </Modal>
     </>
   );
 
@@ -3165,6 +3218,16 @@
             <RefreshIcon />
             {t('Refresh')}
           </Button>
+          <Button
+            type="primary"
+            className="cashier-supervisor-export-button"
+            onClick={exportTransitPremiums}
+            loading={transitPremiumExportLoading}
+            disabled={!selectedCashierRow || transitPremiumRows.length === 0}
+          >
+            <ExportIcon />
+            {t('Export')}
+          </Button>
         </Space>
       </div>
       <Table
@@ -3274,9 +3337,19 @@
                 : activeTab === 'premiums'
                   ? premiumTabContent
                   : activeTab === 'transit-premiums'
-                    ? transitPremiumTabContent
+                  ? transitPremiumTabContent
                   : bankDepositTabContent}
           </div>
+          <Modal
+            title={t('Installment detail')}
+            open={installmentDetailVisible}
+            onCancel={() => setInstallmentDetailVisible(false)}
+            footer={null}
+            width={760}
+            destroyOnClose
+          >
+            {renderInstallmentDetailModalContent()}
+          </Modal>
             </div>
           </div>
         </Layout>

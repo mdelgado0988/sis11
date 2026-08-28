@@ -267,7 +267,7 @@
   const [transitAccountRows, setTransitAccountRows] = React.useState([]);
   const [selectedTransitAccountId, setSelectedTransitAccountId] = React.useState(null);
   const [transitAccountLoading, setTransitAccountLoading] = React.useState(false);
-  const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 15 });
+  const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transitAccountTotal, setTransitAccountTotal] = React.useState(0);
   const [transitAccountFilters, setTransitAccountFilters] = React.useState({});
   const [transitHasSearched, setTransitHasSearched] = React.useState(false);
@@ -1005,6 +1005,8 @@
         width: 100%;
         max-width: none;
         align-self: flex-start;
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
       }
 
       .cashier-supervisor-view .cashier-supervisor-new-income-card {
@@ -1044,6 +1046,16 @@
       .cashier-supervisor-tab-content-new-income .cashier-supervisor-new-income-card .ant-card-body {
         flex: 0 0 auto !important;
         overflow: visible !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-new-income-actions.cashier-supervisor-toolbar {
+        border-bottom: 0;
+        padding-bottom: 4px;
+        margin-bottom: 2px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-new-income-actions.cashier-supervisor-toolbar > .ant-btn:first-child {
+        margin-left: 4px;
       }
 
       .cashier-supervisor-new-income-actions {
@@ -1200,6 +1212,11 @@
         margin: 8px 0;
       }
 
+      .cashier-supervisor-new-income-card .cashier-supervisor-section-title {
+        background: #bfbfbf;
+        border: 1px solid #e6ebf2;
+      }
+
       .cashier-supervisor-payment-method-row {
         display: flex;
         gap: 2px;
@@ -1240,6 +1257,62 @@
         width: 100%;
         max-height: calc(100vh - 150px);
         overflow-y: auto;
+      }
+
+      .cashier-supervisor-collection-payment-modal .ant-modal-content {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-collection-allocation-card {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-collection-allocation-card > .ant-card-body {
+        padding: 4px !important;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-collection-allocation-actions {
+        align-items: center;
+        background: #e6f7ff;
+        border: 1px solid #91caff;
+        border-radius: 0;
+        padding: 4px 0;
+        margin-bottom: 2px;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-collection-allocation-actions > .ant-btn:first-child {
+        margin-left: 4px;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-collection-allocation-actions > .ant-btn:last-child {
+        margin-right: 4px;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-section-title {
+        background: #bfbfbf;
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-table {
+        border: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-collection-payment-modal .cashier-supervisor-table .ant-table-tbody > tr:hover > td {
+        background: #b7d7ff !important;
       }
 
       .cashier-supervisor-collection-allocation-actions {
@@ -1334,6 +1407,131 @@
         opacity: 1;
         -webkit-text-fill-color: #595959;
       }
+
+      /* Shared visual standard for every Cashier tab. */
+      .cashier-supervisor-view {
+        font-size: 13px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar {
+        background: #e6f7ff !important;
+        border: 1px solid #91caff !important;
+        border-radius: 0 !important;
+        padding: 4px 0 !important;
+        margin-bottom: 2px !important;
+        margin-top: -4px;
+        margin-left: -4px;
+        margin-right: -4px;
+        box-shadow: 0 1px 3px rgba(22, 119, 255, 0.12);
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar > .ant-space {
+        margin-left: 4px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar > :first-child {
+        margin-left: 4px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar > :last-child {
+        margin-right: 4px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar .ant-btn {
+        border-radius: 6px;
+        font-size: 13px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-outline-button.ant-btn {
+        border-color: #8f9aa7;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-outline-button.ant-btn:disabled,
+      .cashier-supervisor-view .cashier-supervisor-success-button.ant-btn:disabled {
+        color: #7b8794;
+        background: #f5f5f5;
+        border-color: #6f7b88;
+        opacity: 1;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-export-button.ant-btn {
+        color: #fff;
+        background: #60b13d;
+        border-color: #4f9336;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-report-button.ant-btn {
+        color: #fff;
+        background: #dd603d;
+        border-color: #bd4d35;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-tab-bar {
+        gap: 2px;
+        margin-bottom: 2px;
+        border-bottom-color: #cbd1d8;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-tab {
+        border: 1px solid #cbd1d8;
+        border-bottom: 0;
+        border-radius: 6px 6px 0 0;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-tab.active {
+        border-color: #1677ff;
+        border-bottom-color: #fff;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-tab:disabled {
+        border-color: #cbd1d8;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table {
+        border: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr:hover > td {
+        background: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr.cashier-supervisor-selected-row > td,
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr.ant-table-row-selected > td {
+        background: #86b4ff !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr.cashier-supervisor-selected-row:hover > td,
+      .cashier-supervisor-view .cashier-supervisor-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+        background: #86b4ff !important;
+      }
+
+      .cashier-supervisor-view .ant-card:has(.cashier-supervisor-table) .ant-card-body {
+        padding: 4px !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-status-bar {
+        background: linear-gradient(90deg, #e6f4ff 0%, #4096ff 100%);
+        color: #fff;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-status-bar .cashier-supervisor-status-item strong {
+        color: #fff;
+      }
     `;
     document.head.appendChild(style);
 
@@ -1366,7 +1564,7 @@
 
     const updateScrollHeight = () => {
       const availableHeight = Math.max(320, Math.floor(window.innerHeight - 12));
-      const computed = Math.max(180, Math.floor(availableHeight - 360));
+      const computed = Math.max(180, Math.floor(availableHeight - 340));
       setTransferScrollY(computed);
     };
 
@@ -1597,7 +1795,7 @@
   function loadTransitAccounts(params = {}) {
     const pagination = params.pagination || transitAccountPagination;
     const filters = params.filters || transitAccountFilters;
-    const pageSize = Number(pagination && pagination.pageSize) || 15;
+    const pageSize = Number(pagination && pagination.pageSize) || 25;
     const currentPage = Number(pagination && pagination.current) || 1;
 
     setTransitAccountLoading(true);
@@ -6986,7 +7184,7 @@
         className="cashier-supervisor-table"
         loading={balanceLoading}
         pagination={false}
-        scroll={{ x: 780, y: 420 }}
+        scroll={{ x: 780, y: transferScrollY }}
       />
     </Card>
   );
@@ -7496,6 +7694,7 @@
             columns={policyColumns}
             dataSource={collectionPolicyRows}
             size="small"
+            className="cashier-supervisor-table"
             pagination={false}
             bordered
           />
@@ -7511,6 +7710,7 @@
                     columns={supplementaryColumns}
                     dataSource={collectionSupplementaryRows}
                     size="small"
+                    className="cashier-supervisor-table"
                     pagination={false}
                     bordered
                   />
@@ -7543,7 +7743,7 @@
 
   const renderNewIncomeContent = (collectionMode, editMode, formScope) => (
     <Card size="small" className="cashier-supervisor-new-income-card">
-      <div className="cashier-supervisor-new-income-actions">
+      <div className="cashier-supervisor-new-income-actions cashier-supervisor-toolbar">
         <Button
           type="primary"
           icon={<ExecuteMovementIcon />}
@@ -8419,6 +8619,7 @@
 
         <Modal
           title={t('Collect premiums')}
+          className="cashier-supervisor-collection-payment-modal"
           open={collectionChargeVisible}
           onCancel={() => {
             setCollectionChargeVisible(false);

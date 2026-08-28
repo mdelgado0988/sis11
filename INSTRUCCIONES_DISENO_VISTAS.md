@@ -71,11 +71,19 @@
 - Aplicar el mismo espaciado a todas las pestañas equivalentes de la vista para conservar un comportamiento visual uniforme.
 - Al aplicar el padding, no asumir que el `Card` es hijo directo del contenedor de la pestaña; contemplar envoltorios funcionales como `Spin` para que todas las pestañas reciban el mismo espaciado.
 
+## Tipografía
+
+- Usar `13px` como tamaño base para el contenido general de la vista, salvo títulos o controles con una jerarquía visual propia.
+- Usar `12px` en encabezados y filas de grillas compactas.
+- Usar `line-height: 18px` en encabezados y filas de grillas compactas para mantener una densidad uniforme.
+- Mantener los tamaños especiales existentes de títulos, botones, iconos y formularios cuando formen parte de su jerarquía visual.
+
 ## Topbar de acciones
 
-- Usar un panel de acciones con bordes cuadrados, sin padding lateral derecho.
+- Usar un panel de acciones con bordes cuadrados, sin padding lateral propio; mantener una separación visual de `4px` a la izquierda del grupo inicial y de `4px` a la derecha de los controles alineados al extremo derecho.
 - Usar `padding: 4px 0` para que el panel sea apenas más grueso que los botones y estos queden centrados verticalmente.
 - Compensar el padding del `Card` contenedor cuando sea necesario para eliminar el espacio superior y lateral alrededor del topbar.
 - Mantener una separación izquierda de `4px` para el grupo de botones.
+- Mantener una separación derecha de `4px` para los controles alineados al extremo derecho del topbar, equivalente a la separación izquierda del grupo inicial.
 - Mantener una separación inferior de `2px` entre el topbar y la grilla.
 - Aplicar estas reglas de espaciado de forma uniforme en todas las pestañas de la vista.
