@@ -23,7 +23,7 @@
 - Los botones secundarios o de reportes deben usar un borde ligeramente más oscuro, de referencia `#8f9aa7`.
 - Los botones deshabilitados deben conservar un borde visible, de referencia `#6f7b88`, y no deben perder contraste por opacidad; usar `opacity: 1` cuando sea necesario.
 - Las grillas deben usar un borde exterior de referencia `#cbd1d8` con grosor de `1px`.
-- Los encabezados de las grillas deben usar un fondo sutilmente más oscuro, de referencia `#eef0f3`, y conservar separadores verticales de `1px solid #cbd1d8`.
+- Los encabezados de las grillas deben usar un fondo sutilmente más oscuro, de referencia `#bfbfbf`, y conservar separadores verticales de `1px solid #cbd1d8`.
 - Las filas deben conservar únicamente separadores horizontales de `1px solid #cbd1d8`, sin bordes verticales.
 - Para grillas compactas, usar como referencia padding de `5px 8px`, fuente de `12px` y line-height de `18px`, salvo que el diseño requiera otra densidad.
 
@@ -38,6 +38,11 @@
 - Los botones de Filtrar o Buscar deben mostrar un icono de lupa de Ant Design.
 - Los botones de Actualizar o Refrescar deben mostrar un icono de recarga de Ant Design.
 - Mantener los iconos alineados con la etiqueta y conservar el estilo nativo de Ant Design.
+
+## Status bar
+
+- Usar como fondo estándar una gradiente horizontal: `linear-gradient(90deg, #e6f4ff 0%, #4096ff 100%)`.
+- Usar texto blanco (`#fff`) para conservar el contraste sobre la gradiente.
 
 ## Estados de filas en grillas
 
@@ -58,3 +63,19 @@
 - El color debe aplicarse únicamente al contenido visual de la celda; no modificar los valores ni las reglas de cálculo.
 - Mantener separado el formateo numérico existente, incluyendo separadores de miles y decimales, del estilo por signo.
 - No aplicar este estilo automáticamente a campos editables, botones, totales especiales o textos que no representen montos de una grilla, salvo que el diseño lo solicite expresamente.
+
+## Espaciado de grillas
+
+- Cuando una pestaña use un `Card` como contenedor de la grilla, usar `padding: 4px` en el cuerpo del card para reducir el espacio entre la grilla y el contenedor.
+- Mantener intactos los bordes del card, de la grilla y de sus encabezados al ajustar este espaciado.
+- Aplicar el mismo espaciado a todas las pestañas equivalentes de la vista para conservar un comportamiento visual uniforme.
+- Al aplicar el padding, no asumir que el `Card` es hijo directo del contenedor de la pestaña; contemplar envoltorios funcionales como `Spin` para que todas las pestañas reciban el mismo espaciado.
+
+## Topbar de acciones
+
+- Usar un panel de acciones con bordes cuadrados, sin padding lateral derecho.
+- Usar `padding: 4px 0` para que el panel sea apenas más grueso que los botones y estos queden centrados verticalmente.
+- Compensar el padding del `Card` contenedor cuando sea necesario para eliminar el espacio superior y lateral alrededor del topbar.
+- Mantener una separación izquierda de `4px` para el grupo de botones.
+- Mantener una separación inferior de `2px` entre el topbar y la grilla.
+- Aplicar estas reglas de espaciado de forma uniforme en todas las pestañas de la vista.

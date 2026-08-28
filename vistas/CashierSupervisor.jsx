@@ -176,11 +176,21 @@
     style.id = styleId;
     style.textContent = `
       .cashier-supervisor-view .cashier-supervisor-toolbar {
-        background: transparent;
-        border: 1px solid #e6ebf2;
-        border-radius: 6px;
-        padding: 10px 12px;
-        margin-bottom: 14px;
+        background: #e6f7ff;
+        border: 1px solid #91caff;
+        border-radius: 0 !important;
+        padding: 4px 0;
+        margin-bottom: 2px;
+        margin-top: -4px;
+        margin-left: -4px;
+        margin-right: -4px;
+        display: flex;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(22, 119, 255, 0.12);
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-toolbar > .ant-space {
+        margin-left: 4px;
       }
 
       .cashier-supervisor-view .cashier-supervisor-toolbar .cashier-supervisor-outline-button,
@@ -244,7 +254,7 @@
       }
 
       .cashier-supervisor-view .cashier-supervisor-table .ant-table-thead > tr > th {
-        background: #eef0f3;
+        background: #bfbfbf;
         border-inline-end: 1px solid #cbd1d8 !important;
         border-right: 1px solid #cbd1d8 !important;
         border-bottom: 1px solid #cbd1d8 !important;
@@ -279,7 +289,7 @@
         padding: 9px 12px;
         border: 1px solid #e6ebf2;
         border-radius: 6px;
-        background: linear-gradient(90deg, #fbfcff 0%, #f5f7fb 100%);
+        background: linear-gradient(90deg, #e6f4ff 0%, #4096ff 100%);
         height: 100%;
         overflow: hidden;
       }
@@ -509,6 +519,10 @@
         overflow: hidden;
       }
 
+      .cashier-supervisor-view .cashier-supervisor-tab-content .ant-card > .ant-card-body {
+        padding: 4px !important;
+      }
+
       .cashier-supervisor-view .cashier-supervisor-table {
         flex: 1 1 auto;
         min-height: 0;
@@ -534,7 +548,7 @@
       }
 
       .cashier-supervisor-view .cashier-supervisor-transit-premium-table .ant-table-thead > tr > th {
-        background: #eef0f3;
+        background: #bfbfbf;
         border-inline-end: 1px solid #cbd1d8 !important;
         border-right: 1px solid #cbd1d8 !important;
         border-bottom: 1px solid #cbd1d8 !important;
@@ -617,7 +631,7 @@
       }
 
       .cashier-supervisor-accounting-table .ant-table-thead > tr > th {
-        background: #eef0f3;
+        background: #bfbfbf;
         border-inline-end: 1px solid #cbd1d8 !important;
         border-right: 1px solid #cbd1d8 !important;
         border-bottom: 1px solid #cbd1d8 !important;
@@ -2982,8 +2996,8 @@
           <span>{row.id || '-'}</span>
         </span>
         <span className="cashier-supervisor-status-item">
-          <strong>{t('Cashier')}:</strong>
-          <span>{row.cashier || '-'}</span>
+          <strong>{t('Cashier User')}:</strong>
+          <span>{row.user ? getCashierLabel(row) : '-'}</span>
         </span>
         <span className="cashier-supervisor-status-item">
           <strong>{t('Cash desk status')}:</strong>
