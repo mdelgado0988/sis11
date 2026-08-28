@@ -145,6 +145,7 @@
   const [accountingMovementTitle, setAccountingMovementTitle] = React.useState('');
   const [installmentDetailVisible, setInstallmentDetailVisible] = React.useState(false);
   const [installmentDetailRecord, setInstallmentDetailRecord] = React.useState(null);
+  const [installmentDetailPayPlanLoading, setInstallmentDetailPayPlanLoading] = React.useState(false);
   const [movementReports, setMovementReports] = React.useState([]);
   const [movementIncomeTypes, setMovementIncomeTypes] = React.useState([]);
   const [supervisorPaymentMethodNames, setSupervisorPaymentMethodNames] = React.useState({});
@@ -1453,7 +1454,7 @@
     });
   }
 
-  function openInstallmentDetail(item) {
+  async function openInstallmentDetail(item) {
     if (!item || !item.detailInstallment) {
       message.info(t('Installment detail is not available.'));
       return;
@@ -1461,6 +1462,38 @@
 
     setInstallmentDetailRecord(item);
     setInstallmentDetailVisible(true);
+
+    const payPlanId = Number(item.detailPayPlanId || item.detailInstallment.payPlanId || 0);
+    if (!Number.isFinite(payPlanId) || payPlanId <= 0) return;
+
+    setInstallmentDetailPayPlanLoading(true);
+    try {
+      const response = await exe('LoadEntity', {
+        entity: 'PayPlan',
+        filter: `id = ${payPlanId}`,
+        fields: '[id],[numberInYear],[dueDate]',
+        noTracking: true
+      });
+      const payPlanRows = response && response.ok !== false ? getRows(response) : [];
+      const payPlan = payPlanRows.length > 0 ? payPlanRows[0] : null;
+
+      if (payPlan) {
+        setInstallmentDetailRecord(current => {
+          if (!current) return current;
+          return {
+            ...current,
+            detailInstallment: {
+              ...(current.detailInstallment || {}),
+              ...payPlan
+            }
+          };
+        });
+      }
+    } catch (error) {
+      message.warning(t('Pay plan information could not be loaded.'));
+    } finally {
+      setInstallmentDetailPayPlanLoading(false);
+    }
   }
 
   function renderPolicyIdLink(policyId) {
@@ -1627,6 +1660,7 @@
 
     return (
       <div>
+        {installmentDetailPayPlanLoading ? <Spin size="small" /> : null}
         <div className="cashier-supervisor-installment-section-title">{t('Installment information')}</div>
         <div className="cashier-supervisor-installment-detail-grid">
           {summary.map(item => (
