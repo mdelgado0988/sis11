@@ -48,3 +48,13 @@
 - Cubrir tanto la selección nativa de Ant Design mediante `.ant-table-row-selected` como la selección personalizada mediante clases propias, por ejemplo `.cashier-supervisor-selected-row`.
 - Mantener el cursor tipo mano en las filas que puedan seleccionarse.
 - Aplicar los colores con prioridad suficiente para evitar que los estilos predeterminados de Ant Design o de una tabla específica oculten el estado visual.
+
+## Montos en grillas
+
+- Aplicar un estilo visual general a todos los montos numéricos mostrados en celdas de grillas.
+- Los montos positivos deben mostrarse en verde, usando como referencia `#237804`.
+- Los montos negativos deben mostrarse en rojo, usando como referencia `#cf1322`.
+- Los montos iguales a cero deben mostrarse en negro, usando como referencia `#262626`, con peso de fuente normal.
+- El color debe aplicarse únicamente al contenido visual de la celda; no modificar los valores ni las reglas de cálculo.
+- Mantener separado el formateo numérico existente, incluyendo separadores de miles y decimales, del estilo por signo.
+- No aplicar este estilo automáticamente a campos editables, botones, totales especiales o textos que no representen montos de una grilla, salvo que el diseño lo solicite expresamente.

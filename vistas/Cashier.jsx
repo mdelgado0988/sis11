@@ -581,6 +581,21 @@
         line-height: 20px;
       }
 
+      .cashier-supervisor-view .cashier-grid-money-positive {
+        color: #237804;
+        font-weight: normal;
+      }
+
+      .cashier-supervisor-view .cashier-grid-money-negative {
+        color: #cf1322;
+        font-weight: normal;
+      }
+
+      .cashier-supervisor-view .cashier-grid-money-zero {
+        color: #262626;
+        font-weight: normal;
+      }
+
       .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-thead > tr > th,
       .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-tbody > tr > td {
         padding: 3px 6px !important;
@@ -1399,6 +1414,19 @@
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
+  }
+
+  function renderGridMoney(value) {
+    const amount = Number(value || 0);
+    let className = 'cashier-grid-money-zero';
+
+    if (Number.isFinite(amount) && amount > 0) {
+      className = 'cashier-grid-money-positive';
+    } else if (Number.isFinite(amount) && amount < 0) {
+      className = 'cashier-grid-money-negative';
+    }
+
+    return <span className={className}>{formatMoney(value)}</span>;
   }
 
   function formatDate(value) {
@@ -6544,8 +6572,8 @@
     { title: t('Payer'), dataIndex: 'pagador', key: 'pagador', width: 190, ellipsis: true },
     { title: t('Insured'), dataIndex: 'asegurado', key: 'asegurado', width: 190, ellipsis: true },
     { title: t('Currency'), dataIndex: 'moneda', key: 'moneda', width: 85, align: 'center' },
-    { title: t('Billed'), dataIndex: 'facturado', key: 'facturado', width: 110, align: 'right', render: formatMoney },
-    { title: t('Paid'), dataIndex: 'pagado', key: 'pagado', width: 110, align: 'right', render: formatMoney },
+    { title: t('Billed'), dataIndex: 'facturado', key: 'facturado', width: 110, align: 'right', render: renderGridMoney },
+    { title: t('Paid'), dataIndex: 'pagado', key: 'pagado', width: 110, align: 'right', render: renderGridMoney },
     {
       title: t('Overdue'),
       dataIndex: 'vencido',
@@ -6557,7 +6585,7 @@
 
         return (
           <Space size={4}>
-            <span>{formatMoney(value)}</span>
+            {renderGridMoney(value)}
             <Dropdown
               trigger={['click']}
               placement="bottomRight"
@@ -6586,7 +6614,7 @@
         );
       }
     },
-    { title: t('Pending'), dataIndex: 'pendiente', key: 'pendiente', width: 110, align: 'right', render: formatMoney },
+    { title: t('Pending'), dataIndex: 'pendiente', key: 'pendiente', width: 110, align: 'right', render: renderGridMoney },
     { title: t('Issuance date'), dataIndex: 'fechaEmision', key: 'fechaEmision', width: 120, align: 'center', render: formatDate },
     {
       title: t('Pending installments'),
@@ -6602,22 +6630,22 @@
     { title: t('Contract year'), dataIndex: 'contractYear', key: 'contractYear', width: 110, align: 'center' },
     { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: 130 },
     { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 120, align: 'center', render: formatDate },
-    { title: t('Pending'), dataIndex: 'pendingAmount', key: 'pendingAmount', width: 110, align: 'right', render: formatMoney }
+    { title: t('Pending'), dataIndex: 'pendingAmount', key: 'pendingAmount', width: 110, align: 'right', render: renderGridMoney }
   ];
 
   const balanceColumns = [
     { title: t('Payment method'), dataIndex: 'paymentMethod', key: 'paymentMethod', width: 180 },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' },
-    { title: t('Assigned fund'), dataIndex: 'assignedFund', key: 'assignedFund', width: 130, align: 'right', render: formatMoney },
-    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: formatMoney },
-    { title: t('Deposit'), dataIndex: 'deposit', key: 'deposit', width: 120, align: 'right', render: formatMoney },
+    { title: t('Assigned fund'), dataIndex: 'assignedFund', key: 'assignedFund', width: 130, align: 'right', render: renderGridMoney },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: renderGridMoney },
+    { title: t('Deposit'), dataIndex: 'deposit', key: 'deposit', width: 120, align: 'right', render: renderGridMoney },
     {
       title: t('Difference'),
       dataIndex: 'difference',
       key: 'difference',
       width: 130,
       align: 'right',
-      render: value => <span style={{ color: Number(value) < 0 ? '#ff4d4f' : undefined }}>{formatMoney(value)}</span>
+      render: renderGridMoney
     }
   ];
 
@@ -6669,7 +6697,7 @@
       width: 160,
       render: (_, record) => renderPremiumReversalText(record && (record.reference || record.concept), 140)
     },
-    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: renderGridMoney },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
     { title: t('Type'), key: 'type', width: 135, render: (_, record) => renderPremiumReversalText(getPremiumReversalType(record), 115) },
     { title: t('Payment method'), key: 'paymentMethod', width: 125, render: (_, record) => renderPremiumReversalText(getPremiumReversalPaymentMethods(record), 105) },
@@ -6739,8 +6767,8 @@
     { title: t('Origin'), key: 'sourceExternal', width: 125, render: (_, group) => renderMovementOrigin(group) },
     { title: t('Destination'), key: 'destinationAccount', width: 190, render: (_, group) => renderMovementDestination(group) },
     { title: t('Reference'), key: 'concept', width: 150, render: (_, group) => renderMovementReference(group) },
-    { title: t('Received'), dataIndex: 'amount', key: 'received', width: 110, align: 'right', render: formatMoney },
-    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: formatMoney },
+    { title: t('Received'), dataIndex: 'amount', key: 'received', width: 110, align: 'right', render: renderGridMoney },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: renderGridMoney },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
     { title: t('Payment method'), key: 'paymentMethod', width: 100, render: (_, group) => renderMovementPaymentMethods(group) },
     { title: t('Type'), key: 'incomeType', width: 190, render: (_, group) => renderMovementIncomeType(group) },
@@ -7002,7 +7030,7 @@
       key: 'balance',
       width: 130,
       align: 'right',
-      render: (_, record) => formatMoney(getTransitAccountBalance(record))
+      render: (_, record) => renderGridMoney(getTransitAccountBalance(record))
     },
     {
       title: t('Movements'),
@@ -7108,7 +7136,7 @@
                     { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, align: 'center', render: value => formatDate(value) },
                     { title: t('Transaction'), dataIndex: 'transaction', key: 'transaction' },
                     { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 220 },
-                    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: value => formatMoney(value) }
+                    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: renderGridMoney }
                   ]}
                   dataSource={detailRows}
                   className="cashier-supervisor-transit-detail"
@@ -7333,7 +7361,7 @@
         dataIndex: 'pendingAmount',
         key: 'pendingAmount',
         align: 'right',
-        render: value => formatMoney(value)
+        render: renderGridMoney
       },
       {
         title: t('Amount to apply'),

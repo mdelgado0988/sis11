@@ -136,12 +136,17 @@
   const [accountingMovementTitle, setAccountingMovementTitle] = React.useState('');
   const [movementReports, setMovementReports] = React.useState([]);
   const [movementIncomeTypes, setMovementIncomeTypes] = React.useState([]);
+  const [supervisorPaymentMethodNames, setSupervisorPaymentMethodNames] = React.useState({});
   const [paidPremiumRows, setPaidPremiumRows] = React.useState([]);
   const [paidPremiumLoading, setPaidPremiumLoading] = React.useState(false);
   const [paidPremiumExportLoading, setPaidPremiumExportLoading] = React.useState(false);
   const [paidPremiumPagination, setPaidPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
   const [paidPremiumTotal, setPaidPremiumTotal] = React.useState(0);
   const [paidPremiumSelectedRowKey, setPaidPremiumSelectedRowKey] = React.useState(null);
+  const [transitPremiumRows, setTransitPremiumRows] = React.useState([]);
+  const [transitPremiumLoading, setTransitPremiumLoading] = React.useState(false);
+  const [transitPremiumPagination, setTransitPremiumPagination] = React.useState({ current: 1, pageSize: 25 });
+  const [transitPremiumTotal, setTransitPremiumTotal] = React.useState(0);
   const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
@@ -232,6 +237,21 @@
         border-inline-end: 0 !important;
         border-right: 0 !important;
         border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-view .cashier-grid-money-positive {
+        color: #237804;
+        font-weight: normal;
+      }
+
+      .cashier-supervisor-view .cashier-grid-money-negative {
+        color: #cf1322;
+        font-weight: normal;
+      }
+
+      .cashier-supervisor-view .cashier-grid-money-zero {
+        color: #262626;
+        font-weight: normal;
       }
 
       .cashier-supervisor-status-bar {
@@ -488,6 +508,31 @@
         overflow: auto !important;
       }
 
+      /* Transit premiums has independent table sizing and presentation. */
+      .cashier-supervisor-view .cashier-supervisor-transit-premium-table .ant-table-thead > tr > th,
+      .cashier-supervisor-view .cashier-supervisor-transit-premium-table .ant-table-tbody > tr > td {
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-transit-premium-table .ant-table-thead > tr > th {
+        background: #eef0f3;
+        border-inline-end: 1px solid #cbd1d8 !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-transit-premium-table .ant-table-tbody > tr > td {
+        border-inline-end: 0 !important;
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-view .cashier-supervisor-transit-premium-table .ant-table-body {
+        overflow: auto !important;
+      }
+
       .cashier-supervisor-paid-premium-summary {
         padding: 8px 14px 10px 34px;
         background: #fafafa;
@@ -516,6 +561,17 @@
         display: block;
         width: 100%;
         max-width: 120px;
+        box-sizing: border-box;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: help;
+      }
+
+      .cashier-supervisor-transit-reference-cell {
+        display: block;
+        width: 100%;
+        max-width: 200px;
         box-sizing: border-box;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -637,6 +693,7 @@
   React.useEffect(() => {
     loadBranches();
     loadSupervisorMovementIncomeTypes();
+    loadSupervisorPaymentMethodCatalog();
     loadSupervisorMovementReports();
     applyCurrentMonthDefaults();
 
@@ -701,6 +758,8 @@
     setPaidPremiumRows([]);
     setPaidPremiumTotal(0);
     setPaidPremiumSelectedRowKey(null);
+    setTransitPremiumRows([]);
+    setTransitPremiumTotal(0);
     loadedSupervisorTabsRef.current = {};
   }, [selectedCashierRow && selectedCashierRow.id]);
 
@@ -719,6 +778,10 @@
     } else if (activeTab === 'premiums') {
       loadSupervisorPaidPremiums({
         pagination: { current: 1, pageSize: paidPremiumPagination.pageSize }
+      });
+    } else if (activeTab === 'transit-premiums') {
+      loadSupervisorTransitPremiums({
+        pagination: { current: 1, pageSize: transitPremiumPagination.pageSize }
       });
     }
   }, [selectedCashierRow && selectedCashierRow.id, activeTab]);
@@ -745,6 +808,19 @@
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
+  }
+
+  function renderGridMoney(value) {
+    const amount = Number(value || 0);
+    let className = 'cashier-grid-money-zero';
+
+    if (Number.isFinite(amount) && amount > 0) {
+      className = 'cashier-grid-money-positive';
+    } else if (Number.isFinite(amount) && amount < 0) {
+      className = 'cashier-grid-money-negative';
+    }
+
+    return <span className={className}>{formatMoney(value)}</span>;
   }
 
   function formatDate(value) {
@@ -919,6 +995,17 @@
     );
   }
 
+  function renderSupervisorTransitPremiumReference(group) {
+    const reference = getSupervisorMovementReferenceText(group);
+    if (reference === '-') return reference;
+
+    return (
+      <Tooltip title={reference}>
+        <span className="cashier-supervisor-transit-reference-cell">{reference}</span>
+      </Tooltip>
+    );
+  }
+
   function getSupervisorAccountingReferences(group) {
     const references = [];
     const seen = new Set();
@@ -1087,17 +1174,55 @@
     const items = [group].concat(getSupervisorMovementChildren(group));
 
     items.forEach(item => {
-      const splitPayments = item && Array.isArray(item.SplitPayments) ? item.SplitPayments : [];
+      const splitPayments = item && Array.isArray(item.SplitPayments)
+        ? item.SplitPayments
+        : item && Array.isArray(item.splitPayments) ? item.splitPayments : [];
       splitPayments.forEach(payment => {
-        const name = payment && (payment.paymentMethodName || (payment.PaymentMethod && payment.PaymentMethod.name));
-        if (name) values.push(String(name));
+        const name = payment && (
+          payment.paymentMethodName
+          || (payment.PaymentMethod && payment.PaymentMethod.name)
+          || payment.paymentMethod
+        );
+        if (name) {
+          const code = String(name);
+          values.push(supervisorPaymentMethodNames[code] || code);
+        }
       });
 
       const directName = item && item.PaymentMethod && item.PaymentMethod.name;
       if (directName) values.push(String(directName));
+      if (item && item.paymentMethodName) {
+        const code = String(item.paymentMethodName);
+        values.push(supervisorPaymentMethodNames[code] || code);
+      }
+      if (item && item.paymentMethod) {
+        const code = String(item.paymentMethod);
+        values.push(supervisorPaymentMethodNames[code] || code);
+      }
     });
 
     return Array.from(new Set(values));
+  }
+
+  function loadSupervisorPaymentMethodCatalog() {
+    exe('RepoPaymentMethodCatalog', {
+      operation: 'GET',
+      filter: null,
+      include: null,
+      size: 0,
+      page: 0
+    })
+      .then(response => {
+        if (!response || response.ok === false) return;
+        const names = getRows(response).reduce((result, item) => {
+          const code = getTrimmedString(item && item.code);
+          const name = getTrimmedString(item && item.name);
+          if (code && name) result[code] = name;
+          return result;
+        }, {});
+        setSupervisorPaymentMethodNames(names);
+      })
+      .catch(() => {});
   }
 
   function getSupervisorPaymentMethodAbbreviation(value) {
@@ -1203,7 +1328,7 @@
       key: 'amountApplied',
       width: 125,
       align: 'right',
-      render: (_, item) => formatMoney(item && item.amount !== undefined && item.amount !== null
+      render: (_, item) => renderGridMoney(item && item.amount !== undefined && item.amount !== null
         ? item.amount
         : item && item.minimum !== undefined && item.minimum !== null ? item.minimum : 0)
     }
@@ -1273,7 +1398,11 @@
       : item && item.amount;
     const currencies = getSupervisorMovementValues(group, 'currency');
     const currency = currencies.length ? currencies[0] : '';
-    return `${currency || '-'} ${formatMoney(amount || 0)}`;
+    const amountValue = Number(amount || 0);
+    let className = 'cashier-grid-money-zero';
+    if (Number.isFinite(amountValue) && amountValue > 0) className = 'cashier-grid-money-positive';
+    if (Number.isFinite(amountValue) && amountValue < 0) className = 'cashier-grid-money-negative';
+    return <span className={className}>{`${currency || '-'} ${formatMoney(amountValue)}`}</span>;
   }
 
   function getSupervisorMovementFilterValues() {
@@ -1428,6 +1557,46 @@
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setPaidPremiumLoading(false));
+  }
+
+  function loadSupervisorTransitPremiums(params = {}) {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      setTransitPremiumRows([]);
+      setTransitPremiumTotal(0);
+      return;
+    }
+
+    const pagination = params.pagination || transitPremiumPagination;
+    const pageSize = Number(pagination.pageSize) || 25;
+    const currentPage = Number(pagination.current) || 1;
+    setTransitPremiumLoading(true);
+
+    exe('RepoTransfer', {
+      operation: 'GET',
+      filter: `transferWorkspaceId = ${workspaceId} AND [status] = 1 AND [executed] = 1 AND EXISTS (SELECT 1 FROM IncomeTypeCatalog it WHERE it.code = [Transfer].incomeType AND it.internalType IN ('TRANSIT', 'DEPOPAYMENT', 'REFUND'))`,
+      include: ['SplitPayments', 'IncomeType', 'DestinationAccount'],
+      size: pageSize,
+      page: Math.max(currentPage - 1, 0)
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Transit premiums could not be loaded.'));
+        }
+
+        const rows = getRows(response);
+        loadSupervisorPolicyCodes(rows).catch(() => {});
+        setTransitPremiumRows(rows);
+        setTransitPremiumTotal(getResponseTotal(response, rows));
+        setTransitPremiumPagination({ current: currentPage, pageSize: pageSize });
+        loadedSupervisorTabsRef.current[`${workspaceId}:transit-premiums`] = true;
+      })
+      .catch(error => {
+        setTransitPremiumRows([]);
+        setTransitPremiumTotal(0);
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setTransitPremiumLoading(false));
   }
 
   async function ensureSupervisorExcelLibrary() {
@@ -2082,14 +2251,32 @@
   const accountingColumnKeys = new Set(['accounted']);
   const supervisorMovementDetailColumns = supervisorMovementColumns.filter(column => !accountingColumnKeys.has(column.key));
   const supervisorPaidPremiumColumns = supervisorMovementDetailColumns;
+  const supervisorTransitPremiumColumns = [
+    {
+      title: t('ID'),
+      key: 'id',
+      width: 50,
+      align: 'center',
+      render: (_, group) => getSupervisorMovementFirst(group).id || group.id || '-'
+    },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 60, align: 'center', render: formatDate },
+    { title: t('Status'), key: 'status', width: 60, align: 'center', render: (_, group) => renderSupervisorMovementStatus(group) },
+    { title: t('Origin'), key: 'origin', width: 80, align: 'left', render: (_, group) => renderSupervisorMovementValues(group, 'sourceExternal') },
+    { title: t('Destination'), key: 'destination', width: 170, render: (_, group) => renderSupervisorMovementDestination(group) },
+    { title: t('Reference'), key: 'reference', width: 90, render: (_, group) => renderSupervisorTransitPremiumReference(group) },
+    { title: t('Amount'), key: 'amountCurrency', width: 70, align: 'right', render: (_, group) => renderSupervisorAmountWithCurrency(group) },
+    { title: t('Payment method'), key: 'paymentMethod', width: 100, render: (_, group) => renderSupervisorMovementPaymentMethods(group) },
+    { title: t('Type'), key: 'type', width: 100, render: (_, group) => renderSupervisorMovementIncomeTypes(group) },
+    { title: t('User'), key: 'user', width: 100, render: (_, group) => renderSupervisorMovementUser(group) }
+  ];
 
   const accountingLineColumns = [
     { title: t('Line'), key: 'line', width: '8%', align: 'center', render: (_, line) => renderAccountingText(getAccountingLineNumber(line)) },
     { title: t('Account'), dataIndex: 'account', key: 'account', width: '16%', render: renderAccountingText },
     { title: t('Account name'), key: 'accountName', width: '24%', render: (_, line) => renderAccountingText(getAccountingAccountName(line)) },
     { title: t('Comments'), dataIndex: 'comments', key: 'comments', width: '30%', render: renderAccountingText },
-    { title: t('Debit'), dataIndex: 'debit', key: 'debit', width: '11%', align: 'right', render: formatMoney },
-    { title: t('Credit'), dataIndex: 'credit', key: 'credit', width: '11%', align: 'right', render: formatMoney }
+    { title: t('Debit'), dataIndex: 'debit', key: 'debit', width: '11%', align: 'right', render: renderGridMoney },
+    { title: t('Credit'), dataIndex: 'credit', key: 'credit', width: '11%', align: 'right', render: renderGridMoney }
   ];
 
   const accountingMovementColumns = [
@@ -2097,27 +2284,27 @@
     { title: t('Creation date'), dataIndex: 'date', key: 'date', width: 145, render: formatDateTime },
     { title: t('Accounting date'), dataIndex: 'effectiveDate', key: 'effectiveDate', width: 145, render: formatDateSlash },
     { title: t('Description'), dataIndex: 'description', key: 'description', width: 300, render: renderAccountingText },
-    { title: t('Debit'), key: 'debit', width: 100, align: 'right', render: (_, transaction) => formatMoney(getAccountingTransactionTotal(transaction, 'debit')) },
-    { title: t('Credit'), key: 'credit', width: 100, align: 'right', render: (_, transaction) => formatMoney(getAccountingTransactionTotal(transaction, 'credit')) }
+    { title: t('Debit'), key: 'debit', width: 100, align: 'right', render: (_, transaction) => renderGridMoney(getAccountingTransactionTotal(transaction, 'debit')) },
+    { title: t('Credit'), key: 'credit', width: 100, align: 'right', render: (_, transaction) => renderGridMoney(getAccountingTransactionTotal(transaction, 'credit')) }
   ];
 
   const premiumColumns = [
     { title: t('Payment'), dataIndex: 'payment', key: 'payment', width: 130 },
     { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 130 },
     { title: t('Installment'), dataIndex: 'installment', key: 'installment', width: 110, align: 'center' },
-    { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 110, align: 'right', render: formatMoney },
-    { title: t('Expenses'), dataIndex: 'expenses', key: 'expenses', width: 110, align: 'right', render: formatMoney },
-    { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 110, align: 'right', render: formatMoney },
-    { title: t('Interest'), dataIndex: 'interest', key: 'interest', width: 110, align: 'right', render: formatMoney },
-    { title: t('Total'), dataIndex: 'total', key: 'total', width: 120, align: 'right', render: formatMoney }
+    { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 110, align: 'right', render: renderGridMoney },
+    { title: t('Expenses'), dataIndex: 'expenses', key: 'expenses', width: 110, align: 'right', render: renderGridMoney },
+    { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 110, align: 'right', render: renderGridMoney },
+    { title: t('Interest'), dataIndex: 'interest', key: 'interest', width: 110, align: 'right', render: renderGridMoney },
+    { title: t('Total'), dataIndex: 'total', key: 'total', width: 120, align: 'right', render: renderGridMoney }
   ];
 
   const depositColumns = [
     { title: t('Payment method'), dataIndex: 'paymentMethod', key: 'paymentMethod', width: 160 },
     { title: t('Document'), dataIndex: 'document', key: 'document', width: 140 },
     { title: t('Bank'), dataIndex: 'bank', key: 'bank', width: 160 },
-    { title: t('Balance in favor'), dataIndex: 'balance', key: 'balance', width: 150, align: 'right', render: formatMoney },
-    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: formatMoney }
+    { title: t('Balance in favor'), dataIndex: 'balance', key: 'balance', width: 150, align: 'right', render: renderGridMoney },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: renderGridMoney }
   ];
 
   function applySupervisorMovementFilters(values) {
@@ -2448,6 +2635,46 @@
     </Card>
   );
 
+  const transitPremiumTabContent = (
+    <Card size="small">
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Space>
+          <Button
+            className="cashier-supervisor-outline-button"
+            onClick={() => loadSupervisorTransitPremiums({
+              pagination: { current: 1, pageSize: transitPremiumPagination.pageSize }
+            })}
+            loading={transitPremiumLoading}
+            disabled={!selectedCashierRow}
+          >
+            <RefreshIcon />
+            {t('Refresh')}
+          </Button>
+        </Space>
+      </div>
+      <Table
+        rowKey="id"
+        columns={supervisorTransitPremiumColumns}
+        dataSource={transitPremiumRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table cashier-supervisor-transit-premium-table"
+        loading={transitPremiumLoading}
+        pagination={{
+          current: transitPremiumPagination.current,
+          pageSize: transitPremiumPagination.pageSize,
+          total: transitPremiumTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100']
+        }}
+        onChange={pagination => loadSupervisorTransitPremiums({
+          pagination: { current: pagination.current, pageSize: pagination.pageSize }
+        })}
+        scroll={{ x: 1320, y: transferScrollY }}
+      />
+    </Card>
+  );
+
   const depositTabContent = (
     <Card size="small" title={t('Deposit list')}>
       <Table
@@ -2482,6 +2709,9 @@
             <button type="button" role="tab" aria-selected={activeTab === 'premiums'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'premiums' ? ' active' : ''}`} onClick={() => setActiveTab('premiums')}>
               <PremiumIcon /> {t('Paid premiums')}
             </button>
+            <button type="button" role="tab" aria-selected={activeTab === 'transit-premiums'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'transit-premiums' ? ' active' : ''}`} onClick={() => setActiveTab('transit-premiums')}>
+              <DepositIcon /> {t('Transit premiums')}
+            </button>
             <button type="button" role="tab" aria-selected={activeTab === 'deposits'} disabled={!selectedCashierRow} className={`cashier-supervisor-tab${activeTab === 'deposits' ? ' active' : ''}`} onClick={() => setActiveTab('deposits')}>
               <DepositIcon /> {t('Premium deposits')}
             </button>
@@ -2493,6 +2723,8 @@
                 ? supervisorMovementContent
                 : activeTab === 'premiums'
                   ? premiumTabContent
+                  : activeTab === 'transit-premiums'
+                    ? transitPremiumTabContent
                   : depositTabContent}
           </div>
             </div>
