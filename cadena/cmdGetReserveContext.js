@@ -41,12 +41,8 @@ try {
     payed: Math.abs(payed),
     ceded: Math.abs(cededReserve),
     increase: reserved > 0,
-    reference: isPayment
-      ? `TX-${reserveId} Pago Siniestro`
-      : `TX-${reserveId} Reserva Siniestro`,
-    description: isPayment
-      ? `Pago de siniestro Póliza #${policyCode} - Reclamo #${claimCode}`
-      : `${prefix} de reserva de siniestro Póliza #${policyCode} - Reclamo #${claimCode}`,
+    reference: `TX-${reserveId} Reserva Siniestro`,
+    description: `${prefix} de reserva de siniestro Póliza #${policyCode} - Reclamo #${claimCode}`,
     currency: getTrimmedString(policy.currency),
     Claim: claim,
     Policy: policy,
