@@ -140,11 +140,13 @@
   const [movementFilterForm] = Form.useForm();
   const [quickSearchRows, setQuickSearchRows] = React.useState([]);
   const [quickSearchLoading, setQuickSearchLoading] = React.useState(false);
+  const [quickSearchMovementNavigationLoading, setQuickSearchMovementNavigationLoading] = React.useState(false);
   const [quickSearchExportLoading, setQuickSearchExportLoading] = React.useState(false);
   const [quickSearchPagination, setQuickSearchPagination] = React.useState({ current: 1, pageSize: 25 });
   const [quickSearchTotal, setQuickSearchTotal] = React.useState(0);
   const [quickSearchFilters, setQuickSearchFilters] = React.useState({});
   const [quickSearchFilterVisible, setQuickSearchFilterVisible] = React.useState(false);
+  const [quickSearchSelectedRowKey, setQuickSearchSelectedRowKey] = React.useState(null);
   const [quickSearchFilterForm] = Form.useForm();
   const [quickSearchPayerOptions, setQuickSearchPayerOptions] = React.useState([]);
   const [quickSearchPayerLoading, setQuickSearchPayerLoading] = React.useState(false);
@@ -181,6 +183,7 @@
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
   const loadedSupervisorTabsRef = React.useRef({});
+  const supervisorMovementNavigationRef = React.useRef(null);
 
   React.useEffect(() => {
     const styleId = 'cashier-supervisor-style';
@@ -897,9 +900,21 @@
     if (loadedSupervisorTabsRef.current[tabKey]) return;
 
     if (activeTab === 'details') {
+      const pendingNavigation = supervisorMovementNavigationRef.current
+        && Number(supervisorMovementNavigationRef.current.workspaceId) === workspaceId
+        ? supervisorMovementNavigationRef.current
+        : null;
+      supervisorMovementNavigationRef.current = null;
       loadSupervisorMovements({
-        pagination: { current: 1, pageSize: movementPagination.pageSize },
-        filters: movementFilters
+        workspaceId,
+        pagination: {
+          current: pendingNavigation ? pendingNavigation.page : 1,
+          pageSize: movementPagination.pageSize
+        },
+        filters: pendingNavigation && pendingNavigation.filters
+          ? pendingNavigation.filters
+          : movementFilters,
+        selectedMovementId: pendingNavigation ? pendingNavigation.transferId : null
       });
     } else if (activeTab === 'premiums') {
       loadSupervisorPaidPremiums({
@@ -1905,7 +1920,7 @@
   }
 
   function loadSupervisorMovements(params = {}) {
-    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const workspaceId = Number(params.workspaceId || (selectedCashierRow && selectedCashierRow.id));
     if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
       setMovementRows([]);
       setMovementTotal(0);
@@ -1946,10 +1961,17 @@
         const rows = getRows(response).filter(group => !(filters && filters.pending === true && getSupervisorMovementFirst(group).reversalDate));
         loadSupervisorPolicyCodes(rows).catch(() => {});
         const baseRows = markSupervisorMovementsUnaccounted(rows);
+        const selectedGroup = params.selectedMovementId
+          ? rows.find(group => [group].concat(getSupervisorMovementChildren(group))
+            .some(item => String(item && item.id) === String(params.selectedMovementId)))
+          : null;
+        const selectedRowKey = selectedGroup && selectedGroup.id
+          ? selectedGroup.id
+          : params.selectedMovementId;
         setMovementRows(baseRows);
         setMovementTotal(getResponseTotal(response, baseRows));
         setMovementPagination({ current: Number(pagination.current) || 1, pageSize: Number(pagination.pageSize) || 15 });
-        setMovementSelectedRowKeys([]);
+        setMovementSelectedRowKeys(selectedRowKey ? [selectedRowKey] : []);
         loadedSupervisorTabsRef.current[`${workspaceId}:details`] = true;
         return enrichSupervisorMovementsWithAccounting(rows)
           .then(enrichedRows => setMovementRows(enrichedRows))
@@ -1961,7 +1983,12 @@
         setMovementSelectedRowKeys([]);
         message.error(error && error.message ? error.message : String(error));
       })
-      .finally(() => setMovementLoading(false));
+      .finally(() => {
+        setMovementLoading(false);
+        if (params.selectedMovementId) {
+          setQuickSearchMovementNavigationLoading(false);
+        }
+      });
   }
 
   function searchQuickSearchPayers(value) {
@@ -2067,6 +2094,7 @@
     const currentPage = Number(pagination && pagination.current) || 1;
 
     setQuickSearchLoading(true);
+    setQuickSearchSelectedRowKey(null);
     exe('RepoTransfer', {
       operation: 'GET',
       filter: buildQuickSearchFilter(filters),
@@ -2090,6 +2118,78 @@
         message.error(error && error.message ? error.message : String(error));
       })
       .finally(() => setQuickSearchLoading(false));
+  }
+
+  async function goToSupervisorQuickSearchMovement() {
+    const selectedGroup = quickSearchRows.find(row => String(row && row.id) === String(quickSearchSelectedRowKey));
+    if (!selectedGroup) {
+      message.warning(t('Select a movement first.'));
+      return;
+    }
+
+    const selectedMovement = getSupervisorMovementFirst(selectedGroup);
+    const transferId = Number(selectedMovement && selectedMovement.id || selectedGroup.id);
+    const workspaceId = Number(
+      selectedGroup.transferWorkspaceId
+      || (selectedMovement && selectedMovement.transferWorkspaceId)
+      || selectedGroup.workspaceId
+      || (selectedMovement && selectedMovement.workspaceId)
+    );
+    if (!Number.isFinite(transferId) || transferId <= 0 || !Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('The selected movement has no valid cash desk.'));
+      return;
+    }
+
+    setQuickSearchMovementNavigationLoading(true);
+    try {
+      const workspaceResponse = await exe('RepoTransferWorkspace', {
+        operation: 'GET',
+        include: ['Branch'],
+        filter: `id=${workspaceId}`,
+        size: 1,
+        page: 0
+      });
+      if (!workspaceResponse || workspaceResponse.ok === false) {
+        throw new Error(workspaceResponse && workspaceResponse.msg ? workspaceResponse.msg : t('Cash desk could not be loaded.'));
+      }
+
+      const cashDesk = normalizeRows(workspaceResponse)[0];
+      if (!cashDesk) {
+        throw new Error(t('Cash desk could not be loaded.'));
+      }
+
+      const pageSize = Number(movementPagination.pageSize) || 25;
+      const targetPage = 1;
+      const navigationFilters = { ...movementFilters, transferId };
+
+      movementFilterForm.setFieldsValue({ transferId });
+      supervisorMovementNavigationRef.current = {
+        workspaceId,
+        page: targetPage,
+        transferId,
+        filters: navigationFilters
+      };
+      loadedSupervisorTabsRef.current[`${workspaceId}:details`] = false;
+      setMovementFilters(navigationFilters);
+      setSelectedCashierRow(cashDesk);
+      setActiveTab('details');
+
+      if (selectedCashierRow && Number(selectedCashierRow.id) === workspaceId && activeTab === 'details') {
+        supervisorMovementNavigationRef.current = null;
+        loadSupervisorMovements({
+          workspaceId,
+          pagination: { current: targetPage, pageSize },
+          filters: navigationFilters,
+          selectedMovementId: transferId
+        });
+      } else {
+        message.success(t('Movement located in the cash desk details.'));
+      }
+    } catch (error) {
+      supervisorMovementNavigationRef.current = null;
+      setQuickSearchMovementNavigationLoading(false);
+      message.error(error && error.message ? error.message : String(error));
+    }
   }
 
   async function exportSupervisorQuickSearch() {
@@ -3184,6 +3284,7 @@
     setQuickSearchFilters({});
     setQuickSearchRows([]);
     setQuickSearchTotal(0);
+    setQuickSearchSelectedRowKey(null);
     setQuickSearchPagination({ current: 1, pageSize: quickSearchPagination.pageSize });
     setQuickSearchFilterVisible(false);
   }
@@ -3361,6 +3462,15 @@
               <ExportIcon />
               {t('Export')}
             </Button>
+            <Button
+              className="cashier-supervisor-accounting-button"
+              onClick={goToSupervisorQuickSearchMovement}
+              disabled={!quickSearchSelectedRowKey}
+              loading={quickSearchMovementNavigationLoading}
+            >
+              <ReportIcon />
+              {t('Go to movement')}
+            </Button>
           </Space>
         </div>
         <Table
@@ -3371,6 +3481,11 @@
           bordered
           className="cashier-supervisor-table cashier-supervisor-cash-desk-detail-table"
           loading={quickSearchLoading}
+          rowSelection={{
+            type: 'radio',
+            selectedRowKeys: quickSearchSelectedRowKey ? [quickSearchSelectedRowKey] : [],
+            onChange: keys => setQuickSearchSelectedRowKey(keys.length ? keys[0] : null)
+          }}
           pagination={{
             current: quickSearchPagination.current,
             pageSize: quickSearchPagination.pageSize,
@@ -3381,6 +3496,15 @@
           onChange={pagination => loadSupervisorQuickSearch({
             filters: quickSearchFilters,
             pagination: { current: pagination.current, pageSize: pagination.pageSize }
+          })}
+          rowClassName={record => String(record && record.id) === String(quickSearchSelectedRowKey)
+            ? 'cashier-supervisor-selected-row'
+            : ''}
+          onRow={record => ({
+            onClick: event => {
+              if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper')) return;
+              setQuickSearchSelectedRowKey(record && record.id !== undefined ? record.id : null);
+            }
           })}
           scroll={{ x: 1540, y: transferScrollY }}
           locale={{ emptyText: t('Use the filter to search movements.') }}
@@ -3656,6 +3780,11 @@
 
   return (
     <div className="cashier-supervisor-shell" ref={shellRef}>
+      <Spin
+        spinning={quickSearchMovementNavigationLoading}
+        fullscreen
+        tip={t('Loading movement...')}
+      />
         <Layout className="cashier-supervisor-layout">
           <div className="cashier-supervisor-north">
             {renderStatusBar()}
