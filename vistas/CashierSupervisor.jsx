@@ -3047,6 +3047,17 @@
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
+  function handleOpenCashDeskAccountingSummaryReportCompact() {
+    if (!selectedCashierRow || !selectedCashierRow.id) {
+      message.warning(t('Please select a cash desk first'));
+      return;
+    }
+
+    const workspaceId = selectedCashierRow.id;
+    const url = `${window.location.origin}/#/reportview/ResumenMayorizacionCajaResumen/workspaceId=${workspaceId}&transferId=0`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   function handleTableChange(pagination) {
     loadTransferWorkspaces({
       pagination: {
@@ -3595,6 +3606,11 @@
                   key: 'cash-desk-accounting-summary-report',
                   label: t('Detailed cash desk accounting summary'),
                   onClick: handleOpenCashDeskAccountingSummaryReport
+                },
+                {
+                  key: 'cash-desk-accounting-summary-report-compact',
+                  label: t('Cash desk accounting summary by account'),
+                  onClick: handleOpenCashDeskAccountingSummaryReportCompact
                 }
               ]
             }}

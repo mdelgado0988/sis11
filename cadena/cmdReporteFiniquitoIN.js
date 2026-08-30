@@ -12,6 +12,9 @@
  */
 
 const claimId = context?.row?.reclamo;
+const timeZoneOffsetMinutes = Number.isFinite(Number(context?.row?.timeZoneOffsetMinutes))
+  ? Number(context.row.timeZoneOffsetMinutes)
+  : -300;
 const objectDefinitionId = [46,47]
 const quitarCodigo = texto => texto.split(" - ").slice(1).join(" - ");
 const n2 = value => Number(String(value ?? '').replace(/,/g, ''));
@@ -86,7 +89,7 @@ cmbSector: "80802"
 */
 
 resultado.totalhotelletras = montoEnLetras(n2(resultado.totalhotel));
-resultado.fechaletras = fechaEnLetras(resultado.fechaSiniestro);
+resultado.fechaletras = fechaEnLetras(resultado.fechaSiniestro, timeZoneOffsetMinutes);
 resultado.totalletras = montoEnLetras(n2(resultado.total));
 
 return resultado;
@@ -228,7 +231,7 @@ function getCurrentCheckNumber(payments, predicate = () => true) {
     .filter(item => item.checkNum > 0 && item.date);
 
   if (!candidates.length) {
-    return 0;
+    return '';
   }
 
   candidates.sort((a, b) => {
@@ -305,7 +308,7 @@ function montoEnLetras(monto) {
   return letras;
 }
 
-function fechaEnLetras(fecha) {
+function fechaEnLetras(fecha, timeZoneOffsetMinutes = -300) {
   const meses = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -315,9 +318,13 @@ function fechaEnLetras(fecha) {
 
   if (isNaN(f)) return '';
 
-  const dia = f.getDate();
-  const mes = meses[f.getMonth()];
-  const anio = f.getFullYear();
+  const offset = Number.isFinite(Number(timeZoneOffsetMinutes))
+    ? Number(timeZoneOffsetMinutes)
+    : -300;
+  const localDate = new Date(f.getTime() + offset * 60 * 1000);
+  const dia = localDate.getUTCDate();
+  const mes = meses[localDate.getUTCMonth()];
+  const anio = localDate.getUTCFullYear();
 
   return `${dia} de ${mes} de ${anio}`;
 }
