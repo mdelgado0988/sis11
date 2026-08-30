@@ -1,0 +1,30 @@
+<form method="post" action="inteligencia_negocios.aspx" id="ctl00">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="
+__VIEWSTATE" value="" />
+</div>
+<div>
+	<table cellspacing="0" rules="all" border="1" style="border-collapse:collapse;">
+		<caption>
+			GESTOR DE REPORTES
+		<Tr><Th>Compa&#241;ia: ASEGURADORA GLOBAL</Tr></Th><Tr><Th>Fecha de Exportaci&#243;n: 28/08/2026 8:02:30 p.m.</Tr></Th><Tr><Th>Exportado Por: ADMINISTRADOR SISTEMAS</Tr></Th><Tr><Th>Modulo: GESTOR DE REPORTES|RESULTREPORT</Tr></Th></caption><tr align="left" style="background-color:LightCoral;">
+			<th scope="col">Id</th><th scope="col">C&#243;digo Ramo</th><th scope="col">Ramo</th><th scope="col">Prima</th><th scope="col">Impuestos</th><th scope="col">Gastos</th><th scope="col">Monto cobrado</th><th scope="col">Total</th>
+		</tr><tr>
+			<td>1</td><td>1</td><td>Incendio</td><td>-55.64</td><td>-2.81</td><td>0.00</td><td>-58.45</td><td>-58.45</td>
+		</tr><tr>
+			<td>2</td><td>6</td><td>Automovil</td><td>42816.38</td><td>2618.62</td><td>0.00</td><td>45435.00</td><td>45435.00</td>
+		</tr><tr>
+			<td>3</td><td>20</td><td>Colectivo de Vida</td><td>369702.14</td><td>18485.11</td><td>0.00</td><td>388187.25</td><td>388187.25</td>
+		</tr><tr>
+			<td>4</td><td>31</td><td>Accidentes Personales Individuales</td><td>428.61</td><td>21.38</td><td>0.00</td><td>449.99</td><td>449.99</td>
+		</tr><tr>
+			<td>5</td><td>52</td><td>Riesgos Varios</td><td>172152.40</td><td>8607.62</td><td>0.00</td><td>180760.02</td><td>180760.02</td>
+		</tr><tr>
+			<td>6</td><td>81</td><td>Fianzas de Construcci&#243;n</td><td>321.27</td><td>16.06</td><td>0.00</td><td>337.33</td><td>337.33</td>
+		</tr><tr>
+			<td>7</td><td>84</td><td>Fianzas Miscelaneas</td><td>1187.50</td><td>59.37</td><td>0.00</td><td>1246.87</td><td>1246.87</td>
+		</tr><tr>
+			<td>8</td><td>96</td><td>RamosTecnicos</td><td>36630.00</td><td>1831.50</td><td>0.00</td><td>38461.50</td><td>38461.50</td>
+		</tr>
+	</table>
+</div></form>
