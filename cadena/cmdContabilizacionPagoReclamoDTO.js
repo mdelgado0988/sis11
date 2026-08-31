@@ -19,26 +19,29 @@ try {
   const payment = loadEntity(
     'ClaimPayment',
     `id=${paymentId}`,
-    'claimId,total,payoutId,sourceAccountId'
+    'claimId,total,payoutId,sourceAccountId,producer,parentId'
   );
-  validatePayment(payment, paymentId);
-
-  const payout = loadEntity(
-    'LifeCoveragePayout',
-    `id=${getPositiveInteger(payment.payoutId)}`,
-    'reserveType,reserved'
-  );
-  if (!payout) {
-    throw new Error('No se recuperó información de la reserva del pago');
+  const isMergedPayment = getTrimmedString(payment && payment.producer).toUpperCase() === 'MERGED';
+  // A regular payment keeps the existing single-reserve calculation.
+  // A merged payment aggregates the child requests linked by parentId.
+  const paymentItems = isMergedPayment
+    ? loadMergedPayments(paymentId)
+    : [payment];
+  if (!isMergedPayment) {
+    validatePayment(payment, paymentId);
+  } else {
+    validateMergedPayment(payment, paymentId, paymentItems);
   }
-
-  const cededCessions = loadCededCessions(payment.payoutId);
-  const cededReserve = sumCededReserve(cededCessions);
-  const reinsuranceAmount = calculateProportionalReinsurance(
-    cededReserve,
-    payment.total,
-    payout.reserved
-  );
+  const paymentContexts = paymentItems.map(item => buildPaymentContext(item));
+  const payout = paymentContexts[0].payout;
+  const paymentTotal = paymentContexts.reduce((total, item) => total + toNumber(item.payment.total), 0);
+  const reinsuranceAmount = paymentContexts.reduce((total, item) => {
+    return total + calculateProportionalReinsurance(
+      sumCededReserve(item.cessions),
+      item.payment.total,
+      item.payout.reserved
+    );
+  }, 0);
 
   const account = loadEntity(
     'Account',
@@ -51,7 +54,7 @@ try {
 
   const claim = loadEntity(
     'Claim',
-    `id=${getPositiveInteger(payment.claimId)}`,
+    `id=${getPositiveInteger(paymentItems[0].claimId)}`,
     'lifePolicyId'
   );
   if (!claim || getPositiveInteger(claim.lifePolicyId) <= 0) {
@@ -67,12 +70,12 @@ try {
     throw new Error('No se recuperó información válida de la póliza');
   }
 
-  const acceptants = getCededAcceptants(
-    cededCessions,
-    payment.total,
-    payout.reserved,
+  const acceptants = mergeAcceptants(paymentContexts.map(item => getCededAcceptants(
+    item.cessions,
+    item.payment.total,
+    item.payout.reserved,
     policy
-  );
+  )));
 
   const lob = loadEntity(
     'LOB',
@@ -90,17 +93,22 @@ try {
   const codigoPago = tipoPago === 'GastoReclamo'
     ? 'GastosSiniestros'
     : 'PagosSiniestros';
+  const mergedPaymentDetail = isMergedPayment
+    ? ` Solicitudes fusionadas: ${paymentItems.map(item => {
+      return `#${getPositiveInteger(item && item.id)} (${toNumber(item && item.total).toFixed(2)})`;
+    }).join(', ')}`
+    : '';
 
   return [{
-    monto: Math.abs(toNumber(payment.total)),
+    monto: Math.abs(toNumber(paymentTotal)),
     reaseguroCedido: reinsuranceAmount,
     aceptantes: acceptants,
     cuentaBancaria: getTrimmedString(account.catalogAccountCode),
-    reclamoId: getPositiveInteger(payment.claimId),
+    reclamoId: getPositiveInteger(paymentItems[0].claimId),
     code: codigoPago,
     lob: getTrimmedString(policy.lob),
-    referencia: `Liquidación Reclamo # ${payment.claimId} Solicitud # ${paymentId}`,
-    description: `${conceptoPago} de reclamo ${payment.claimId} Póliza ${getTrimmedString(policy.code)} Solicitud ${paymentId}`,
+    referencia: `Liquidación Reclamo # ${paymentItems[0].claimId} Solicitud # ${paymentId}`,
+    description: `${conceptoPago} de reclamo ${paymentItems[0].claimId} Póliza ${getTrimmedString(policy.code)} Solicitud ${paymentId}${mergedPaymentDetail}`,
     unique: `TX-R#${payment.claimId}-S#${paymentId}`,
     ramo: getTrimmedString(lob.name),
     tipoPago: tipoPago,
@@ -138,6 +146,105 @@ function validatePayment(payment, paymentId) {
   }
 }
 
+function validateMergedPayment(payment, paymentId, paymentItems) {
+  if (!payment) {
+    throw new Error(`No se recuperó la solicitud de pago ${paymentId}`);
+  }
+
+  if (getRows(paymentItems).length === 0) {
+    throw new Error(`No se encontraron solicitudes asociadas a la solicitud de fusión ${paymentId}`);
+  }
+
+  if (getPositiveInteger(payment.sourceAccountId) <= 0) {
+    throw new Error('La solicitud de pago no tiene una cuenta bancaria válida');
+  }
+}
+
+function loadMergedPayments(parentId) {
+  const payments = loadEntities(
+    'ClaimPayment',
+    `parentId=${getPositiveInteger(parentId)}`,
+    'id,claimId,total,payoutId,sourceAccountId,producer,parentId'
+  );
+
+  if (payments.length === 0) {
+    throw new Error(`No se encontraron solicitudes asociadas a la solicitud de fusión ${parentId}`);
+  }
+
+  payments.forEach(payment => validateMergedChildPayment(
+    payment,
+    getPositiveInteger(payment && payment.id)
+  ));
+  return payments;
+}
+
+function validateMergedChildPayment(payment, paymentId) {
+  if (!payment) {
+    throw new Error(`No se recuperó la solicitud de pago ${paymentId}`);
+  }
+
+  if (getPositiveInteger(payment.claimId) <= 0) {
+    throw new Error('La solicitud de pago no tiene un reclamo válido');
+  }
+
+  if (getPositiveInteger(payment.payoutId) <= 0) {
+    throw new Error('La solicitud de pago no tiene una reserva válida');
+  }
+
+  if (!Number.isFinite(Number(payment.total))) {
+    throw new Error('La solicitud de pago no tiene un monto válido');
+  }
+}
+
+function buildPaymentContext(payment) {
+  const item = payment || {};
+  const payoutId = getPositiveInteger(item.payoutId);
+  const payout = loadEntity(
+    'LifeCoveragePayout',
+    `id=${payoutId}`,
+    'reserveType,reserved'
+  );
+
+  if (!payout) {
+    throw new Error(`No se recuperó información de la reserva del pago ${getPositiveInteger(item.id)}`);
+  }
+
+  return {
+    payment: item,
+    payout: payout,
+    cessions: loadCededCessions(payoutId)
+  };
+}
+
+function mergeAcceptants(acceptantLists) {
+  const grouped = {};
+
+  getRows(acceptantLists).forEach(list => {
+    getRows(list).forEach(item => {
+      const contactId = getPositiveInteger(item && item.codigo);
+      const accountCode = getTrimmedString(item && item.cuentaContable);
+      if (contactId <= 0) return;
+
+      const key = `${contactId}|${accountCode}`;
+      if (!grouped[key]) {
+        grouped[key] = {
+          monto: 0,
+          codigo: contactId,
+          debe: 0,
+          habe: 0,
+          cuentaContable: accountCode
+        };
+      }
+
+      grouped[key].monto = toDecimal(grouped[key].monto + toNumber(item.monto));
+      grouped[key].debe = toDecimal(grouped[key].debe + toNumber(item.debe));
+      grouped[key].habe = toDecimal(grouped[key].habe + toNumber(item.habe));
+    });
+  });
+
+  return Object.keys(grouped).map(key => grouped[key]);
+}
+
 function loadEntity(entity, filter, fields) {
   const data = {
     entity: entity,
@@ -168,6 +275,33 @@ function loadEntity(entity, filter, fields) {
   }
 
   return outputData && typeof outputData === 'object' ? outputData : null;
+}
+
+function loadEntities(entity, filter, fields) {
+  const data = {
+    entity: entity,
+    operation: 'GET',
+    filter: filter,
+    noTracking: true
+  };
+
+  if (getTrimmedString(fields)) {
+    data.fields = fields;
+  }
+
+  doCmd({
+    cmd: 'LoadEntities',
+    data: data
+  });
+
+  const response = typeof LoadEntities === 'undefined' ? null : LoadEntities;
+  if (!response || response.ok === false) {
+    throw new Error(response && response.msg
+      ? response.msg
+      : `No fue posible recuperar las entidades ${entity}`);
+  }
+
+  return getRows(response.outData);
 }
 
 function loadCededCessions(payoutId) {
