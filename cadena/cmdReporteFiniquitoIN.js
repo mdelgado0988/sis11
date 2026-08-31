@@ -46,6 +46,19 @@ resultado.apartamento = policy.insuredObject?.userData?.aptoocasa ?? "";
 resultado.calle = policy.insuredObject?.userData?.calleoavenida ?? "";
 resultado.poliza = policy.code;
 resultado.fechaSiniestro = claim.occurrence;
+const ubicacion = [resultado.edificio, resultado.calle]
+  .map(value => String(value ?? '').trim())
+  .filter(Boolean);
+const referencias = [
+  resultado.apartamento ? `Casa ${String(resultado.apartamento).trim()}` : '',
+  resultado.corregimiento ? `Corregimiento de ${String(resultado.corregimiento).trim()}` : '',
+  resultado.ciudad ? `Distrito de ${String(resultado.ciudad).trim()}` : '',
+  resultado.provincia ? `Provincia de ${String(resultado.provincia).trim()}` : ''
+].filter(Boolean);
+const descripcionUbicacion = [...ubicacion, ...referencias].join(', ');
+resultado.descripcionSiniestro = descripcionUbicacion
+  ? `la propiedad asegurada ${descripcionUbicacion}`
+  : 'la propiedad asegurada';
 resultado.ramo = quitarCodigo(lob.name);
 resultado.telefono = claimerContact.phone;
 resultado.correo = claimerContact.email;
@@ -65,7 +78,7 @@ resultado.chequehotel = getCurrentCheckNumber(claim.payments, payment =>
 
 resultado.lifeCoverageIdsContenido = getCoverageIdsByCodes(policy.coverages, ["256", "258"]);
 
-resultado.totalcontenido = sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido);
+resultado.totalcontenido = formatN2(sumPaymentDetailsByCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido));
 
 
 // Edificio sigue el criterio histórico: todo lo pagado que no pertenezca a contenido.
