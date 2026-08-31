@@ -2006,11 +2006,8 @@
   }
 
   function getRefundFixedFundsOption() {
-    return externalSourceOptions.find(item => {
-      const code = getTrimmedString(item && item.value).toUpperCase();
-      const label = getTrimmedString(item && item.label).toUpperCase();
-      return code === 'CAJADOP' || label === 'FONDOS FIJOS';
-    });
+    // RepoExternalSourceCatalog returns the fixed-funds destination first.
+    return externalSourceOptions[0] || null;
   }
 
   async function resolveRefundDestinationAccount() {
