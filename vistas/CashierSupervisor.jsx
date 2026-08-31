@@ -177,6 +177,8 @@
   const [bankDepositExportLoading, setBankDepositExportLoading] = React.useState(false);
   const [bankDepositPagination, setBankDepositPagination] = React.useState({ current: 1, pageSize: 25 });
   const [bankDepositTotal, setBankDepositTotal] = React.useState(0);
+  const [customerStatementVisible, setCustomerStatementVisible] = React.useState(false);
+  const [customerStatementForm] = Form.useForm();
   const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
   const quickSearchPayerSearchTimeoutRef = React.useRef(null);
@@ -2628,6 +2630,29 @@
     window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`, '_blank', 'noopener,noreferrer');
   }
 
+  function openSupervisorCustomerStatement() {
+    setCustomerStatementVisible(true);
+    customerStatementForm.setFieldsValue({
+      holderId: undefined,
+      fcorte: getDatePickerValue(new Date())
+    });
+  }
+
+  function generateSupervisorCustomerStatement(values) {
+    const holderId = Number(values && values.holderId);
+    const fcorte = values && values.fcorte && typeof values.fcorte.format === 'function'
+      ? values.fcorte.format('YYYY-MM-DD')
+      : '';
+
+    if (!Number.isInteger(holderId) || holderId <= 0 || !fcorte) {
+      return;
+    }
+
+    const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/holderId=${holderId}&fcorte=${encodeURIComponent(fcorte)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setCustomerStatementVisible(false);
+  }
+
   async function openAccountingMovements() {
     const selectedKey = movementSelectedRowKeys[0];
     const selectedGroup = movementRows.find(row => String(row && row.id) === String(selectedKey));
@@ -3611,6 +3636,11 @@
                   key: 'cash-desk-accounting-summary-report-compact',
                   label: t('Cash desk accounting summary by account'),
                   onClick: handleOpenCashDeskAccountingSummaryReportCompact
+                },
+                {
+                  key: 'customer-account-statement',
+                  label: t('Customer account statement'),
+                  onClick: openSupervisorCustomerStatement
                 }
               ]
             }}
@@ -3857,6 +3887,65 @@
                     ? bankDepositTabContent
                     : supervisorQuickSearchContent}
           </div>
+          <Modal
+            title={t('Customer account statement')}
+            open={customerStatementVisible}
+            onCancel={() => setCustomerStatementVisible(false)}
+            footer={null}
+            destroyOnClose={false}
+          >
+            <Form
+              form={customerStatementForm}
+              layout="vertical"
+              onFinish={generateSupervisorCustomerStatement}
+            >
+              <Form.Item
+                label={t('Contact')}
+                name="holderId"
+                rules={[{ required: true, message: t('Please select a contact') }]}
+              >
+                <Select
+                  allowClear
+                  showSearch
+                  filterOption={false}
+                  loading={quickSearchPayerLoading}
+                  onSearch={searchQuickSearchPayers}
+                  optionLabelProp="label"
+                  placeholder={t('Type a payer name, identification or id')}
+                  notFoundContent={quickSearchPayerLoading ? t('Loading') : t('Type at least 3 characters')}
+                >
+                  {quickSearchPayerOptions.map(item => (
+                    <Option key={item.id} value={item.id} label={item.name}>
+                      <div>
+                        <div>{item.name}</div>
+                        <div style={{ fontSize: 11, color: '#8c8c8c' }}>
+                          {`${t('ID')}: ${item.id}${item.identification ? ` | ${item.identification}` : ''}`}
+                        </div>
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                label={t('Cutoff date')}
+                name="fcorte"
+                rules={[{ required: true, message: t('Please select a date') }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              </Form.Item>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <Button onClick={() => setCustomerStatementVisible(false)}>
+                  {t('Cancel')}
+                </Button>
+                <Button type="primary" htmlType="submit">
+                  {t('Generate')}
+                </Button>
+              </div>
+            </Form>
+          </Modal>
+
           <Modal
             title={t('Installment detail')}
             open={installmentDetailVisible}

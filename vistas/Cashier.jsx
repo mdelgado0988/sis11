@@ -310,6 +310,7 @@
   const [collectionFilters, setCollectionFilters] = React.useState({});
   const [collectionFilterVisible, setCollectionFilterVisible] = React.useState(false);
   const [collectionSelectedRowKeys, setCollectionSelectedRowKeys] = React.useState([]);
+  const [customerStatementVisible, setCustomerStatementVisible] = React.useState(false);
   const [collectionChargeVisible, setCollectionChargeVisible] = React.useState(false);
   const [transitCollectionMode, setTransitCollectionMode] = React.useState(false);
   const [transitCollectionAccount, setTransitCollectionAccount] = React.useState(null);
@@ -325,6 +326,7 @@
   const [collectionPaymentExecuting, setCollectionPaymentExecuting] = React.useState(false);
   const collectionExternalPolicySearchTimer = React.useRef(null);
   const [collectionFilterForm] = Form.useForm();
+  const [customerStatementForm] = Form.useForm();
   const [newIncomeAccountSearchForm] = Form.useForm();
   const [collectionLobOptions, setCollectionLobOptions] = React.useState([]);
   const [payerOptions, setPayerOptions] = React.useState([]);
@@ -2478,6 +2480,14 @@
 
   function getCurrentUtcDateTime() {
     return new Date().toISOString();
+  }
+
+  function getDatePickerValue(dateLike) {
+    if (typeof moment !== 'undefined') {
+      return moment(dateLike);
+    }
+
+    return new Date(dateLike);
   }
 
   function loadCurrentUser() {
@@ -4747,6 +4757,29 @@
     setCollectionSelectedRowKeys([]);
     setCollectionPagination({ current: 1, pageSize: collectionPagination.pageSize });
     setCollectionFilterVisible(false);
+  }
+
+  function openCustomerStatement() {
+    setCustomerStatementVisible(true);
+    customerStatementForm.setFieldsValue({
+      holderId: undefined,
+      fcorte: getDatePickerValue(new Date())
+    });
+  }
+
+  function generateCustomerStatement(values) {
+    const holderId = Number(values && values.holderId);
+    const fcorte = values && values.fcorte && typeof values.fcorte.format === 'function'
+      ? values.fcorte.format('YYYY-MM-DD')
+      : '';
+
+    if (!Number.isInteger(holderId) || holderId <= 0 || !fcorte) {
+      return;
+    }
+
+    const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/holderId=${holderId}&fcorte=${encodeURIComponent(fcorte)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setCustomerStatementVisible(false);
   }
 
   function getCollectionRowKey(record) {
@@ -7358,6 +7391,12 @@
             {t('Filter')}
           </Button>
           <Button
+            className="cashier-supervisor-report-button"
+            onClick={openCustomerStatement}
+          >
+            {t('Customer account statement')}
+          </Button>
+          <Button
             className="cashier-supervisor-premium-pay-button"
             type="primary"
             onClick={openCollectionCharge}
@@ -9072,6 +9111,58 @@
             </Form.Item>
           </Form>
         </Drawer>
+
+        <Modal
+          title={t('Customer account statement')}
+          open={customerStatementVisible}
+          onCancel={() => setCustomerStatementVisible(false)}
+          footer={null}
+          destroyOnClose={false}
+        >
+          <Form
+            form={customerStatementForm}
+            layout="vertical"
+            onFinish={generateCustomerStatement}
+          >
+            <Form.Item
+              label={t('Contact')}
+              name="holderId"
+              rules={[{ required: true, message: t('Please select a contact') }]}
+            >
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                options={payerOptions}
+                loading={payerLoading}
+                onSearch={searchPayers}
+                optionLabelProp="name"
+                placeholder={t('Type at least 3 characters')}
+                notFoundContent={t('No payers found')}
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={t('Cutoff date')}
+              name="fcorte"
+              rules={[{ required: true, message: t('Please select a date') }]}
+            >
+              <DatePicker
+                style={{ width: '100%' }}
+                format="DD/MM/YYYY"
+              />
+            </Form.Item>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={() => setCustomerStatementVisible(false)}>
+                {t('Cancel')}
+              </Button>
+              <Button type="primary" htmlType="submit">
+                {t('Generate')}
+              </Button>
+            </div>
+          </Form>
+        </Modal>
 
         <Drawer
           title={t('Transit premium filters')}
