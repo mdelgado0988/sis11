@@ -50,15 +50,15 @@ const ubicacion = [resultado.edificio, resultado.calle]
   .map(value => String(value ?? '').trim())
   .filter(Boolean);
 const referencias = [
-  resultado.apartamento ? `Casa ${String(resultado.apartamento).trim()}` : '',
+  resultado.apartamento ? `${String(resultado.apartamento).trim()}` : '',
   resultado.corregimiento ? `Corregimiento de ${String(resultado.corregimiento).trim()}` : '',
   resultado.ciudad ? `Distrito de ${String(resultado.ciudad).trim()}` : '',
   resultado.provincia ? `Provincia de ${String(resultado.provincia).trim()}` : ''
 ].filter(Boolean);
 const descripcionUbicacion = [...ubicacion, ...referencias].join(', ');
 resultado.descripcionSiniestro = descripcionUbicacion
-  ? `la propiedad asegurada ${descripcionUbicacion}`
-  : 'la propiedad asegurada';
+  ? `la Propiedad Asegurada ${descripcionUbicacion}`
+  : 'la Propiedad Asegurada';
 resultado.ramo = quitarCodigo(lob.name);
 resultado.telefono = claimerContact.phone;
 resultado.correo = claimerContact.email;
