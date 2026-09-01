@@ -21,7 +21,7 @@ try {
     cmd: 'DoQuery',
     data: {
       sql: `
-SELECT TOP 1 parentId
+SELECT TOP 1 parentId, claimId
 FROM ClaimPayment
 WHERE id IN (${ids.join(',')})
   AND parentId IS NOT NULL
@@ -36,6 +36,7 @@ ORDER BY id;`
 
   const parentRow = getFirstRow(parentLookup.outData);
   const requestId = toPositiveInteger(parentRow && parentRow.parentId);
+  const claimId = toPositiveInteger(parentRow && parentRow.claimId);
   if (requestId <= 0) {
     return buildResult(false, 'No se encontró un parentId válido en las solicitudes recibidas.');
   }
@@ -90,6 +91,16 @@ WHERE parentId = ${requestId};`
       ? updateResult.msg
       : 'No fue posible actualizar la solicitud principal.');
   }
+
+  const template = 'Solcitud de Pago.docx';
+  
+  doCmd({
+      "cmd": "GenerateClaimDoc",
+      "data": {
+          "claimId": claimId,
+          "template": template
+      }
+  });
 
   return buildResult(true, `Solicitud ${requestId} actualizada correctamente.`);
 } catch (error) {
