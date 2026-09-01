@@ -21,9 +21,40 @@
     Space,
     Spin,
     Table,
+    Tabs,
     message
   } = A;
   const { Option } = Select;
+  const { TabPane } = Tabs;
+
+  const tabIconStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '1em',
+    height: '1em',
+    marginRight: 6,
+    flex: 'none',
+    verticalAlign: 'middle',
+    lineHeight: 1,
+    color: 'inherit'
+  };
+
+  const SearchTabIcon = () => (
+    <span role="img" aria-label="search" className="anticon anticon-search" style={tabIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M909.6 854.5L649.9 594.8A314.3 314.3 0 0 0 712 412c0-166.8-135.2-302-302-302S108 245.2 108 412s135.2 302 302 302a299.5 299.5 0 0 0 182.8-62.1l259.7 259.7a8 8 0 0 0 11.3 0l45.8-45.8a8 8 0 0 0 0-11.3zM410 634c-122.6 0-222-99.4-222-222s99.4-222 222-222 222 99.4 222 222-99.4 222-222 222z"></path>
+      </svg>
+    </span>
+  );
+
+  const GeneralDataTabIcon = () => (
+    <span role="img" aria-label="information" className="anticon anticon-info-circle" style={tabIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-48-272h96V432h-96v180zm0-276h96v-96h-96v96z"></path>
+      </svg>
+    </span>
+  );
 
   const [filterForm] = Form.useForm();
   const [rows, setRows] = React.useState([]);
@@ -40,10 +71,86 @@
   const [productOptions, setProductOptions] = React.useState([]);
   const [productCatalog, setProductCatalog] = React.useState([]);
   const [selectedLine, setSelectedLine] = React.useState('');
+  const [selectedRow, setSelectedRow] = React.useState(null);
+  const [policyInfo, setPolicyInfo] = React.useState(null);
+  const [renewalInfo, setRenewalInfo] = React.useState(null);
+  const [accountingInfo, setAccountingInfo] = React.useState(null);
+  const [policyLoading, setPolicyLoading] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState('search');
 
   React.useEffect(() => {
     loadCatalogs();
   }, []);
+
+  React.useEffect(() => {
+    const policyId = Number(selectedRow && selectedRow.policyId) || 0;
+    if (!policyId) {
+      setPolicyInfo(null);
+      setRenewalInfo(null);
+      setAccountingInfo(null);
+      setPolicyLoading(false);
+      return undefined;
+    }
+
+    setPolicyLoading(true);
+    setRenewalInfo(null);
+    setAccountingInfo(null);
+
+    const policyRequest = exe('RepoLifePolicy', {
+      operation: 'GET',
+      filter: `id=${policyId}`,
+      include: ['PayPlan', 'Product', 'Branch', 'Holder', 'Payer', 'Insureds', 'Coverages', 'Commissions', 'Cessions', 'Anniversaries'],
+      noTracking: true
+    });
+    const renewalRequest = exe('LoadEntities', {
+      entity: 'LifePolicy',
+      fields: 'id,activeDate',
+      filter: `originalPolicyId=${policyId}`,
+      noTracking: true
+    });
+    const accountingRequest = exe('LoadEntities', {
+      entity: '[Transaction]',
+      fields: '[id],[entity],[entityId],[effectiveDate]',
+      filter: `[entity] = N'LifePolicy' AND [entityId] = ${policyId}`,
+      noTracking: true
+    });
+
+    policyRequest.then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The policy could not be loaded.'));
+      }
+      const records = getRows(response);
+      setPolicyInfo(records.length ? records[0] : null);
+    }).catch(error => {
+      setPolicyInfo(null);
+      message.error(error && error.message ? error.message : t('The policy could not be loaded.'));
+    }).finally(() => setPolicyLoading(false));
+
+    renewalRequest.then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The renewal status could not be loaded.'));
+      }
+      setRenewalInfo(getRows(response)[0] || null);
+    }).catch(error => {
+      setRenewalInfo(null);
+      message.error(error && error.message ? error.message : t('The renewal status could not be loaded.'));
+    });
+
+    accountingRequest.then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The accounting status could not be loaded.'));
+      }
+      const entries = getRows(response).sort((left, right) => {
+        const leftDate = new Date(left && left.effectiveDate || 0).getTime();
+        const rightDate = new Date(right && right.effectiveDate || 0).getTime();
+        return rightDate - leftDate;
+      });
+      setAccountingInfo(entries[0] || null);
+    }).catch(error => {
+      setAccountingInfo(null);
+      message.error(error && error.message ? error.message : t('The accounting status could not be loaded.'));
+    });
+  }, [selectedRow ? selectedRow.policyId : 0]);
 
   React.useEffect(() => {
     const styleId = 'historical-billing-view-style';
@@ -136,13 +243,136 @@
         line-height: 18px;
       }
 
+      .historical-billing-view .historical-billing-tabs {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .historical-billing-view .historical-billing-tabs > .ant-tabs-nav {
+        margin-bottom: 2px;
+        border-bottom: 1px solid #cbd1d8;
+      }
+
+      .historical-billing-view .historical-billing-tabs > .ant-tabs-nav .ant-tabs-tab {
+        margin: 0 2px 0 0;
+        border: 1px solid #cbd1d8;
+        border-bottom: 0;
+        border-radius: 6px 6px 0 0;
+      }
+
+      .historical-billing-view .historical-billing-tabs > .ant-tabs-nav .ant-tabs-tab-active {
+        border-color: #1677ff;
+        border-bottom-color: #fff;
+      }
+
+      .historical-billing-view .historical-billing-tabs > .ant-tabs-content-holder {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .historical-billing-view .historical-billing-tabs .ant-tabs-tabpane {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .historical-billing-view .historical-billing-filter-panel {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        padding: 4px;
+      }
+
+      .historical-billing-view .historical-billing-filter-panel > .ant-spin-nested-loading {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .historical-billing-view .historical-billing-section-title {
+        background: #bfbfbf;
+        border: 1px solid #cbd1d8;
+        padding: 5px 8px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 18px;
+      }
+
+      .historical-billing-view .historical-billing-data-card {
+        border: 1px solid #cbd1d8;
+        margin-bottom: 8px;
+      }
+
+      .historical-billing-view .historical-billing-data-row {
+        display: grid;
+        grid-template-columns: 150px 1fr;
+        border-bottom: 1px solid #cbd1d8;
+        min-height: 30px;
+      }
+
+      .historical-billing-view .historical-billing-data-row:last-child {
+        border-bottom: 0;
+      }
+
+      .historical-billing-view .historical-billing-data-label,
+      .historical-billing-view .historical-billing-data-value {
+        padding: 5px 8px;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .historical-billing-view .historical-billing-data-label {
+        font-weight: 600;
+        background: #f5f5f5;
+        border-right: 1px solid #cbd1d8;
+      }
+
+      .historical-billing-view .historical-billing-general-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: 8px;
+        height: 100%;
+        overflow: auto;
+      }
+
+      .historical-billing-view .historical-billing-general-main,
+      .historical-billing-view .historical-billing-general-summary {
+        min-width: 0;
+      }
+
+      .historical-billing-view .historical-billing-general-summary .historical-billing-data-card {
+        margin-bottom: 8px;
+      }
+
+      .historical-billing-view .historical-billing-general-empty {
+        padding: 24px;
+        text-align: center;
+      }
+
+      @media (max-width: 900px) {
+        .historical-billing-view .historical-billing-general-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
       .historical-billing-view .historical-billing-table .ant-table-tbody > tr:hover > td {
         background: #b7d7ff !important;
+      }
+
+      .historical-billing-view .historical-billing-table .ant-table-tbody > tr {
+        cursor: pointer;
+      }
+
+      .historical-billing-view .historical-billing-table .historical-billing-selected-row > td,
+      .historical-billing-view .historical-billing-table .historical-billing-selected-row:hover > td {
+        background: #86b4ff !important;
       }
 
       .historical-billing-view .historical-billing-money-positive { color: #237804; }
       .historical-billing-view .historical-billing-money-negative { color: #cf1322; }
       .historical-billing-view .historical-billing-money-zero { color: #262626; }
+      .historical-billing-view .historical-billing-money-deferred { color: #1677ff; }
     `;
     if (!style.parentNode) document.head.appendChild(style);
 
@@ -157,6 +387,11 @@
     if (Array.isArray(data)) return data;
     if (data) return [data];
     return [];
+  }
+
+  function getFirstRow(value) {
+    if (Array.isArray(value)) return value[0] || null;
+    return value && typeof value === 'object' ? value : null;
   }
 
   function text(value) {
@@ -179,11 +414,12 @@
     return `${parts[0]}.${parts[1]}`;
   }
 
-  function renderMoney(value) {
+  function renderMoney(value, extraClass) {
     const amount = number(value);
     let className = 'historical-billing-money-zero';
     if (amount > 0) className = 'historical-billing-money-positive';
     if (amount < 0) className = 'historical-billing-money-negative';
+    if (extraClass) className += ` ${extraClass}`;
     return <span className={className}>{formatMoney(amount)}</span>;
   }
 
@@ -193,6 +429,33 @@
     const date = new Date(/z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`);
     if (Number.isNaN(date.getTime())) return raw;
     return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+  }
+
+  function calculatePremiumAccrual(startValue, endValue, premiumValue) {
+    const startText = text(startValue);
+    const endText = text(endValue);
+    if (!startText || !endText) return null;
+
+    const start = new Date(startText);
+    const end = new Date(endText);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return null;
+
+    const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    const today = new Date();
+    const currentDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    const totalDays = Math.max(1, Math.ceil((endDay - startDay) / millisecondsPerDay));
+    const elapsedDays = Math.min(totalDays, Math.max(0, Math.floor((currentDay - startDay) / millisecondsPerDay)));
+    const premium = Math.max(0, number(premiumValue));
+    const earned = premium * (elapsedDays / totalDays);
+
+    return {
+      totalDays,
+      elapsedDays,
+      earned,
+      deferred: premium - earned
+    };
   }
 
   function formatPickerDate(value) {
@@ -378,12 +641,100 @@
     setTotal(0);
     setExecutionTime('0.00 milisegundos');
     setSearched(false);
+    setSelectedRow(null);
     setPagination({ current: 1, pageSize: 25 });
+  }
+
+  function entityName(entity) {
+    if (!entity) return '-';
+    if (Array.isArray(entity)) return entity.length ? entityName(entity[0]) : '-';
+    if (entity.Contact || entity.contact || entity.Insured || entity.insured) {
+      return entityName(entity.Contact || entity.contact || entity.Insured || entity.insured);
+    }
+    return text(entity.FullName || entity.fullName || [
+      entity.name,
+      entity.middlename,
+      entity.surname1,
+      entity.surname2
+    ].filter(Boolean).join(' ') || entity.description || entity.id) || '-';
+  }
+
+  function entityId(entity) {
+    if (!entity) return 0;
+    if (Array.isArray(entity)) return entity.length ? entityId(entity[0]) : 0;
+    if (entity.Contact || entity.contact || entity.Insured || entity.insured) {
+      return entityId(entity.Contact || entity.contact || entity.Insured || entity.insured);
+    }
+    const id = Number(entity.id || entity.contactId || entity.ContactId);
+    return Number.isInteger(id) && id > 0 ? id : 0;
+  }
+
+  function renderPolicyLink(value, policyId) {
+    const id = Number(policyId || 0);
+    const label = text(value) || (id > 0 ? String(id) : '-');
+    if (!id) return label;
+    return (
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
+        onClick={event => {
+          event.stopPropagation();
+          window.open(`#/lifepolicy/${id}`, '_blank', 'noopener,noreferrer');
+        }}
+      >
+        {label}
+      </Button>
+    );
+  }
+
+  function renderContactLink(entity, fallback) {
+    const id = entityId(entity);
+    const label = fallback || entityName(entity);
+    if (!id || label === '-') return label;
+    return (
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
+        onClick={() => window.open(`#/contact/${id}`, '_blank', 'noopener,noreferrer')}
+      >
+        {label}
+      </Button>
+    );
+  }
+
+  function firstEntity(policy, names) {
+    for (let index = 0; index < names.length; index += 1) {
+      if (policy && policy[names[index]]) return policy[names[index]];
+    }
+    return null;
+  }
+
+  function firstNumber(source, names, fallback) {
+    for (let index = 0; index < names.length; index += 1) {
+      const value = Number(source && source[names[index]]);
+      if (Number.isFinite(value)) return value;
+    }
+    return fallback === undefined ? 0 : fallback;
+  }
+
+  function getSelectedPayPlan(policy) {
+    const plans = policy && Array.isArray(policy.PayPlan) ? policy.PayPlan : [];
+    const selectedPayPlanId = Number(selectedRow && selectedRow.payPlanId) || 0;
+    return plans.find(plan => Number(plan && plan.id) === selectedPayPlanId) || plans[0] || {};
+  }
+
+  function handleRowSelect(record) {
+    setPolicyLoading(true);
+    setSelectedRow(record);
+    setActiveTab('general');
   }
 
   const columns = [
     { title: t('Receipt'), dataIndex: 'receipt', key: 'receipt', width: 120 },
-    { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150 },
+    { title: t('Policy ID'), dataIndex: 'policyId', key: 'policyId', width: 95, align: 'center', render: value => renderPolicyLink(value, value) },
+    { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150, render: (value, record) => renderPolicyLink(value, record && record.policyId) },
     { title: t('Year-Month'), dataIndex: 'yearMonth', key: 'yearMonth', width: 105, align: 'center' },
     { title: t('Status'), dataIndex: 'status', key: 'status', width: 110, render: value => t(value || '') },
     { title: t('Start'), dataIndex: 'start', key: 'start', width: 110, align: 'center', render: formatDate },
@@ -393,135 +744,220 @@
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 110, align: 'right', render: renderMoney }
   ];
 
+  const generalData = selectedRow || {};
+  const detailPolicy = policyInfo || {};
+  const detailPayPlan = getSelectedPayPlan(detailPolicy);
+  const detailGross = firstNumber(detailPolicy, ['anualPremium', 'annualPremium'], Number(generalData.total) || 0);
+  const detailExpenses = firstNumber(detailPolicy, ['fee', 'expenses', 'fees'], 0);
+  const detailOtherExpenses = firstNumber(detailPolicy, ['otherExpenses', 'otherFee'], 0);
+  const detailTax = firstNumber(detailPolicy, ['tax', 'taxes'], 0);
+  const detailInterest = firstNumber(detailPolicy, ['interest', 'interests'], 0);
+  const detailTotal = firstNumber(detailPolicy, ['anualTotal', 'annualTotal'], Number(generalData.total) || 0);
+  const detailPaid = firstNumber(detailPayPlan, ['payed', 'paid'], Number(generalData.paid) || 0);
+  const detailPending = detailTotal - detailPaid;
+  const detailPremium = firstNumber(detailPolicy, ['coverages', 'premium'], detailGross);
+  const detailCoinsurance = firstNumber(detailPolicy, ['coinsurance', 'coInsurance', 'coInsurancePremium'], 0);
+  const detailAccrual = calculatePremiumAccrual(detailPolicy.start || generalData.start, detailPolicy.end || generalData.end, detailGross);
+  const detailEarned = detailAccrual ? detailAccrual.earned : firstNumber(detailPolicy, ['earnedPremium', 'accruedPremium', 'devengada'], 0);
+  const detailDeferred = detailAccrual ? detailAccrual.deferred : firstNumber(detailPolicy, ['deferredPremium', 'diferida'], 0);
+  const detailInsuredSum = firstNumber(detailPolicy, ['insuredSum', 'sumInsured'], 0);
+  const detailCoinsuranceSum = firstNumber(detailPolicy, ['coinsuranceSum', 'coInsuranceSum'], 0);
+  const detailNetSum = detailInsuredSum - detailCoinsuranceSum;
+  const detailProductionCommission = firstNumber(detailPolicy, ['commissions', 'commission'], 0);
+  const detailCoinsuranceCommission = firstNumber(detailPolicy, ['coinsuranceCommission', 'coInsuranceCommission'], 0);
+  const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
+  const detailInsured = firstEntity(detailPolicy, ['Insureds', 'Insured', 'insured']);
+  const detailBeneficiary = detailInsured;
+  const detailCreditor = firstEntity(detailPolicy, ['CessionBeneficiary', 'cessionBeneficiary', 'Creditor', 'creditor']);
+  const detailBranch = firstEntity(detailPolicy, ['Branch', 'branch']);
+  const detailAnniversary = detailPolicy.Anniversaries && detailPolicy.Anniversaries[0] ? detailPolicy.Anniversaries[0] : {};
+  const detailPolicyVersion = detailPolicy.policyVersion === null || detailPolicy.policyVersion === undefined
+    ? 0
+    : Number(detailPolicy.policyVersion);
+  const detailPolicyType = detailPolicyVersion >= 1 ? t('Renewal') : t('New');
+  const detailRenewal = renewalInfo
+    ? (renewalInfo.activeDate ? t('Renewed') : t('In progress'))
+    : t('No action');
+  const detailAccountingDate = accountingInfo && accountingInfo.effectiveDate;
+  const detailBeneficiaryName = entityName(detailBeneficiary) === '-' ? t('No Tiene') : entityName(detailBeneficiary);
+  const detailCreditorName = entityName(detailCreditor) === '-' ? t('No Tiene') : entityName(detailCreditor);
+
   return (
     <div className="historical-billing-view">
       <Card size="small">
-        <div className="historical-billing-toolbar">
-          <Button type="primary" onClick={() => setFilterVisible(true)}>
-            {t('Filter')}
-          </Button>
-        </div>
-        <Drawer
-          title={t('Historical billing filters')}
-          className="historical-billing-drawer"
-          placement="right"
-          width={420}
-          open={filterVisible}
-          onClose={() => setFilterVisible(false)}
-        >
-          <Form form={filterForm} layout="vertical" onFinish={handleSearch}>
-            <Row gutter={12}>
-              <Col span={24}>
-                <Form.Item label={t('Client')} name="clientId">
-                  <Select
-                    showSearch
-                    allowClear
-                    filterOption={false}
-                    loading={clientLoading}
-                    onSearch={searchClients}
-                    options={clientOptions}
-                    placeholder={t('Search client')}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item label={t('Policy code')} name="policyCode">
-                  <Input />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label={t('Policy ID')} name="policyId">
-                  <Input type="number" min={1} />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item label={t('Line of business')} name="line">
-                  <Select allowClear options={lineOptions} onChange={handleLineChange} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label={t('Product')} name="product">
-                  <Select
-                    allowClear
-                    disabled={!selectedLine}
-                    showSearch
-                    optionFilterProp="label"
-                    options={productOptions}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item label={t('Loan number')} name="loanNumber">
-                  <Input />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label={t('Plate')} name="plate">
-                  <Input />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item label={t('Issuance date from')} name="issueFrom">
-                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label={t('Issuance date to')} name="issueTo">
-                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={12}>
-              <Col span={24}>
-                <Form.Item label={t('Policy status')} name="status">
-                  <Select allowClear>
-                    <Option value="ACTIVE">{t('Active')}</Option>
-                    <Option value="INACTIVE">{t('Inactive')}</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
-            <Space>
-              <Button type="primary" htmlType="submit">{t('Search')}</Button>
-              <Button onClick={clearFilters}>{t('Clear')}</Button>
-            </Space>
-          </Form>
-        </Drawer>
-        <Spin spinning={loading}>
-          {!searched ? (
-            <div style={{ padding: 24, textAlign: 'center' }}>{t('Apply filters to search.')}</div>
-          ) : (
-            <Table
-              className="historical-billing-table"
-              rowKey="key"
-              size="small"
-              bordered
-              columns={columns}
-              dataSource={rows}
-              pagination={{
-                current: pagination.current,
-                pageSize: pagination.pageSize,
-                total,
-                showSizeChanger: true,
-                pageSizeOptions: ['15', '25'],
-                showTotal: () => (
-                  <span>
-                    {t('Total records')}: {total} | {t('Time')}: {executionTime}
-                  </span>
-                )
-              }}
-              onChange={handleTableChange}
-              scroll={{ x: 1000, y: 'calc(100dvh - 310px)' }}
-            />
-          )}
+        <Spin spinning={loading || policyLoading}>
+        <Tabs className="historical-billing-tabs" activeKey={activeTab} onChange={setActiveTab} type="card">
+          <TabPane tab={<span><SearchTabIcon />{t('Search')}</span>} key="search">
+            <div className="historical-billing-filter-panel">
+              <div className="historical-billing-toolbar">
+                <Button type="primary" onClick={() => setFilterVisible(true)}>{t('Filter')}</Button>
+              </div>
+              <Drawer
+                title={t('Historical billing filters')}
+                className="historical-billing-drawer"
+                placement="right"
+                width={420}
+                open={filterVisible}
+                onClose={() => setFilterVisible(false)}
+              >
+                <Form form={filterForm} layout="vertical" onFinish={handleSearch}>
+                  <Row gutter={12}>
+                    <Col span={24}>
+                      <Form.Item label={t('Client')} name="clientId">
+                        <Select showSearch allowClear filterOption={false} loading={clientLoading} onSearch={searchClients} options={clientOptions} placeholder={t('Search client')} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Item label={t('Policy code')} name="policyCode"><Input /></Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label={t('Policy ID')} name="policyId"><Input type="number" min={1} /></Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Item label={t('Line of business')} name="line"><Select allowClear options={lineOptions} onChange={handleLineChange} /></Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label={t('Product')} name="product">
+                        <Select allowClear disabled={!selectedLine} showSearch optionFilterProp="label" options={productOptions} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Item label={t('Loan number')} name="loanNumber"><Input /></Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label={t('Plate')} name="plate"><Input /></Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Item label={t('Issuance date from')} name="issueFrom"><DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label={t('Issuance date to')} name="issueTo"><DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={24}>
+                      <Form.Item label={t('Policy status')} name="status">
+                        <Select allowClear>
+                          <Option value="ACTIVE">{t('Active')}</Option>
+                          <Option value="INACTIVE">{t('Inactive')}</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Space>
+                    <Button type="primary" htmlType="submit">{t('Search')}</Button>
+                    <Button onClick={clearFilters}>{t('Clear')}</Button>
+                  </Space>
+                </Form>
+              </Drawer>
+              <Spin spinning={loading}>
+                <Table
+                  className="historical-billing-table"
+                  rowKey="key"
+                  size="small"
+                  bordered
+                  columns={columns}
+                  dataSource={rows}
+                  onRow={record => ({ onClick: () => handleRowSelect(record) })}
+                  rowClassName={record => selectedRow && selectedRow.key === record.key ? 'historical-billing-selected-row' : ''}
+                  pagination={{
+                    current: pagination.current,
+                    pageSize: pagination.pageSize,
+                    total,
+                    showSizeChanger: true,
+                    pageSizeOptions: ['15', '25'],
+                    showTotal: () => <span>{t('Total records')}: {total} | {t('Time')}: {executionTime}</span>
+                  }}
+                  onChange={handleTableChange}
+                  scroll={{ x: 1000, y: 'calc(100dvh - 310px)' }}
+                />
+              </Spin>
+            </div>
+          </TabPane>
+          <TabPane tab={<span><GeneralDataTabIcon />{t('General data')}</span>} key="general" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a record from the search results to view its general data.')}</div>
+              ) : policyLoading ? (
+                <Spin spinning />
+              ) : (
+                <div className="historical-billing-general-layout">
+                  <div className="historical-billing-general-main">
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('References')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Invoice number')}</div><div className="historical-billing-data-value">{detailPolicy.fiscalNumber || generalData.receipt || '-'}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Invoice total')}</div><div className="historical-billing-data-value">{renderMoney(detailTotal)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Type')}</div><div className="historical-billing-data-value">{detailPolicyType}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Policy')}</div><div className="historical-billing-data-value">{renderPolicyLink(detailPolicy.code || generalData.policy, detailPolicy.id || generalData.policyId)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Branch')}</div><div className="historical-billing-data-value">{entityName(detailBranch) || text(detailPolicy.branchCode) || '-'}</div></div>
+                    </div>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Entities')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Policyholder')}</div><div className="historical-billing-data-value">{renderContactLink(detailHolder, entityName(detailHolder))}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Insured')}</div><div className="historical-billing-data-value">{renderContactLink(detailInsured, entityName(detailInsured))}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Beneficiary')}</div><div className="historical-billing-data-value">{renderContactLink(detailBeneficiary, detailBeneficiaryName)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Creditor')}</div><div className="historical-billing-data-value">{renderContactLink(detailCreditor, detailCreditorName)}</div></div>
+                    </div>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Status')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Renewal')}</div><div className="historical-billing-data-value">{detailRenewal}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Accounting')}</div><div className="historical-billing-data-value">{accountingInfo ? t('Yes') : t('No')}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection')}</div><div className="historical-billing-data-value">{text(detailPolicy.collectionStatus || detailPolicy.collection) || '-'}</div></div>
+                    </div>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Dates')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Start')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.start || generalData.start)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('End date')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.end || generalData.end)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Issued')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.activeDate || detailPolicy.issueDate)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid through')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.paidUntil || detailPayPlan.dueDate)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Accounted')}</div><div className="historical-billing-data-value">{formatDate(detailAccountingDate)}</div></div>
+                    </div>
+                  </div>
+                  <div className="historical-billing-general-summary">
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Invoice')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Gross')}</div><div className="historical-billing-data-value">{renderMoney(detailGross)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Expenses')}</div><div className="historical-billing-data-value">{renderMoney(detailExpenses)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Other expenses')}</div><div className="historical-billing-data-value">{renderMoney(detailOtherExpenses)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Taxes')}</div><div className="historical-billing-data-value">{renderMoney(detailTax)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Interest')}</div><div className="historical-billing-data-value">{renderMoney(detailInterest)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Total')}</div><div className="historical-billing-data-value">{renderMoney(detailTotal)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid')}</div><div className="historical-billing-data-value">{renderMoney(detailPaid)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Pending')}</div><div className="historical-billing-data-value">{renderMoney(detailPending)}</div></div>
+                    </div>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Premiums')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Gross')}</div><div className="historical-billing-data-value">{renderMoney(detailGross)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Coinsurance')}</div><div className="historical-billing-data-value">{renderMoney(detailCoinsurance)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Net')}</div><div className="historical-billing-data-value">{renderMoney(detailPremium)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Earned')}</div><div className="historical-billing-data-value">{renderMoney(detailEarned)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Deferred')}</div><div className="historical-billing-data-value">{renderMoney(detailDeferred, 'historical-billing-money-deferred')}</div></div>
+                    </div>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Sums')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Gross sum')}</div><div className="historical-billing-data-value">{renderMoney(detailInsuredSum)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Coinsurance')}</div><div className="historical-billing-data-value">{renderMoney(detailCoinsuranceSum)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Net sum')}</div><div className="historical-billing-data-value">{renderMoney(detailNetSum)}</div></div>
+                    </div>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Commissions')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Production')}</div><div className="historical-billing-data-value">{renderMoney(detailProductionCommission)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Coinsurance')}</div><div className="historical-billing-data-value">{renderMoney(detailCoinsuranceCommission)}</div></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </TabPane>
+        </Tabs>
         </Spin>
       </Card>
     </div>

@@ -7,7 +7,7 @@
  * @created 2026/08/31
  * @name cmdHistoricalBilling
  * @version 1.0
- * @purpose: Return paginated historical billing rows with policy filters.
+ * @purpose: Return paginated historical billing rows grouped by policy with policy filters.
  * @context: {
  *   page?: number,
  *   size?: number,
@@ -32,20 +32,19 @@ try {
   const dataSql = `
 WITH BillingRows AS (
     SELECT
-        pp.[id] AS [payPlanId],
         lp.[id] AS [policyId],
         COALESCE(NULLIF(lp.[fiscalNumber], ''), '-') AS [receipt],
         COALESCE(NULLIF(lp.[code], ''), '-') AS [policy],
-        CONVERT(VARCHAR(7), pp.[dueDate], 120) AS [yearMonth],
+        CONVERT(VARCHAR(7), MIN(pp.[dueDate]), 120) AS [yearMonth],
         CASE
             WHEN lp.[active] = 1 AND lp.[entityState] = 'ACTIVE' THEN 'ACTIVE'
             ELSE 'INACTIVE'
         END AS [status],
         lp.[start] AS [start],
-        pp.[dueDate] AS [end],
-        ISNULL(pp.[minimum], pp.[expected]) AS [total],
-        ISNULL(pp.[payed], 0) AS [paid],
-        ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0) AS [pending]
+        MAX(pp.[dueDate]) AS [end],
+        SUM(ISNULL(pp.[minimum], pp.[expected])) AS [total],
+        SUM(ISNULL(pp.[payed], 0)) AS [paid],
+        SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0)) AS [pending]
     FROM [PayPlan] pp
     INNER JOIN [LifePolicy] lp ON lp.[id] = pp.[lifePolicyId]
     LEFT JOIN [Product] pro
@@ -53,9 +52,15 @@ WITH BillingRows AS (
        AND pro.[code] = lp.[productCode]
     WHERE 1 = 1
       ${where}
+    GROUP BY
+        lp.[id],
+        lp.[fiscalNumber],
+        lp.[code],
+        lp.[active],
+        lp.[entityState],
+        lp.[start]
 )
 SELECT
-    [payPlanId],
     [policyId],
     [receipt],
     [policy],
@@ -68,7 +73,7 @@ SELECT
     [pending],
     COUNT(1) OVER() AS [totalRows]
 FROM BillingRows
-ORDER BY [policyId], [end], [payPlanId]
+ORDER BY [policyId], [end]
 OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
 
   doCmd({ cmd: 'DoQuery', data: { sql: dataSql } });
@@ -83,13 +88,17 @@ OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
   if (data.length === 0) {
     const countSql = `
 SELECT COUNT(1) AS [total]
-FROM [PayPlan] pp
-INNER JOIN [LifePolicy] lp ON lp.[id] = pp.[lifePolicyId]
-LEFT JOIN [Product] pro
-    ON pro.[lobCode] = lp.[lob]
-   AND pro.[code] = lp.[productCode]
-WHERE 1 = 1
-  ${where};`;
+FROM (
+    SELECT lp.[id]
+    FROM [PayPlan] pp
+    INNER JOIN [LifePolicy] lp ON lp.[id] = pp.[lifePolicyId]
+    LEFT JOIN [Product] pro
+        ON pro.[lobCode] = lp.[lob]
+       AND pro.[code] = lp.[productCode]
+    WHERE 1 = 1
+      ${where}
+    GROUP BY lp.[id]
+) groupedPolicies;`;
 
     doCmd({ cmd: 'DoQuery', data: { sql: countSql } });
     const countResponse = getQueryResult();
@@ -167,7 +176,9 @@ function buildFilter(input) {
 function mapRow(row) {
   const item = row || {};
   return {
-    key: `${item.policyId || 0}-${item.payPlanId || 0}`,
+    key: String(item.policyId || 0),
+    policyId: item.policyId || 0,
+    payPlanId: 0,
     receipt: item.receipt || '-',
     policy: item.policy || '-',
     yearMonth: item.yearMonth || '-',

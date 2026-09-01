@@ -8,6 +8,7 @@
 - No modificar dimensiones, espaciados ni comportamiento de las grillas cuando el objetivo sea únicamente mejorar los bordes.
 - Mantener el borde activo de la pestaña con el color principal de la vista para conservar la identificación de la pestaña seleccionada.
 - Usar bordes discretos, evitando contrastes fuertes o estilos que hagan que la interfaz se vea pesada.
+- Para pestañas tipo tarjeta de Ant Design, usar borde de `1px solid #cbd1d8`, esquinas superiores redondeadas de `6px 6px 0 0`, separación de `2px` y borde activo `#1677ff`; el borde inferior activo debe integrarse con el contenedor usando el fondo blanco.
 
 ## Grillas
 
