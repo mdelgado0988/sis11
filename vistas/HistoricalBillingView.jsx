@@ -56,6 +56,33 @@
     </span>
   );
 
+  const CoverageTabIcon = () => (
+    <span role="img" aria-label="coverages" className="anticon anticon-safety-certificate" style={tabIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M866 169L512 64 158 169v257c0 234.7 143.9 443.2 354 514 210.1-70.8 354-279.3 354-514V169zm-76 257c0 193.2-114.1 365.6-278 431.2C348.1 791.6 234 619.2 234 426V224l278-82.4L790 224v202z"></path>
+        <path d="M464 512l-72-72-56 56 128 128 224-224-56-56z"></path>
+      </svg>
+    </span>
+  );
+
+  const InstallmentTabIcon = () => (
+    <span role="img" aria-label="installments" className="anticon anticon-calendar" style={tabIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M880 184H744v-48c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v48H352v-48c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v48H144c-4.4 0-8 3.6-8 8v648c0 4.4 3.6 8 8 8h736c4.4 0 8-3.6 8-8V192c0-4.4-3.6-8-8-8zM240 248h544v112H240V248zm584 520H176V424h648v344z"></path>
+        <path d="M280 496h80v80h-80zm160 0h80v80h-80zm160 0h80v80h-80zM280 624h80v80h-80zm160 0h80v80h-80zm160 0h80v80h-80z"></path>
+      </svg>
+    </span>
+  );
+
+  const CopyIcon = () => (
+    <span role="img" aria-label="copy" className="anticon anticon-copy" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1em', height: '1em', lineHeight: 1 }}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M832 64H296c-17.7 0-32 14.3-32 32v96h64v-64h472v472h-64v64h96c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32z"></path>
+        <path d="M696 224H160c-17.7 0-32 14.3-32 32v672c0 17.7 14.3 32 32 32h536c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32zm-32 672H192V288h472v608z"></path>
+      </svg>
+    </span>
+  );
+
   const [filterForm] = Form.useForm();
   const [rows, setRows] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
@@ -632,6 +659,14 @@
       : []);
   }
 
+  function renderCoverageIndicators(coverage) {
+    const indicators = [];
+    if (coverage && coverage.basic) indicators.push(t('Basic'));
+    if (coverage && coverage.mandatory) indicators.push(t('Mandatory'));
+    if (coverage && coverage.appliesTo) indicators.push(text(coverage.appliesTo));
+    return indicators.length ? indicators.join(' / ') : '-';
+  }
+
   function clearFilters() {
     filterForm.resetFields();
     setClientOptions([]);
@@ -642,6 +677,8 @@
     setExecutionTime('0.00 milisegundos');
     setSearched(false);
     setSelectedRow(null);
+    setPolicyInfo(null);
+    setActiveTab('search');
     setPagination({ current: 1, pageSize: 25 });
   }
 
@@ -669,38 +706,101 @@
     return Number.isInteger(id) && id > 0 ? id : 0;
   }
 
-  function renderPolicyLink(value, policyId) {
-    const id = Number(policyId || 0);
-    const label = text(value) || (id > 0 ? String(id) : '-');
-    if (!id) return label;
+  function copyToClipboard(value) {
+    const content = text(value);
+    if (!content || content === '-') return;
+
+    const notifySuccess = () => message.success(t('Copied to clipboard.'));
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(content).then(notifySuccess).catch(() => {
+        copyToClipboardFallback(content, notifySuccess);
+      });
+      return;
+    }
+    copyToClipboardFallback(content, notifySuccess);
+  }
+
+  function copyToClipboardFallback(content, onSuccess) {
+    const input = document.createElement('textarea');
+    input.value = content;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    try {
+      if (document.execCommand('copy')) onSuccess();
+    } finally {
+      document.body.removeChild(input);
+    }
+  }
+
+  function renderCopyButton(value) {
+    const content = text(value);
+    if (!content || content === '-') return null;
     return (
       <Button
         type="link"
         size="small"
-        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
+        aria-label={t('Copy')}
+        title={t('Copy')}
+        style={{ padding: '0 0 0 5px', height: 'auto', lineHeight: 1.2, fontSize: 12 }}
         onClick={event => {
           event.stopPropagation();
-          window.open(`#/lifepolicy/${id}`, '_blank', 'noopener,noreferrer');
+          copyToClipboard(content);
         }}
       >
-        {label}
+        <CopyIcon />
       </Button>
+    );
+  }
+
+  function renderCopyableText(value) {
+    const label = text(value) || '-';
+    return <span>{label}{renderCopyButton(label)}</span>;
+  }
+
+  function renderPolicyLink(value, policyId) {
+    const id = Number(policyId || 0);
+    const label = text(value) || (id > 0 ? String(id) : '-');
+    if (!id) return renderCopyableText(label);
+    return (
+      <span>
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
+          onClick={event => {
+            event.stopPropagation();
+            window.open(`#/lifepolicy/${id}`, '_blank', 'noopener,noreferrer');
+          }}
+        >
+          {label}
+        </Button>
+        {renderCopyButton(label)}
+      </span>
     );
   }
 
   function renderContactLink(entity, fallback) {
     const id = entityId(entity);
     const label = fallback || entityName(entity);
-    if (!id || label === '-') return label;
+    if (!id || label === '-') return renderCopyableText(label);
     return (
-      <Button
-        type="link"
-        size="small"
-        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
-        onClick={() => window.open(`#/contact/${id}`, '_blank', 'noopener,noreferrer')}
-      >
-        {label}
-      </Button>
+      <span>
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
+          onClick={event => {
+            event.stopPropagation();
+            window.open(`#/contact/${id}`, '_blank', 'noopener,noreferrer');
+          }}
+        >
+          {label}
+        </Button>
+        {renderCopyButton(label)}
+      </span>
     );
   }
 
@@ -744,6 +844,28 @@
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 110, align: 'right', render: renderMoney }
   ];
 
+  const coverageColumns = [
+    { title: t('Code'), dataIndex: 'code', key: 'code', width: 100, align: 'center' },
+    { title: t('Name'), dataIndex: 'name', key: 'name', width: 260 },
+    { title: t('Indicators'), key: 'indicators', width: 180, render: (_, coverage) => renderCoverageIndicators(coverage) },
+    { title: t('Insured sum'), key: 'limit', width: 130, align: 'right', render: (_, coverage) => renderMoney(firstNumber(coverage, ['limit', 'insuredSum'], 0)) },
+    { title: t('Base premium'), key: 'basePremium', width: 130, align: 'right', render: (_, coverage) => renderMoney(firstNumber(coverage, ['basePremium'], 0)) },
+    { title: t('Loading/Discount'), key: 'loading', width: 150, align: 'right', render: (_, coverage) => renderMoney(firstNumber(coverage, ['loading'], 0)) },
+    { title: t('Extra premium'), key: 'extraPremium', width: 130, align: 'right', render: (_, coverage) => renderMoney(firstNumber(coverage, ['extraPremium'], 0)) },
+    { title: t('Monthly premium'), key: 'monthlyPremium', width: 140, align: 'right', render: (_, coverage) => renderMoney(firstNumber(coverage, ['monthlyPremium', 'monthly', 'premium'], 0)) },
+    { title: t('Deductible'), key: 'deductible', width: 120, align: 'right', render: (_, coverage) => renderMoney(firstNumber(coverage, ['deductible'], 0)) }
+  ];
+
+  const installmentColumns = [
+    { title: t('Installment Id'), dataIndex: 'id', key: 'id', width: 90, align: 'center' },
+    { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: 180 },
+    { title: t('Amount due'), key: 'amountDue', width: 130, align: 'right', render: (_, installment) => renderMoney(firstNumber(installment, ['minimum', 'expected'], 0)) },
+    { title: t('Paid'), key: 'paid', width: 110, align: 'right', render: (_, installment) => renderMoney(firstNumber(installment, ['payed', 'paid'], 0)) },
+    { title: t('Payment date'), key: 'paymentDate', width: 125, align: 'center', render: (_, installment) => formatDate(installment && (installment.payedDate || installment.paymentDate)) },
+    { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 125, align: 'center', render: formatDate },
+    { title: t('Installment'), dataIndex: 'numberInYear', key: 'numberInYear', width: 100, align: 'center' },
+    { title: t('Contract year'), dataIndex: 'contractYear', key: 'contractYear', width: 120, align: 'center' }
+  ];
   const generalData = selectedRow || {};
   const detailPolicy = policyInfo || {};
   const detailPayPlan = getSelectedPayPlan(detailPolicy);
@@ -765,6 +887,17 @@
   const detailNetSum = detailInsuredSum - detailCoinsuranceSum;
   const detailProductionCommission = firstNumber(detailPolicy, ['commissions', 'commission'], 0);
   const detailCoinsuranceCommission = firstNumber(detailPolicy, ['coinsuranceCommission', 'coInsuranceCommission'], 0);
+  const installmentRows = Array.isArray(detailPolicy.PayPlan)
+    ? detailPolicy.PayPlan.slice().sort((left, right) => {
+      const yearDifference = Number(left && left.contractYear || 0) - Number(right && right.contractYear || 0);
+      if (yearDifference !== 0) return yearDifference;
+      return Number(left && left.numberInYear || 0) - Number(right && right.numberInYear || 0);
+    })
+    : [];
+  const coverageRows = Array.isArray(detailPolicy.Coverages) ? detailPolicy.Coverages : [];
+  const sumCoverageField = fields => coverageRows.reduce((total, coverage) => total + firstNumber(coverage, fields, 0), 0);
+  const totalInstallmentDue = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['minimum', 'expected'], 0), 0);
+  const totalInstallmentPaid = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['payed', 'paid'], 0), 0);
   const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
   const detailInsured = firstEntity(detailPolicy, ['Insureds', 'Insured', 'insured']);
   const detailBeneficiary = detailInsured;
@@ -893,7 +1026,7 @@
                   <div className="historical-billing-general-main">
                     <div className="historical-billing-data-card">
                       <div className="historical-billing-section-title">{t('References')}</div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Invoice number')}</div><div className="historical-billing-data-value">{detailPolicy.fiscalNumber || generalData.receipt || '-'}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Invoice number')}</div><div className="historical-billing-data-value">{renderCopyableText(detailPolicy.fiscalNumber || generalData.receipt || '-')}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Invoice total')}</div><div className="historical-billing-data-value">{renderMoney(detailTotal)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Type')}</div><div className="historical-billing-data-value">{detailPolicyType}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Policy')}</div><div className="historical-billing-data-value">{renderPolicyLink(detailPolicy.code || generalData.policy, detailPolicy.id || generalData.policyId)}</div></div>
@@ -909,7 +1042,7 @@
                     <div className="historical-billing-data-card">
                       <div className="historical-billing-section-title">{t('Status')}</div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Renewal')}</div><div className="historical-billing-data-value">{detailRenewal}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Accounting')}</div><div className="historical-billing-data-value">{accountingInfo ? t('Yes') : t('No')}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Posted')}</div><div className="historical-billing-data-value">{accountingInfo ? t('Yes') : t('No')}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection')}</div><div className="historical-billing-data-value">{text(detailPolicy.collectionStatus || detailPolicy.collection) || '-'}</div></div>
                     </div>
                     <div className="historical-billing-data-card">
@@ -954,6 +1087,69 @@
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+          </TabPane>
+          <TabPane tab={<span><CoverageTabIcon />{t('Coverages')}</span>} key="coverages" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its coverages.')}</div>
+              ) : (
+                <Table
+                  className="historical-billing-table"
+                  rowKey={(coverage, index) => String(coverage && (coverage.id || coverage.code) || index)}
+                  size="small"
+                  bordered
+                  columns={coverageColumns}
+                  dataSource={coverageRows}
+                  summary={() => (
+                    <Table.Summary>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={3}><strong>{t('Totals')}</strong></Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} align="right">{renderMoney(sumCoverageField(['limit', 'insuredSum']))}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} align="right">{renderMoney(sumCoverageField(['basePremium']))}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} align="right">{renderMoney(sumCoverageField(['loading']))}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} align="right">{renderMoney(sumCoverageField(['extraPremium']))}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right">{renderMoney(sumCoverageField(['monthlyPremium', 'monthly', 'premium']))}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={8}></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
+                  pagination={false}
+                  scroll={{ x: 1200, y: 'calc(100dvh - 310px)' }}
+                  locale={{ emptyText: t('No coverages found.') }}
+                />
+              )}
+            </div>
+          </TabPane>
+          <TabPane tab={<span><InstallmentTabIcon />{t('Installments')}</span>} key="installments" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its installments.')}</div>
+              ) : (
+                <Table
+                  className="historical-billing-table"
+                  rowKey={(installment, index) => String(installment && installment.id || index)}
+                  size="small"
+                  bordered
+                  columns={installmentColumns}
+                  dataSource={installmentRows}
+                  summary={() => (
+                    <Table.Summary>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={2}><strong>{t('Totals')}</strong></Table.Summary.Cell>
+                        <Table.Summary.Cell index={2} align="right">{renderMoney(totalInstallmentDue)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} align="right">{renderMoney(totalInstallmentPaid)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} colSpan={2}>{t('Total installments')}: {installmentRows.length}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={6}></Table.Summary.Cell>
+                        <Table.Summary.Cell index={7}></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
+                  pagination={false}
+                  scroll={{ x: 980, y: 'calc(100dvh - 310px)' }}
+                  locale={{ emptyText: t('No installments found.') }}
+                />
               )}
             </div>
           </TabPane>
