@@ -443,10 +443,17 @@
         background: #86b4ff !important;
       }
 
-      .historical-billing-view .historical-billing-money-positive { color: #237804; }
-      .historical-billing-view .historical-billing-money-negative { color: #cf1322; }
-      .historical-billing-view .historical-billing-money-zero { color: #262626; }
-      .historical-billing-view .historical-billing-money-deferred { color: #1677ff; }
+      .historical-billing-view .historical-billing-money-positive,
+      .historical-billing-modal .historical-billing-money-positive { color: #237804; }
+      .historical-billing-view .historical-billing-money-negative,
+      .historical-billing-modal .historical-billing-money-negative { color: #cf1322; }
+      .historical-billing-view .historical-billing-money-zero,
+      .historical-billing-modal .historical-billing-money-zero { color: #262626; }
+      .historical-billing-view .historical-billing-money-deferred,
+      .historical-billing-modal .historical-billing-money-deferred { color: #1677ff; }
+      .historical-billing-view .historical-billing-installment-status-pending { color: #cf1322; font-weight: 500; }
+      .historical-billing-view .historical-billing-installment-status-paid { color: #237804; font-weight: 500; }
+      .historical-billing-modal .historical-billing-table .ant-table-body { overflow-y: scroll !important; }
     `;
     if (!style.parentNode) document.head.appendChild(style);
 
@@ -1039,8 +1046,10 @@
       const dueDate = startDate.clone().add(frequencyMonths * index, 'months');
       const coveredUntil = dueDate.clone().add(frequencyMonths, 'months');
       const amount = (centsPerRow + (index === remainingSlots - 1 ? remainder : 0)) / 100;
+      const dueDateIso = toRestructureUtcIso(dueDate);
+      const coveredUntilIso = toRestructureUtcIso(coveredUntil);
       const edited = !!originalRow && (
-        String(sourceRow.dueDate || sourceRow.normalDueDate || '') !== String(dueDate.toISOString()) ||
+        String(sourceRow.dueDate || sourceRow.normalDueDate || '') !== String(dueDateIso) ||
         number(sourceRow.minimum) !== amount ||
         number(sourceRow.expected) !== amount
       );
@@ -1056,9 +1065,9 @@
         pendingAmount: amount,
         payed: 0,
         payedDate: null,
-        dueDate: dueDate.toISOString(),
-        normalDueDate: dueDate.toISOString(),
-        coveredUntil: coveredUntil.toISOString(),
+        dueDate: dueDateIso,
+        normalDueDate: dueDateIso,
+        coveredUntil: coveredUntilIso,
         pending: true,
         final: index === remainingSlots - 1,
         edited,
@@ -1090,6 +1099,63 @@
       });
       setEndorsementModalOpen(true);
     }).catch(() => {});
+  }
+
+  function getRestructureDueDateMoment(row) {
+    if (!row || typeof moment === 'undefined') return null;
+    const value = row.dueDate || row.normalDueDate || row.coveredUntil;
+    if (!value) return null;
+    const date = moment(value);
+    return date.isValid() ? date : null;
+  }
+
+  function toRestructureUtcIso(dateLike) {
+    if (!dateLike || typeof dateLike.year !== 'function') return null;
+    const utcDate = new Date(Date.UTC(
+      dateLike.year(),
+      dateLike.month(),
+      dateLike.date(),
+      dateLike.hour(),
+      dateLike.minute(),
+      dateLike.second(),
+      dateLike.millisecond()
+    ));
+    return utcDate.toISOString();
+  }
+
+  function updateRestructureDueDate(rowIndex, selectedDate) {
+    if (!selectedDate || typeof selectedDate.isValid !== 'function' || !selectedDate.isValid()) {
+      message.error(t('The due date is required.'));
+      return;
+    }
+
+    setRestructurePreviewRows(previousRows => {
+      const nextRows = previousRows.slice();
+      const currentRow = nextRows[rowIndex];
+      if (!currentRow || number(currentRow.payed) > 0) return previousRows;
+
+      const previousDate = getRestructureDueDateMoment(nextRows[rowIndex - 1]);
+      const nextDate = getRestructureDueDateMoment(nextRows[rowIndex + 1]);
+      if (previousDate && selectedDate.isBefore(previousDate, 'day')) {
+        message.error(t('The due date cannot be earlier than the previous installment date.'));
+        return previousRows;
+      }
+      if (nextDate && selectedDate.isAfter(nextDate, 'day')) {
+        message.error(t('The due date cannot be greater than the next installment date.'));
+        return previousRows;
+      }
+
+      const updatedDate = toRestructureUtcIso(selectedDate);
+      if (!updatedDate) return previousRows;
+      nextRows[rowIndex] = {
+        ...currentRow,
+        dueDate: updatedDate,
+        normalDueDate: updatedDate,
+        edited: true
+      };
+      return nextRows;
+    });
+    setRestructurePreviewDirty(false);
   }
 
   function getResponseId(response, fieldName) {
@@ -1431,7 +1497,7 @@
           footer={null}
           width="49vw"
           destroyOnClose
-          bodyStyle={{ padding: 12, maxHeight: '68vh', overflowY: 'auto' }}
+           bodyStyle={{ padding: 12, height: 'calc(68vh - 24px)', overflow: 'hidden' }}
         >
           <Spin spinning={restructureLoading}>
             <Form
@@ -1472,14 +1538,56 @@
                 rowKey={(row, index) => String(row && row.id ? `${row.id}-${index}` : index)}
                 dataSource={restructurePreviewRows}
                 columns={[
-                  { title: t('Installment'), dataIndex: 'numberInYear', key: 'numberInYear', align: 'center' },
-                  { title: t('Concept'), dataIndex: 'concept', key: 'concept' },
-                  { title: t('Amount due'), dataIndex: 'minimum', key: 'minimum', align: 'right', render: renderMoney },
-                  { title: t('Paid'), dataIndex: 'payed', key: 'payed', align: 'right', render: renderMoney },
-                  { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', align: 'center', render: formatDate },
-                  { title: t('Status'), key: 'status', align: 'center', render: (_, row) => number(row && row.payed) > 0 ? t('Paid') : t('Pending') }
-                ]}
-                scroll={{ x: 760, y: 360 }}
+                   { title: t('Installment'), dataIndex: 'numberInYear', key: 'numberInYear', width: 78, align: 'center' },
+                   { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: 150, ellipsis: true },
+                   { title: t('Amount due'), dataIndex: 'minimum', key: 'minimum', width: 112, align: 'right', render: value => renderMoney(value) },
+                   { title: t('Paid'), dataIndex: 'payed', key: 'payed', width: 100, align: 'right', render: value => renderMoney(value) },
+                   {
+                     title: t('Due date'),
+                     dataIndex: 'dueDate',
+                     key: 'dueDate',
+                     width: 155,
+                     align: 'center',
+                     render: (value, row, index) => {
+                       const isPaid = number(row && row.payed) > 0;
+                       return (
+                         <DatePicker
+                           value={getRestructureDueDateMoment(row)}
+                           allowClear={false}
+                           disabled={isPaid}
+                           format="DD/MM/YYYY"
+                           style={{ width: '100%' }}
+                           disabledDate={currentDate => {
+                             if (isPaid || !currentDate) return false;
+                             const previousDate = getRestructureDueDateMoment(restructurePreviewRows[index - 1]);
+                             const nextDate = getRestructureDueDateMoment(restructurePreviewRows[index + 1]);
+                             return !!((previousDate && currentDate.isBefore(previousDate, 'day')) || (nextDate && currentDate.isAfter(nextDate, 'day')));
+                           }}
+                           onChange={selectedDate => updateRestructureDueDate(index, selectedDate)}
+                         />
+                       );
+                     }
+                   },
+                   {
+                     title: t('Status'),
+                     key: 'status',
+                     width: 92,
+                     align: 'center',
+                     render: (_, row) => {
+                       const isPaid = number(row && row.payed) > 0;
+                       return (
+                         <span
+                           className={`historical-billing-installment-status-${isPaid ? 'paid' : 'pending'}`}
+                            style={{ color: isPaid ? '#cf1322' : '#237804', fontWeight: 500 }}
+                         >
+                           {isPaid ? t('Paid') : t('Pending')}
+                         </span>
+                       );
+                     }
+                   }
+                 ]}
+                 tableLayout="fixed"
+                 scroll={{ x: 687, y: 360 }}
                 locale={{ emptyText: t('Calculate the new installments to preview them.') }}
               />
             </Form>
