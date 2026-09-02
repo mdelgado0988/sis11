@@ -1274,7 +1274,9 @@
     }).catch(function (error) {
       if (!cancelled) {
         setPaymentBankNames({});
-        console.error('Error loading payment method bank contacts:', error);
+        message.error(error && error.message
+          ? error.message
+          : t('Payment method bank information could not be loaded.'));
       }
     });
 
@@ -1316,12 +1318,9 @@
       return () => { cancelled = true; };
     }
 
-    const numericCode = /^\d+$/.test(countryCode) ? Number(countryCode) : 0;
     exe('RepoCountryCatalog', {
       operation: 'GET',
-      filter: numericCode > 0
-        ? `(code = '${escapeSql(countryCode)}' OR id = ${numericCode})`
-        : `code = '${escapeSql(countryCode)}'`
+      filter: `code = '${escapeSql(countryCode)}'`
     }).then(response => {
       if (cancelled) return;
       const country = getRows(response)[0];
@@ -1329,7 +1328,9 @@
     }).catch(error => {
       if (!cancelled) {
         setPayerNationalityName('');
-        console.error('Error loading payer nationality:', error);
+        message.error(error && error.message
+          ? error.message
+          : t('Payer nationality could not be loaded.'));
       }
     });
 
@@ -1694,7 +1695,9 @@
         description: ''
       });
       setEndorsementModalOpen(true);
-    }).catch(() => {});
+    }).catch(() => {
+      message.error(t('Please complete the required fields.'));
+    });
   }
 
   function getRestructureDueDateMoment(row) {
@@ -2609,7 +2612,9 @@
               onValuesChange={() => setRestructurePreviewDirty(true)}
             >
               <div className="historical-billing-toolbar">
-                <Button type="primary" htmlType="button" onClick={() => restructureForm.validateFields(['newFrequency', 'newInstallments', 'startDate']).then(calculateRestructure).catch(() => {})}>
+                <Button type="primary" htmlType="button" onClick={() => restructureForm.validateFields(['newFrequency', 'newInstallments', 'startDate']).then(calculateRestructure).catch(() => {
+                  message.error(t('Please complete the required fields.'));
+                })}>
                   {t('Calculate installments')}
                 </Button>
                 <Button type="primary" htmlType="button" onClick={openEndorsementModal} loading={restructureLoading}>
