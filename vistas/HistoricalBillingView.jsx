@@ -110,6 +110,9 @@
   const [selectedLine, setSelectedLine] = React.useState('');
   const [selectedRow, setSelectedRow] = React.useState(null);
   const [policyInfo, setPolicyInfo] = React.useState(null);
+  const [collectionCutoffValue, setCollectionCutoffValue] = React.useState(undefined);
+  const [collectionPaymentMethodOptions, setCollectionPaymentMethodOptions] = React.useState([]);
+  const [relationshipOptions, setRelationshipOptions] = React.useState([]);
   const [renewalInfo, setRenewalInfo] = React.useState(null);
   const [accountingInfo, setAccountingInfo] = React.useState(null);
   const [policyLoading, setPolicyLoading] = React.useState(false);
@@ -125,6 +128,10 @@
   const [restructureForm] = Form.useForm();
   const [endorsementForm] = Form.useForm();
   const [endorsementModalOpen, setEndorsementModalOpen] = React.useState(false);
+  const [collectionMethodForm] = Form.useForm();
+  const [collectionMethodModalOpen, setCollectionMethodModalOpen] = React.useState(false);
+  const [collectionMethodChanging, setCollectionMethodChanging] = React.useState(false);
+  const [collectionMethodDynamicForm, setCollectionMethodDynamicForm] = React.useState(null);
 
   React.useEffect(() => {
     loadCatalogs();
@@ -134,6 +141,7 @@
     const policyId = Number(selectedRow && selectedRow.policyId) || 0;
     if (!policyId) {
       setPolicyInfo(null);
+      setCollectionCutoffValue(undefined);
       setRenewalInfo(null);
       setAccountingInfo(null);
       setPaymentRows([]);
@@ -466,6 +474,81 @@
       .historical-billing-view .historical-billing-installment-status-pending { color: #cf1322; font-weight: 500; }
       .historical-billing-view .historical-billing-installment-status-paid { color: #237804; font-weight: 500; }
       .historical-billing-modal .historical-billing-table .ant-table-body { overflow-y: scroll !important; }
+
+      .historical-billing-modal .historical-billing-dynamic-form-card {
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        background: transparent;
+        margin-bottom: 12px;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-rendered-form {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        margin: 0 -6px;
+        width: 100%;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-rendered-form > .rendered-form,
+      .historical-billing-modal .historical-billing-dynamic-rendered-form .rendered-form > .row {
+        width: 100%;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-rendered-form .rendered-form > .row {
+        display: flex;
+        flex-wrap: wrap;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-form-field {
+        box-sizing: border-box;
+        flex: 0 0 100%;
+        max-width: 100%;
+        padding: 0 6px;
+        margin-bottom: 12px;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-col-4 {
+        flex-basis: 33.333333%;
+        max-width: 33.333333%;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-col-6 {
+        flex-basis: 50%;
+        max-width: 50%;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-col-8 {
+        flex-basis: 66.666667%;
+        max-width: 66.666667%;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-col-12 {
+        flex-basis: 100%;
+        max-width: 100%;
+      }
+
+      .historical-billing-modal .historical-billing-dynamic-form-field input,
+      .historical-billing-modal .historical-billing-dynamic-form-field select,
+      .historical-billing-modal .historical-billing-dynamic-form-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .historical-billing-modal .historical-billing-form-error {
+        color: #cf1322;
+        margin-bottom: 8px;
+      }
+
+      @media (max-width: 900px) {
+        .historical-billing-modal .historical-billing-dynamic-col-4,
+        .historical-billing-modal .historical-billing-dynamic-col-6,
+        .historical-billing-modal .historical-billing-dynamic-col-8 {
+          flex-basis: 100% !important;
+          max-width: 100% !important;
+        }
+      }
     `;
     if (!style.parentNode) document.head.appendChild(style);
 
@@ -559,7 +642,9 @@
   function loadCatalogs() {
     Promise.all([
       exe('RepoLob', { operation: 'GET' }),
-      exe('RepoProduct', { operation: 'GET' })
+      exe('RepoProduct', { operation: 'GET' }),
+      exe('RepoPaymentMethodCatalog', { operation: 'GET' }),
+      exe('RepoRelationshipCatalog', { operation: 'GET', filter: "principalType = 'PERSON'" })
     ]).then(responses => {
       setLineOptions(getRows(responses[0]).map(item => ({
         value: text(item && item.code),
@@ -570,6 +655,15 @@
         value: text(item && item.code),
         label: text(item && (item.name || item.code)),
         line: text(item && (item.lobCode || item.lob))
+      })).filter(item => item.value));
+      setCollectionPaymentMethodOptions(getRows(responses[2]).map(item => ({
+        value: text(item && item.code),
+        label: text(item && (item.name || item.code)),
+        formId: number(item && item.formId)
+      })).filter(item => item.value));
+      setRelationshipOptions(getRows(responses[3]).map(item => ({
+        value: text(item && item.id),
+        label: text(item && item.name)
       })).filter(item => item.value));
     }).catch(error => {
       message.error(error && error.message ? error.message : t('Catalogs could not be loaded.'));
@@ -771,6 +865,17 @@
     ].filter(Boolean).join(' ') || entity.description || entity.id) || '-';
   }
 
+  function entityField(entity, names) {
+    if (Array.isArray(entity)) return entity.length ? entityField(entity[0], names) : '';
+    if (!entity) return '';
+    if (entity.Contact || entity.contact) return entityField(entity.Contact || entity.contact, names);
+    for (let index = 0; index < names.length; index += 1) {
+      const value = text(entity[names[index]]);
+      if (value) return value;
+    }
+    return '';
+  }
+
   function entityId(entity) {
     if (!entity) return 0;
     if (Array.isArray(entity)) return entity.length ? entityId(entity[0]) : 0;
@@ -921,6 +1026,7 @@
   function handleRowSelect(record) {
     paymentsLoadedPolicyRef.current = null;
     setPaymentRows([]);
+    setCollectionCutoffValue(undefined);
     setPolicyLoading(true);
     setSelectedRow(record);
     setActiveTab('general');
@@ -1028,6 +1134,41 @@
   const detailBeneficiary = detailInsured;
   const detailCreditor = firstEntity(detailPolicy, ['CessionBeneficiary', 'cessionBeneficiary', 'Creditor', 'creditor']);
   const detailBranch = firstEntity(detailPolicy, ['Branch', 'branch']);
+  const detailMainInsured = firstEntity(detailPolicy, ['MainInsured', 'mainInsured'])
+    || (Array.isArray(detailPolicy.Insureds)
+      ? detailPolicy.Insureds.find(item => Number(item && (item.isMainInsured || item.mainInsured)) === 1)
+      : null)
+    || {};
+  const mainInsuredRelationship = detailMainInsured.relationship;
+  const mainInsuredRelationshipCode = mainInsuredRelationship && typeof mainInsuredRelationship === 'object'
+    ? (mainInsuredRelationship.code !== undefined && mainInsuredRelationship.code !== null
+      ? mainInsuredRelationship.code
+      : mainInsuredRelationship.id)
+    : mainInsuredRelationship;
+  const mainInsuredRelationshipName = mainInsuredRelationship && typeof mainInsuredRelationship === 'object'
+    ? (mainInsuredRelationship.name || mainInsuredRelationship.description || mainInsuredRelationship.label)
+    : (detailMainInsured.Relationship && (detailMainInsured.Relationship.name || detailMainInsured.Relationship.description || detailMainInsured.Relationship.label));
+  const relationshipCatalogOption = relationshipOptions.find(item =>
+    text(item && item.value) === text(mainInsuredRelationshipCode)
+  );
+  const collectionPayerId = entityField(detailHolder, ['cnp', 'nif', 'nationalId', 'identification']) || '-';
+  const collectionPayerName = entityName(detailHolder);
+  const collectionPayerRelationship = Number(mainInsuredRelationshipCode) === 0
+    ? t('Principal')
+    : text(relationshipCatalogOption && relationshipCatalogOption.label || mainInsuredRelationshipName || mainInsuredRelationshipCode) || '-';
+  const collectionPayerNationality = entityField(detailHolder, ['nationality', 'nationalityName', 'country']) || '-';
+  const collectionPayerPhone = entityField(detailHolder, ['phone', 'telephone', 'phoneNumber']) || '-';
+  const collectionPayerEmail = entityField(detailHolder, ['email', 'emailAddress']) || '-';
+  const collectionZone = text(detailPolicy.collectionZone || detailPolicy.collectionZoneName || detailPolicy.collectionZoneCode || detailPolicy.zone) || '-';
+  const collectionExecutive = text(detailPolicy.collectionExecutive || detailPolicy.collectionExecutiveName || detailPolicy.executive) || '-';
+  const collectionCollector = text(detailPolicy.collector || detailPolicy.collectorName || detailPolicy.collectionUser) || '-';
+  const collectionMethodCode = text(detailPolicy.paymentMethodCode || detailPolicy.collectionMethod || detailPolicy.paymentMethod);
+  const collectionMethodOption = collectionPaymentMethodOptions.find(item => text(item && item.value) === collectionMethodCode);
+  const collectionMethod = text(collectionMethodOption && collectionMethodOption.label || detailPolicy.collectionMethodName || detailPolicy.paymentMethodName || collectionMethodCode) || '-';
+  React.useEffect(() => {
+    const value = text(detailPolicy.collectionCutoff || detailPolicy.cutoffDate || detailPolicy.cutoff);
+    setCollectionCutoffValue(['1', '2', '3', '4', '5'].includes(value) ? value : undefined);
+  }, [policyInfo]);
   const detailAnniversary = detailPolicy.Anniversaries && detailPolicy.Anniversaries[0] ? detailPolicy.Anniversaries[0] : {};
   const detailPolicyVersion = detailPolicy.policyVersion === null || detailPolicy.policyVersion === undefined
     ? 0
@@ -1357,6 +1498,67 @@
     return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}.${milliseconds}0000`;
   }
 
+  function parsePaymentMethodSelectedDate(value) {
+    if (!value) return null;
+    if (typeof value.toDate === 'function') {
+      const date = value.toDate();
+      return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
+    }
+    if (typeof value.format === 'function') return parsePaymentMethodSelectedDate(value.format('YYYY-MM-DD'));
+    const raw = text(value);
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      const parts = raw.split('-');
+      const date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function parsePaymentMethodUtcDate(value) {
+    const raw = text(value);
+    if (!raw) return null;
+    const utcValue = /z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/i.test(raw) ? raw : `${raw}Z`;
+    const date = new Date(utcValue);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function formatPaymentMethodUtcDateTime7(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const pad = value => String(value).padStart(2, '0');
+    const milliseconds = String(date.getUTCMilliseconds()).padStart(3, '0');
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}.${milliseconds}0000`;
+  }
+
+  function buildPaymentMethodEffectiveDate(policyStart, value) {
+    const selectedDate = parsePaymentMethodSelectedDate(value);
+    if (!selectedDate) return null;
+    const now = new Date();
+    const startDate = parsePaymentMethodUtcDate(policyStart);
+    const selectedTime = Date.UTC(
+      selectedDate.getUTCFullYear(),
+      selectedDate.getUTCMonth(),
+      selectedDate.getUTCDate(),
+      now.getUTCHours(),
+      now.getUTCMinutes(),
+      now.getUTCSeconds(),
+      now.getUTCMilliseconds()
+    );
+    if (startDate && selectedTime < startDate.getTime()) {
+      return formatPaymentMethodUtcDateTime7(new Date(Date.UTC(
+        selectedDate.getUTCFullYear(),
+        selectedDate.getUTCMonth(),
+        selectedDate.getUTCDate(),
+        startDate.getUTCHours(),
+        startDate.getUTCMinutes(),
+        startDate.getUTCSeconds(),
+        startDate.getUTCMilliseconds()
+      )));
+    }
+    return formatPaymentMethodUtcDateTime7(new Date(selectedTime));
+  }
+
   async function executeRestructure(values) {
     if (!restructurePreviewRows.length) {
       throw new Error(t('Calculate the new installments before executing the endorsement.'));
@@ -1419,7 +1621,159 @@
      endorsementForm.resetFields();
      setPolicyReloadToken(value => value + 1);
     message.success(executeResponse.msg || t('Endorsement executed successfully'));
+   }
+
+  function openCollectionMethodModal() {
+    collectionMethodForm.resetFields();
+    setCollectionMethodDynamicForm(null);
+    collectionMethodForm.setFieldsValue({
+      effectiveDate: typeof moment !== 'undefined'
+        ? (detailPolicy.start ? moment(detailPolicy.start) : moment())
+        : null,
+      newPaymentMethod: undefined,
+      observations: ''
+    });
+    setCollectionMethodModalOpen(true);
   }
+
+  function getCollectionMethodFormId(methodCode) {
+    const option = collectionPaymentMethodOptions.find(item => item && text(item.value) === text(methodCode));
+    return option && number(option.formId) > 0 ? number(option.formId) : 0;
+  }
+
+  function loadCollectionMethodDynamicForm(methodCode) {
+    const formId = getCollectionMethodFormId(methodCode);
+    if (!formId) {
+      setCollectionMethodDynamicForm(null);
+      return;
+    }
+
+    setCollectionMethodDynamicForm({ formId, form: null, loading: true, error: '' });
+    exe('GetForms', { filter: `id=${formId}` })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The payment form could not be loaded.'));
+        }
+        const form = getRows(response)[0];
+        if (!form) throw new Error(t('The payment form was not found.'));
+        setCollectionMethodDynamicForm({ formId, form, loading: false, error: '' });
+      })
+      .catch(error => {
+        setCollectionMethodDynamicForm({
+          formId,
+          form: null,
+          loading: false,
+          error: error && error.message ? error.message : String(error)
+        });
+      });
+  }
+
+  async function executeCollectionMethodChange(values) {
+    const policyId = Number(detailPolicy.id || selectedRow && selectedRow.policyId) || 0;
+    if (!policyId) throw new Error(t('Select a policy before changing the collection method.'));
+    const effectiveDate = buildPaymentMethodEffectiveDate(detailPolicy.start, values && values.effectiveDate);
+    const newPaymentMethod = text(values && values.newPaymentMethod);
+    const observations = text(values && values.observations);
+    if (!effectiveDate || !newPaymentMethod || !observations) {
+      throw new Error(t('The effective date, new payment method and observations are required.'));
+    }
+
+    setCollectionMethodChanging(true);
+    try {
+      const response = await exe('ChangePaymentMethod', {
+        policyId: policyId,
+        newPaymentMethod: newPaymentMethod,
+        effectiveDate: effectiveDate,
+        note: observations,
+        informative: true,
+        operation: 'ADD'
+      });
+      if (!response || !response.ok) {
+        throw new Error(response && response.msg ? response.msg : t('The collection method could not be changed.'));
+      }
+      const changeId = getResponseId(response, 'changeId');
+      if (!(changeId > 0)) throw new Error(t('The endorsement change could not be determined.'));
+      const changeEntity = await exe('LoadEntity', { entity: 'Change', fields: 'id,processId', filter: `id=${changeId}`, noTracking: true });
+      const processId = getResponseId(changeEntity, 'processId');
+      if (!(processId > 0)) throw new Error(t('The endorsement workflow process could not be determined.'));
+      const approval = await exe('GotoStep', { procesoId: processId, estado: 'APROVED' });
+      if (!approval || !approval.ok) throw new Error(approval && approval.msg ? approval.msg : t('The endorsement workflow could not be approved.'));
+      const executeResponse = await exe('ExeChangePaymentMethod', { changeId: changeId, operation: 'EXECUTE', exeNow: true });
+      if (!executeResponse || !executeResponse.ok) throw new Error(executeResponse && executeResponse.msg ? executeResponse.msg : t('The collection method could not be changed.'));
+      setCollectionMethodModalOpen(false);
+      collectionMethodForm.resetFields();
+      setPolicyReloadToken(value => value + 1);
+      message.success(executeResponse.msg || response.msg || t('Collection method changed successfully.'));
+    } finally {
+      setCollectionMethodChanging(false);
+    }
+  }
+
+  React.useEffect(() => {
+    const config = collectionMethodDynamicForm;
+    if (!config || config.loading || !config.form) return undefined;
+    if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return undefined;
+
+    const container = document.getElementById('historical-billing-collection-method-form');
+    if (!container) return undefined;
+
+    let formData = config.form.json;
+    if (typeof formData === 'string') {
+      try {
+        formData = JSON.parse(formData);
+      } catch (error) {
+        setCollectionMethodDynamicForm(current => current && current.formId === config.formId
+          ? { ...current, form: null, error: t('The payment form definition is invalid.') }
+          : current);
+        return undefined;
+      }
+    }
+    if (!Array.isArray(formData)) return undefined;
+
+    container.innerHTML = '';
+    $(container).formRender({ formData });
+    container.classList.add('historical-billing-dynamic-rendered-form');
+    container.querySelectorAll('.rendered-form > .row, .rendered-form .row').forEach(row => {
+      row.style.display = 'flex';
+      row.style.flexWrap = 'wrap';
+      row.style.width = '100%';
+    });
+    container.querySelectorAll('[class*="col-md-"]').forEach(control => {
+      const field = control.closest('.form-group') || control.parentElement;
+      if (!field || field === container) return;
+
+      field.classList.add('historical-billing-dynamic-form-field');
+      field.style.boxSizing = 'border-box';
+      field.style.paddingLeft = '6px';
+      field.style.paddingRight = '6px';
+      field.style.marginBottom = '12px';
+
+      const match = String(control.className || '').match(/\bcol-md-(4|6|8|12)\b/);
+      const columnUnits = match ? Number(match[1]) : 12;
+      const columnSize = (columnUnits / 12) * 100;
+      field.classList.add(`historical-billing-dynamic-col-${columnUnits}`);
+      field.style.flex = `0 0 ${columnSize}%`;
+      field.style.maxWidth = `${columnSize}%`;
+      control.style.width = '100%';
+      control.style.maxWidth = '100%';
+      control.style.boxSizing = 'border-box';
+    });
+
+    if (config.form.logic) {
+      try {
+        function runDynamicFormLogic() {
+          return eval(config.form.logic);
+        }
+        runDynamicFormLogic.call({ exe });
+      } catch (error) {
+        message.error(error && error.message ? error.message : String(error));
+      }
+    }
+
+    return () => {
+      if (container) container.innerHTML = '';
+    };
+  }, [collectionMethodDynamicForm]);
 
   return (
     <div className="historical-billing-view">
@@ -1696,7 +2050,101 @@
               )}
             </div>
           </TabPane>
+          <TabPane tab={<span><PaymentTabIcon />{t('Collection information')}</span>} key="collection-info" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its collection information.')}</div>
+              ) : (
+                <Row gutter={12}>
+                  <Col xs={24} lg={12}>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Payer information')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Relationship')}</div><div className="historical-billing-data-value">{collectionPayerRelationship}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer ID')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerId)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer name')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerName || '-')}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer nationality')}</div><div className="historical-billing-data-value">{collectionPayerNationality}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer phone')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerPhone)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer email')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerEmail)}</div></div>
+                    </div>
+                  </Col>
+                  <Col xs={24} lg={12}>
+                    <div className="historical-billing-data-card">
+                      <div className="historical-billing-section-title">{t('Collection information')}</div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection zone')}</div><div className="historical-billing-data-value">{collectionZone}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection executive')}</div><div className="historical-billing-data-value">{collectionExecutive}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collector')}</div><div className="historical-billing-data-value">{collectionCollector}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection method')}</div><div className="historical-billing-data-value">
+                        <span>{collectionMethod}</span>
+                        <Button type="link" size="small" onClick={openCollectionMethodModal}>{t('Change')}</Button>
+                      </div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection cutoff')}</div><div className="historical-billing-data-value">
+                        <Select
+                          value={collectionCutoffValue}
+                          placeholder={t('Select...')}
+                          onChange={setCollectionCutoffValue}
+                          style={{ minWidth: 160 }}
+                        >
+                          <Option value="1">1</Option>
+                          <Option value="2">2</Option>
+                          <Option value="3">3</Option>
+                          <Option value="4">4</Option>
+                          <Option value="5">5</Option>
+                        </Select>
+                      </div></div>
+                    </div>
+                  </Col>
+                </Row>
+              )}
+            </div>
+          </TabPane>
         </Tabs>
+        <Modal
+          className="historical-billing-modal"
+          title={t('Change collection method')}
+          open={collectionMethodModalOpen}
+          onCancel={() => setCollectionMethodModalOpen(false)}
+          footer={null}
+          width="520px"
+          destroyOnClose
+          bodyStyle={{ padding: 12 }}
+        >
+          <Form
+            form={collectionMethodForm}
+            layout="vertical"
+            onFinish={values => executeCollectionMethodChange(values)
+              .catch(error => message.error(error && error.message ? error.message : t('The collection method could not be changed.')))}
+          >
+            <Form.Item label={t('Endorsement effective date')} name="effectiveDate" rules={[{ required: true, message: t('Select the endorsement effective date.') }]}>
+              <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label={t('New payment method')} name="newPaymentMethod" rules={[{ required: true, message: t('Select the new payment method.') }]}>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={collectionPaymentMethodOptions}
+                placeholder={t('Select...')}
+                onChange={loadCollectionMethodDynamicForm}
+              />
+            </Form.Item>
+            {collectionMethodDynamicForm && (
+              <div className="historical-billing-dynamic-form-card">
+                {collectionMethodDynamicForm.loading && <Spin size="small" />}
+                {collectionMethodDynamicForm.error && (
+                  <div className="historical-billing-form-error">{collectionMethodDynamicForm.error}</div>
+                )}
+                {!collectionMethodDynamicForm.loading && !collectionMethodDynamicForm.error && (
+                  <div id="historical-billing-collection-method-form" className="historical-billing-dynamic-form" />
+                )}
+              </div>
+            )}
+            <Form.Item label={t('Observations')} name="observations" rules={[{ required: true, message: t('Enter the observations.') }]}>
+              <Input.TextArea rows={4} />
+            </Form.Item>
+            <div className="historical-billing-toolbar" style={{ justifyContent: 'flex-end' }}>
+              <Button type="primary" htmlType="submit" loading={collectionMethodChanging}>{t('Execute')}</Button>
+            </div>
+          </Form>
+        </Modal>
         <Modal
           className="historical-billing-modal"
           title={t('Restructure installments')}
