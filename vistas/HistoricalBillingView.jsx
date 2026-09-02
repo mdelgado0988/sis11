@@ -76,6 +76,14 @@
     </span>
   );
 
+  const PaymentTabIcon = () => (
+    <span role="img" aria-label="payments" className="anticon anticon-dollar" style={tabIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm42-405.8v-89.5c36.7 7.1 68.8 22.7 96.1 46.7l36.4-47.3c-38.3-34.5-82.4-55.1-132.5-61.9v-41.5h-42.2v40.3c-39.2 2.6-70.7 15.6-94.6 38.9-23.8 23.3-35.8 52.8-35.8 88.4 0 37.5 11.5 65.6 34.7 84.3 23.1 18.8 54.9 32.6 95.7 41.5v92.4c-42.1-7.5-82.4-28-120.6-61.4l-41.1 46.1c46.3 43.2 100.2 68.5 161.7 75.9v52.2h42.2v-51.2c40.3-2.3 72.6-15 96.9-38.2 24.3-23.2 36.4-53.3 36.4-90.2 0-35.7-11.6-62.8-34.9-81.4-23.4-18.7-56-33.5-97.8-44.1zm-42-10.2c-26.8-7.7-45.8-16.2-57.1-25.5-11.3-9.2-17-21.6-17-37.1 0-15.3 6.2-27.5 18.6-36.6 12.4-9.1 30.9-14.5 55.5-16.2v115.4zm42 203.4V553.7c28.2 8.1 48.2 17.1 60 27.1 11.8 10 17.7 23.1 17.7 39.3 0 16.4-6.5 29.3-19.5 38.7-13 9.4-32.4 14.9-58.2 16.6z"></path>
+      </svg>
+    </span>
+  );
+
   const CopyIcon = () => (
     <span role="img" aria-label="copy" className="anticon anticon-copy" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1em', height: '1em', lineHeight: 1 }}>
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -105,6 +113,9 @@
   const [renewalInfo, setRenewalInfo] = React.useState(null);
   const [accountingInfo, setAccountingInfo] = React.useState(null);
   const [policyLoading, setPolicyLoading] = React.useState(false);
+  const [paymentRows, setPaymentRows] = React.useState([]);
+  const [paymentsLoading, setPaymentsLoading] = React.useState(false);
+  const paymentsLoadedPolicyRef = React.useRef(null);
   const [activeTab, setActiveTab] = React.useState('search');
   const [restructureModalOpen, setRestructureModalOpen] = React.useState(false);
   const [restructureLoading, setRestructureLoading] = React.useState(false);
@@ -125,6 +136,8 @@
       setPolicyInfo(null);
       setRenewalInfo(null);
       setAccountingInfo(null);
+      setPaymentRows([]);
+      setPaymentsLoading(false);
       setPolicyLoading(false);
       return undefined;
     }
@@ -151,7 +164,6 @@
       filter: `[entity] = N'LifePolicy' AND [entityId] = ${policyId}`,
       noTracking: true
     });
-
     policyRequest.then(response => {
       if (!response || response.ok === false) {
         throw new Error(response && response.msg ? response.msg : t('The policy could not be loaded.'));
@@ -695,6 +707,11 @@
   }
 
   function handleSearch(values) {
+    paymentsLoadedPolicyRef.current = null;
+    setPaymentRows([]);
+    setSelectedRow(null);
+    setPolicyInfo(null);
+    setActiveTab('search');
     search(values, { current: 1, pageSize: pagination.pageSize });
   }
 
@@ -732,6 +749,9 @@
     setExecutionTime('0.00 milisegundos');
     setSearched(false);
     setSelectedRow(null);
+    paymentsLoadedPolicyRef.current = null;
+    setPaymentRows([]);
+    setPaymentsLoading(false);
     setPolicyInfo(null);
     setActiveTab('search');
     setPagination({ current: 1, pageSize: 25 });
@@ -837,6 +857,24 @@
     );
   }
 
+  function renderAllocationLink(value) {
+    const allocationId = Number(value || 0);
+    if (!(allocationId > 0)) return '-';
+    return (
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0, height: 'auto', lineHeight: 1.2, fontSize: 12 }}
+        onClick={event => {
+          event.stopPropagation();
+          window.open(`#/allocation?id=${allocationId}`, '_blank', 'noopener,noreferrer');
+        }}
+      >
+        {allocationId}
+      </Button>
+    );
+  }
+
   function renderContactLink(entity, fallback) {
     const id = entityId(entity);
     const label = fallback || entityName(entity);
@@ -881,9 +919,41 @@
   }
 
   function handleRowSelect(record) {
+    paymentsLoadedPolicyRef.current = null;
+    setPaymentRows([]);
     setPolicyLoading(true);
     setSelectedRow(record);
     setActiveTab('general');
+  }
+
+  function loadPolicyPayments(policyId) {
+    const id = Number(policyId) || 0;
+    if (!id || paymentsLoadedPolicyRef.current === id) return;
+
+    paymentsLoadedPolicyRef.current = id;
+    setPaymentsLoading(true);
+    exe('RepoTransfer', {
+      operation: 'GET',
+      filter: `([Transfer].lifePolicyId = ${id} OR EXISTS (SELECT 1 FROM AllocationInstallment ai WHERE ai.allocationId = [Transfer].allocationId AND ai.lifePolicyId = ${id})) AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1 AND [Transfer].[isExternal] = 1`,
+      include: ['Allocation', 'Allocation.InstallmentPremiums', 'TransferWorkspace', 'IncomeType'],
+      noTracking: true
+    }).then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('Payments could not be loaded.'));
+      }
+      setPaymentRows(getRows(response));
+    }).catch(error => {
+      paymentsLoadedPolicyRef.current = null;
+      setPaymentRows([]);
+      message.error(error && error.message ? error.message : t('Payments could not be loaded.'));
+    }).finally(() => setPaymentsLoading(false));
+  }
+
+  function handleTabChange(tabKey) {
+    if (tabKey === 'payments' && selectedRow) {
+      loadPolicyPayments(selectedRow.policyId);
+    }
+    setActiveTab(tabKey);
   }
 
   const columns = [
@@ -918,7 +988,7 @@
     { title: t('Paid'), key: 'paid', width: 110, align: 'right', render: (_, installment) => renderMoney(firstNumber(installment, ['payed', 'paid'], 0)) },
     { title: t('Payment date'), key: 'paymentDate', width: 125, align: 'center', render: (_, installment) => formatDate(installment && (installment.payedDate || installment.paymentDate)) },
     { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 125, align: 'center', render: formatDate },
-    { title: t('Installment'), dataIndex: 'numberInYear', key: 'numberInYear', width: 100, align: 'center' },
+    { title: t('Installment Number'), dataIndex: 'numberInYear', key: 'numberInYear', width: 100, align: 'center' },
     { title: t('Contract year'), dataIndex: 'contractYear', key: 'contractYear', width: 120, align: 'center' }
   ];
   const generalData = selectedRow || {};
@@ -969,6 +1039,112 @@
   const detailAccountingDate = accountingInfo && accountingInfo.effectiveDate;
   const detailBeneficiaryName = entityName(detailBeneficiary) === '-' ? t('No Tiene') : entityName(detailBeneficiary);
   const detailCreditorName = entityName(detailCreditor) === '-' ? t('No Tiene') : entityName(detailCreditor);
+
+  function getPaymentMovementChildren(group) {
+    if (!group) return [];
+    if (Array.isArray(group.AllocationMovements)) return group.AllocationMovements;
+    if (Array.isArray(group.movements)) return group.movements;
+    if (Array.isArray(group.Movements)) return group.Movements;
+    return [];
+  }
+
+  function getPaymentAppliedInstallments(group) {
+    const values = [];
+    const appendInstallments = installments => {
+      if (Array.isArray(installments)) values.push(...installments);
+      else if (installments && typeof installments === 'object') values.push(installments);
+    };
+    [group].concat(getPaymentMovementChildren(group)).forEach(item => {
+      const allocations = [item && item.Allocation, item && item.allocation].filter(Boolean);
+      allocations.forEach(allocation => {
+        const installments = allocation.InstallmentPremiums || allocation.installmentPremiums || allocation.AllocationInstallments || allocation.allocationInstallments;
+        appendInstallments(installments);
+      });
+      const installments = item && (item.InstallmentPremiums || item.installmentPremiums || item.AllocationInstallments || item.allocationInstallments);
+      appendInstallments(installments);
+    });
+    return values.filter((value, index, items) => items.findIndex(item =>
+      (value && item && value.id && item.id === value.id) ||
+      (value && item && !value.id && !item.id && value.payPlanId === item.payPlanId && value.lifePolicyId === item.lifePolicyId)
+    ) === index);
+  }
+
+  function getPaymentReference(group, item) {
+    const reference = text(group && (group.reference || group.Reference)) || text(item && (item.reference || item.Reference));
+    const conceptValue = text(group && group.concept) || text(item && item.concept);
+    const concept = conceptValue
+      .replace(/^IW\b/, 'Pago de prima')
+      .replace(/Reversal of/g, 'Reversión de');
+    return [concept, reference].filter(Boolean).join(' - ') || '-';
+  }
+
+  const paymentGridRows = paymentRows.map((group, index) => {
+    const movementChildren = getPaymentMovementChildren(group);
+    const item = movementChildren.find(movement => Number(movement && movement.id) === Number(group && group.id))
+      || movementChildren.find(movement => movement && movement.isExternal === true)
+      || movementChildren[0]
+      || group
+      || {};
+    const installments = getPaymentAppliedInstallments(group);
+    const allocation = group && (group.Allocation || group.allocation);
+    const paymentAmount = number(group && group.amount) || number(item && item.amount) || installments.reduce((total, installment) => total + firstNumber(installment, ['moneyInAmount', 'amount', 'premiumAmount'], 0), 0);
+    const complementaryAmount = installments.reduce((total, installment) => total + firstNumber(installment, ['complementaryAmount', 'moneyComplementary', 'supplementaryAmount', 'supplementary'], 0), 0) || firstNumber(allocation, ['supplementaryAmount'], 0);
+    const workspace = group && (group.TransferWorkspace || group.transferWorkspace)
+      || allocation && (allocation.TransferWorkspace || allocation.transferWorkspace);
+    const paymentPolicy = detailPolicy.code || generalData.policy || '-';
+    const paymentProduct = detailPolicy.Product || detailPolicy.product || {};
+    const paymentLineCode = text(detailPolicy.lob || detailPolicy.lobCode || detailPolicy.lineCode || paymentProduct.lob || paymentProduct.lobCode || paymentProduct.line);
+    const paymentLineCatalog = lineOptions.find(option => text(option && option.value) === paymentLineCode);
+    const paymentLine = text(detailPolicy.lineName || detailPolicy.lobName || paymentLineCatalog && paymentLineCatalog.label || paymentProduct.lobName || paymentProduct.lineName || paymentProduct.name || paymentLineCode);
+    const directPayPlanIds = [group, item].concat(getPaymentMovementChildren(group)).map(value => Number(value && (value.payPlanId || value.PayPlanId))).filter(value => Number.isFinite(value) && value > 0);
+    const fallbackInstallments = directPayPlanIds.map(payPlanId => detailPolicy.PayPlan && detailPolicy.PayPlan.find(payPlan => Number(payPlan && payPlan.id) === payPlanId)).filter(Boolean);
+    const paymentInstallments = installments.length ? installments : fallbackInstallments;
+    const paymentInstallmentsWithPlan = paymentInstallments.map(installment => {
+      const payPlanId = Number(installment && (installment.payPlanId || installment.PayPlanId) || 0);
+      const payPlan = payPlanId > 0 && Array.isArray(detailPolicy.PayPlan)
+        ? detailPolicy.PayPlan.find(item => Number(item && item.id) === payPlanId)
+        : null;
+      return payPlan ? { ...payPlan, ...installment } : installment;
+    });
+    const paymentInstallmentNumbers = Array.from(new Set(
+      paymentInstallmentsWithPlan
+        .map(installment => installment.numberInYear || installment.NumberInYear || installment.number || installment.PayPlan && installment.PayPlan.numberInYear)
+        .filter(Boolean)
+        .map(value => String(value))
+    )).join(', ');
+    return {
+      key: `${item.id || group.id || 'payment'}-${index}`,
+      cashDate: workspace && (workspace.date || workspace.Date) || group.date || item.date,
+      currency: text(group.currency || item.currency || allocation && allocation.currency) || '-',
+      observations: getPaymentReference(group, item),
+      transferId: item.id || group.id || '-',
+      allocationId: allocation && allocation.id || group && group.allocationId || item && item.allocationId || '-',
+      line: paymentLine || '-',
+      policy: paymentPolicy,
+      installment: paymentInstallmentNumbers || '-',
+      paid: paymentAmount,
+      complementary: complementaryAmount,
+      cashier: text(workspace && workspace.user || group.user || item.user) || '-',
+      payer: entityName(detailHolder)
+    };
+  });
+
+  const paymentColumns = [
+    { title: t('Cash desk date'), dataIndex: 'cashDate', key: 'cashDate', width: 120, align: 'center', render: formatDate },
+    { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' },
+    { title: t('Observations'), dataIndex: 'observations', key: 'observations', width: 240, ellipsis: true },
+    { title: t('Transfer ID'), dataIndex: 'transferId', key: 'transferId', width: 110, align: 'center' },
+    { title: t('Allocation ID'), dataIndex: 'allocationId', key: 'allocationId', width: 110, align: 'center', render: renderAllocationLink },
+    { title: t('Line of business'), dataIndex: 'line', key: 'line', width: 170, ellipsis: true },
+    { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150, render: (value) => renderPolicyLink(value, detailPolicy.id || generalData.policyId) },
+    { title: t('Installment no.'), dataIndex: 'installment', key: 'installment', width: 110, align: 'center' },
+    { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 120, align: 'right', render: renderMoney },
+    { title: t('Supplementary premiums'), dataIndex: 'complementary', key: 'complementary', width: 160, align: 'right', render: renderMoney },
+    { title: t('Cashier'), dataIndex: 'cashier', key: 'cashier', width: 220, ellipsis: true },
+    { title: t('Payer'), dataIndex: 'payer', key: 'payer', width: 220, ellipsis: true, render: value => renderContactLink(detailHolder, value) }
+  ];
+  const paymentTotalPaid = paymentGridRows.reduce((total, row) => total + number(row.paid), 0);
+  const paymentTotalComplementary = paymentGridRows.reduce((total, row) => total + number(row.complementary), 0);
 
   const restructureFrequencyOptions = [
     { value: 'm', label: t('Monthly'), months: 1 },
@@ -1249,7 +1425,7 @@
     <div className="historical-billing-view">
       <Card size="small">
         <Spin spinning={loading || policyLoading}>
-        <Tabs className="historical-billing-tabs" activeKey={activeTab} onChange={setActiveTab} type="card">
+         <Tabs className="historical-billing-tabs" activeKey={activeTab} onChange={handleTabChange} type="card">
           <TabPane tab={<span><SearchTabIcon />{t('Search')}</span>} key="search">
             <div className="historical-billing-filter-panel">
               <div className="historical-billing-toolbar">
@@ -1485,6 +1661,38 @@
                     locale={{ emptyText: t('No installments found.') }}
                   />
                 </>
+              )}
+            </div>
+          </TabPane>
+          <TabPane tab={<span><PaymentTabIcon />{t('Payments')}</span>} key="payments" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its payments.')}</div>
+              ) : (
+                <Table
+                  className="historical-billing-table"
+                  rowKey="key"
+                  size="small"
+                  bordered
+                  loading={paymentsLoading}
+                  columns={paymentColumns}
+                  dataSource={paymentGridRows}
+                  summary={() => (
+                    <Table.Summary>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={8}>
+                          <strong>{t('Totals')}</strong> | {t('Payments')}: {paymentGridRows.length}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={8} align="right">{renderMoney(paymentTotalPaid)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right">{renderMoney(paymentTotalComplementary)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} colSpan={2}></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
+                  pagination={false}
+                  scroll={{ x: 1820, y: 'calc(100dvh - 310px)' }}
+                  locale={{ emptyText: t('No payments found.') }}
+                />
               )}
             </div>
           </TabPane>
