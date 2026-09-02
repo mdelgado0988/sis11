@@ -16,6 +16,8 @@
     Drawer,
     Form,
     Input,
+    InputNumber,
+    Modal,
     Row,
     Select,
     Space,
@@ -104,6 +106,14 @@
   const [accountingInfo, setAccountingInfo] = React.useState(null);
   const [policyLoading, setPolicyLoading] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState('search');
+  const [restructureModalOpen, setRestructureModalOpen] = React.useState(false);
+  const [restructureLoading, setRestructureLoading] = React.useState(false);
+  const [restructurePreviewRows, setRestructurePreviewRows] = React.useState([]);
+  const [restructurePreviewDirty, setRestructurePreviewDirty] = React.useState(false);
+  const [policyReloadToken, setPolicyReloadToken] = React.useState(0);
+  const [restructureForm] = Form.useForm();
+  const [endorsementForm] = Form.useForm();
+  const [endorsementModalOpen, setEndorsementModalOpen] = React.useState(false);
 
   React.useEffect(() => {
     loadCatalogs();
@@ -177,7 +187,7 @@
       setAccountingInfo(null);
       message.error(error && error.message ? error.message : t('The accounting status could not be loaded.'));
     });
-  }, [selectedRow ? selectedRow.policyId : 0]);
+  }, [selectedRow ? selectedRow.policyId : 0, policyReloadToken]);
 
   React.useEffect(() => {
     const styleId = 'historical-billing-view-style';
@@ -224,6 +234,43 @@
       .historical-billing-view .historical-billing-toolbar .ant-btn {
         border-radius: 6px;
         font-size: 13px;
+      }
+
+      .historical-billing-modal .historical-billing-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: #e6f7ff !important;
+        border: 1px solid #91caff !important;
+        border-radius: 0 !important;
+        padding: 4px !important;
+        margin-bottom: 4px;
+      }
+
+      .historical-billing-modal .historical-billing-toolbar .ant-btn {
+        border-radius: 6px;
+        font-size: 13px;
+      }
+
+      .historical-billing-modal .historical-billing-table {
+        border: 1px solid #cbd1d8;
+      }
+
+      .historical-billing-modal .historical-billing-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .historical-billing-modal .historical-billing-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
       }
 
       .historical-billing-view .historical-billing-table {
@@ -529,9 +576,10 @@
       const escaped = escapeSql(query);
       const numericId = isNumericId ? Number(query) : 0;
       const idFilter = numericId > 0 ? ` OR [id] = ${numericId}` : '';
+      const contactNameFilter = `(([isPerson] = 1 AND CONCAT_WS(' ', [name], [surname1]) LIKE N'${escaped}%') OR ([isPerson] = 0 AND [surname2] LIKE N'${escaped}%'))`;
       const filter = isNumericId && query.length < 3
         ? `(inactive=0) AND [id] = ${numericId}`
-        : `(inactive=0) AND (([name] LIKE N'%${escaped}%') OR ([surname1] LIKE N'%${escaped}%') OR ([surname2] LIKE N'%${escaped}%') OR ([cnp] LIKE N'%${escaped}%') OR ([nif] LIKE N'%${escaped}%')${idFilter})`;
+        : `(inactive=0) AND (${contactNameFilter} OR ([cnp] LIKE N'%${escaped}%') OR ([nif] LIKE N'%${escaped}%')${idFilter})`;
 
       setClientLoading(true);
       exe('GetContacts', { operation: 'GET', filter: filter, size: 15 })
@@ -915,6 +963,222 @@
   const detailBeneficiaryName = entityName(detailBeneficiary) === '-' ? t('No Tiene') : entityName(detailBeneficiary);
   const detailCreditorName = entityName(detailCreditor) === '-' ? t('No Tiene') : entityName(detailCreditor);
 
+  const restructureFrequencyOptions = [
+    { value: 'm', label: t('Monthly'), months: 1 },
+    { value: 'b', label: t('Bimonthly'), months: 2 },
+    { value: 't', label: t('Quarterly'), months: 3 },
+    { value: 's', label: t('Semiannual'), months: 6 },
+    { value: 'y', label: t('Annual'), months: 12 }
+  ];
+
+  function getRestructureFrequencyMonths(value) {
+    const option = restructureFrequencyOptions.find(item => item.value === text(value).toLowerCase());
+    return option ? option.months : 1;
+  }
+
+  function openRestructureModal() {
+    const currentFrequency = text(detailPolicy.periodicity).toLowerCase();
+    restructureForm.setFieldsValue({
+      newFrequency: restructureFrequencyOptions.some(item => item.value === currentFrequency) ? currentFrequency : 'm',
+      newInstallments: installmentRows.length || 1,
+      effectiveDate: typeof moment !== 'undefined' && detailPolicy.start ? moment(detailPolicy.start) : null,
+      startDate: typeof moment !== 'undefined' && detailPolicy.start ? moment(detailPolicy.start) : null,
+      description: ''
+    });
+    setRestructurePreviewRows([]);
+    setRestructurePreviewDirty(false);
+    setRestructureModalOpen(true);
+  }
+
+  function calculateRestructure(values) {
+    const currentRows = installmentRows.slice();
+    const desiredInstallments = Number(values && values.newInstallments);
+    const paidRows = currentRows.filter(row => number(row && row.payed) > 0);
+    const startDate = values && values.startDate;
+    const policyStart = detailPolicy.start && typeof moment !== 'undefined' ? moment(detailPolicy.start) : null;
+    const policyEnd = detailPolicy.end && typeof moment !== 'undefined' ? moment(detailPolicy.end) : null;
+    const frequencyMonths = getRestructureFrequencyMonths(values && values.newFrequency);
+
+    if (!desiredInstallments || desiredInstallments < 1 || desiredInstallments % 1 !== 0) {
+      throw new Error(t('The installment count must be a positive integer.'));
+    }
+    if (desiredInstallments <= paidRows.length) {
+      throw new Error(t('The number of installments must be greater than the paid installments.'));
+    }
+    if (!startDate || typeof startDate.isValid !== 'function' || !startDate.isValid()) {
+      throw new Error(t('The start date is required.'));
+    }
+    if (policyStart && startDate.isBefore(policyStart, 'day')) {
+      throw new Error(t('The start date cannot be earlier than the policy start date.'));
+    }
+    if (policyEnd && startDate.isAfter(policyEnd, 'day')) {
+      throw new Error(t('The start date cannot be later than the policy end date.'));
+    }
+
+    const pendingAmount = currentRows.reduce((total, row) => total + number(row && row.minimum) - number(row && row.payed), 0);
+    const remainingSlots = desiredInstallments - paidRows.length;
+    const baseCents = Math.max(0, Math.round(pendingAmount * 100));
+    const centsPerRow = Math.floor(baseCents / remainingSlots);
+    const remainder = baseCents - centsPerRow * remainingSlots;
+    const unpaidRows = currentRows.filter(row => number(row && row.payed) <= 0);
+     const lockedRows = paidRows.map(row => ({
+       ...row,
+       dueAmount: 0,
+       pendingAmount: 0,
+       pending: false,
+       edited: false,
+       PayPlanDetail: Array.isArray(row && row.PayPlanDetail)
+         ? row.PayPlanDetail.map(detail => ({ ...detail }))
+         : []
+     }));
+    const newRows = [];
+
+    for (let index = 0; index < remainingSlots; index += 1) {
+      const originalRow = unpaidRows[index] || null;
+      const sourceRow = originalRow || unpaidRows[unpaidRows.length - 1] || {};
+      const dueDate = startDate.clone().add(frequencyMonths * index, 'months');
+      const coveredUntil = dueDate.clone().add(frequencyMonths, 'months');
+      const amount = (centsPerRow + (index === remainingSlots - 1 ? remainder : 0)) / 100;
+      const edited = !!originalRow && (
+        String(sourceRow.dueDate || sourceRow.normalDueDate || '') !== String(dueDate.toISOString()) ||
+        number(sourceRow.minimum) !== amount ||
+        number(sourceRow.expected) !== amount
+      );
+
+      newRows.push({
+        ...sourceRow,
+        id: originalRow && originalRow.id != null ? originalRow.id : 0,
+        tempKey: `restructure-preview-${index + 1}`,
+        numberInYear: paidRows.length + index + 1,
+        minimum: amount,
+        expected: amount,
+        dueAmount: amount,
+        pendingAmount: amount,
+        payed: 0,
+        payedDate: null,
+        dueDate: dueDate.toISOString(),
+        normalDueDate: dueDate.toISOString(),
+        coveredUntil: coveredUntil.toISOString(),
+        pending: true,
+        final: index === remainingSlots - 1,
+        edited,
+        PayPlanDetail: Array.isArray(sourceRow.PayPlanDetail)
+          ? sourceRow.PayPlanDetail.map(detail => ({ ...detail }))
+          : []
+      });
+    }
+
+    setRestructurePreviewRows(lockedRows.concat(newRows));
+    setRestructurePreviewDirty(false);
+    message.success(t('Preview updated successfully'));
+  }
+
+  function openEndorsementModal() {
+    if (!restructurePreviewRows.length) {
+      message.warning(t('Calculate the new installments before executing the endorsement.'));
+      return;
+    }
+    if (restructurePreviewDirty) {
+      message.warning(t('Calculate the new installments again before executing the endorsement.'));
+      return;
+    }
+
+    restructureForm.validateFields(['newFrequency', 'newInstallments', 'startDate']).then(values => {
+      endorsementForm.setFieldsValue({
+        effectiveDate: values.startDate || (typeof moment !== 'undefined' && detailPolicy.start ? moment(detailPolicy.start) : null),
+        description: ''
+      });
+      setEndorsementModalOpen(true);
+    }).catch(() => {});
+  }
+
+  function getResponseId(response, fieldName) {
+    const first = getRows(response)[0] || {};
+    return number(response && response[fieldName]) || number(response && response.id) || number(first[fieldName]) || number(first.id);
+  }
+
+  function buildRestructureEffectiveDate(value) {
+    if (!value || typeof value.toDate !== 'function') return '';
+    const selectedDate = value.toDate();
+    const now = new Date();
+    const date = new Date(Date.UTC(
+      selectedDate.getUTCFullYear(),
+      selectedDate.getUTCMonth(),
+      selectedDate.getUTCDate(),
+      now.getUTCHours(),
+      now.getUTCMinutes(),
+      now.getUTCSeconds(),
+      now.getUTCMilliseconds()
+    ));
+    const pad = part => String(part).padStart(2, '0');
+    const milliseconds = String(date.getUTCMilliseconds()).padStart(3, '0');
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}.${milliseconds}0000`;
+  }
+
+  async function executeRestructure(values) {
+    if (!restructurePreviewRows.length) {
+      throw new Error(t('Calculate the new installments before executing the endorsement.'));
+    }
+    const effectiveDate = buildRestructureEffectiveDate(values && values.effectiveDate);
+    if (!effectiveDate || !values.startDate || !text(values && values.description)) {
+      throw new Error(t('The effective date and endorsement description are required.'));
+    }
+
+    const editedPayPlan = restructurePreviewRows.map(row => {
+      const cloned = {
+        ...row,
+        PayPlanDetail: Array.isArray(row && row.PayPlanDetail)
+          ? row.PayPlanDetail.map(detail => ({ ...detail }))
+          : []
+      };
+      delete cloned.tempKey;
+      return cloned;
+    });
+    const changeResponse = await exe('ChangePayPlan', {
+      policyId: detailPolicy.id || selectedRow.policyId,
+      effectiveDate: effectiveDate,
+      operation: 'ADD',
+      code: null,
+      note: text(values.description),
+      changeIdToBeAmended: null,
+      jEditedPayPlan: JSON.stringify(editedPayPlan),
+      Surcharges: []
+    });
+    if (!changeResponse || !changeResponse.ok) {
+      throw new Error(changeResponse && changeResponse.msg ? changeResponse.msg : t('The endorsement could not be created.'));
+    }
+
+    const changeId = getResponseId(changeResponse, 'changeId');
+    if (!(changeId > 0)) throw new Error(t('The endorsement change could not be determined.'));
+    const previousFrequency = escapeSql(detailPolicy.periodicity);
+    const newFrequency = escapeSql(values && values.newFrequency);
+    const currentPaymentMethod = escapeSql(detailPolicy.paymentMethodCode || detailPolicy.paymentMethod);
+    const changeFields = await exe('SetField', {
+      entity: 'Change',
+      entityId: changeId,
+      fieldValue: `newPaymentMethod='${currentPaymentMethod}',oldPaymentMethod='${currentPaymentMethod}',newFrequency='${newFrequency}',oldFrequency='${previousFrequency}'`
+    });
+    if (!changeFields || changeFields.ok === false) {
+      throw new Error(changeFields && changeFields.msg ? changeFields.msg : t('The endorsement fields could not be updated.'));
+    }
+    const changeEntity = await exe('LoadEntity', { entity: 'Change', fields: 'id,processId', filter: `id=${changeId}`, noTracking: true });
+    const processId = getResponseId(changeEntity, 'processId');
+    if (!(processId > 0)) throw new Error(t('The endorsement workflow process could not be determined.'));
+    const approval = await exe('GotoStep', { procesoId: processId, estado: 'APROVED' });
+    if (!approval || approval.ok === false) throw new Error(approval && approval.msg ? approval.msg : t('The endorsement workflow could not be approved.'));
+     const executeResponse = await exe('ExeChangePayPlan', { changeId: changeId, operation: 'EXECUTE', exeNow: true });
+     if (!executeResponse || !executeResponse.ok) throw new Error(executeResponse && executeResponse.msg ? executeResponse.msg : t('The endorsement could not be executed.'));
+
+     setRestructureModalOpen(false);
+     setEndorsementModalOpen(false);
+     setRestructurePreviewRows([]);
+     setRestructurePreviewDirty(false);
+     restructureForm.resetFields();
+     endorsementForm.resetFields();
+     setPolicyReloadToken(value => value + 1);
+    message.success(executeResponse.msg || t('Endorsement executed successfully'));
+  }
+
   return (
     <div className="historical-billing-view">
       <Card size="small">
@@ -1127,33 +1391,131 @@
               {!selectedRow ? (
                 <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its installments.')}</div>
               ) : (
-                <Table
-                  className="historical-billing-table"
-                  rowKey={(installment, index) => String(installment && installment.id || index)}
-                  size="small"
-                  bordered
-                  columns={installmentColumns}
-                  dataSource={installmentRows}
-                  summary={() => (
-                    <Table.Summary>
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell index={0} colSpan={2}><strong>{t('Totals')}</strong></Table.Summary.Cell>
-                        <Table.Summary.Cell index={2} align="right">{renderMoney(totalInstallmentDue)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={3} align="right">{renderMoney(totalInstallmentPaid)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={4} colSpan={2}>{t('Total installments')}: {installmentRows.length}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={6}></Table.Summary.Cell>
-                        <Table.Summary.Cell index={7}></Table.Summary.Cell>
-                      </Table.Summary.Row>
-                    </Table.Summary>
-                  )}
-                  pagination={false}
-                  scroll={{ x: 980, y: 'calc(100dvh - 310px)' }}
-                  locale={{ emptyText: t('No installments found.') }}
-                />
+                <>
+                  <div className="historical-billing-toolbar">
+                    <Button type="primary" onClick={openRestructureModal}>{t('Restructure installments')}</Button>
+                  </div>
+                  <Table
+                    className="historical-billing-table"
+                    rowKey={(installment, index) => String(installment && installment.id || index)}
+                    size="small"
+                    bordered
+                    columns={installmentColumns}
+                    dataSource={installmentRows}
+                    summary={() => (
+                      <Table.Summary>
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell index={0} colSpan={2}><strong>{t('Totals')}</strong></Table.Summary.Cell>
+                          <Table.Summary.Cell index={2} align="right">{renderMoney(totalInstallmentDue)}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={3} align="right">{renderMoney(totalInstallmentPaid)}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={4} colSpan={2}>{t('Total installments')}: {installmentRows.length}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={6}></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7}></Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    )}
+                    pagination={false}
+                    scroll={{ x: 980, y: 'calc(100dvh - 310px)' }}
+                    locale={{ emptyText: t('No installments found.') }}
+                  />
+                </>
               )}
             </div>
           </TabPane>
         </Tabs>
+        <Modal
+          className="historical-billing-modal"
+          title={t('Restructure installments')}
+          open={restructureModalOpen}
+          onCancel={() => setRestructureModalOpen(false)}
+          footer={null}
+          width="49vw"
+          destroyOnClose
+          bodyStyle={{ padding: 12, maxHeight: '68vh', overflowY: 'auto' }}
+        >
+          <Spin spinning={restructureLoading}>
+            <Form
+              form={restructureForm}
+              layout="vertical"
+              onValuesChange={() => setRestructurePreviewDirty(true)}
+            >
+              <div className="historical-billing-toolbar">
+                <Button type="primary" htmlType="button" onClick={() => restructureForm.validateFields(['newFrequency', 'newInstallments', 'startDate']).then(calculateRestructure).catch(() => {})}>
+                  {t('Calculate installments')}
+                </Button>
+                <Button type="primary" htmlType="button" onClick={openEndorsementModal} loading={restructureLoading}>
+                  {t('Execute endorsement')}
+                </Button>
+              </div>
+              <Row gutter={12}>
+                <Col xs={24} md={6}>
+                  <Form.Item label={t('New payment frequency')} name="newFrequency" rules={[{ required: true, message: t('Select the new payment frequency.') }]}>
+                    <Select options={restructureFrequencyOptions} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={6}>
+                  <Form.Item label={t('Number of installments')} name="newInstallments" rules={[{ required: true, message: t('Enter the number of installments.') }]}>
+                    <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={6}>
+                  <Form.Item label={t('Start date')} name="startDate" rules={[{ required: true, message: t('Select the start date.') }]}>
+                    <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Table
+                className="historical-billing-table"
+                size="small"
+                bordered
+                pagination={false}
+                rowKey={(row, index) => String(row && row.id ? `${row.id}-${index}` : index)}
+                dataSource={restructurePreviewRows}
+                columns={[
+                  { title: t('Installment'), dataIndex: 'numberInYear', key: 'numberInYear', align: 'center' },
+                  { title: t('Concept'), dataIndex: 'concept', key: 'concept' },
+                  { title: t('Amount due'), dataIndex: 'minimum', key: 'minimum', align: 'right', render: renderMoney },
+                  { title: t('Paid'), dataIndex: 'payed', key: 'payed', align: 'right', render: renderMoney },
+                  { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', align: 'center', render: formatDate },
+                  { title: t('Status'), key: 'status', align: 'center', render: (_, row) => number(row && row.payed) > 0 ? t('Paid') : t('Pending') }
+                ]}
+                scroll={{ x: 760, y: 360 }}
+                locale={{ emptyText: t('Calculate the new installments to preview them.') }}
+              />
+            </Form>
+          </Spin>
+        </Modal>
+        <Modal
+          className="historical-billing-modal"
+          title={t('Execute endorsement')}
+          open={endorsementModalOpen}
+          onCancel={() => setEndorsementModalOpen(false)}
+          footer={null}
+          width="520px"
+          destroyOnClose
+          bodyStyle={{ padding: 12 }}
+        >
+          <Form
+            form={endorsementForm}
+            layout="vertical"
+            onFinish={values => {
+              setRestructureLoading(true);
+              executeRestructure({ ...restructureForm.getFieldsValue(true), ...values })
+                .catch(error => message.error(error && error.message ? error.message : t('The endorsement could not be executed.')))
+                .finally(() => setRestructureLoading(false));
+            }}
+          >
+            <Form.Item label={t('Endorsement effective date')} name="effectiveDate" rules={[{ required: true, message: t('Select the endorsement effective date.') }]}>
+              <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label={t('Endorsement description')} name="description" rules={[{ required: true, message: t('Enter an endorsement description.') }]}>
+              <Input.TextArea rows={4} />
+            </Form.Item>
+            <div className="historical-billing-toolbar" style={{ justifyContent: 'flex-end' }}>
+              <Button type="primary" htmlType="submit" loading={restructureLoading}>{t('Execute endorsement')}</Button>
+            </div>
+          </Form>
+        </Modal>
         </Spin>
       </Card>
     </div>

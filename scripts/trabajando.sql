@@ -12,9 +12,9 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 1
-and t.cplan = 'BPVC' 
-and t.cendoso = 37
+where t.cramo = 81
+--and t.cplan = 'BPVC' 
+and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
 AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
@@ -156,3 +156,13 @@ INNER JOIn maplanes pl on pl.cramo = mapla.cramo and pl.cplan = mapla.cplan
 WHERE  mapla.cplan= CASE (mapla.cramo) WHEN 81 THEN REP.cplan WHEN 82 THEN REP.cplan WHEN 83 THEN REP.cplan WHEN 84 THEN REP.cplan END
 and   (mapla.bimprime = 1)
 AND rep.itipo='GEN'
+
+select c.cramo lobCode, c.cplan productCode, rtrim(pl.xplan) [name], rtrim(mc.xdescripcion_l) [name]
+, c.ccoberdepe [Cobertura Principal]
+, 'No' isCoverage
+, 0 cessionCode
+, c.ccobertura coverageCode
+from maplancob c
+inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
+inner join macoberturas mc on mc.cramo = c.cramo and mc.ccobertura = c.ccobertura
+WHERE c.cramo IN (81,82,83,84)
