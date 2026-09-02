@@ -133,6 +133,7 @@
   const [collectionMethodChanging, setCollectionMethodChanging] = React.useState(false);
   const [collectionMethodDynamicForm, setCollectionMethodDynamicForm] = React.useState(null);
   const [paymentBankNames, setPaymentBankNames] = React.useState({});
+  const [collectionCutoffUpdating, setCollectionCutoffUpdating] = React.useState(false);
 
   React.useEffect(() => {
     loadCatalogs();
@@ -666,6 +667,19 @@
       txtNoTarjeta: t('Card number')
     };
     return labels[fieldName] || fieldName;
+  }
+
+  function getCollectionCutoffObject() {
+    return (Array.isArray(detailPolicy.InsuredObjects)
+      ? detailPolicy.InsuredObjects
+      : (Array.isArray(detailPolicy.insuredObjects) ? detailPolicy.insuredObjects : []))
+      .find(item => getInsuredObjectDefinitionCode(item) === 'DTFechaCorte') || null;
+  }
+
+  function getCollectionCutoffObjectValue(insuredObject) {
+    const values = parseInsuredObjectValues(insuredObject);
+    const fieldName = Object.keys(values).find(name => /corte|cutoff/i.test(name)) || Object.keys(values)[0];
+    return fieldName ? text(values[fieldName] && values[fieldName].value) : '';
   }
 
   function isInsuredObjectBankField(fieldName, fieldLabel) {
@@ -1302,9 +1316,109 @@
   const collectionMethodOption = collectionPaymentMethodOptions.find(item => text(item && item.value) === collectionMethodCode);
   const collectionMethod = text(collectionMethodOption && collectionMethodOption.label || detailPolicy.collectionMethodName || detailPolicy.paymentMethodName || collectionMethodCode) || '-';
   React.useEffect(() => {
-    const value = text(detailPolicy.collectionCutoff || detailPolicy.cutoffDate || detailPolicy.cutoff);
+    const cutoffObject = getCollectionCutoffObject();
+    const value = getCollectionCutoffObjectValue(cutoffObject)
+      || text(detailPolicy.collectionCutoff || detailPolicy.cutoffDate || detailPolicy.cutoff);
     setCollectionCutoffValue(['1', '2', '3', '4', '5'].includes(value) ? value : undefined);
   }, [policyInfo]);
+
+  async function updateCollectionCutoffObject() {
+    const policyId = Number(detailPolicy.id || selectedRow && selectedRow.policyId) || 0;
+    if (!policyId) {
+      message.error(t('Select a policy before updating the collection cutoff.'));
+      return;
+    }
+
+    const value = text(collectionCutoffValue);
+    const existingObjectFromPolicy = getCollectionCutoffObject();
+    setCollectionCutoffUpdating(true);
+
+    try {
+      const definitionResponse = await exe('LoadEntities', {
+        entity: 'ObjectDefinition',
+        filter: "code = 'DTFechaCorte'",
+        include: ['Form']
+      });
+      if (!definitionResponse || definitionResponse.ok === false) {
+        throw new Error(definitionResponse && definitionResponse.msg
+          ? definitionResponse.msg
+          : t('The collection cutoff object definition could not be loaded.'));
+      }
+
+      const objectDefinition = getRows(definitionResponse)[0];
+      if (!objectDefinition || number(objectDefinition.id) <= 0) {
+        throw new Error(t('The DTFechaCorte object definition was not found.'));
+      }
+      const existingObject = existingObjectFromPolicy || (Array.isArray(detailPolicy.InsuredObjects)
+        ? detailPolicy.InsuredObjects
+        : (Array.isArray(detailPolicy.insuredObjects) ? detailPolicy.insuredObjects : []))
+        .find(item => number(item && item.objectDefinitionId) === number(objectDefinition.id)) || null;
+      if (!existingObject && !value) return;
+
+      let form = objectDefinition.Form || objectDefinition.form || null;
+      if (!form && number(objectDefinition.formId) > 0) {
+        const formResponse = await exe('GetForms', { filter: `id=${number(objectDefinition.formId)}` });
+        form = getRows(formResponse)[0] || null;
+      }
+
+      let definition = form && form.json ? form.json : (existingObject && existingObject.jValues);
+      if (typeof definition === 'string') {
+        try {
+          definition = JSON.parse(definition);
+        } catch (error) {
+          definition = [];
+        }
+      }
+      if (!Array.isArray(definition)) definition = [];
+
+      let cutoffField = definition.find(field => field && /corte|cutoff/i.test(`${field.name} ${field.label}`));
+      const cutoffFieldName = cutoffField && cutoffField.name ? cutoffField.name : 'fechaCorte';
+      if (!cutoffField) {
+        cutoffField = { type: 'select', name: cutoffFieldName, label: t('Collection cutoff'), userData: [value] };
+        definition.push(cutoffField);
+      } else {
+        definition = definition.map(field => field && field.name === cutoffFieldName
+          ? { ...field, userData: [value] }
+          : field);
+      }
+
+      const entity = existingObject
+        ? { ...existingObject, jValues: JSON.stringify(definition) }
+        : {
+          id: 0,
+          objectDefinitionId: number(objectDefinition.id),
+          lifePolicyId: policyId,
+          jValues: JSON.stringify(definition),
+          jMap: null,
+          jFileUpload: null,
+          alias: null,
+          jDetailList: null,
+          ObjectDefinition: null,
+          userData: JSON.stringify({ [cutoffFieldName]: value })
+        };
+
+      if (existingObject && existingObject.userData && typeof existingObject.userData === 'object') {
+        entity.userData = { ...existingObject.userData, [cutoffFieldName]: value };
+      }
+
+      const response = await exe('RepoInsuredObject', {
+        operation: existingObject ? 'UPDATE' : 'ADD',
+        entity
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg
+          ? response.msg
+          : t('The collection cutoff could not be updated.'));
+      }
+
+      setPolicyReloadToken(current => current + 1);
+      message.success(t('Collection cutoff updated successfully.'));
+    } catch (error) {
+      message.error(error && error.message ? error.message : t('The collection cutoff could not be updated.'));
+    } finally {
+      setCollectionCutoffUpdating(false);
+    }
+  }
   const detailAnniversary = detailPolicy.Anniversaries && detailPolicy.Anniversaries[0] ? detailPolicy.Anniversaries[0] : {};
   const detailPolicyVersion = detailPolicy.policyVersion === null || detailPolicy.policyVersion === undefined
     ? 0
@@ -2376,18 +2490,24 @@
                         <Button type="link" size="small" onClick={openCollectionMethodModal}>{t('Change')}</Button>
                       </div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Collection cutoff')}</div><div className="historical-billing-data-value">
-                        <Select
-                          value={collectionCutoffValue}
-                          placeholder={t('Select...')}
-                          onChange={setCollectionCutoffValue}
-                          style={{ minWidth: 160 }}
-                        >
-                          <Option value="1">1</Option>
-                          <Option value="2">2</Option>
-                          <Option value="3">3</Option>
-                          <Option value="4">4</Option>
-                          <Option value="5">5</Option>
-                        </Select>
+                         <Space>
+                           <Select
+                             value={collectionCutoffValue}
+                             placeholder={t('Select...')}
+                             allowClear
+                             onChange={setCollectionCutoffValue}
+                             style={{ minWidth: 160 }}
+                           >
+                             <Option value="1">1</Option>
+                             <Option value="2">2</Option>
+                             <Option value="3">3</Option>
+                             <Option value="4">4</Option>
+                             <Option value="5">5</Option>
+                           </Select>
+                           <Button type="primary" size="small" loading={collectionCutoffUpdating} onClick={updateCollectionCutoffObject}>
+                             {t('Update')}
+                           </Button>
+                         </Space>
                       </div></div>
                     </div>
                   </Col>
