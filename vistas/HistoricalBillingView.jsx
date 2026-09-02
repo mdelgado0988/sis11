@@ -134,6 +134,7 @@
   const [collectionMethodDynamicForm, setCollectionMethodDynamicForm] = React.useState(null);
   const [paymentBankNames, setPaymentBankNames] = React.useState({});
   const [collectionCutoffUpdating, setCollectionCutoffUpdating] = React.useState(false);
+  const [payerNationalityName, setPayerNationalityName] = React.useState('');
 
   React.useEffect(() => {
     loadCatalogs();
@@ -1306,7 +1307,35 @@
   const collectionPayerRelationship = Number(mainInsuredRelationshipCode) === 0
     ? t('Principal')
     : text(relationshipCatalogOption && relationshipCatalogOption.label || mainInsuredRelationshipName || mainInsuredRelationshipCode) || '-';
-  const collectionPayerNationality = entityField(detailHolder, ['nationality', 'nationalityName', 'country']) || '-';
+  const collectionPayerNationalityCode = entityField(detailHolder, ['nationality']);
+  React.useEffect(() => {
+    let cancelled = false;
+    const countryCode = text(collectionPayerNationalityCode);
+    if (!countryCode) {
+      setPayerNationalityName('');
+      return () => { cancelled = true; };
+    }
+
+    const numericCode = /^\d+$/.test(countryCode) ? Number(countryCode) : 0;
+    exe('RepoCountryCatalog', {
+      operation: 'GET',
+      filter: numericCode > 0
+        ? `(code = '${escapeSql(countryCode)}' OR id = ${numericCode})`
+        : `code = '${escapeSql(countryCode)}'`
+    }).then(response => {
+      if (cancelled) return;
+      const country = getRows(response)[0];
+      setPayerNationalityName(text(country && country.name));
+    }).catch(error => {
+      if (!cancelled) {
+        setPayerNationalityName('');
+        console.error('Error loading payer nationality:', error);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [collectionPayerNationalityCode]);
+  const collectionPayerNationality = payerNationalityName || collectionPayerNationalityCode || '-';
   const collectionPayerPhone = entityField(detailHolder, ['phone', 'telephone', 'phoneNumber']) || '-';
   const collectionPayerEmail = entityField(detailHolder, ['email', 'emailAddress']) || '-';
   const collectionZone = text(detailPolicy.collectionZone || detailPolicy.collectionZoneName || detailPolicy.collectionZoneCode || detailPolicy.zone) || '-';
