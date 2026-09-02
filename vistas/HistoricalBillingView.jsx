@@ -132,6 +132,7 @@
   const [collectionMethodModalOpen, setCollectionMethodModalOpen] = React.useState(false);
   const [collectionMethodChanging, setCollectionMethodChanging] = React.useState(false);
   const [collectionMethodDynamicForm, setCollectionMethodDynamicForm] = React.useState(null);
+  const [paymentBankNames, setPaymentBankNames] = React.useState({});
 
   React.useEffect(() => {
     loadCatalogs();
@@ -157,7 +158,7 @@
     const policyRequest = exe('RepoLifePolicy', {
       operation: 'GET',
       filter: `id=${policyId}`,
-      include: ['PayPlan', 'Product', 'Branch', 'Holder', 'Payer', 'Insureds', 'Coverages', 'Commissions', 'Cessions', 'Anniversaries'],
+       include: ['PayPlan', 'Product', 'Branch', 'Holder', 'Payer', 'Insureds', 'InsuredObjects', 'InsuredObjects.ObjectDefinition', 'Coverages', 'Commissions', 'Cessions', 'Anniversaries'],
       noTracking: true
     });
     const renewalRequest = exe('LoadEntities', {
@@ -588,6 +589,87 @@
     const parts = fixed.split('.');
     parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return `${parts[0]}.${parts[1]}`;
+  }
+
+  function parseInsuredObjectValues(insuredObject) {
+    if (!insuredObject) return {};
+
+    const storedValues = insuredObject.userData && typeof insuredObject.userData === 'object' && !Array.isArray(insuredObject.userData)
+      ? insuredObject.userData
+      : {};
+
+    let fields = insuredObject.jValues;
+    if (typeof fields === 'string') {
+      try {
+        fields = JSON.parse(fields);
+      } catch (error) {
+        fields = [];
+      }
+    }
+    if (!Array.isArray(fields)) {
+      return Object.keys(storedValues).reduce((values, fieldName) => {
+        const value = storedValues[fieldName];
+        if (value !== null && value !== undefined && String(value).trim() !== '') {
+          values[fieldName] = {
+            label: getInsuredObjectFieldLabel(fieldName),
+            value,
+            displayValue: value
+          };
+        }
+        return values;
+      }, {});
+    }
+
+    return fields.reduce((values, field) => {
+      if (!field || !field.name) return values;
+      const storedValue = Object.prototype.hasOwnProperty.call(storedValues, field.name)
+        ? storedValues[field.name]
+        : field.userData;
+      const userData = Array.isArray(storedValue) ? storedValue : [storedValue];
+      const value = userData.length > 1 ? userData.join(', ') : userData[0];
+      if (value !== null && value !== undefined && String(value).trim() !== '') {
+        const selectedOption = Array.isArray(field.values)
+          ? field.values.find(option => userData.some(item => String(item) === String(option && option.value)))
+          : null;
+        values[field.name] = {
+          label: text(field.label) || getInsuredObjectFieldLabel(field.name),
+          value,
+          displayValue: selectedOption && selectedOption.label ? selectedOption.label : value
+        };
+      }
+      return values;
+    }, {});
+  }
+
+  function getInsuredObjectDefinitionCode(insuredObject) {
+    return text(insuredObject && insuredObject.ObjectDefinition && insuredObject.ObjectDefinition.code)
+      || text(insuredObject && insuredObject.objectDefinitionCode);
+  }
+
+  function getInsuredObjectDefinitionLabel(code) {
+    const labels = {
+      DTCheque: t('Cheque information'),
+      DTTarjeta: t('Credit card information'),
+      DTACH: t('ACH information')
+    };
+    return labels[code] || code;
+  }
+
+  function getInsuredObjectFieldLabel(fieldName) {
+    const labels = {
+      txtNoCheque: t('Check number'),
+      txtNoCuenta: t('Account number'),
+      txtNoCuentaACH: t('Account number'),
+      txtRutaACH: t('Bank route'),
+      cmbBancoACH: t('Bank'),
+      txtTarjeta: t('Card number'),
+      txtNoTarjeta: t('Card number')
+    };
+    return labels[fieldName] || fieldName;
+  }
+
+  function isInsuredObjectBankField(fieldName, fieldLabel) {
+    return /banco|bank/i.test(`${text(fieldName)} ${text(fieldLabel)}`);
   }
 
   function renderMoney(value, extraClass) {
@@ -1130,6 +1212,60 @@
   const totalInstallmentDue = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['minimum', 'expected'], 0), 0);
   const totalInstallmentPaid = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['payed', 'paid'], 0), 0);
   const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
+  const collectionPaymentInsuredObjects = (Array.isArray(detailPolicy.InsuredObjects)
+    ? detailPolicy.InsuredObjects
+    : (Array.isArray(detailPolicy.insuredObjects) ? detailPolicy.insuredObjects : []))
+    .filter(item => ['DTCheque', 'DTTarjeta', 'DTACH'].includes(getInsuredObjectDefinitionCode(item)));
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const bankCodes = [];
+    collectionPaymentInsuredObjects.forEach(insuredObject => {
+      const values = parseInsuredObjectValues(insuredObject);
+      Object.keys(values).forEach(fieldName => {
+        const field = values[fieldName];
+        const bankCode = text(field && field.value);
+        if (isInsuredObjectBankField(fieldName, field && field.label)
+          && bankCode && bankCodes.indexOf(bankCode) < 0) {
+          bankCodes.push(bankCode);
+        }
+      });
+    });
+
+    if (!bankCodes.length) {
+      setPaymentBankNames({});
+      return () => { cancelled = true; };
+    }
+
+    Promise.all(bankCodes.map(function (bankCode) {
+      const contactId = Number(bankCode);
+      if (!Number.isInteger(contactId) || contactId <= 0) return Promise.resolve([bankCode, '']);
+
+      return exe('LoadEntity', {
+        entity: 'Contact',
+        fields: 'id,name,middlename,surname1,surname2',
+        filter: `id = ${contactId}`,
+        noTracking: true
+      }).then(function (response) {
+        const contact = getRows(response)[0];
+        return [bankCode, contact ? entityName(contact) : ''];
+      });
+    })).then(function (entries) {
+      if (!cancelled) {
+        const names = {};
+        entries.forEach(function (entry) { names[entry[0]] = entry[1]; });
+        setPaymentBankNames(names);
+      }
+    }).catch(function (error) {
+      if (!cancelled) {
+        setPaymentBankNames({});
+        console.error('Error loading payment method bank contacts:', error);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [policyInfo]);
+
   const detailInsured = firstEntity(detailPolicy, ['Insureds', 'Insured', 'insured']);
   const detailBeneficiary = detailInsured;
   const detailCreditor = firstEntity(detailPolicy, ['CessionBeneficiary', 'cessionBeneficiary', 'Creditor', 'creditor']);
@@ -1668,6 +1804,129 @@
       });
   }
 
+  function getCollectionMethodObjectDefinitionCode(methodCode) {
+    const option = collectionPaymentMethodOptions.find(item => item && text(item.value) === text(methodCode));
+    const identity = `${text(methodCode)} ${text(option && option.label)}`
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+
+    if (identity.includes('ACH')) return 'DTACH';
+    if (identity.includes('CHEQUE') || identity === 'CH') return 'DTCheque';
+    if (identity.includes('TARJETA') || identity === 'TCD') return 'DTTarjeta';
+    return null;
+  }
+
+  function getDynamicCollectionMethodJson(form) {
+    if (!form) return null;
+
+    let definition = form.json;
+    if (typeof definition === 'string') {
+      try {
+        definition = JSON.parse(definition);
+      } catch (error) {
+        return null;
+      }
+    }
+    if (!Array.isArray(definition)) return null;
+
+    const container = document.getElementById('historical-billing-collection-method-form');
+    if (!container) return JSON.stringify(definition);
+
+    const values = {};
+    container.querySelectorAll('[name]').forEach(control => {
+      const name = control.getAttribute('name');
+      if (!name) return;
+      if (control.type === 'checkbox') values[name] = Boolean(control.checked);
+      else if (control.type === 'radio') {
+        if (control.checked) values[name] = control.value;
+      } else values[name] = control.value;
+    });
+
+    const updatedDefinition = definition.map(field => {
+      if (!field || !field.name || !Object.prototype.hasOwnProperty.call(values, field.name)) return field;
+      const value = values[field.name];
+      return {
+        ...field,
+        userData: Array.isArray(value) ? value : [value === null || value === undefined ? '' : String(value)]
+      };
+    });
+
+    return JSON.stringify(updatedDefinition);
+  }
+
+  async function syncCollectionMethodInsuredObject(policyId, methodCode, methodFormId) {
+    const newDefinitionCode = getCollectionMethodObjectDefinitionCode(methodCode);
+    const previousMethod = text(detailPolicy.paymentMethodCode || detailPolicy.paymentMethod);
+    if (text(previousMethod).toUpperCase() === text(methodCode).toUpperCase()) return;
+
+    const definitionsResponse = await exe('LoadEntities', {
+      entity: 'ObjectDefinition',
+      filter: "code in ('DTCheque', 'DTTarjeta', 'DTACH')"
+    });
+    if (!definitionsResponse || definitionsResponse.ok === false) {
+      throw new Error(definitionsResponse && definitionsResponse.msg
+        ? definitionsResponse.msg
+        : t('The payment method object definitions could not be loaded.'));
+    }
+
+    const definitions = getRows(definitionsResponse);
+    const definitionByCode = definitions.reduce((result, item) => {
+      if (item && item.code) result[item.code] = item;
+      return result;
+    }, {});
+    const definitionIds = definitions.map(item => number(item && item.id)).filter(id => id > 0);
+
+    if (!definitionIds.length) {
+      throw new Error(t('The payment method object definitions were not found.'));
+    }
+
+    const deleteResponse = await exe('DoQuery', {
+      sql: `DELETE FROM InsuredObject WHERE lifePolicyId = ${number(policyId)} AND objectDefinitionId IN (${definitionIds.join(',')})`
+    });
+    if (!deleteResponse || deleteResponse.ok === false) {
+      throw new Error(deleteResponse && deleteResponse.msg
+        ? deleteResponse.msg
+        : t('The previous payment method insured objects could not be removed.'));
+    }
+
+    if (!newDefinitionCode) return;
+
+    const objectDefinition = definitionByCode[newDefinitionCode];
+    if (!objectDefinition || number(objectDefinition.id) <= 0) {
+      throw new Error(t('The selected payment method object definition was not found.'));
+    }
+
+    const dynamicForm = collectionMethodDynamicForm && number(collectionMethodDynamicForm.formId) === number(methodFormId)
+      ? collectionMethodDynamicForm.form
+      : null;
+    const jValues = getDynamicCollectionMethodJson(dynamicForm);
+    if (!jValues) {
+      throw new Error(t('The selected payment method form is not available.'));
+    }
+
+    const addResponse = await exe('RepoInsuredObject', {
+      operation: 'ADD',
+      entity: {
+        id: 0,
+        objectDefinitionId: number(objectDefinition.id),
+        lifePolicyId: number(policyId),
+        jValues,
+        jMap: null,
+        jFileUpload: null,
+        alias: null,
+        jDetailList: null,
+        ObjectDefinition: null,
+        userData: JSON.stringify([])
+      }
+    });
+    if (!addResponse || addResponse.ok === false) {
+      throw new Error(addResponse && addResponse.msg
+        ? addResponse.msg
+        : t('The selected payment method insured object could not be created.'));
+    }
+  }
+
   async function executeCollectionMethodChange(values) {
     const policyId = Number(detailPolicy.id || selectedRow && selectedRow.policyId) || 0;
     if (!policyId) throw new Error(t('Select a policy before changing the collection method.'));
@@ -1700,6 +1959,7 @@
       if (!approval || !approval.ok) throw new Error(approval && approval.msg ? approval.msg : t('The endorsement workflow could not be approved.'));
       const executeResponse = await exe('ExeChangePaymentMethod', { changeId: changeId, operation: 'EXECUTE', exeNow: true });
       if (!executeResponse || !executeResponse.ok) throw new Error(executeResponse && executeResponse.msg ? executeResponse.msg : t('The collection method could not be changed.'));
+      await syncCollectionMethodInsuredObject(policyId, newPaymentMethod, getCollectionMethodFormId(newPaymentMethod));
       setCollectionMethodModalOpen(false);
       collectionMethodForm.resetFields();
       setPolicyReloadToken(value => value + 1);
@@ -1729,6 +1989,12 @@
       }
     }
     if (!Array.isArray(formData)) return undefined;
+
+    const selectedMethod = collectionMethodForm.getFieldValue('newPaymentMethod');
+    const isCreditCardForm = getCollectionMethodObjectDefinitionCode(selectedMethod) === 'DTTarjeta';
+    if (isCreditCardForm) {
+      formData = formData.filter(field => field && field.name !== 'hiddenTarjeta');
+    }
 
     container.innerHTML = '';
     $(container).formRender({ formData });
@@ -2064,9 +2330,41 @@
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer name')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerName || '-')}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer nationality')}</div><div className="historical-billing-data-value">{collectionPayerNationality}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer phone')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerPhone)}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer email')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerEmail)}</div></div>
-                    </div>
-                  </Col>
+                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Payer email')}</div><div className="historical-billing-data-value">{renderCopyableText(collectionPayerEmail)}</div></div>
+                     </div>
+                     {collectionPaymentInsuredObjects.length > 0 && (
+                       <div className="historical-billing-data-card">
+                         <div className="historical-billing-section-title">{t('Payment method information')}</div>
+                         {collectionPaymentInsuredObjects.map((insuredObject, index) => {
+                           const code = getInsuredObjectDefinitionCode(insuredObject);
+                           const values = parseInsuredObjectValues(insuredObject);
+                           return (
+                             <div key={`${code}-${insuredObject.id || index}`}>
+                               <div className="historical-billing-data-row">
+                                 <div className="historical-billing-data-label">{t('Payment method')}</div>
+                                 <div className="historical-billing-data-value">{getInsuredObjectDefinitionLabel(code)}</div>
+                               </div>
+                                {Object.keys(values)
+                                  .filter(fieldName => !(code === 'DTTarjeta' && fieldName === 'hiddenTarjeta'))
+                                  .map(fieldName => {
+                                  const field = values[fieldName];
+                                  const rawValue = text(field && field.value);
+                                  const bankName = isInsuredObjectBankField(fieldName, field && field.label)
+                                    ? text(paymentBankNames[rawValue])
+                                    : '';
+                                  return (
+                                    <div className="historical-billing-data-row" key={`${code}-${fieldName}`}>
+                                      <div className="historical-billing-data-label">{field.label}</div>
+                                      <div className="historical-billing-data-value">{bankName || text(field.displayValue) || rawValue || '-'}</div>
+                                    </div>
+                                  );
+                                  })}
+                             </div>
+                           );
+                         })}
+                       </div>
+                     )}
+                   </Col>
                   <Col xs={24} lg={12}>
                     <div className="historical-billing-data-card">
                       <div className="historical-billing-section-title">{t('Collection information')}</div>
