@@ -15,6 +15,10 @@ let elementId = 0;
 let policy;
 let configCobtar;
 let avancesProyecto = [];
+let productCoveragesFianza = [];
+let configCoveragesFianza = [];
+let coberturasSeleccionadasFianza = [];
+let polizaConfirmadaFianza = false;
 
 $("#rut").css({
   backgroundColor: "#f5f5f5",
@@ -957,7 +961,300 @@ function setDefaultCobtar(){
     if($("#hiddenCobtar").val() === ''){
         const data = construirCobtar("#tab2");
         $("#hiddenCobtar").val(JSON.stringify(data));
-    }    
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Gestión de coberturas de la póliza y resumen de coberturas
+////////////////////////////////////////////////////////////////////////////////
+
+function escapeSqlFianza(value) {
+    return String(value ?? '').replace(/'/g, "''");
+}
+
+function formatMoneyFianza(value) {
+    const number = Number(value || 0);
+    return number.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+async function setProductCoveragesFianza() {
+    try {
+        const productFilter = policy?.lob
+            ? `lobCode = '${escapeSqlFianza(policy.lob)}' AND code = '${escapeSqlFianza(policy.productCode)}'`
+            : `code = '${escapeSqlFianza(policy?.productCode)}'`;
+
+        const productResult = await me.exe('RepoProduct', {
+            operation: 'GET',
+            filter: productFilter
+        });
+
+        const product = productResult.outData?.[0];
+        const productConfig = product?.configJson ? JSON.parse(product.configJson) : {};
+        const productCoverages = Array.isArray(productConfig.Coverages)
+            ? productConfig.Coverages
+            : [];
+
+        const tableResult = await me.exe('GetFullTable', { table: 'cfgCoberturaProductoReaFianza' });
+        configCoveragesFianza = mapearTablaConfig(tableResult.outData ?? [])
+            .filter(row => !policy?.productCode || row.productCode == policy.productCode);
+
+        productCoveragesFianza = productCoverages.map(productCoverage => {
+            const policyCoverage = policy.Coverages.find(coverage =>
+                String(coverage.code ?? '').trim().toUpperCase() ===
+                String(productCoverage.code ?? '').trim().toUpperCase()
+            );
+            const configCoverage = configCoveragesFianza.find(row =>
+                String(row.coverageCode ?? '').trim().toUpperCase() ===
+                String(productCoverage.code ?? '').trim().toUpperCase()
+            );
+
+            return {
+                ...policyCoverage,
+                id: policyCoverage?.id ?? 0,
+                lifePolicyId: policy.id,
+                code: productCoverage.code,
+                name: productCoverage.name ?? 'Cobertura desconocida',
+                limit: policyCoverage?.limit ?? policyCoverage?.sumaAsegurada ?? 0,
+                premium: policyCoverage?.premium ?? policyCoverage?.prima ?? policyCoverage?.basePremium ?? 0,
+                deductible: policyCoverage?.deductible ?? 0,
+                periodicity: policyCoverage?.periodicity ?? 0,
+                basePremium: policyCoverage?.basePremium ?? 0,
+                extraPremium: policyCoverage?.extraPremium ?? 0,
+                loading: policyCoverage?.loading ?? 0,
+                internalPremium: policyCoverage?.internalPremium ?? 0,
+                reStatus: policyCoverage?.reStatus ?? 0,
+                manualPremium: policyCoverage?.manualPremium ?? false,
+                manualLimit: policyCoverage?.manualLimit ?? false,
+                isInternal: policyCoverage?.isInternal ?? false,
+                baseLimit: policyCoverage?.baseLimit ?? 0,
+                limitFactor: policyCoverage?.limitFactor ?? null,
+                loadingInsuredSum: policyCoverage?.loadingInsuredSum ?? 0,
+                parentPercentage: policyCoverage?.parentPercentage ?? 0,
+                coContractId: policyCoverage?.coContractId ?? null,
+                jCustom: policyCoverage?.jCustom ?? null,
+                jPremiumDetail: policyCoverage?.jPremiumDetail ?? null,
+                distributionMode: policyCoverage?.distributionMode ?? null,
+                startBasePremium: policyCoverage?.startBasePremium ?? 0,
+                startLimit: policyCoverage?.startLimit ?? 0,
+                parent: policyCoverage?.parent ?? null,
+                hasMaturity: policyCoverage?.hasMaturity ?? false,
+                ignoreIndexation: policyCoverage?.ignoreIndexation ?? false,
+                suma: String(configCoverage?.isCoverage ?? 'NO').trim().toUpperCase() === 'SI' ? 'Sí' : 'No',
+                mandatory: productCoverage.mandatory ?? false,
+                incluido: Boolean(policyCoverage),
+                basic: productCoverage.basic ?? policyCoverage?.basic ?? false,
+                description: productCoverage.description ?? policyCoverage?.description ?? '',
+                start: policyCoverage?.start ?? policy.start,
+                end: policyCoverage?.end ?? policy.end,
+                appliesTo: productCoverage.appliesTo ?? policyCoverage?.appliesTo ?? 'INS',
+                commercialName: productCoverage.commercialName ?? policyCoverage?.commercialName ?? '',
+                internalBonus: productCoverage.internalBonus ?? policyCoverage?.internalBonus ?? false,
+                number: productCoverage.number ?? policyCoverage?.number ?? 0,
+                ofnCode: productCoverage.ofnCode ?? policyCoverage?.ofnCode ?? 0,
+                ofnGroup: productCoverage.ofnGroup ?? policyCoverage?.ofnGroup ?? 0,
+                reinsuranceCode: productCoverage.reinsurance ?? policyCoverage?.reinsuranceCode ?? null
+            };
+        });
+    } catch (error) {
+        console.error(`Error cargando coberturas del producto: ${error.toString()}`);
+        productCoveragesFianza = [];
+        configCoveragesFianza = [];
+    }
+}
+
+function ensureCoberturasFianzaStyles() {
+    if ($('#coberturas-fianza-styles').length) return;
+
+    $('<style>', { id: 'coberturas-fianza-styles' }).html(`
+        #tab2 #toolbarCoberturasFianza {
+            display:flex; align-items:center; gap:8px; width:100%; margin-bottom:8px;
+        }
+        #modalCoberturasFianza {
+            display:none; position:fixed; inset:0; z-index:999999999;
+            background:rgba(0,0,0,.45); align-items:center; justify-content:center;
+        }
+        #modalCoberturasFianza .coberturas-fianza-dialog {
+            width:900px; max-width:95%; max-height:90vh; background:#fff;
+            border-radius:6px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.2);
+        }
+        #modalCoberturasFianza .coberturas-fianza-header {
+            display:flex; align-items:center; justify-content:space-between;
+            padding:12px 16px; border-bottom:1px solid #f0f0f0; font-weight:600;
+        }
+        #modalCoberturasFianza .coberturas-fianza-body { padding:12px 16px; overflow:auto; max-height:65vh; }
+        #modalCoberturasFianza .coberturas-fianza-table { width:100%; border-collapse:collapse; font-size:14px; }
+        #modalCoberturasFianza .coberturas-fianza-table th { background:#bfbfbf; color:rgba(0,0,0,.85); font-weight:500; padding:8px 10px; border:1px solid #d9d9d9; text-align:left; }
+        #modalCoberturasFianza .coberturas-fianza-table td { padding:8px 10px; border:1px solid #d9d9d9; }
+        #modalCoberturasFianza .coberturas-fianza-table tbody tr:hover td { background:#fafafa; }
+        #modalCoberturasFianza .coberturas-fianza-footer { display:flex; justify-content:flex-end; padding:12px 16px; border-top:1px solid #f0f0f0; }
+        #tab2 #footerResumenCoberturasFianza {
+            display:flex; align-items:center; gap:24px; width:100%; box-sizing:border-box;
+            margin-top:8px; padding:10px 14px; border:1px solid #91caff; border-radius:4px;
+            background:#e6f7ff; color:#0958d9;
+        }
+        #tab2 #footerResumenCoberturasFianza .resumen-cob-item { display:flex; flex-direction:column; }
+        #tab2 #footerResumenCoberturasFianza .resumen-cob-label { font-size:11px; font-weight:600; text-transform:uppercase; }
+        #tab2 #footerResumenCoberturasFianza .resumen-cob-value { font-size:18px; font-weight:700; }
+    `).appendTo('head');
+}
+
+function renderToolbarCoberturasFianza() {
+    const $tab = $('#tab2');
+    if (!$tab.length) return;
+    ensureCoberturasFianzaStyles();
+    $('#toolbarCoberturasFianza').remove();
+
+    $tab.prepend(`
+        <div id="toolbarCoberturasFianza">
+            <button type="button" id="btnGestionarCoberturasFianza" class="ant-btn ant-btn-primary">
+                <span style="margin-right:6px;">▦</span> Gestionar Coberturas
+            </button>
+        </div>
+    `);
+
+    renderModalCoberturasFianza();
+
+    $(document)
+        .off('click.coberturasFianza', '#btnGestionarCoberturasFianza')
+        .on('click.coberturasFianza', '#btnGestionarCoberturasFianza', function () {
+            $('#modalCoberturasFianza').css('display', 'flex');
+        });
+}
+
+function renderModalCoberturasFianza() {
+    $('#modalCoberturasFianza').remove();
+
+    const rows = productCoveragesFianza.map(coverage => `
+        <tr>
+            <td style="text-align:center;"><input type="checkbox" class="chk-cobertura-fianza" value="${escapeSqlFianza(coverage.code)}" ${coverage.mandatory || coverage.incluido ? 'checked' : ''} ${coverage.mandatory || polizaConfirmadaFianza ? 'disabled' : ''}></td>
+            <td>${coverage.code ?? ''}</td>
+            <td>${coverage.name ?? ''}</td>
+            <td style="text-align:right;">${formatMoneyFianza(coverage.limit)}</td>
+            <td style="text-align:right;">${formatMoneyFianza(coverage.premium)}</td>
+            <td style="text-align:center;">${coverage.suma ?? 'No'}</td>
+        </tr>
+    `).join('');
+
+    $('body').append(`
+        <div id="modalCoberturasFianza">
+            <div class="coberturas-fianza-dialog">
+                <div class="coberturas-fianza-header">
+                    <span>Gestión de Coberturas</span>
+                    <button type="button" id="btnCerrarCoberturasFianza" class="ant-btn ant-btn-link">×</button>
+                </div>
+                <div class="coberturas-fianza-body">
+                    <table class="coberturas-fianza-table">
+                        <thead><tr><th style="width:42px; text-align:center;"><input type="checkbox" id="chkAllCoberturasFianza" ${polizaConfirmadaFianza ? 'disabled' : ''}></th><th>Código</th><th>Nombre</th><th style="text-align:right;">Suma asegurada</th><th style="text-align:right;">Prima</th><th style="text-align:center;">¿Suma?</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div class="coberturas-fianza-footer">
+                    <button type="button" id="btnGuardarCoberturasFianza" class="ant-btn ant-btn-primary" ${polizaConfirmadaFianza ? 'disabled' : ''}>Guardar</button>
+                </div>
+            </div>
+        </div>
+    `);
+
+    $(document)
+        .off('click.coberturasFianzaClose', '#btnCerrarCoberturasFianza')
+        .on('click.coberturasFianzaClose', '#btnCerrarCoberturasFianza', () => $('#modalCoberturasFianza').hide())
+        .off('click.coberturasFianzaOverlay', '#modalCoberturasFianza')
+        .on('click.coberturasFianzaOverlay', '#modalCoberturasFianza', function (event) {
+            if (event.target.id === 'modalCoberturasFianza') $('#modalCoberturasFianza').hide();
+        })
+        .off('change.coberturasFianzaAll', '#chkAllCoberturasFianza')
+        .on('change.coberturasFianzaAll', '#chkAllCoberturasFianza', function () {
+            $('.chk-cobertura-fianza').not(':disabled').prop('checked', $(this).is(':checked'));
+        })
+        .off('click.coberturasFianzaSave', '#btnGuardarCoberturasFianza')
+        .on('click.coberturasFianzaSave', '#btnGuardarCoberturasFianza', guardarCoberturasFianza);
+}
+
+async function guardarCoberturasFianza() {
+    coberturasSeleccionadasFianza = productCoveragesFianza.filter(coverage =>
+        coverage.mandatory || $(`.chk-cobertura-fianza[value="${coverage.code}"]`).is(':checked')
+    );
+
+    if (!coberturasSeleccionadasFianza.length) {
+        me.message.warning('Debe seleccionar al menos una cobertura');
+        return;
+    }
+
+    try {
+        const sql = buildLifeCoverageInsertFianza(coberturasSeleccionadasFianza);
+        const result = await me.exe('DoQuery', {
+            sql: `DELETE FROM LifeCoverage WHERE lifePolicyId = ${Number(policy.id)}; ${sql}`
+        });
+
+        if (!result.ok) {
+            me.message.error(`Error guardando coberturas: ${result.msg}`);
+            return;
+        }
+
+        me.message.success(`Coberturas guardadas correctamente (${coberturasSeleccionadasFianza.length})`, 5);
+        $('#modalCoberturasFianza').hide();
+        policy = await getPolicyData(policyId);
+        await listarCobtar();
+        renderTablaAgrupada(configCobtar);
+        cargarCobtarDesdeHidden('#hiddenCobtar', '#tab2');
+        bindEventosCobtar();
+        setDefaultCobtar();
+        await setProductCoveragesFianza();
+        renderToolbarCoberturasFianza();
+        renderFooterCoberturasFianza();
+        actualizarResumenCoberturasFianza();
+    } catch (error) {
+        console.error(error);
+        me.message.error(`Error guardando coberturas: ${error.toString()}`);
+    }
+}
+
+function buildLifeCoverageInsertFianza(coverages) {
+    const columns = [
+        'lifePolicyId', 'code', 'name', 'limit', 'deductible', 'periodicity', 'basePremium',
+        'extraPremium', 'basic', 'description', 'loading', 'start', 'end', 'appliesTo',
+        'commercialName', 'internalBonus', 'number', 'ofnCode', 'ofnGroup', 'solvency2Code',
+        'startBasePremium', 'startLimit', 'parent', 'hasMaturity', 'ignoreIndexation',
+        'internalPremium', 'reStatus', 'manualPremium', 'manualLimit', 'isInternal', 'baseLimit',
+        'limitFactor', 'loadingInsuredSum', 'reinsuranceCode', 'parentPercentage', 'coContractId',
+        'jCustom', 'jPremiumDetail', 'distributionMode'
+    ];
+
+    const sqlValue = (value, column) => {
+        if (value === null || value === undefined || value === '') return 'NULL';
+        if (['lifePolicyId', 'limit', 'deductible', 'periodicity', 'basePremium', 'extraPremium', 'loading', 'number', 'ofnCode', 'ofnGroup', 'startBasePremium', 'startLimit', 'internalPremium', 'reStatus', 'baseLimit', 'loadingInsuredSum', 'parentPercentage'].includes(column)) {
+            return Number.isFinite(Number(value)) ? String(Number(value)) : 'NULL';
+        }
+        if (['basic', 'internalBonus', 'hasMaturity', 'ignoreIndexation', 'manualPremium', 'manualLimit', 'isInternal'].includes(column)) return value ? '1' : '0';
+        if (column === 'start' || column === 'end') return `'${escapeSqlFianza(new Date(value).toISOString())}'`;
+        return `N'${escapeSqlFianza(value)}'`;
+    };
+
+    return `INSERT INTO [LifeCoverage] (${columns.map(column => `[${column}]`).join(', ')}) VALUES\n` +
+        coverages.map(coverage => `(${columns.map(column => sqlValue(coverage[column], column)).join(', ')})`).join(',\n') + ';';
+}
+
+function renderFooterCoberturasFianza() {
+    $('#footerResumenCoberturasFianza').remove();
+    $('#tab2').append(`
+        <div id="footerResumenCoberturasFianza">
+            <div class="resumen-cob-item"><span class="resumen-cob-label">Coberturas</span><span class="resumen-cob-value" id="lblCantidadCoberturasFianza">0</span></div>
+            <div class="resumen-cob-item"><span class="resumen-cob-label">Suma asegurada</span><span class="resumen-cob-value" id="lblSumaCoberturasFianza">0.00</span></div>
+            <div class="resumen-cob-item"><span class="resumen-cob-label">Prima total</span><span class="resumen-cob-value" id="lblPrimaCoberturasFianza">0.00</span></div>
+        </div>
+    `);
+}
+
+function actualizarResumenCoberturasFianza() {
+    const currentCoverages = policy?.Coverages ?? [];
+    const suma = currentCoverages.reduce((total, coverage) => total + Number(coverage.limit || 0), 0);
+    const prima = currentCoverages.reduce((total, coverage) => total + Number(coverage.premium || 0), 0);
+    $('#lblCantidadCoberturasFianza').text(currentCoverages.length);
+    $('#lblSumaCoberturasFianza').text(formatMoneyFianza(suma));
+    $('#lblPrimaCoberturasFianza').text(formatMoneyFianza(prima));
 }
 
 //Estilos
@@ -1473,7 +1770,7 @@ const onDocumentReady = async () => {
     $('#policyEnd').val(policy.End);
     $('#suma_afianzada').prop("readOnly", true);
     $('#suma_afianzada').val(formatear(policy.insuredSum));
-    await listarCobtar();    
+    await listarCobtar();
     renderTablaAgrupada(configCobtar);
     validaInputs();
     cargarCobtarDesdeHidden("#hiddenCobtar", "#tab2");
@@ -1481,6 +1778,11 @@ const onDocumentReady = async () => {
 
     //Voy a validar si no hay nada en el hidden de cobtar lo voy a cargar con los datos por default
     setDefaultCobtar();    
+
+    await setProductCoveragesFianza();
+    renderToolbarCoberturasFianza();
+    renderFooterCoberturasFianza();
+    actualizarResumenCoberturasFianza();
 
     await loadDataTable({reference:'#clase_riesgo',tableName:'actividadfianza',indexCode:0,indexDisplay:1});
     await loadDataTable({reference:'#actividad',tableName:'actividadfianza',indexCode:0,indexDisplay:1});
@@ -1494,7 +1796,7 @@ const onDocumentReady = async () => {
 async function getPolicyData(policyId) {
     const result = await me.exe('LoadEntity', {
         entity: 'LifePolicy',
-        fields: '[id],[insuredSum],[start],[end], productCode',
+        fields: '[id],[insuredSum],[start],[end],[productCode],[lob],[active]',
         filter: `id=${policyId}`,
         noTracking: true
     });
@@ -1502,7 +1804,7 @@ async function getPolicyData(policyId) {
 
     const coverages = await me.exe('LoadEntities', {
         entity: 'LifeCoverage',
-        fields: 'code, name, basic, [start], [end]',
+        fields: 'id, code, name, basic, [start], [end], [limit], deductible, periodicity, basePremium, extraPremium, loading, internalPremium, reStatus, manualPremium, manualLimit, isInternal, baseLimit, limitFactor, loadingInsuredSum, reinsuranceCode, parentPercentage, coContractId, jCustom, jPremiumDetail, distributionMode, appliesTo, commercialName, internalBonus, number, ofnCode, ofnGroup, solvency2Code, hasMaturity, ignoreIndexation, description',
         filter: `lifePolicyId = ${policyId}`,
         noTracking: true
     });
