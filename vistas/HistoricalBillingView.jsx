@@ -22,6 +22,7 @@
     Select,
     Space,
     Spin,
+    Switch,
     Table,
     Tabs,
     message
@@ -84,6 +85,14 @@
     </span>
   );
 
+  const DelinquencyTabIcon = () => (
+    <span role="img" aria-label="delinquency" className="anticon anticon-warning" style={tabIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M464 80h96l336 720H128L464 80zm48 184L248 728h528L512 264zm-32 184h64v144h-64V448zm0 184h64v64h-64v-64z"></path>
+      </svg>
+    </span>
+  );
+
   const CopyIcon = () => (
     <span role="img" aria-label="copy" className="anticon anticon-copy" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1em', height: '1em', lineHeight: 1 }}>
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -135,6 +144,7 @@
   const [paymentBankNames, setPaymentBankNames] = React.useState({});
   const [collectionCutoffUpdating, setCollectionCutoffUpdating] = React.useState(false);
   const [payerNationalityName, setPayerNationalityName] = React.useState('');
+  const [delinquencyGrouped, setDelinquencyGrouped] = React.useState(true);
 
   React.useEffect(() => {
     loadCatalogs();
@@ -1222,6 +1232,115 @@
       return Number(left && left.numberInYear || 0) - Number(right && right.numberInYear || 0);
     })
     : [];
+  const getLocalDateOnly = value => {
+    const raw = text(value);
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  };
+  const getDelinquencyAmounts = installment => {
+    const invoiced = firstNumber(installment, ['minimum', 'expected'], 0);
+    const paid = firstNumber(installment, ['payed', 'paid'], 0);
+    const pending = Math.max(0, invoiced - paid);
+    const amounts = {
+      invoiced,
+      paid,
+      pending,
+      current: 0,
+      overdue: 0,
+      m30a60: 0,
+      m60a90: 0,
+      m90a120: 0,
+      mmas120: 0,
+      dueSoon: 0
+    };
+    if (!pending) return amounts;
+
+    const dueDate = getLocalDateOnly(installment && (installment.dueDate || installment.normalDueDate || installment.coveredUntil));
+    if (!dueDate) return amounts;
+    const today = getLocalDateOnly(new Date());
+    const daysOverdue = Math.floor((today - dueDate) / (24 * 60 * 60 * 1000));
+
+    if (daysOverdue <= 0) {
+      const currentMonth = today.getMonth();
+      const currentYear = today.getFullYear();
+      const nextMonthDate = new Date(currentYear, currentMonth + 1, 1);
+      const isDueThisMonth = dueDate.getFullYear() === currentYear
+        && dueDate.getMonth() === currentMonth
+        && dueDate >= today;
+      const isDueNextMonthOrLater = dueDate >= nextMonthDate;
+
+      if (isDueThisMonth) amounts.dueSoon = pending;
+      else if (isDueNextMonthOrLater) amounts.current = pending;
+    } else {
+      amounts.overdue = pending;
+      // Aging ranges are intentionally non-overlapping: 30-60, 61-90, 91-120, and >120.
+      if (daysOverdue >= 30 && daysOverdue <= 60) amounts.m30a60 = pending;
+      else if (daysOverdue >= 61 && daysOverdue <= 90) amounts.m60a90 = pending;
+      else if (daysOverdue >= 91 && daysOverdue <= 120) amounts.m90a120 = pending;
+      else if (daysOverdue > 120) amounts.mmas120 = pending;
+    }
+    return amounts;
+  };
+  const getPolicyCurrency = policy => {
+    const currency = policy && (policy.currency || policy.Currency);
+    if (currency && typeof currency === 'object') return text(currency.code || currency.name || currency.id) || '-';
+    return text(policy && (policy.currencyCode || policy.currencyName || currency)) || text(generalData.currency) || '-';
+  };
+  const delinquencyRows = installmentRows.map((installment, index) => ({
+    key: String(installment && installment.id || index),
+    policy: detailPolicy.code || generalData.policy || '-',
+    currency: getPolicyCurrency(detailPolicy),
+    installmentNumber: installment && installment.numberInYear,
+    installmentCount: 1,
+    entryDate: detailPolicy.created || detailPolicy.createdDate || generalData.created,
+    dueDate: installment && (installment.dueDate || installment.normalDueDate || installment.coveredUntil),
+    ...getDelinquencyAmounts(installment)
+  }));
+  const groupedDelinquencyRows = Object.values(delinquencyRows.reduce((groups, row) => {
+    const groupKey = `${row.policy}|${row.currency}`;
+    if (!groups[groupKey]) {
+      groups[groupKey] = { ...row, key: groupKey };
+      return groups;
+    }
+    groups[groupKey].installmentCount += row.installmentCount;
+    ['invoiced', 'paid', 'pending', 'current', 'overdue', 'm30a60', 'm60a90', 'm90a120', 'mmas120', 'dueSoon']
+      .forEach(field => { groups[groupKey][field] += number(row[field]); });
+    return groups;
+  }, {}));
+  const delinquencyDisplayRows = delinquencyGrouped ? groupedDelinquencyRows : delinquencyRows;
+  const delinquencyTotals = delinquencyRows.reduce((totals, row) => {
+    Object.keys(totals).forEach(field => { totals[field] += number(row[field]); });
+    return totals;
+  }, {
+    invoiced: 0,
+    paid: 0,
+    pending: 0,
+    current: 0,
+    overdue: 0,
+    m30a60: 0,
+    m60a90: 0,
+    m90a120: 0,
+    mmas120: 0,
+    dueSoon: 0
+  });
+  const delinquencyColumns = [
+    { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150, render: value => renderPolicyLink(value, detailPolicy.id || generalData.policyId) },
+    { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 80, align: 'center' },
+    { title: delinquencyGrouped ? t('Total installments') : t('Installment number'), key: 'installmentNumber', width: 125, align: 'center', render: (_, row) => delinquencyGrouped ? row.installmentCount : (row.installmentNumber || '-') },
+    { title: t('Invoiced'), dataIndex: 'invoiced', key: 'invoiced', width: 100, align: 'right', render: value => renderMoney(value) },
+    { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Current Amount'), dataIndex: 'current', key: 'current', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Overdue'), dataIndex: 'overdue', key: 'overdue', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: '30-60', dataIndex: 'm30a60', key: 'm30a60', width: 105, align: 'right', render: value => renderMoney(value) },
+    { title: '61-90', dataIndex: 'm60a90', key: 'm60a90', width: 105, align: 'right', render: value => renderMoney(value) },
+    { title: '91-120', dataIndex: 'm90a120', key: 'm90a120', width: 105, align: 'right', render: value => renderMoney(value) },
+    { title: '>120', dataIndex: 'mmas120', key: 'mmas120', width: 105, align: 'right', render: value => renderMoney(value) },
+    { title: t('Due soon'), dataIndex: 'dueSoon', key: 'dueSoon', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: delinquencyGrouped ? t('Entry date') : t('Installment date'), dataIndex: delinquencyGrouped ? 'entryDate' : 'dueDate', key: 'delinquencyDate', width: 120, align: 'center', render: formatDate }
+  ];
   const coverageRows = Array.isArray(detailPolicy.Coverages) ? detailPolicy.Coverages : [];
   const sumCoverageField = fields => coverageRows.reduce((total, coverage) => total + firstNumber(coverage, fields, 0), 0);
   const totalInstallmentDue = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['minimum', 'expected'], 0), 0);
@@ -2425,6 +2544,57 @@
                     pagination={false}
                     scroll={{ x: 980, y: 'calc(100dvh - 310px)' }}
                     locale={{ emptyText: t('No installments found.') }}
+                  />
+                </>
+              )}
+            </div>
+          </TabPane>
+          <TabPane tab={<span><DelinquencyTabIcon />{t('Delinquency')}</span>} key="delinquency" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its delinquency.')}</div>
+              ) : (
+                <>
+                  <div className="historical-billing-toolbar">
+                    <Space>
+                      <span>{t('Grouped')}</span>
+                      <Switch
+                        checked={delinquencyGrouped}
+                        checkedChildren={t('Grouped')}
+                        unCheckedChildren={t('Detailed')}
+                        onChange={setDelinquencyGrouped}
+                      />
+                    </Space>
+                  </div>
+                  <Table
+                    className="historical-billing-table"
+                    rowKey="key"
+                    size="small"
+                    bordered
+                    columns={delinquencyColumns}
+                    dataSource={delinquencyDisplayRows}
+                    summary={() => (
+                      <Table.Summary>
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell index={0} colSpan={2}><strong>{t('Totals')}</strong></Table.Summary.Cell>
+                        <Table.Summary.Cell index={2} align="center">{delinquencyGrouped ? `${delinquencyRows.length} ${t('Total installments')}` : ''}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} align="right">{renderMoney(delinquencyTotals.invoiced)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} align="right">{renderMoney(delinquencyTotals.paid)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} align="right">{renderMoney(delinquencyTotals.pending)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} align="right">{renderMoney(delinquencyTotals.current)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.overdue)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} align="right">{renderMoney(delinquencyTotals.m90a120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={11} align="right">{renderMoney(delinquencyTotals.mmas120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={13}></Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    )}
+                    pagination={false}
+                    scroll={{ x: 1500, y: 'calc(100dvh - 310px)' }}
+                    locale={{ emptyText: t('No delinquency records found.') }}
                   />
                 </>
               )}
