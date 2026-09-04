@@ -107,9 +107,14 @@ if (isMerged) {
   mergedChild = loadedChildren[0] || mergedChild;
 }
 const mergedChildConcept = getMeaningfulPaymentText(mergedChild);
+if (isMerged) {
+  dataContex.reference = '';
+}
 if (mergedChildConcept && (isMerged || mergedChild)) {
-  dataContex.reference = mergedChildConcept;
   dataContex.concept = mergedChildConcept;
+  if (!isMerged) {
+    dataContex.reference = mergedChildConcept;
+  }
 }
 
 formatOutputAmounts(dataContex);

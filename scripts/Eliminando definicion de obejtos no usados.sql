@@ -2,6 +2,14 @@ use sis11
 
 go
 
+delete from ObjectDefinition
+WHERE code in ('DTITR','DTIRN','DTTRC'
+,'DTIDN','DTRCB','DTRCE','DTTCM','DTTDC'
+,'DTTDC2','DTTCM2','DTIDN2','DTNA','DTNM'
+,'DTRVAFP','DTINH','FRPR','DTDSASS','DTFIA','DTTRE','DTTEE','DTADM','DTOV','DTFID','DTFID3D','DTFIDBBB','DTAUTO'
+,'DTPruebaRamosGenerales','DTVIB','DTVI'
+,'TEST0009','Prueba001','INSP','DetailInsuredObjects','DTDTM','DTCREC','FRMEXECUTIVE','DTILAM'
+,'COASEGMINOR')
 
 select * from ObjectDefinition
 WHERE code in ('DTITR','DTIRN','DTTRC'
