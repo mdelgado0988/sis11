@@ -709,7 +709,10 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
             const FECHA_INICIAL_DEFAULT = formatearFecha(covPolicy?.start ? covPolicy.start : (isBasic ? policy?.start : policy?.end));
             const FECHA_FINAL_DEFAULT = formatearFecha(covPolicy?.end ? covPolicy.end : policy.end);
 
-            const $tr = $("<tr>");
+            const $tr = $("<tr>")
+                .attr("data-coverage-row", g.coverageCode)
+                .attr("data-base-start", FECHA_INICIAL_DEFAULT)
+                .attr("data-base-end", FECHA_FINAL_DEFAULT);
 
             // columna fija
             $("<td>")
@@ -816,11 +819,7 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
                 // Vigencia (días)
                 if (name.toLowerCase().includes("duración")) {
                 $input.on("change", function () {
-                    diasVigencia = Number($(this).val()) || 0;
-
-                    const fechaFinal = sumarDias(fechaInicial, diasVigencia);
-
-                    $tr.find("input[data-field*='Final']").val(fechaFinal);
+                    recalcularVigenciasFianza($container);
                 });
                 }
             
@@ -857,9 +856,78 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
 
         $table.append($tbody);
         $container.append($table);
+        recalcularVigenciasFianza($container);
 
     }catch(error){
         console.error(error);
+    }
+}
+
+function recalcularVigenciasFianza($container = $("#tab2")) {
+    try {
+        const rows = {};
+
+        $container.find("tr[data-coverage-row]").each(function () {
+            const $row = $(this);
+            const code = String($row.attr("data-coverage-row") || "").trim();
+            rows[code.toUpperCase()] = $row;
+        });
+
+        const configByCode = {};
+        configCoveragesFianza.forEach(config => {
+            const code = String(config.coverageCode || "").trim().toUpperCase();
+            if (code) configByCode[code] = config;
+        });
+
+        const calculated = {};
+        const calculating = new Set();
+
+        const getField = ($row, text) => $row.find("input[data-field]").filter(function () {
+            return String($(this).attr("data-field") || "").toLowerCase().includes(text);
+        }).first();
+
+        const calculate = code => {
+            const normalizedCode = String(code || "").trim().toUpperCase();
+            if (!normalizedCode || calculated[normalizedCode]) return calculated[normalizedCode];
+
+            const $row = rows[normalizedCode];
+            if (!$row || !$row.length) return null;
+
+            if (calculating.has(normalizedCode)) {
+                console.warn(`Dependencia circular de vigencia en cobertura ${normalizedCode}`);
+                return null;
+            }
+
+            calculating.add(normalizedCode);
+
+            const config = configByCode[normalizedCode];
+            const principal = String(config?.coberturaPrincipal ?? "").trim();
+            const $duration = getField($row, "duración");
+            const duration = Number($duration.val()) || 0;
+            const $start = getField($row, "f. inicial");
+            const $end = getField($row, "f. final");
+
+            let start = String($row.attr("data-base-start") || $start.val() || "");
+            let end = String($row.attr("data-base-end") || $end.val() || "");
+
+            if (principal && principal !== "0" && principal.toUpperCase() !== "NULL") {
+                const principalResult = calculate(principal);
+                if (principalResult?.end) start = principalResult.end;
+            }
+
+            if (start) $start.val(start);
+            if (duration > 0 && start) end = sumarDias(start, duration);
+            if (end) $end.val(end);
+
+            const result = { start, end };
+            calculated[normalizedCode] = result;
+            calculating.delete(normalizedCode);
+            return result;
+        };
+
+        Object.keys(rows).forEach(calculate);
+    } catch (error) {
+        console.error(`Error calculando vigencias de coberturas: ${error.toString()}`);
     }
 }
 
@@ -1197,12 +1265,12 @@ async function guardarCoberturasFianza() {
         me.message.success(`Coberturas guardadas correctamente (${coberturasSeleccionadasFianza.length})`, 5);
         $('#modalCoberturasFianza').hide();
         policy = await getPolicyData(policyId);
+        await setProductCoveragesFianza();
         await listarCobtar();
         renderTablaAgrupada(configCobtar);
         cargarCobtarDesdeHidden('#hiddenCobtar', '#tab2');
         bindEventosCobtar();
         setDefaultCobtar();
-        await setProductCoveragesFianza();
         renderToolbarCoberturasFianza();
         renderFooterCoberturasFianza();
         actualizarResumenCoberturasFianza();
@@ -1770,6 +1838,7 @@ const onDocumentReady = async () => {
     $('#policyEnd').val(policy.End);
     $('#suma_afianzada').prop("readOnly", true);
     $('#suma_afianzada').val(formatear(policy.insuredSum));
+    await setProductCoveragesFianza();
     await listarCobtar();
     renderTablaAgrupada(configCobtar);
     validaInputs();
@@ -1779,16 +1848,17 @@ const onDocumentReady = async () => {
     //Voy a validar si no hay nada en el hidden de cobtar lo voy a cargar con los datos por default
     setDefaultCobtar();    
 
-    await setProductCoveragesFianza();
     renderToolbarCoberturasFianza();
     renderFooterCoberturasFianza();
     actualizarResumenCoberturasFianza();
 
-    await loadDataTable({reference:'#clase_riesgo',tableName:'actividadfianza',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#actividad',tableName:'actividadfianza',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#tipo_vigencia',tableName:'tipovigencia',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#vigencia_fianza',tableName:'vigenciafianza',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#tipo_licitacion',tableName:'tipolicitacion',indexCode:0,indexDisplay:1});
+    await Promise.all([
+        loadDataTable({reference:'#clase_riesgo',tableName:'actividadfianza',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#actividad',tableName:'actividadfianza',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#tipo_vigencia',tableName:'tipovigencia',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#vigencia_fianza',tableName:'vigenciafianza',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#tipo_licitacion',tableName:'tipolicitacion',indexCode:0,indexDisplay:1})
+    ]);
     cargarCumuloAsync();
 
 };
