@@ -1,12 +1,42 @@
 /**
- * @author Michael Delgado
- * @email michael.delgado@axxis-systems.com
- * @created 2026/09/04
+ * @author Cesar Aguilar
+ * @email cesar.aguilar@axxis-systems.com
+ * @created 2026/08/25
  * @name GestionCargosdeRemesas
  * @version 1.0
  * @purpose: Manage remittance batches, cash desk assignments, processing, and remittance detail.
  */
 () => {
+  const actionIconStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '1em',
+    height: '1em',
+    marginRight: 6,
+    verticalAlign: 'middle',
+    lineHeight: 1
+  };
+
+  const ActionIcon = ({ label, children }) => (
+    <span role="img" aria-label={label} className="anticon" style={actionIconStyle}>
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        {children}
+      </svg>
+    </span>
+  );
+
+  const SearchIcon = () => <ActionIcon label="search"><path d="M909.6 854.6L649.9 594.9A314.3 314.3 0 0 0 712 412c0-166.8-135.2-302-302-302S108 245.2 108 412s135.2 302 302 302a299.5 299.5 0 0 0 182.8-62.1l259.7 259.7a8 8 0 0 0 11.3 0l45.8-45.7a8 8 0 0 0 0-11.3zM410 634c-122.6 0-222-99.4-222-222s99.4-222 222-222 222 99.4 222 222-99.4 222-222 222z" /></ActionIcon>;
+  const ClearIcon = () => <ActionIcon label="clear"><path d="M832 256H640l-48-48H432l-48 48H192v80h640v-80zM240 400h544v368c0 44.2-35.8 80-80 80H320c-44.2 0-80-35.8-80-80V400z" /></ActionIcon>;
+  const UploadIcon = () => <ActionIcon label="upload"><path d="M472 656h80V344l104 104 56-56-200-200-200 200 56 56 104-104v312zM160 760h704v80H160z" /></ActionIcon>;
+  const PlusIcon = () => <ActionIcon label="new"><path d="M480 160h64v320h320v64H544v320h-64V544H160v-64h320z" /></ActionIcon>;
+  const DeleteIcon = () => <ActionIcon label="delete"><path d="M832 256H640l-48-48H432l-48 48H192v80h640v-80zM240 400h544v368c0 44.2-35.8 80-80 80H320c-44.2 0-80-35.8-80-80V400z" /></ActionIcon>;
+  const PlayIcon = () => <ActionIcon label="process"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm-80 672V288l240 224-240 224z" /></ActionIcon>;
+  const EyeIcon = () => <ActionIcon label="view"><path d="M942.2 486.2C847.4 286.5 704.1 186 512 186S176.6 286.5 81.8 486.2a60.7 60.7 0 0 0 0 51.6C176.6 737.5 319.9 838 512 838s335.4-100.5 430.2-300.2a60.7 60.7 0 0 0 0-51.6zM512 726c-119.4 0-227.2-65.6-305.3-177C284.8 437.6 392.6 372 512 372s227.2 65.6 305.3 177C739.2 660.4 631.4 726 512 726zm0-304c-69 0-125 56-125 125s56 125 125 125 125-56 125-125-56-125-125-125z" /></ActionIcon>;
+  const FileSearchIcon = () => <ActionIcon label="detail"><path d="M832 128H384c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h448c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM400 256h320v64H400v-64zm0 128h224v64H400v-64zm0 128h128v64H400v-64zm360 248H516l-80-80 45-45 35 35 91-91 45 45-91 91h199v45z" /></ActionIcon>;
+  const CloseIcon = () => <ActionIcon label="close"><path d="M563.8 512l262.5-312.2c4.4-5.2.7-13.3-6.1-13.3H745.5c-4.6 0-9 2-12 5.6L512 451.8 290.5 192.1c-3-3.6-7.4-5.6-12-5.6H203.8c-6.8 0-10.5 8.1-6.1 13.3L460.2 512 197.7 824.2c-4.4 5.2-.7 13.3 6.1 13.3h74.7c4.6 0 9-2 12-5.6L512 572.2l221.5 259.7c3 3.6 7.4 5.6 12 5.6h74.7c6.8 0 10.5-8.1 6.1-13.3L563.8 512z" /></ActionIcon>;
+  const ExportIcon = () => <ActionIcon label="export"><path d="M472 128h80v384h128L512 704 344 512h128V128zM160 800h704v80H160z" /></ActionIcon>;
+
   const Table      = A.Table;
   const Form       = A.Form;
   const Select     = A.Select;
@@ -163,17 +193,11 @@
     return 'blocked';
   };
 
-  const canDeleteBatch = (record) => normalizedBatchStatus(record) === 'PENDING'
-    && batchExecutionState(record) === 'pending';
+  const canDeleteBatch = (record) => batchExecutionState(record) === 'available';
 
   const deleteBatchBlockedMessage = (record) => {
     if (!record) return t('Seleccione una remesa para anular.');
-    if (normalizedBatchStatus(record) !== 'PENDING') {
-      return t('Solo se pueden anular remesas en estado Pendiente.');
-    }
-    if (batchExecutionState(record) !== 'pending') {
-      return t('La remesa se encuentra en ejecución y no puede anularse.');
-    }
+    if (!canDeleteBatch(record)) return t('Solo se pueden anular remesas en estado Disponible.');
     return '';
   };
 
@@ -834,6 +858,10 @@
       message.warning(t('La remesa ya está siendo enviada a procesamiento.'));
       return;
     }
+    if (batchDeletionRef.current[batchId]) {
+      message.warning(t('La remesa está siendo anulada y no puede procesarse.'));
+      return;
+    }
 
     Modal.confirm({
       title: t('Procesar remesa'),
@@ -942,8 +970,12 @@
               throw new Error(result && result.msg ? result.msg : t('No se pudo anular la remesa.'));
             }
 
+            setRows((currentRows) => currentRows.filter((record) => Number(record && record.id) !== batchId));
+            setPagination((currentPagination) => Object.assign({}, currentPagination, {
+              total: Math.max(0, Number(currentPagination.total || 0) - 1)
+            }));
+            clearSelection();
             message.success(result.msg || (t('La remesa') + ' ' + batchId + ' ' + t('fue anulada.')));
-            return loadBatches(pagination.current, pagination.pageSize, filters);
           })
           .catch((error) => {
             message.error(error && error.message ? error.message : String(error || t('No se pudo anular la remesa.')));
@@ -1252,6 +1284,7 @@
   };
 
   const handleSearch = () => {
+    if (deletingBatchId !== null) return;
     const values = form.getFieldsValue();
     const remesa = String(values.numeroRemesa || '').trim();
     if (remesa && !/^\d+$/.test(remesa)) {
@@ -1264,12 +1297,14 @@
   };
 
   const handleClear = () => {
+    if (deletingBatchId !== null) return;
     form.resetFields();
     setFilters({});
     loadBatches(1, PAGE_SIZE, {});
   };
 
   const handleTableChange = (nextPagination) => {
+    if (deletingBatchId !== null) return;
     loadBatches(nextPagination.current || 1, nextPagination.pageSize || PAGE_SIZE, filters);
   };
 
@@ -1682,42 +1717,12 @@
         border: 1px solid #91caff;
         border-radius: 0;
         box-shadow: 0 1px 3px rgba(22, 119, 255, 0.12);
-      }
-
-      .gestion-remesas-actions > .ant-space {
-        margin-left: 4px;
-        margin-right: 4px;
-      }
-
-      .gestion-remesas-actions,
-      .gestion-remesas-upload-actions,
-      .gestion-remesas-line-actions {
         gap: 8px;
       }
 
-      .gestion-remesas-upload-actions,
-      .gestion-remesas-line-actions {
-        display: flex;
-        align-items: center;
-        min-height: 42px;
-        margin: 8px -4px 0;
-        padding: 4px;
-        background: #e6f7ff;
-        border: 1px solid #91caff;
-      }
-
-      .gestion-remesas-line-actions {
-        flex: 0 0 auto;
-        margin-top: 0;
-      }
-
+      .gestion-remesas-actions .ant-btn:disabled,
       .gestion-remesas-upload-actions .ant-btn:disabled,
       .gestion-remesas-line-actions .ant-btn:disabled {
-        border-color: #6f7b88;
-        opacity: 1;
-      }
-
-      .gestion-remesas-actions .ant-btn:disabled {
         border-color: #6f7b88;
         opacity: 1;
       }
@@ -1729,6 +1734,32 @@
         color: #fff;
       }
 
+      .gestion-remesas-actions .gestion-remesas-accounting-button {
+        background: #315f8f;
+        border-color: #264d75;
+        color: #fff;
+      }
+
+      .gestion-remesas-actions .gestion-remesas-accounting-button:hover,
+      .gestion-remesas-actions .gestion-remesas-accounting-button:focus {
+        background: #264d75;
+        border-color: #1f4163;
+        color: #fff;
+      }
+
+      .gestion-remesas-actions .gestion-remesas-new-cash-desk-button {
+        background: #dd603d;
+        border-color: #bd4d35;
+        color: #fff;
+      }
+
+      .gestion-remesas-actions .gestion-remesas-new-cash-desk-button:hover,
+      .gestion-remesas-actions .gestion-remesas-new-cash-desk-button:focus {
+        background: #bd4d35;
+        border-color: #a9432e;
+        color: #fff;
+      }
+
       .gestion-remesas-actions .gestion-remesas-process-button:hover,
       .gestion-remesas-actions .gestion-remesas-process-button:focus,
       .gestion-remesas-actions .gestion-remesas-export-button:hover,
@@ -1736,6 +1767,19 @@
         background: #4f9336;
         border-color: #3f7d2c;
         color: #fff;
+      }
+
+      .gestion-remesas-export-button {
+        background: #60b13d !important;
+        border-color: #4f9336 !important;
+        color: #fff !important;
+      }
+
+      .gestion-remesas-export-button:hover,
+      .gestion-remesas-export-button:focus {
+        background: #4f9336 !important;
+        border-color: #3f7d2c !important;
+        color: #fff !important;
       }
 
       .gestion-remesas-content-row {
@@ -1766,6 +1810,34 @@
       .gestion-remesas-detail-drawer .ant-drawer-body {
         padding: 12px;
         overflow: auto;
+      }
+
+      .gestion-remesas-detail-drawer .ant-drawer-header,
+      .gestion-remesas-standard-modal .ant-modal-header,
+      .gestion-remesas-upload-modal .ant-modal-header,
+      .gestion-remesas-line-modal .ant-modal-header {
+        border-bottom: 1px solid #cbd1d8;
+      }
+
+      .gestion-remesas-standard-modal .ant-modal-footer,
+      .gestion-remesas-upload-modal .ant-modal-footer,
+      .gestion-remesas-line-modal .ant-modal-footer {
+        border-top: 1px solid #cbd1d8;
+      }
+
+      .gestion-remesas-caja-card,
+      .gestion-remesas-distribution-card,
+      .gestion-remesas-line-summary-card {
+        border: 1px solid #cbd1d8;
+      }
+
+      .gestion-remesas-caja-card .ant-card-head,
+      .gestion-remesas-distribution-card .ant-card-head,
+      .gestion-remesas-line-summary-card .ant-card-head {
+        min-height: 38px;
+        padding: 0 12px;
+        background: #f5f7fa;
+        border-bottom: 1px solid #cbd1d8;
       }
 
       .gestion-remesas-line-modal {
@@ -1921,39 +1993,9 @@
         background: #b7d7ff !important;
       }
 
-      .gestion-remesas-grid-column .gestion-remesas-selected-row > td {
-        background: #86b4ff !important;
-      }
-
+      .gestion-remesas-grid-column .gestion-remesas-selected-row > td,
       .gestion-remesas-grid-column .gestion-remesas-selected-row:hover > td {
         background: #86b4ff !important;
-      }
-
-      .gestion-remesas-standard-modal .ant-modal-header,
-      .gestion-remesas-upload-modal .ant-modal-header,
-      .gestion-remesas-line-modal .ant-modal-header {
-        border-bottom: 1px solid #cbd1d8;
-      }
-
-      .gestion-remesas-standard-modal .ant-modal-footer,
-      .gestion-remesas-upload-modal .ant-modal-footer,
-      .gestion-remesas-line-modal .ant-modal-footer {
-        border-top: 1px solid #cbd1d8;
-      }
-
-      .gestion-remesas-caja-card .ant-card-head,
-      .gestion-remesas-distribution-card .ant-card-head,
-      .gestion-remesas-line-summary-card .ant-card-head {
-        min-height: 38px;
-        padding: 0 12px;
-        background: #f5f7fa;
-        border-bottom: 1px solid #cbd1d8;
-      }
-
-      .gestion-remesas-caja-card,
-      .gestion-remesas-distribution-card,
-      .gestion-remesas-line-summary-card {
-        border: 1px solid #cbd1d8;
       }
 
       .gestion-remesas-grid-column .ant-table-pagination {
@@ -1966,7 +2008,7 @@
       }
 
       .gestion-remesas-selected-row > td {
-        background: #e6f7ff !important;
+        background: #86b4ff !important;
       }
 
       .gestion-remesas-upload-modal .ant-modal-body {
@@ -2007,9 +2049,24 @@
       }
 
       .gestion-remesas-upload-actions {
-        margin-top: 18px;
-        padding-top: 12px;
-        border-top: 1px solid #d9d9d9;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        margin: 12px -4px 0;
+        padding: 4px;
+        background: #e6f7ff;
+        border: 1px solid #91caff;
+      }
+
+      .gestion-remesas-line-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 4px;
+        background: #e6f7ff;
+        border: 1px solid #91caff;
       }
 
       .gestion-remesas-ellipsis {
@@ -2309,18 +2366,28 @@
         <Divider style={{ margin: '6px 0' }} />
 
         <Space className="gestion-remesas-actions" wrap>
-          <Button type="primary" loading={loading} onClick={handleSearch}>{t('Search')}</Button>
-          <Button disabled={loading} onClick={handleClear}>{t('Clear filters')}</Button>
+          <Button type="primary" loading={loading} disabled={deletingBatchId !== null} onClick={handleSearch}>
+            <SearchIcon />
+            {t('Search')}
+          </Button>
+          <Button disabled={loading || deletingBatchId !== null} onClick={handleClear}>
+            <ClearIcon />
+            {t('Clear filters')}
+          </Button>
           <Button
-            disabled={loading || uploading || currentUserLoading || !currentUserEmail}
+            className="gestion-remesas-accounting-button"
+            disabled={loading || uploading || currentUserLoading || !currentUserEmail || deletingBatchId !== null}
             onClick={openUpload}
           >
+            <UploadIcon />
             {t('Upload remittance')}
           </Button>
           <Button
+            className="gestion-remesas-new-cash-desk-button"
             disabled={loading || currentUserLoading || !currentUserEmail}
             onClick={openNewCashDesk}
           >
+            <PlusIcon />
             {t('New cash desk')}
           </Button>
           <Tooltip title={deleteBatchBlockedMessage(selectedBatch)}>
@@ -2337,6 +2404,7 @@
                   || deletingBatchId !== null}
                 onClick={deleteSelectedRemittance}
               >
+                <DeleteIcon />
                 {t('Anular')}
               </Button>
             </span>
@@ -2346,18 +2414,21 @@
             loading={processingBatchId !== null
               && selectedBatch !== null
               && Number(processingBatchId) === Number(selectedBatch.id)}
-            disabled={!selectedBatch || loading || uploading || processingBatchId !== null}
+            disabled={!selectedBatch || loading || uploading || processingBatchId !== null || deletingBatchId !== null}
             onClick={processSelectedRemittance}
           >
+            <PlayIcon />
             {t('Process remittance')}
           </Button>
-          <Button type="primary" disabled={!selectedBatch} onClick={() => setDetailDrawerOpen(true)}>{t('View Details')}</Button>
+          <Button type="primary" disabled={!selectedBatch} onClick={() => setDetailDrawerOpen(true)}>
+            <EyeIcon />
+            {t('View Details')}
+          </Button>
         </Space>
 
         <Row className="gestion-remesas-content-row" gutter={12} wrap={false}>
           <Col className="gestion-remesas-grid-column">
           <Table
-            className="gestion-remesas-main-table"
             size="small"
             rowKey="id"
             loading={loading}
@@ -2374,6 +2445,7 @@
               current: pagination.current,
               pageSize: pagination.pageSize,
               total: pagination.total,
+              disabled: deletingBatchId !== null,
               showSizeChanger: false,
               showTotal: (total, range) => t('Showing') + ' ' + range[0] + ' - ' + range[1] + ' ' + t('of') + ' ' + total
             }}
@@ -2421,12 +2493,17 @@
               </Form>
               <div style={{ textAlign: 'right', marginTop: 8 }}>
                 <Space>
-                  <Button type="primary" disabled={!batchDetail} onClick={() => setLineDetailOpen(true)}>{t('View Detail')}</Button>
+                  <Button type="primary" disabled={!batchDetail} onClick={() => setLineDetailOpen(true)}>
+                    <FileSearchIcon />
+                    {t('View Detail')}
+                  </Button>
                   <Button
+                    className="gestion-remesas-export-button"
                     loading={detailExporting}
                     disabled={!batchDetail || detailLoading}
                     onClick={exportRemittanceDetail}
                   >
+                    <ExportIcon />
                     {t('Export')}
                   </Button>
                 </Space>
@@ -2549,12 +2626,18 @@
                 showUploadList={false}
                 disabled={uploading}
               >
-              <Button size="small" disabled={uploading}>{t('Buscar')}</Button>
+                <Button size="small" disabled={uploading}>
+                  <SearchIcon />
+                  {t('Buscar')}
+                </Button>
               </Upload>
             </div>
 
             <Space className="gestion-remesas-upload-actions" wrap>
-              <Button size="small" disabled={uploading} onClick={clearUploadSelection}>{t('Nueva Carga')}</Button>
+              <Button size="small" disabled={uploading} onClick={clearUploadSelection}>
+                <UploadIcon />
+                {t('Nueva Carga')}
+              </Button>
               <Button
                 size="small"
                 type="primary"
@@ -2563,9 +2646,13 @@
                   || uploadFileParsing || uploadCashDesksLoading || uploadPayersLoading}
                 onClick={processUpload}
               >
+                <PlayIcon />
                 {t('Procesar Archivo')}
               </Button>
-              <Button size="small" disabled={uploading} onClick={resetUpload}>{t('Cancelar')}</Button>
+              <Button size="small" disabled={uploading} onClick={resetUpload}>
+                <CloseIcon />
+                {t('Cancelar')}
+              </Button>
             </Space>
           </fieldset>
         </Modal>
@@ -2596,12 +2683,17 @@
           </Card>
 
           <Space className="gestion-remesas-line-actions">
-            <Button onClick={() => setLineDetailOpen(false)}>{t('Close')}</Button>
+            <Button onClick={() => setLineDetailOpen(false)}>
+              <CloseIcon />
+              {t('Close')}
+            </Button>
             <Button
+              className="gestion-remesas-export-button"
               loading={detailExporting}
               disabled={!batchDetail || detailLoading}
               onClick={exportRemittanceDetail}
             >
+              <ExportIcon />
               {t('Export')}
             </Button>
           </Space>
