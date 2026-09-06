@@ -62,6 +62,12 @@
     </ActionIcon>
   );
 
+  const ExportIcon = () => (
+    <ActionIcon label="export">
+      <path d="M472 128h80v384h128L512 704 344 512h128V128zM160 800h704v80H160z" />
+    </ActionIcon>
+  );
+
   const Table      = A.Table;
   const Form       = A.Form;
   const Select     = A.Select;
@@ -95,6 +101,7 @@
   const [usersLoading, setUsersLoading] = React.useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = React.useState([]);
   const [selectedBatch, setSelectedBatch] = React.useState(null);
+  const [exporting, setExporting] = React.useState(false);
   const [inconsistencyOpen, setInconsistencyOpen] = React.useState(false);
   const [inconsistencyLoading, setInconsistencyLoading] = React.useState(false);
   const [inconsistencyRows, setInconsistencyRows] = React.useState([]);
@@ -721,6 +728,71 @@
     }
   });
 
+  const isUsableXlsxExportLibrary = (xlsxLibrary) => Boolean(xlsxLibrary
+    && typeof xlsxLibrary.writeFile === 'function'
+    && xlsxLibrary.utils
+    && typeof xlsxLibrary.utils.aoa_to_sheet === 'function'
+    && typeof xlsxLibrary.utils.book_new === 'function'
+    && typeof xlsxLibrary.utils.book_append_sheet === 'function');
+
+  const exportSelectedBatch = () => {
+    const batchId = Number(selectedBatch && selectedBatch.id || 0);
+    if (batchId <= 0) {
+      message.warning('Seleccione al menos un lote para exportar su detalle.');
+      return;
+    }
+
+    setExporting(true);
+    Promise.all([loadBatchStoredData(batchId), ensureXlsxLibrary()])
+      .then(([storedData, xlsxLibrary]) => {
+        if (!isUsableXlsxExportLibrary(xlsxLibrary)) {
+          throw new Error('El componente de Excel no permite generar archivos de salida.');
+        }
+
+        const validRows = Array.isArray(storedData)
+          ? storedData
+          : (storedData && Array.isArray(storedData.validRows) ? storedData.validRows : []);
+        const invalidRows = storedData && !Array.isArray(storedData)
+          && Array.isArray(storedData.invalidRows)
+          ? storedData.invalidRows
+          : [];
+
+        if (!validRows.length && !invalidRows.length) {
+          throw new Error('El lote seleccionado no contiene detalle para exportar.');
+        }
+
+        const workbook = xlsxLibrary.utils.book_new();
+        if (validRows.length) {
+          const detailSheet = xlsxLibrary.utils.aoa_to_sheet(validRows);
+          xlsxLibrary.utils.book_append_sheet(workbook, detailSheet, 'Detalle del lote');
+        }
+
+        if (invalidRows.length) {
+          const inconsistencyRows = [
+            ['Fila', 'Póliza', 'Motivo']
+          ].concat(invalidRows.map((row) => [
+            row && row.fila,
+            row && row.poliza,
+            Array.isArray(row && row.errores)
+              ? row.errores.join(' ')
+              : String(row && row.errores || '')
+          ]));
+          const inconsistencySheet = xlsxLibrary.utils.aoa_to_sheet(inconsistencyRows);
+          xlsxLibrary.utils.book_append_sheet(workbook, inconsistencySheet, 'Inconsistencias');
+        }
+
+        xlsxLibrary.writeFile(workbook, 'notificaciones-masivas-lote-' + batchId + '.xlsx', {
+          bookType: 'xlsx',
+          compression: true
+        });
+        message.success('El detalle del lote fue exportado correctamente.');
+      })
+      .catch((error) => {
+        message.error(error && error.message ? error.message : 'No se pudo exportar el detalle del lote.');
+      })
+      .then(() => setExporting(false));
+  };
+
   const mergeFreshBatch = (freshBatch) => {
     const batchId = Number(freshBatch && freshBatch.id || 0);
     if (batchId <= 0) return;
@@ -1267,6 +1339,19 @@
         color: #fff;
       }
 
+      .notificaciones-masivas-toolbar .notificaciones-masivas-export-button {
+        background: #60b13d;
+        border-color: #4f9336;
+        color: #fff;
+      }
+
+      .notificaciones-masivas-toolbar .notificaciones-masivas-export-button:hover,
+      .notificaciones-masivas-toolbar .notificaciones-masivas-export-button:focus {
+        background: #4f9336;
+        border-color: #3f7d2c;
+        color: #fff;
+      }
+
       .notificaciones-masivas-filters {
         margin: 0;
         padding: 8px 12px 2px;
@@ -1559,6 +1644,15 @@
           <Button className="notificaciones-masivas-outline-button" onClick={handleClear}>
             <ClearIcon />
             Limpiar filtros
+          </Button>
+          <Button
+            className="notificaciones-masivas-export-button"
+            loading={exporting}
+            disabled={!selectedBatch || exporting || loading}
+            onClick={exportSelectedBatch}
+          >
+            <ExportIcon />
+            Exportar
           </Button>
         </Space>
 
