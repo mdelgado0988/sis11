@@ -1,5 +1,8 @@
 ﻿use GlobalSIS_AG01
 
+GO
+
+return
 select t.cramo, RTRIM(t.cplan) cplan, RTRIM(t.ccober) ccober, 36 cendoso
 	, REPLACE(tf.formula,'{XMONTH}','XMONTH') as formula
 	, rtrim(REPLACE(REPLACE(REPLACE(REPLACE(tf.mprima,'{XMONTH}','XMONTH'),'{PPRIMAPP}','6.53'),'{XPRIMA}','XPRIMA'),'{CCOBER}','CCOBER')) AS mprima	
@@ -19,7 +22,7 @@ and t.cendoso = 36
 --and tf.formula<> '{Qanos6}=1'
 AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
-
+GO
 
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -35,16 +38,16 @@ from macoberturas mc
 inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
-where c.cramo = 1
+where c.cramo = 81
 --AND pl.istatplan = 'V'
-and C.cplan = 'BPVC' 
+and C.cplan = 'FIAGCCOG' 
 
 SELECT * FROM #Coberturas
 order by 1,2,4
 
 select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo 
 from ccerti_preguntas 
-where cramo = 1 
+where cramo = 81 
 AND (cpregunta IN (select SA FROM #Coberturas)
 	OR cpregunta IN (select CGRUPO FROM #Coberturas)
 	OR cpregunta IN (select CGRUPO1 FROM #Coberturas)
@@ -56,7 +59,7 @@ order by cpregunta
 
 --SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Les06'
 --select * from tarifasvar where variable = 'CalMPAnt'
-EXECUTE dbo.Proc_GetPrimaAnte @p_cramo=1, @p_cplan = N'{XPLAN}', @p_ccober={CCOBER},  @p_cprocesV={CPROCES_V}
+
 return;
 
 declare @ramo int = 31

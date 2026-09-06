@@ -88,3 +88,29 @@
 - Mantener una separación derecha de `4px` para los controles alineados al extremo derecho del topbar, equivalente a la separación izquierda del grupo inicial.
 - Mantener una separación inferior de `2px` entre el topbar y la grilla.
 - Aplicar estas reglas de espaciado de forma uniforme en todas las pestañas de la vista.
+
+## Layout y uso del viewport
+
+- Las vistas tabulares deben ocupar el ancho y alto disponible de la ventana del navegador.
+- Evitar el scroll vertical de la página principal. El scroll vertical debe existir únicamente dentro del cuerpo de la grilla cuando los registros superen el espacio disponible.
+- Construir el layout principal con un contenedor flexible (`display: flex`, normalmente en dirección de columna) y aplicar `min-height: 0` a los contenedores flexibles que incluyan grillas.
+- La grilla debe crecer dinámicamente para ocupar todo el espacio restante después del encabezado, la barra de contexto, las pestañas, el topbar, los filtros y la paginación.
+- No utilizar alturas fijas pequeñas para limitar la grilla. Si se requiere un cálculo explícito, usar la altura disponible del viewport, por ejemplo `100dvh` o `calc(100dvh - [espacio ocupado por la interfaz])`, sin exceder el límite inferior visible.
+- Mantener la paginación, los totales y los indicadores de registros visibles dentro del área de la vista, sin quedar ocultos por el crecimiento de la grilla.
+- El contenedor exterior de la vista debe usar `overflow: hidden` cuando corresponda para impedir que el contenido genere scroll en toda la ventana.
+- El contenedor del contenido de la pestaña y el cuerpo de la grilla deben poder crecer y reducirse con `flex: 1 1 auto` y `min-height: 0`.
+- Al cambiar de pestaña, cargar datos, aplicar filtros o cambiar el tamaño de la ventana, conservar el cálculo dinámico del alto disponible y evitar espacios vacíos innecesarios.
+- Si se requiere recalcular dimensiones por cambios del navegador o del contenedor, usar un mecanismo reactivo como `ResizeObserver` o un listener de resize correctamente registrado y limpiado.
+- El scroll horizontal debe habilitarse únicamente cuando el ancho total de las columnas lo requiera. No reducir la grilla ni crear scroll vertical de la página para resolver un desbordamiento horizontal.
+- El comportamiento del scroll debe ser estable: no debe aparecer y desaparecer al cargar datos, cambiar de pestaña o mover el cursor. Mantener el área de scroll de la grilla definida desde el inicio cuando el diseño lo requiera.
+- Una grilla vacía debe conservar su estructura visual, borde, encabezados y altura disponible, aunque todavía no tenga registros cargados.
+- Las máscaras de carga y los mensajes de error deben renderizarse dentro del área de contenido correspondiente, sin expandir el documento ni bloquear innecesariamente toda la ventana.
+- Estos ajustes son exclusivamente de presentación y layout; no deben modificar consultas, comandos, filtros, paginación ni reglas de negocio salvo solicitud expresa.
+
+## Aplicación en vistas con pestañas
+
+- Todas las pestañas de una misma vista deben compartir el mismo contenedor, espaciado, tipografía, tratamiento de bordes y estrategia de expansión vertical.
+- Las pestañas que dependan de una selección pueden permanecer deshabilitadas hasta contar con la selección requerida, pero su estructura no debe provocar scroll adicional en la ventana.
+- Los paneles laterales de filtros deben ocupar únicamente el espacio necesario y no reducir permanentemente el área vertical disponible para la grilla principal.
+- En vistas como `Cashier`, `CashierSupervisor` y `HistoricalBilling`, la grilla debe expandirse hasta el límite inferior disponible y el scroll de registros debe quedar confinado a la grilla.
+- Al volver a una pestaña previamente visitada, reutilizar los datos ya cargados cuando corresponda y conservar el tamaño dinámico de la grilla; recargar únicamente cuando cambie la selección, la búsqueda o se solicite una actualización.
