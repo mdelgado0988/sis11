@@ -22,7 +22,11 @@ let contractId = 0;
 let tipoContratoSelected = "";
 let tipoPrimaSelected = "";
 let aceptantesTabEnabled = false;
+let coaseguradoresTabEnabled = false;
 let distributionDirty = false;
+let coCessions = [];
+let coaseguradores = [];
+let coaseguradoresData = [];
 const policyId = window.location.href.split('/')[5] || 3403;
 
 const TIPO_MOVIMIENTO_ES = {
@@ -40,9 +44,10 @@ const cfgCoberturaReaseguro = [
   { lob: 52, name: "cfgCoberturaProductoReaRiesgosVarios" },
   { lob: 1, name: "cfgCoberturaProductoRea" },
   { lob: 6, name: "cfgCoberturaProductoReaAuto" },
-  { lob: 81, name: "cfgCoberturaProductoRea" },
-  { lob: 82, name: "cfgCoberturaProductoRea" },
-  { lob: 83, name: "cfgCoberturaProductoRea" }
+  { lob: 81, name: "cfgCoberturaProductoReaFianza" },
+  { lob: 82, name: "cfgCoberturaProductoReaFianza" },
+  { lob: 83, name: "cfgCoberturaProductoReaFianza" },
+  { lob: 84, name: "cfgCoberturaProductoReaFianza" }
 ]
 
 // ===== Datos de prueba =====
@@ -53,7 +58,7 @@ let aceptantes = [
 let reaseguradoresData = [
   { name: "GLOBAL", contactId: 1, lineId: "Cuota Parte", cessionId: 101, split: 30, sumInsured: 10000, premium: 500, commission: 50, tax: 25 }
 ];
-const distribuciones = ["RET", "CUOTA PARTE", "EXCEDENTE 1", "FAC", "FRO"];
+const distribuciones = ["RET", "CUOTA PARTE", "EXCEDENTE 1", "FAC", "FRO", "COASEGURO"];
 
 const filasControles = [
   [
@@ -134,6 +139,17 @@ const filasControles = [
     { tipo: "number2", nombre: "", id: "srfo", valor: 0, readonly: true }
   ],
   [
+    { tipo: "label", nombre: "Coaseguro", id: "lblCoaseguro", contrato: "COASEGURO" },
+    { tipo: "percent8", nombre: "", id: "pco", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "msco", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mpco", valor: 0, readonly: true },
+    { tipo: "percent8", nombre: "", id: "pcco", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mcco", valor: 0, readonly: true },
+    { tipo: "percent8", nombre: "", id: "pico", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "mico", valor: 0, readonly: true },
+    { tipo: "number2", nombre: "", id: "srco", valor: 0, readonly: true }
+  ],
+  [
     { tipo: "label", nombre: "Totales", id: "lblTotal" },
     { tipo: "percent8", nombre: "", id: "tp", valor: 0, readonly: true, clase: "input-verde-negrita" },
     { tipo: "number2", nombre: "", id: "tms", valor: 0, readonly: true, clase: "input-verde-negrita" },
@@ -162,6 +178,8 @@ const relaciones = [
   { tipo: "imp", porcentajeId: "piex1", montoId: "miex1", sumaId: "", montoCalculoId: "mpex1", comisionId: "mcex1", pcomisionId: "pcex1", saldoRea: "srex1" },
   { tipo: "imp", porcentajeId: "pifp", montoId: "mifp", sumaId: "", montoCalculoId: "mpfp", comisionId: "mcfp", pcomisionId: "pcfp", saldoRea: "srfp" },
   { tipo: "imp", porcentajeId: "pifo", montoId: "mifo", sumaId: "", montoCalculoId: "mpfo", comisionId: "mcfo", pcomisionId: "pcfo", saldoRea: "srfo" }
+  ,{ tipo: "comi", porcentajeId: "pcco", montoId: "mcco", sumaId: "", montoCalculoId: "mpco", saldoRea: "srco" }
+  ,{ tipo: "imp", porcentajeId: "pico", montoId: "mico", sumaId: "", montoCalculoId: "mpco", comisionId: "mcco", pcomisionId: "pcco", saldoRea: "srco" }
 ];
 
 // Creamos un mapa para acceso rápido por id
@@ -202,7 +220,11 @@ async function saveChanges() {
     resultado = await addCessions(newCessions);
     if(resultado.isOk){        
       newCessions = resultado.newSaveCessions;
-      mostrarNotificacion(`Distribución de reaseguro guardada satisfactoriamente` , "success");
+      const resultadoCoaseguro = await guardarCoaseguradores(false);
+      if (!resultadoCoaseguro?.ok) {
+        mostrarNotificacion(`Distribución guardada, pero no se pudo guardar el coaseguro: ${resultadoCoaseguro.msg || "Error"}`, "warning");
+      }
+      mostrarNotificacion(`Distribución de reaseguro guardada satisfactoriamente` , "success"); 
       distributionDirty = false;
       syncAceptantesTabState();
       cessions = newCessions;
@@ -1147,7 +1169,7 @@ async function loadConfigCoverages(){
 
 async function loadDataEntities(){
 
-  const RepoPolicy = await me.exe("LoadEntity", { entity: "LifePolicy", fields: "lob, productCode, id, activeDate", filter: `id = ${policyId}` });
+  const RepoPolicy = await me.exe("LoadEntity", { entity: "LifePolicy", fields: "lob, productCode, id, activeDate, coinsurance, currency", filter: `id = ${policyId}` });
   policy = RepoPolicy.outData;
 
   if(!RepoPolicy)
@@ -1159,11 +1181,14 @@ async function loadDataEntities(){
   await loadConfigCoverages();
 
   await loadCessions();
+  await loadCoCessions();
+  await listarCoaseguradores();
 
   const RepoCoverages = await me.exe("LoadEntities", { entity: "LifeCoverage", fields: "code, limit, basePremium", filter: `lifePolicyId = ${policyId}` });
   coverages = RepoCoverages.outData ?? [];
     
   await listarAceptantes();
+  sincronizarControlesCoaseguro();
 
   if(coverages.length <= 0)
     mostrarNotificacion(`No existen coberturas en la póliza, por favor asegúrese de cotizar primero la póliza`, "warning");
@@ -1177,14 +1202,14 @@ function calculaTotales() {
     const totales = { tp, tms, tmp, tpc, tmc, tpi, tmi};
     const forzar = true;
   
-    totales.tp = redondear($("#pret").val(),8, forzar) + redondear($("#pcp").val(),8, forzar) + redondear($("#pex1").val(),8, forzar) + redondear($("#pfp").val(),8, forzar) + redondear($("#pfo").val(),8, forzar) + redondear($("#pnot").val(),8, forzar);
-    totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msex1").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val());
-    totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpex1").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val());
-    totales.tpc = redondear($("#pcret").val(),8, forzar) + redondear($("#pccp").val(),8, forzar) + redondear($("#pcex1").val(),8, forzar) + redondear($("#pcfp").val(),8, forzar) + redondear($("#pcfo").val(),8, forzar) + redondear($("#pcnot").val(),8, forzar);
-    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear ($("#mcex1").val()) + redondear ($("#mcfp").val()) + redondear ($("#mcfo").val()) + redondear ($("#mcnot").val());
-    totales.tpi = redondear ($("#piret").val(),8, forzar) + redondear ($("#picp").val(),8, forzar) + redondear($("#piex1").val(),8, forzar) + redondear($("#pifp").val(),8, forzar) + redondear($("#pifo").val(),8, forzar) + redondear($("#pinot").val(),8, forzar);
-    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
-    totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srex1").val()) + redondear($("#srfo").val());
+    totales.tp = redondear($("#pret").val(),8, forzar) + redondear($("#pcp").val(),8, forzar) + redondear($("#pex1").val(),8, forzar) + redondear($("#pfp").val(),8, forzar) + redondear($("#pfo").val(),8, forzar) + redondear($("#pnot").val(),8, forzar) + redondear($("#pco").val(),8, forzar);
+    totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msex1").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val()) + redondear($("#msco").val());
+    totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpex1").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val()) + redondear($("#mpco").val());
+    totales.tpc = redondear($("#pcret").val(),8, forzar) + redondear($("#pccp").val(),8, forzar) + redondear($("#pcex1").val(),8, forzar) + redondear($("#pcfp").val(),8, forzar) + redondear($("#pcfo").val(),8, forzar) + redondear($("#pcnot").val(),8, forzar) + redondear($("#pcco").val(),8, forzar);
+    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear ($("#mcex1").val()) + redondear ($("#mcfp").val()) + redondear ($("#mcfo").val()) + redondear ($("#mcnot").val()) + redondear($("#mcco").val());
+    totales.tpi = redondear ($("#piret").val(),8, forzar) + redondear ($("#picp").val(),8, forzar) + redondear($("#piex1").val(),8, forzar) + redondear($("#pifp").val(),8, forzar) + redondear($("#pifo").val(),8, forzar) + redondear($("#pinot").val(),8, forzar) + redondear($("#pico").val(),8, forzar);
+    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val()) + redondear($("#mico").val());
+    totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srex1").val()) + redondear($("#srfo").val()) + redondear($("#srco").val());
   
     totales.tp = redondear(totales.tp, 8, forzar);
     totales.tms = redondear(totales.tms);
@@ -2491,8 +2516,47 @@ function crearGridDistribucion() {
 
   $hidden.after(html);
   renderTabsDistribucion();
+  crearPanelTabsDistribucion();
 
   cargarDataGrid();
+}
+
+function crearPanelTabsDistribucion() {
+  const $grid = $("#gridDistribucionContainer");
+  if (!$grid.length || $("#panelTabsDistribucion").length) return;
+
+  const $panel = $(`
+    <div id="panelTabsDistribucion" style="width:100%;">
+      <div class="tabs-header" style="display:flex; gap:0; border-bottom:1px solid #d9d9d9; margin-bottom:10px;">
+        <button type="button" class="tab-panel-btn active" data-panel-tab="contrato" style="border:1px solid #d9d9d9; border-bottom-color:#1677ff; background:#fff; color:#1677ff; padding:8px 16px; cursor:pointer;">Contrato</button>
+        <button type="button" class="tab-panel-btn" data-panel-tab="coaseguro" style="border:1px solid #d9d9d9; border-left:0; background:#fafafa; color:#595959; padding:8px 16px; cursor:pointer;">Coaseguro</button>
+      </div>
+      <div id="panelContratoDistribucion"></div>
+      <div id="panelCoaseguro" style="display:none;"></div>
+    </div>
+  `);
+
+  $grid.before($panel);
+  $grid.appendTo("#panelContratoDistribucion");
+
+  $(document).off("click.panelDistribucion", "#panelTabsDistribucion .tab-panel-btn")
+    .on("click.panelDistribucion", "#panelTabsDistribucion .tab-panel-btn", function () {
+      const tab = $(this).data("panel-tab");
+      const contratoActivo = tab === "contrato";
+      $("#panelTabsDistribucion .tab-panel-btn").removeClass("active").css({
+        background: "#fafafa",
+        color: "#595959",
+        borderBottomColor: "#d9d9d9"
+      });
+      $(this).addClass("active").css({
+        background: "#fff",
+        color: "#1677ff",
+        borderBottomColor: "#1677ff"
+      });
+      $("#panelContratoDistribucion").toggle(contratoActivo);
+      $("#panelCoaseguro").toggle(!contratoActivo);
+      if (!contratoActivo) renderCoaseguradores();
+    });
 }
 
 function renderTabsDistribucion() {
@@ -3498,6 +3562,230 @@ $("<style>")
       min-width: 1200px;
     }
 
+    /* ===== TABLA DE COASEGURO ===== */
+    #panelCoaseguro {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0 10px 12px;
+    }
+
+    #panelCoaseguro .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    #panelCoaseguro .grid-coaseguradores {
+      width: 100%;
+      min-width: 900px;
+      table-layout: auto;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: #fff;
+    }
+
+    #panelCoaseguro .grid-coaseguradores th {
+      padding: 9px 10px;
+      background: #f0f0f0;
+      border-right: 1px solid #d9d9d9;
+      border-bottom: 1px solid #cfcfcf;
+      color: #262626;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    #panelCoaseguro .grid-coaseguradores td {
+      padding: 7px 10px;
+      border-right: 1px solid #e5e5e5;
+      border-bottom: 1px solid #e5e5e5;
+      color: #262626;
+      font-size: 13px;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    #panelCoaseguro .grid-coaseguradores th:last-child,
+    #panelCoaseguro .grid-coaseguradores td:last-child {
+      border-right: none;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .acciones-coasegurador {
+      width: 86px;
+      min-width: 86px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .acciones-coasegurador .ant-btn {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      margin: 0 2px;
+      font-size: 16px;
+      line-height: 26px;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .btn-editar-coasegurador {
+      color: #1677ff;
+      border: 1px solid #91caff;
+      background: #e6f4ff;
+      border-radius: 4px;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .btn-editar-coasegurador:hover {
+      color: #0958d9;
+      border-color: #4096ff;
+      background: #bae0ff;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .acciones-coasegurador .btn-eliminar {
+      color: #ff4d4f;
+      border: 1px solid #ffccc7;
+      background: #fff2f0;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .acciones-coasegurador .btn-eliminar:hover {
+      color: #d9363e;
+      border-color: #ff7875;
+      background: #fff1f0;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .col-participante {
+      min-width: 210px;
+      width: 230px;
+      text-align: left;
+    }
+
+    #panelCoaseguro .grid-coaseguradores tbody tr:hover {
+      background: #fafafa;
+    }
+
+    #panelCoaseguro .grid-coaseguradores .coaseguro-compania {
+      background: #f8f8f8;
+      font-weight: 600;
+    }
+
+    #panelCoaseguro .grid-coaseguradores th:nth-child(n+4),
+    #panelCoaseguro .grid-coaseguradores td:nth-child(n+4) {
+      text-align: right;
+    }
+
+    #panelCoaseguro .grid-coaseguradores th:first-child,
+    #panelCoaseguro .grid-coaseguradores td:first-child,
+    #panelCoaseguro .grid-coaseguradores th:nth-child(2),
+    #panelCoaseguro .grid-coaseguradores td:nth-child(2),
+    #panelCoaseguro .grid-coaseguradores th:nth-child(3),
+    #panelCoaseguro .grid-coaseguradores td:nth-child(3) {
+      text-align: left;
+    }
+
+    #panelCoaseguro .grid-coaseguradores input.coaseguro-porcentaje {
+      width: 92px;
+      box-sizing: border-box;
+      padding: 4px 7px;
+      border: 1px solid #bfbfbf;
+      border-radius: 4px;
+      background: #fff;
+      color: #262626;
+      text-align: right;
+      font-size: 13px;
+    }
+
+    #panelCoaseguro .grid-coaseguradores input.coaseguro-porcentaje:focus {
+      outline: none;
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(22, 119, 255, .15);
+    }
+
+    #panelCoaseguro .resumen-card {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      background: #fafafa;
+      font-size: 13px;
+    }
+
+    /* ===== MODAL DE COASEGURO ===== */
+    .carga-masiva-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 999998;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, .35);
+    }
+
+    .carga-masiva-modal {
+      width: min(520px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .2);
+    }
+
+    .carga-masiva-header,
+    .carga-masiva-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .carga-masiva-header h3 {
+      margin: 0;
+      color: rgba(0, 0, 0, .85);
+      font-size: 17px;
+    }
+
+    .carga-masiva-close {
+      border: 0;
+      background: transparent;
+      color: rgba(0, 0, 0, .45);
+      cursor: pointer;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .carga-masiva-body {
+      padding: 18px;
+      color: rgba(0, 0, 0, .75);
+    }
+
+    .carga-masiva-body label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .carga-masiva-body .ant-input {
+      display: block;
+      box-sizing: border-box;
+      min-height: 30px;
+      margin-top: 5px;
+      padding: 5px 8px;
+      border: 1px solid #d9d9d9;
+      border-radius: 4px;
+      background: #fff;
+    }
+
+    .carga-masiva-footer {
+      justify-content: flex-end;
+      border-top: 1px solid #f0f0f0;
+      border-bottom: 0;
+    }
+
   `)
   .appendTo("head");
 
@@ -3513,6 +3801,8 @@ async function initGridDistribucion() {
 
   const maxIntentos = 10;
   const delay = 500;
+
+  $("#modalAgregarCoasegurador").remove();
 
   for (let intento = 0; intento < maxIntentos; intento++) {
 
@@ -3530,6 +3820,7 @@ async function initGridDistribucion() {
 
       crearGridDistribucion();
       renderControlesDistribucion();
+      sincronizarControlesCoaseguro();
       renderReaseguradores();
       addParticipantsEvent();
       renderResumen();
@@ -3603,4 +3894,451 @@ function showLoading(text = "Procesando...") {
 
 function hideLoading() {
     document.getElementById("global-loading-mask")?.remove();
+}
+
+///////////////////////////////////////////////////////////
+/// Coaseguro
+///////////////////////////////////////////////////////////
+
+function coaseguroNumero(valor) {
+  if (valor === null || valor === undefined || valor === "") return 0;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : 0;
+  const texto = String(valor).trim().replace(/,/g, "");
+  const numero = Number(texto);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function coaseguroMonto(valor) {
+  return redondear(coaseguroNumero(valor), 2);
+}
+
+function coaseguroFormato(valor) {
+  return formatearNumero(coaseguroMonto(valor));
+}
+
+function coaseguroEscapar(valor) {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function ajustarDiferenciaAlMayorCoaseguro(items, field, target) {
+  if (!Array.isArray(items) || !items.length) return;
+  const diferencia = coaseguroMonto(target) - coaseguroMonto(items.reduce((sum, row) => sum + coaseguroNumero(row[field]), 0));
+  if (Math.abs(diferencia) < 0.005) return;
+  const mayor = items.reduce((current, row) =>
+    !current || coaseguroNumero(row[field]) > coaseguroNumero(current[field]) ? row : current, null);
+  if (mayor) mayor[field] = coaseguroMonto(coaseguroNumero(mayor[field]) + diferencia);
+}
+
+async function loadCoCessions() {
+  try {
+    const result = await me.exe("RepoCoCession", {
+      operation: "GET",
+      filter: `lifePolicyId = ${parseInt(policyId, 10)} AND parentCoCession IS NULL`,
+      include: ["Contact"],
+      entity: null,
+      bulkJson: null,
+      size: 0,
+      page: 0,
+      showColumnsIfEmpty: false
+    });
+    coCessions = Array.isArray(result?.outData) ? result.outData : [];
+  } catch (error) {
+    coCessions = [];
+    mostrarNotificacion(`No se pudo cargar el coaseguro: ${error?.msg || error}`, "warning");
+  }
+}
+
+async function listarCoaseguradores() {
+  try {
+    const result = await me.exe("LoadEntities", {
+      entity: "Contact",
+      fields: "id, name, middleName, surname1, surname2, isPerson",
+      filter: "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'COI')"
+    });
+    coaseguradores = (result?.outData || [])
+      .filter(item => Number(item.id) !== 4939)
+      .map(item => ({
+        id: Number(item.id),
+        nombre: item.isPerson
+          ? [item.name, item.middleName, item.surname1, item.surname2].filter(Boolean).join(" ").trim()
+          : String(item.surname2 || item.name || "").trim()
+      }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  } catch (error) {
+    coaseguradores = [];
+    mostrarNotificacion(`No se pudo cargar el catálogo de coaseguradores: ${error?.msg || error}`, "warning");
+  }
+}
+
+function getCoaseguradorNombre(id) {
+  return coaseguradores.find(item => Number(item.id) === Number(id))?.nombre || "";
+}
+
+function getCoaseguroGlobalBase() {
+  const unique = new Map();
+  (cessions || []).filter(item => normalizeCondition(item.lineId) !== "COASEGURO").forEach(item => {
+    const key = `${item.coverageId || item.lifeCoverageId || item.coverageCode || item.id}`;
+    if (!unique.has(key)) unique.set(key, item);
+  });
+  return [...unique.values()].reduce((total, item) => {
+    total.sumInsured += coaseguroNumero(item.sumInsured);
+    total.premium += coaseguroNumero(item.premium);
+    return total;
+  }, { sumInsured: 0, premium: 0 });
+}
+
+function sincronizarControlesCoaseguro() {
+  const base = getCoaseguroGlobalBase();
+  const percentage = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.percentage), 0);
+  const commission = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.commission), 0);
+  const tax = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.tax), 0);
+  const premiumCeded = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.premiumCeded), 0);
+  const commissionRate = premiumCeded ? commission * 100 / premiumCeded : 0;
+  const taxRate = premiumCeded ? tax * 100 / premiumCeded : 0;
+  $("#pco").val(formatearNumero(percentage));
+  $("#msco").val(coaseguroFormato(base.sumInsured * percentage / 100));
+  $("#mpco").val(coaseguroFormato(base.premium * percentage / 100));
+  $("#pcco").val(formatearNumero(commissionRate));
+  $("#mcco").val(coaseguroFormato(commission));
+  $("#pico").val(formatearNumero(taxRate));
+  $("#mico").val(coaseguroFormato(tax));
+  $("#srco").val(coaseguroFormato(premiumCeded - commission - tax));
+  calculaTotales();
+}
+
+function renderCoaseguradores() {
+  const $tab = $("#panelCoaseguro");
+  if (!$tab.length) return;
+  sincronizarControlesCoaseguro();
+  coaseguradoresData = coCessions.map(row => ({
+    id: row.id,
+    contactId: row.contactId,
+    name: getCoaseguradorNombre(row.contactId) || row.Contact?.name || "",
+    percentage: coaseguroNumero(row.percentage),
+    sumInsured: coaseguroMonto(row.sumInsuredCeded),
+    premium: coaseguroMonto(row.premiumCeded),
+    commission: coaseguroMonto(row.commission),
+    tax: coaseguroMonto(row.tax),
+    leader: row.leader === true || Number(row.leader) === 1
+  }));
+
+  const base = getCoaseguroGlobalBase();
+  const distributed = coaseguradoresData.reduce((sum, row) => sum + row.percentage, 0);
+  const companyPercentage = Math.max(0, 100 - distributed);
+  const placedSum = coaseguradoresData.reduce((sum, row) => sum + row.sumInsured, 0);
+  const placedPremium = coaseguradoresData.reduce((sum, row) => sum + row.premium, 0);
+
+  $tab.html(`
+    <div class="coaseguro-toolbar" style="display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap;">
+      <button type="button" class="ant-btn ant-btn-primary" id="btnAgregarCoasegurador">+ Agregar coasegurador</button>
+      <button type="button" class="ant-btn" id="btnActualizarCoaseguradores">&#8635; Actualizar</button>
+      <label for="coaseguradoraCompaniaLider" style="display:flex; align-items:center; gap:6px; margin-left:4px;">
+        Compañía líder
+        <select id="coaseguradoraCompaniaLider" class="ant-input" style="width:88px; height:30px;">
+          <option value="no" ${Number(policy?.coinsurance) === 1 ? "" : "selected"}>No</option>
+          <option value="si" ${Number(policy?.coinsurance) === 1 ? "selected" : ""}>Sí</option>
+        </select>
+      </label>
+      <span style="font-weight:600;">Participación de la compañía: ${formatearNumero(companyPercentage)}%</span>
+    </div>
+    <div class="table-scroll"><table class="ant-table grid-coaseguradores">
+      <thead><tr><th>Acciones</th><th>Coasegurador</th><th>Líder</th><th>Porcentaje</th><th>Suma</th><th>Prima</th><th>Comisión</th><th>Impuesto</th></tr></thead>
+      <tbody>${coaseguradoresData.map((row, index) => `
+        <tr data-index="${index}">
+          <td class="acciones-coasegurador">
+            <button type="button" class="ant-btn ant-btn-link btn-editar-coasegurador" data-index="${index}" title="Editar coasegurador" aria-label="Editar coasegurador">&#9998;</button>
+            <button type="button" class="ant-btn ant-btn-link btn-eliminar btn-eliminar-coasegurador" data-index="${index}" title="Eliminar coasegurador" aria-label="Eliminar coasegurador">&#128465;</button>
+          </td>
+          <td class="col-participante" title="${coaseguroEscapar(row.name || `Contacto ${row.contactId}`)}">&#128100; ${coaseguroEscapar(row.name || `Contacto ${row.contactId}`)}</td>
+          <td>${row.leader ? "Sí" : "No"}</td>
+          <td><input class="coaseguro-porcentaje" data-index="${index}" type="text" value="${formatearNumero(row.percentage)}" /></td>
+          <td class="num">${coaseguroFormato(row.sumInsured)}</td>
+          <td class="num">${coaseguroFormato(row.premium)}</td>
+          <td class="num">${coaseguroFormato(row.commission)}</td>
+          <td class="num">${coaseguroFormato(row.tax)}</td>
+        </tr>`).join("")}
+        <tr class="coaseguro-compania"><td class="acciones-coasegurador"></td><td class="col-participante" title="Compañía">&#128100; Compañía</td><td>${Number(policy?.coinsurance) === 1 ? "Sí" : "No"}</td><td>${formatearNumero(companyPercentage)}</td><td>${coaseguroFormato(base.sumInsured - placedSum)}</td><td>${coaseguroFormato(base.premium - placedPremium)}</td><td>0.00</td><td>0.00</td></tr>
+      </tbody>
+    </table></div>
+    <div class="resumen-card" style="margin-top:10px;">Suma total: <strong>${coaseguroFormato(base.sumInsured)}</strong> &nbsp; Prima total: <strong>${coaseguroFormato(base.premium)}</strong></div>
+  `);
+
+  $(document).off("click.coaseguro", "#btnAgregarCoasegurador")
+    .on("click.coaseguro", "#btnAgregarCoasegurador", function () {
+      abrirModalAgregarCoasegurador();
+    });
+  $(document).off("click.coaseguro", "#btnActualizarCoaseguradores")
+    .on("click.coaseguro", "#btnActualizarCoaseguradores", async function () {
+      showLoading("Actualizando coaseguradores...");
+      try {
+        await loadCoCessions();
+        renderCoaseguradores();
+        mostrarNotificacion("Coaseguradores actualizados correctamente.", "success");
+      } catch (error) {
+        mostrarNotificacion(`No se pudo actualizar coaseguradores: ${error?.msg || error}`, "error");
+      } finally {
+        hideLoading();
+      }
+    });
+  $(document).off("click.coaseguro", ".btn-editar-coasegurador")
+    .on("click.coaseguro", ".btn-editar-coasegurador", function () {
+      abrirModalAgregarCoasegurador(Number($(this).data("index")));
+    });
+  $(document).off("change.coaseguro", "#coaseguradoraCompaniaLider")
+    .on("change.coaseguro", "#coaseguradoraCompaniaLider", async function () {
+    const $select = $(this);
+    const companiaEsLider = $select.val() === "si";
+    $select.prop("disabled", true);
+    showLoading("Actualizando liderazgo de la compañía...");
+    try {
+      const resultado = await actualizarCoinsuranceLifePolicy(companiaEsLider ? 1 : 2);
+      if (!resultado?.ok) {
+        mostrarNotificacion(`No se pudo actualizar el liderazgo de la compañía: ${resultado?.msg || "Error"}`, "warning");
+        $select.val(companiaEsLider ? "no" : "si");
+        return;
+      }
+      policy.coinsurance = companiaEsLider ? 1 : 2;
+      mostrarNotificacion(`La compañía se marcó como ${companiaEsLider ? "líder" : "no líder"}.`, "success");
+      renderCoaseguradores();
+    } catch (error) {
+      mostrarNotificacion(`No se pudo actualizar el liderazgo de la compañía: ${error?.msg || error}`, "error");
+      $select.val(companiaEsLider ? "no" : "si");
+    } finally {
+      hideLoading();
+      $select.prop("disabled", false);
+    }
+  });
+  $tab.find(".coaseguro-porcentaje").off("change.coaseguro").on("change.coaseguro", async function () {
+    const index = Number($(this).data("index"));
+    const value = coaseguroNumero(this.value);
+    const total = coaseguradoresData.reduce((sum, row, i) => sum + (i === index ? value : row.percentage), 0);
+    if (value < 0 || total > 100) {
+      mostrarNotificacion("La suma de porcentajes no puede exceder 100%.", "warning");
+      renderCoaseguradores();
+      return;
+    }
+    const row = coaseguradoresData[index];
+    if (!row) return;
+    row.percentage = value;
+    recalcularCoasegurador(row);
+    coCessions[index] = { ...coCessions[index], percentage: value, sumInsuredCeded: row.sumInsured, premiumCeded: row.premium, commission: row.commission, tax: row.tax };
+    await guardarCoaseguradores(false);
+    renderCoaseguradores();
+  });
+  $tab.find(".btn-eliminar-coasegurador").off("click.coaseguro").on("click.coaseguro", async function () {
+    const index = Number($(this).data("index"));
+    if (!Number.isInteger(index)) return;
+    showLoading("Eliminando coasegurador...");
+    coaseguradoresData.splice(index, 1);
+    coCessions.splice(index, 1);
+    try {
+      const guardado = await guardarCoaseguradores(false);
+      if (!guardado?.ok) throw new Error(guardado?.msg || "No se pudo eliminar el coasegurador");
+      renderCoaseguradores();
+      mostrarNotificacion("Coasegurador eliminado correctamente.", "success");
+      await preguntarAplicarDistribucionCoaseguro();
+    } catch (error) {
+      mostrarNotificacion(`No se pudo eliminar el coasegurador: ${error?.msg || error}`, "error");
+    } finally {
+      hideLoading();
+    }
+  });
+}
+
+function recalcularCoasegurador(row) {
+  const base = getCoaseguroGlobalBase();
+  row.sumInsured = coaseguroMonto(base.sumInsured * row.percentage / 100);
+  row.premium = coaseguroMonto(base.premium * row.percentage / 100);
+  const commissionRate = coaseguradoresData.reduce((sum, item) => sum + coaseguroNumero(item.commission), 0) / Math.max(1, coaseguradoresData.reduce((sum, item) => sum + coaseguroNumero(item.premium), 0));
+  row.commission = coaseguroMonto(row.premium * commissionRate);
+}
+
+function mostrarConfirmacionAplicarContrato() {
+  return new Promise(resolve => {
+    $("#modalConfirmarAplicarContrato").remove();
+    $("body").append(`
+      <div id="modalConfirmarAplicarContrato" class="carga-masiva-overlay" style="z-index:1000003;">
+        <div class="carga-masiva-modal" role="dialog" aria-modal="true" aria-labelledby="tituloConfirmarAplicarContrato" style="width:min(440px,100%);">
+          <div class="carga-masiva-header">
+            <h3 id="tituloConfirmarAplicarContrato">Aplicar contrato</h3>
+            <button type="button" class="carga-masiva-close" data-confirmar-aplicar="no">&times;</button>
+          </div>
+          <div class="carga-masiva-body">
+            <p style="margin:0;">La distribución de coaseguro fue modificada.</p>
+            <p style="margin:12px 0 0;">¿Desea aplicar ahora la distribución del contrato de reaseguro?</p>
+          </div>
+          <div class="carga-masiva-footer">
+            <button type="button" class="ant-btn" data-confirmar-aplicar="no">No</button>
+            <button type="button" class="ant-btn ant-btn-primary" data-confirmar-aplicar="si">Sí</button>
+          </div>
+        </div>
+      </div>`);
+
+    $(document).off("click.confirmarAplicarContrato", "[data-confirmar-aplicar]")
+      .on("click.confirmarAplicarContrato", "[data-confirmar-aplicar]", function () {
+        const aplicar = $(this).data("confirmar-aplicar") === "si";
+        $("#modalConfirmarAplicarContrato").remove();
+        $(document).off("click.confirmarAplicarContrato", "[data-confirmar-aplicar]");
+        resolve(aplicar);
+      });
+  });
+}
+
+async function preguntarAplicarDistribucionCoaseguro() {
+  const aplicarAhora = await mostrarConfirmacionAplicarContrato();
+  if (aplicarAhora) {
+    showLoading("Aplicando distribución del contrato...");
+    $("#btnRecalcular").trigger("click");
+  }
+}
+
+function abrirModalAgregarCoasegurador(index = null) {
+  $("#modalAgregarCoasegurador").remove();
+
+  const rowEdit = index === null ? null : coaseguradoresData[index];
+  if (index !== null && !rowEdit) return;
+
+  const idsRegistrados = new Set(coaseguradoresData
+    .filter((row, rowIndex) => rowIndex !== index)
+    .map(row => String(row.contactId)));
+  const disponibles = coaseguradores.filter(item => !idsRegistrados.has(String(item.id)));
+  if (!disponibles.length) {
+    mostrarNotificacion("Todos los coaseguradores disponibles ya fueron agregados.", "warning");
+    return;
+  }
+
+  const base = getCoaseguroGlobalBase();
+  const source = rowEdit ? coCessions[index] || {} : {};
+  const porcentajeComision = rowEdit?.commissionRate ?? (base.premium > 0 ? (coaseguroNumero(source.commission) / Math.max(1, coaseguroNumero(source.premiumCeded))) * 100 : 0);
+  const opciones = disponibles.map(item => `<option value="${item.id}" ${rowEdit && String(rowEdit.contactId) === String(item.id) ? "selected" : ""}>${coaseguroEscapar(item.nombre || `Contacto ${item.id}`)}</option>`).join("");
+
+  const html = `
+    <div id="modalAgregarCoasegurador" class="carga-masiva-overlay" style="z-index:1000002;">
+      <div class="carga-masiva-modal" role="dialog" aria-modal="true" aria-labelledby="tituloAgregarCoasegurador">
+        <div class="carga-masiva-header">
+          <h3 id="tituloAgregarCoasegurador">${rowEdit ? "Editar coasegurador" : "Selección de coasegurador"}</h3>
+          <button type="button" class="carga-masiva-close" id="cerrarModalAgregarCoasegurador">&times;</button>
+        </div>
+        <div class="carga-masiva-body">
+          <label for="modalCoasegurador">Coasegurador:</label>
+          <select id="modalCoasegurador" class="ant-input" style="width:100%; margin:8px 0 14px;">
+            <option value="">Seleccione...</option>${opciones}
+          </select>
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+            <input id="modalCoaseguradorLider" type="checkbox" ${rowEdit?.leader ? "checked" : ""} /> Líder
+          </label>
+          <label for="modalCoaseguradorPorcentaje">% Ced:</label>
+          <input id="modalCoaseguradorPorcentaje" class="ant-input percent" type="text" value="${formatearRedondeado(rowEdit?.percentage ?? 0, 2)}" style="width:100%; margin:8px 0 14px;" />
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div><label>Suma asegurada:</label><input id="modalCoaseguradorSumaBase" class="ant-input" type="text" value="${coaseguroFormato(base.sumInsured)}" readonly /></div>
+            <div><label>Prima:</label><input id="modalCoaseguradorPrimaBase" class="ant-input" type="text" value="${coaseguroFormato(base.premium)}" readonly /></div>
+            <div><label>Suma asegurada cedida:</label><input id="modalCoaseguradorSuma" class="ant-input number" type="text" value="${coaseguroFormato(rowEdit?.sumInsured ?? 0)}" readonly /></div>
+            <div><label>Prima cedida:</label><input id="modalCoaseguradorPrima" class="ant-input number" type="text" value="${coaseguroFormato(rowEdit?.premium ?? 0)}" readonly /></div>
+            <div><label>Comisión:</label><input id="modalCoaseguradorComision" class="ant-input number" type="text" value="${coaseguroFormato(rowEdit?.commission ?? 0)}" readonly /></div>
+            <div><label>% Comisión:</label><input id="modalCoaseguradorPorcentajeComision" class="ant-input percent" type="text" value="${formatearRedondeado(porcentajeComision, 2)}" /></div>
+          </div>
+          <div style="margin-top:14px; position:relative;">
+            <label for="modalCoaseguradorIntermediario">Intermediario:</label>
+            <input id="modalCoaseguradorIntermediario" class="ant-input" type="text" autocomplete="off" placeholder="Escribir para buscar contacto..." value="${coaseguroEscapar(source.intermediaryName || "")}" style="width:100%; margin-top:8px;" />
+            <input id="modalCoaseguradorIntermediarioId" type="hidden" value="${source.intermediaryId ?? source.brokerId ?? ""}" />
+            <div id="modalCoaseguradorIntermediarioOpciones" style="display:none; position:fixed; z-index:1000001; max-height:180px; overflow:auto; background:#fff; border:1px solid #d9d9d9; box-shadow:0 4px 12px rgba(0,0,0,.15);"></div>
+          </div>
+        </div>
+        <div class="carga-masiva-footer">
+          <button type="button" class="ant-btn" id="cancelarModalAgregarCoasegurador">Cancelar</button>
+          <button type="button" class="ant-btn ant-btn-primary" id="aceptarModalAgregarCoasegurador">Aceptar</button>
+        </div>
+      </div>
+    </div>`;
+
+  $("body").append(html);
+
+  const actualizarMontos = () => {
+    const porcentaje = coaseguroNumero($("#modalCoaseguradorPorcentaje").val());
+    const porcentajeCom = coaseguroNumero($("#modalCoaseguradorPorcentajeComision").val());
+    $("#modalCoaseguradorSuma").val(coaseguroFormato(base.sumInsured * porcentaje / 100));
+    const prima = coaseguroMonto(base.premium * porcentaje / 100);
+    $("#modalCoaseguradorPrima").val(coaseguroFormato(prima));
+    $("#modalCoaseguradorComision").val(coaseguroFormato(prima * porcentajeCom / 100));
+  };
+  $("#modalCoaseguradorPorcentaje, #modalCoaseguradorPorcentajeComision").off("input.modalCoaseguro").on("input.modalCoaseguro", actualizarMontos);
+  actualizarMontos();
+
+  const cerrarModal = () => {
+    $("#modalAgregarCoasegurador").remove();
+    $(document).off("keydown.modalAgregarCoasegurador");
+    $(window).off("resize.modalCoaseguro scroll.modalCoaseguro");
+  };
+  $(document).off("click.modalAgregarCoasegurador", "#cerrarModalAgregarCoasegurador, #cancelarModalAgregarCoasegurador")
+    .on("click.modalAgregarCoasegurador", "#cerrarModalAgregarCoasegurador, #cancelarModalAgregarCoasegurador", cerrarModal);
+  $(document).off("keydown.modalAgregarCoasegurador").on("keydown.modalAgregarCoasegurador", event => {
+    if (event.key === "Escape") cerrarModal();
+  });
+
+  $(document).off("click.modalAgregarCoasegurador", "#aceptarModalAgregarCoasegurador")
+    .on("click.modalAgregarCoasegurador", "#aceptarModalAgregarCoasegurador", async function (event) {
+      event.preventDefault();
+      const contactId = Number($("#modalCoasegurador").val());
+      const participante = disponibles.find(item => Number(item.id) === contactId);
+      const percentage = coaseguroNumero($("#modalCoaseguradorPorcentaje").val());
+      const commissionRate = coaseguroNumero($("#modalCoaseguradorPorcentajeComision").val());
+      const total = coaseguradoresData.reduce((sum, row, rowIndex) => sum + (rowIndex === index ? 0 : coaseguroNumero(row.percentage)), 0) + percentage;
+      if (!participante) return mostrarNotificacion("Seleccione un coasegurador.", "warning");
+      if (percentage <= 0) return mostrarNotificacion("Ingrese un porcentaje de participación mayor que cero.", "warning");
+      if (total > 100) return mostrarNotificacion("La suma de porcentajes no puede exceder 100%.", "warning");
+
+      const esLider = $("#modalCoaseguradorLider").is(":checked");
+      const nuevo = {
+        ...(index === null ? {} : source),
+        lifePolicyId: Number(policyId), contactId, percentage,
+        sumInsured: base.sumInsured, premium: base.premium,
+        sumInsuredCeded: coaseguroMonto(base.sumInsured * percentage / 100),
+        premiumCeded: coaseguroMonto(base.premium * percentage / 100),
+        commission: coaseguroMonto(coaseguroNumero($("#modalCoaseguradorComision").val())),
+        tax: coaseguroMonto(source.tax || 0),
+        currency: policy.currency || source.currency || "USD",
+        leader: esLider,
+        brokerId: Number($("#modalCoaseguradorIntermediarioId").val()) || null,
+        intermediaryName: String($("#modalCoaseguradorIntermediario").val() || "").trim(),
+        brokerCommission: coaseguroMonto(source.brokerCommission || 0)
+      };
+      const anterior = [...coCessions];
+      if (index === null) coCessions.push(nuevo); else coCessions[index] = nuevo;
+      showLoading("Guardando coasegurador...");
+      try {
+        const liderazgo = await actualizarCoinsuranceLifePolicy(esLider ? 1 : 2);
+        if (!liderazgo?.ok) throw new Error(liderazgo?.msg || "No se pudo actualizar el liderazgo");
+        const guardado = await guardarCoaseguradores(false);
+        if (!guardado?.ok) throw new Error(guardado?.msg || "No se pudo guardar el coasegurador");
+        policy.coinsurance = esLider ? 1 : 2;
+        cerrarModal();
+        sincronizarControlesCoaseguro();
+        renderCoaseguradores();
+        mostrarNotificacion(index === null ? "Coasegurador agregado correctamente." : "Coasegurador actualizado correctamente.", "success");
+        await preguntarAplicarDistribucionCoaseguro();
+      } catch (error) {
+        coCessions = anterior;
+        mostrarNotificacion(`No se pudo guardar el coasegurador: ${error?.msg || error}`, "error");
+      } finally {
+        hideLoading();
+      }
+    });
+}
+
+async function actualizarCoinsuranceLifePolicy(valor) {
+  return await me.exe("DoQuery", { sql: `UPDATE LifePolicy SET coinsurance = ${Number(valor) === 1 ? 1 : 2} WHERE id = ${parseInt(policyId, 10)}` });
+}
+
+async function guardarCoaseguradores() {
+  try {
+    const inserts = coCessions.map(row => `INSERT INTO CoCession (lifePolicyId, contactId, sumInsured, premium, sumInsuredCeded, premiumCeded, commission, percentage, created, leader, currency, liquidationId, paidOnCollection, parentCoCession, brokerCommission, tax, changeId, overwritten, allocationId, lifeCoverageId, brokerId) VALUES (${parseInt(policyId, 10)}, ${parseInt(row.contactId, 10)}, ${coaseguroMonto(row.sumInsured)}, ${coaseguroMonto(row.premium)}, ${coaseguroMonto(row.sumInsuredCeded)}, ${coaseguroMonto(row.premiumCeded)}, ${coaseguroMonto(row.commission)}, ${coaseguroMonto(row.percentage)}, GETDATE(), ${row.leader ? 1 : 0}, '${String(row.currency || "USD").replace(/'/g, "''")}', NULL, 0, NULL, 0, ${coaseguroMonto(row.tax)}, NULL, 0, NULL, NULL, NULL);`).join("\n");
+    return await me.exe("DoQuery", { sql: `SET XACT_ABORT ON; BEGIN TRANSACTION; DELETE FROM CoCession WHERE lifePolicyId = ${parseInt(policyId, 10)}; ${inserts} COMMIT TRANSACTION;` });
+  } catch (error) {
+    return { ok: false, msg: error?.msg || String(error) };
+  }
 }

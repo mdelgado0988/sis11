@@ -15,7 +15,7 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 81
+where t.cramo = 84
 --and t.cplan = 'BPVC' 
 and t.cendoso = 36
 --and t.ccober = 25
@@ -40,7 +40,7 @@ inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
 where c.cramo = 81
 --AND pl.istatplan = 'V'
-and C.cplan = 'FIAGCCOG' 
+--and C.cplan = 'FIAGCCOG' 
 
 SELECT * FROM #Coberturas
 order by 1,2,4
