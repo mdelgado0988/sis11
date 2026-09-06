@@ -15,7 +15,7 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 84
+where t.cramo = 81
 --and t.cplan = 'BPVC' 
 and t.cendoso = 36
 --and t.ccober = 25
@@ -113,8 +113,8 @@ GROUP BY cramo, xnombrep
 SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos WHERE cramo = 6 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 1
-declare @cplan varchar(15) = 'vid-desemp';
+declare @cramo int = 81
+declare @cplan varchar(15) = 'FIAGCCOG';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
 		cross apply (select count(1)  cobs
@@ -147,7 +147,7 @@ left join maplanes pl on pl.cramo = r.cramo and pl.cplan = r.cplan
 where r.cramo in (81,82,83,84)
 and r.xdpto = 'EMISION'
 --and cplan = 'FIAGCCOG'
-and r.xdescripcion like '%contrato%'
+--and r.xdescripcion like '%contrato%'
 AND r.xnombrep NOT LIKE '%endoso%'
 order by r.cramo, r.cplan
 
