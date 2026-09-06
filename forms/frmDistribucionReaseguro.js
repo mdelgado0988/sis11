@@ -4056,7 +4056,7 @@ function renderCoaseguradores() {
           </td>
           <td class="col-participante" title="${coaseguroEscapar(row.name || `Contacto ${row.contactId}`)}">&#128100; ${coaseguroEscapar(row.name || `Contacto ${row.contactId}`)}</td>
           <td>${row.leader ? "Sí" : "No"}</td>
-          <td><input class="coaseguro-porcentaje" data-index="${index}" type="text" value="${formatearNumero(row.percentage)}" /></td>
+          <td class="num">${formatearNumero(row.percentage)}</td>
           <td class="num">${coaseguroFormato(row.sumInsured)}</td>
           <td class="num">${coaseguroFormato(row.premium)}</td>
           <td class="num">${coaseguroFormato(row.commission)}</td>
@@ -4112,23 +4112,6 @@ function renderCoaseguradores() {
       hideLoading();
       $select.prop("disabled", false);
     }
-  });
-  $tab.find(".coaseguro-porcentaje").off("change.coaseguro").on("change.coaseguro", async function () {
-    const index = Number($(this).data("index"));
-    const value = coaseguroNumero(this.value);
-    const total = coaseguradoresData.reduce((sum, row, i) => sum + (i === index ? value : row.percentage), 0);
-    if (value < 0 || total > 100) {
-      mostrarNotificacion("La suma de porcentajes no puede exceder 100%.", "warning");
-      renderCoaseguradores();
-      return;
-    }
-    const row = coaseguradoresData[index];
-    if (!row) return;
-    row.percentage = value;
-    recalcularCoasegurador(row);
-    coCessions[index] = { ...coCessions[index], percentage: value, sumInsuredCeded: row.sumInsured, premiumCeded: row.premium, commission: row.commission, tax: row.tax };
-    await guardarCoaseguradores(false);
-    renderCoaseguradores();
   });
   $tab.find(".btn-eliminar-coasegurador").off("click.coaseguro").on("click.coaseguro", async function () {
     const index = Number($(this).data("index"));
