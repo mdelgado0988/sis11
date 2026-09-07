@@ -1,3 +1,11 @@
+/**
+ * @author Michael Delgado
+ * @email michael.delgado@axxis-systems.com
+ * @created 2026/09/07
+ * @name PolicyBilling
+ * @version 1.0
+ * @purpose: Display policy billing receipts, endorsements, premiums, taxes, and installment details.
+ */
 ()=>{
   const { useEffect, useState } = React;
   const {
@@ -183,13 +191,21 @@
     function getBillValues(bill, fallback) {
       const currentBill = bill || {};
       const backup = fallback || {};
+      const hasPremiumBreakdown = currentBill.coverages !== undefined
+        || currentBill.surcharges !== undefined
+        || currentBill.discounts !== undefined;
+      const premium = Number(currentBill.coverages || 0) || 0;
+      const discounts = Number(currentBill.discounts || 0) || 0;
+      const surcharges = Number(currentBill.surcharges || 0) || 0;
       return {
         receiptNumber: currentBill.fiscalNumber || backup.fiscalNumber || '-',
         receiptAmount: Number(currentBill.anualTotal || currentBill.annualTotal || 0) || 0,
-        premium: Number(currentBill.coverages || 0) || 0,
-        discounts: Number(currentBill.discounts || 0) || 0,
-        surcharges: Number(currentBill.surcharges || 0) || 0,
-        grossPremium: Number(currentBill.anualPremium || currentBill.annualPremium || 0) || 0,
+        premium,
+        discounts,
+        surcharges,
+        grossPremium: hasPremiumBreakdown
+          ? premium + discounts + surcharges
+          : Number(currentBill.anualPremium || currentBill.annualPremium || 0) || 0,
         tax: Number(currentBill.tax || 0) || 0,
         expenses: Number(currentBill.fee || 0) || 0
       };
