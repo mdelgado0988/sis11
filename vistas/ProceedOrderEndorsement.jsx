@@ -12,15 +12,28 @@
 
   // ---------------------------------------------------------------- utilities
   // Date rule (§2.3): every date is handled as a CALENDAR date in the browser
-  // local zone, normalised to local midnight. We slice the YYYY-MM-DD prefix and
-  // rebuild the date locally, so a UTC offset can never move the calendar day.
+  // local zone, normalised to local midnight. Date-only values stay unchanged;
+  // timestamp values with an explicit zone are converted to the browser locale.
   const toLocalDate = (value) => {
     if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
     if (value && typeof value.toDate === 'function') {
       const m = value.toDate();
       return new Date(m.getFullYear(), m.getMonth(), m.getDate());
     }
-    const raw = String(value).slice(0, 10);
+    const rawValue = String(value);
+    // ISO timestamps with an explicit zone must be converted to the browser's
+    // local calendar date before comparison. Date-only values are already
+    // calendar dates and must not be shifted by the browser timezone.
+    if (rawValue.includes('T') && /(?:Z|[+-]\d{2}:?\d{2})$/.test(rawValue)) {
+      const instant = new Date(rawValue);
+      if (!Number.isNaN(instant.getTime())) {
+        return new Date(instant.getFullYear(), instant.getMonth(), instant.getDate());
+      }
+    }
+    const raw = rawValue.slice(0, 10);
     const parts = raw.split('-');
     if (parts.length !== 3) return null;
     const y = Number(parts[0]), mo = Number(parts[1]), d = Number(parts[2]);
@@ -31,6 +44,29 @@
     if (!date) return '';
     const p = (n) => (n < 10 ? '0' + n : String(n));
     return date.getFullYear() + '-' + p(date.getMonth() + 1) + '-' + p(date.getDate());
+  };
+  const fmtAtNoon = (value) => {
+    const raw = String(value == null ? '' : value).trim();
+    const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
+    if (datePart) return datePart[0] + 'T12:00:00';
+    const calendarDate = toLocalDate(value);
+    const calendar = fmt(calendarDate);
+    return calendar ? calendar + 'T12:00:00' : '';
+  };
+  const toPolicyLocalDate = (value) => {
+    if (!value) return null;
+    if (value instanceof Date || (value && typeof value.toDate === 'function')) return toLocalDate(value);
+    const raw = String(value).trim();
+    if (!raw) return null;
+    // LifePolicy dates are persisted at midnight by the API. Apply the same
+    // UTC-to-browser-local conversion used by the policy screens, including
+    // responses that omit the explicit Z suffix.
+    const source = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)
+      ? raw
+      : (raw.includes('T') ? raw + 'Z' : raw + 'T00:00:00Z');
+    const instant = new Date(source);
+    if (Number.isNaN(instant.getTime())) return toLocalDate(raw);
+    return new Date(instant.getFullYear(), instant.getMonth(), instant.getDate());
   };
   const DAY = 86400000;
   const daysBetween = (a, b) => (!a || !b ? null : Math.round((b.getTime() - a.getTime()) / DAY));
@@ -277,8 +313,8 @@
     const mainCov = coverages.find((c) => txt(c.code) === mainCode);
     if (!mainCov) return { error: t('The configured main coverage (') + mainCode + t(') is not present on this policy.') };
 
-    const curMainStart = toLocalDate(mainCov.start);
-    const curMainEnd = toLocalDate(mainCov.end);
+    const curMainStart = toPolicyLocalDate(mainCov.start);
+    const curMainEnd = toPolicyLocalDate(mainCov.end);
     if (!curMainStart || !curMainEnd) return { error: t('The main coverage has no usable start/end dates.') };
 
     const mainDuration = daysBetween(curMainStart, curMainEnd);
@@ -288,8 +324,8 @@
     const rows = coverages.map((c) => {
       const code = txt(c.code);
       const cfg = cfgByCov[code];
-      const curStart = toLocalDate(c.start);
-      const curEnd = toLocalDate(c.end);
+      const curStart = toPolicyLocalDate(c.start);
+      const curEnd = toPolicyLocalDate(c.end);
       const duration = daysBetween(curStart, curEnd);
       const isMain = code === mainCode;
       // Configured as taking part in the relationship, and not the main one.
@@ -339,11 +375,13 @@
 
   // ---------------------------------------------------------------- validation
   const missing = [];
-  if (!effectiveDate) missing.push(t('Effective endorsement date'));
-  const policyStartDate = policy ? toLocalDate(policy.start) : null;
+  if (!effectiveDate) missing.push(t('Change date'));
+  const policyStartDate = policy ? toPolicyLocalDate(policy.start) : null;
   const effectiveDateValue = toLocalDate(effectiveDate);
-  const effectiveDateError = policyStartDate && effectiveDateValue
-    && effectiveDateValue.getTime() <= policyStartDate.getTime()
+  const policyStartKey = fmt(policyStartDate);
+  const effectiveDateKey = fmt(effectiveDateValue);
+  const effectiveDateError = policyStartKey && effectiveDateKey
+    && effectiveDateKey <= policyStartKey
     ? t('The date cannot be equal to or earlier than the policy issue/start date.')
     : '';
   if (effectiveDateError) missing.push(effectiveDateError);
@@ -374,8 +412,8 @@
       const row = model.rows.filter((item) => item.code === txt(coverage.code))[0];
       const changedCoverage = { ...coverage };
       if (row && row.newStart && row.newEnd) {
-        changedCoverage.start = fmt(row.newStart) + 'T00:00:00';
-        changedCoverage.end = fmt(row.newEnd) + 'T00:00:00';
+        changedCoverage.start = fmtAtNoon(row.newStart);
+        changedCoverage.end = fmtAtNoon(row.newEnd);
       }
       return changedCoverage;
     });
@@ -384,9 +422,28 @@
       policyId: policyId,
       jOldCoverages: JSON.stringify(oldCoverages),
       jNewCoverages: JSON.stringify(newCoverages),
-      effectiveDate: effectiveDateValue,
+      newStart: model.mainRow && model.mainRow.newStart ? fmtAtNoon(model.mainRow.newStart) : '',
+      newEnd: model.mainRow && model.mainRow.newEnd ? fmtAtNoon(model.mainRow.newEnd) : '',
+      effectiveDate: fmtAtNoon(effectiveDateValue),
       jAdditional: JSON.stringify({ endorsementType: 'PROCEEDORDER' })
     };
+  };
+
+  const approveEndorsementWorkflow = async function (processId) {
+    const procesoId = Number(processId || 0);
+    if (!procesoId) {
+      throw new Error(t('The endorsement workflow process could not be determined.'));
+    }
+
+    const result = await exe('GotoStep', {
+      procesoId: procesoId,
+      estado: 'APROVED'
+    });
+    const response = Array.isArray(result) ? (result[0] || {}) : result;
+    if (!response || !response.ok) {
+      throw new Error(translatedMessage(response && response.msg, 'The endorsement workflow could not be approved.'));
+    }
+    return response;
   };
 
   const onCalculate = async function () {
@@ -494,8 +551,11 @@
       setChangeId(cid);
       pushStep(t('Generate the endorsement'), true, t('endorsement ') + cid);
 
+      await approveEndorsementWorkflow(created.outData.processId);
+      pushStep(t('Approve endorsement workflow'), true, '');
+
       // --- execute
-      const executed = await exe('ExeChangeCoverage', { changeId: cid, exeNow: false, operation: 'EXECUTE', noTracking: true });
+      const executed = await exe('ExeChangeCoverage', { changeId: cid, exeNow: true, operation: 'EXECUTE', noTracking: true });
       if (!executed || !executed.ok) {
         pushStep(t('Execute the endorsement'), false, translatedMessage(executed && executed.msg, 'no response'));
         const executeError = t('The endorsement was generated but NOT executed. ') + translatedMessage(executed && executed.msg, '');
@@ -516,6 +576,73 @@
       }
       pushStep(t('Execute the endorsement'), true, translatedMessage(executed.msg, ''));
 
+      // ChangeCoverage updates the coverages but does not necessarily update the
+      // LifePolicy validity. Persist the dates represented by the endorsement.
+      const executedData = executed.outData && Array.isArray(executed.outData)
+        ? executed.outData[0]
+        : (executed.outData || {});
+      const endorsementCoverages = executedData.jNewCoverages
+        || created.outData.jNewCoverages
+        || addPayload.jNewCoverages;
+      let maxCoverageEnd = '';
+      try {
+        const coverageList = typeof endorsementCoverages === 'string'
+          ? JSON.parse(endorsementCoverages)
+          : endorsementCoverages;
+        (Array.isArray(coverageList) ? coverageList : []).forEach((coverage) => {
+          const end = toLocalDate(coverage.end);
+          if (end && (!maxCoverageEnd || end > toLocalDate(maxCoverageEnd))) maxCoverageEnd = fmt(end);
+        });
+      } catch (errorCoverageDates) {
+        maxCoverageEnd = '';
+      }
+
+      // Read the coverages after execution as the source of truth. The
+      // endorsement response can contain a pre-execution JSON snapshot whose
+      // date differs from the value finally persisted by ChangeCoverage.
+      const persistedPolicyResponse = await exe('RepoLifePolicy', {
+        operation: 'GET',
+        filter: 'id = ' + policyId,
+        include: ['Coverages']
+      });
+      const persistedPolicy = persistedPolicyResponse && persistedPolicyResponse.ok
+        ? (Array.isArray(persistedPolicyResponse.outData)
+          ? persistedPolicyResponse.outData[0]
+          : persistedPolicyResponse.outData)
+        : null;
+      const persistedCoverages = persistedPolicy
+        && (persistedPolicy.Coverages || persistedPolicy.coveragesList);
+      if (Array.isArray(persistedCoverages)) {
+        persistedCoverages.forEach((coverage) => {
+          const end = toLocalDate(coverage.end);
+          if (end && (!maxCoverageEnd || end > toLocalDate(maxCoverageEnd))) maxCoverageEnd = fmt(end);
+        });
+      }
+      const policyStart = eff;
+      const policyEnd = maxCoverageEnd || executedData.newEnd || created.outData.newEnd || addPayload.newEnd;
+      if (!policyStart || !policyEnd) {
+        const validityError = t('The endorsement was applied, but its new policy validity dates were not returned.');
+        pushStep(t('Update policy validity'), false, validityError);
+        setResult({ kind: 'partial', msg: validityError });
+        message.error(validityError);
+        return;
+      }
+
+      const policyUpdate = await exe('SetField', {
+        entity: 'LifePolicy',
+        entityId: policyId,
+        fieldValue: "[start]='" + fmtAtNoon(policyStart) + "', [end]='" + fmtAtNoon(policyEnd) + "'",
+        raw: true
+      });
+      if (!policyUpdate || !policyUpdate.ok) {
+        const validityError = t('The endorsement was applied, but the policy validity could not be updated. ') + translatedMessage(policyUpdate && policyUpdate.msg, 'no response');
+        pushStep(t('Update policy validity'), false, validityError);
+        setResult({ kind: 'partial', msg: validityError });
+        message.error(validityError);
+        return;
+      }
+      pushStep(t('Update policy validity'), true, policyStart + ' -> ' + policyEnd);
+
       // --- synchronise the insured object (§3.3)
       const synced = await exe('ExeChain', { chain: 'cmdUpdateInsuredObjectData', context: JSON.stringify({ policyId: policyId }) });
       const syncData = synced && synced.outData;
@@ -528,6 +655,7 @@
       if (syncOk) {
         setResult({ kind: 'success', msg: t('Endorsement ') + cid + t(' applied and insured-object data synchronised.') });
         message.success(t('The endorsement was applied successfully.'));
+        setTimeout(() => { window.location.href = policyHref; }, 500);
       } else {
         // §3.4: never hide a partial failure behind a generic success message.
         setResult({ kind: 'partial', msg: t('PARTIAL: endorsement ') + cid + t(' WAS applied to the policy, but the insured-object synchronisation failed — ') + syncMsg });
@@ -671,7 +799,7 @@
 
         <Row gutter={16}>
           <Col span={8}>
-            <Form.Item label={t('Effective endorsement date')} required
+            <Form.Item label={t('Change date')} required
               validateStatus={touched && (!effectiveDate || effectiveDateError) ? 'error' : ''}
               help={touched && !effectiveDate
                 ? t('This field is required.')

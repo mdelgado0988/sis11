@@ -58,11 +58,11 @@ order by cpregunta
 --select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
 --SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Les06'
---select * from tarifasvar where variable = 'CalMPAnt'
+--select * from tarifasvar where variable = 'porcDeduAutoChino'
 
 return;
 
-declare @ramo int = 31
+declare @ramo int = 81
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -132,14 +132,6 @@ inner join adpolcob c on p.cpoliza = c.cpoliza and p.fanopol = c.fanopol and p.f
 where p.cramo = @cramo 
 --and p.cplan = @cplan 
 --and p.cendoso = 36;
-
-select * from rea_ces where crecibo = 792901
-
-select xsinonimo, rtrim(ccodigo) ccodigo, xdescripcion_l from Macodigos where xsinonimo='cclarie' Order by xdescripcion_l
-
-select distinct ccobertura from maplancob c
-where c.cramo = 31
-and cplan not in ('EG1','EG2','EG3','EG4','EG5')
 
 select pl.xplan, r.* 
 from marepteccia r

@@ -114,3 +114,58 @@
 - Los paneles laterales de filtros deben ocupar únicamente el espacio necesario y no reducir permanentemente el área vertical disponible para la grilla principal.
 - En vistas como `Cashier`, `CashierSupervisor` y `HistoricalBilling`, la grilla debe expandirse hasta el límite inferior disponible y el scroll de registros debe quedar confinado a la grilla.
 - Al volver a una pestaña previamente visitada, reutilizar los datos ya cargados cuando corresponda y conservar el tamaño dinámico de la grilla; recargar únicamente cuando cambie la selección, la búsqueda o se solicite una actualización.
+
+## Diseño de pestañas de Información Resumen del Reclamo
+
+> Esta especificación reproduce la referencia visual aprobada para esta vista y prevalece sobre el estilo genérico de pestañas tipo tarjeta descrito anteriormente.
+
+- Mostrar las pestañas en una sola fila horizontal, compacta y sin saltos de línea.
+- Usar una franja de fondo azul muy claro (`#e6f4ff`) con una línea inferior de `1px solid #91caff`.
+- Cada pestaña debe medir aproximadamente `30px` de alto y usar `padding: 0 11px`, con el texto centrado verticalmente.
+- Usar borde de `1px solid #91caff`, esquinas superiores de `4px 4px 0 0`, sin redondeo inferior y una separación horizontal de `2px`.
+- Las pestañas inactivas deben usar fondo azul claro (`#f0f5ff`), texto azul (`#245b9e`), fuente de `12px` y peso normal (`400`).
+- La pestaña activa debe usar fondo blanco (`#ffffff`), texto azul oscuro (`#0b3f7d`) y peso semibold (`600`). Su borde inferior debe ser blanco para integrarse visualmente con el área de contenido.
+- En hover, mantener el texto azul oscuro y usar un fondo ligeramente más intenso (`#e6f4ff`), sin cambiar dimensiones ni desplazar las pestañas.
+- Mantener el orden y los textos de la referencia: `Datos Generales`, `Objeto Afectado`, `Cobertura / Reservas`, `Pagos`, `Gastos`, `Recuperaciones`, `Agregar Documentos`, `Comentarios`, `Impresiones` y `Deducciones`.
+- Si el ancho disponible no alcanza, conservar una sola línea y habilitar desplazamiento horizontal en el contenedor; no comprimir el texto ni aumentar la altura.
+
+### Referencia CSS para Ant Design
+
+```css
+.claim-summary-tabs > .ant-tabs-nav {
+  margin: 0;
+  background: #e6f4ff;
+  border-bottom: 1px solid #91caff;
+}
+
+.claim-summary-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  gap: 2px;
+}
+
+.claim-summary-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  height: 30px;
+  margin: 0;
+  padding: 0 11px;
+  background: #f0f5ff;
+  border: 1px solid #91caff;
+  border-radius: 4px 4px 0 0;
+  color: #245b9e;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.claim-summary-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab:hover {
+  background: #e6f4ff;
+  color: #0b3f7d;
+}
+
+.claim-summary-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+  background: #ffffff;
+  border-bottom-color: #ffffff;
+}
+
+.claim-summary-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #0b3f7d;
+  font-weight: 600;
+}
+```

@@ -19,6 +19,7 @@ let productCoveragesFianza = [];
 let configCoveragesFianza = [];
 let coberturasSeleccionadasFianza = [];
 let polizaConfirmadaFianza = false;
+const isEndorsementFianza = window.location.href.includes('tab12');
 
 $("#rut").css({
   backgroundColor: "#f5f5f5",
@@ -705,8 +706,9 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
 
             // ===== constante fecha inicial =====
             const covPolicy = policy.Coverages.find(x => x.code == g.coverageCode);
-            const isBasic = covPolicy?.basic ?? false;
-            const FECHA_INICIAL_DEFAULT = formatearFecha(covPolicy?.start ? covPolicy.start : (isBasic ? policy?.start : policy?.end));
+            // The policy start is the single calendar base for tariff dates.
+            // Do not reuse a possibly stale coverage start after the policy changes.
+            const FECHA_INICIAL_DEFAULT = formatearFecha(policy?.start);
             const FECHA_FINAL_DEFAULT = formatearFecha(covPolicy?.end ? covPolicy.end : policy.end);
 
             const $tr = $("<tr>")
@@ -881,10 +883,26 @@ function recalcularVigenciasFianza($container = $("#tab2")) {
 
         const calculated = {};
         const calculating = new Set();
+        const resolvingRoot = new Set();
 
         const getField = ($row, text) => $row.find("input[data-field]").filter(function () {
             return String($(this).attr("data-field") || "").toLowerCase().includes(text);
         }).first();
+
+        const getRootCoverageCode = code => {
+            const normalizedCode = String(code || "").trim().toUpperCase();
+            if (!normalizedCode || resolvingRoot.has(normalizedCode)) return normalizedCode;
+
+            const config = configByCode[normalizedCode];
+            const principal = String(config?.coverageCodeDep ?? config?.coberturaPrincipal ?? "").trim();
+            if (!principal || principal === "0" || principal.toUpperCase() === "NULL"
+                || principal.toUpperCase() === normalizedCode) return normalizedCode;
+
+            resolvingRoot.add(normalizedCode);
+            const root = getRootCoverageCode(principal);
+            resolvingRoot.delete(normalizedCode);
+            return root || normalizedCode;
+        };
 
         const calculate = code => {
             const normalizedCode = String(code || "").trim().toUpperCase();
@@ -901,17 +919,23 @@ function recalcularVigenciasFianza($container = $("#tab2")) {
             calculating.add(normalizedCode);
 
             const config = configByCode[normalizedCode];
-            const principal = String(config?.coberturaPrincipal ?? "").trim();
+            const principal = String(config?.coverageCodeDep ?? config?.coberturaPrincipal ?? "").trim();
             const $duration = getField($row, "duración");
             const duration = Number($duration.val()) || 0;
             const $start = getField($row, "f. inicial");
             const $end = getField($row, "f. final");
 
-            let start = String($row.attr("data-base-start") || $start.val() || "");
+            // Always read the current policy start when recalculating. The row
+            // attribute is only a fallback for legacy rendered rows.
+            const policyStart = formatearFecha(policy?.start);
+            let start = String(policyStart || $row.attr("data-base-start") || $start.val() || "");
             let end = String($row.attr("data-base-end") || $end.val() || "");
 
             if (principal && principal !== "0" && principal.toUpperCase() !== "NULL") {
-                const principalResult = calculate(principal);
+                // All coverages in the same dependency tree start on the
+                // root coverage end, never on a stale intermediate date.
+                const rootCode = getRootCoverageCode(normalizedCode);
+                const principalResult = calculate(rootCode);
                 if (principalResult?.end) start = principalResult.end;
             }
 
@@ -1085,8 +1109,10 @@ async function setProductCoveragesFianza() {
                 lifePolicyId: policy.id,
                 code: productCoverage.code,
                 name: productCoverage.name ?? 'Cobertura desconocida',
-                limit: policyCoverage?.limit ?? policyCoverage?.sumaAsegurada ?? 0,
-                premium: policyCoverage?.premium ?? policyCoverage?.prima ?? policyCoverage?.basePremium ?? 0,
+                // Display the values stored on the policy coverage, not the
+                // product configuration or a tariff fallback.
+                limit: policyCoverage?.limit ?? 0,
+                premium: policyCoverage?.premium ?? 0,
                 deductible: policyCoverage?.deductible ?? 0,
                 periodicity: policyCoverage?.periodicity ?? 0,
                 basePremium: policyCoverage?.basePremium ?? 0,
@@ -1177,7 +1203,7 @@ function renderToolbarCoberturasFianza() {
 
     $tab.prepend(`
         <div id="toolbarCoberturasFianza">
-            <button type="button" id="btnGestionarCoberturasFianza" class="ant-btn ant-btn-primary">
+            <button type="button" id="btnGestionarCoberturasFianza" class="ant-btn ant-btn-primary" ${polizaConfirmadaFianza ? 'disabled' : ''}>
                 <span style="margin-right:6px;">▦</span> Gestionar Coberturas
             </button>
         </div>
@@ -1190,6 +1216,47 @@ function renderToolbarCoberturasFianza() {
         .on('click.coberturasFianza', '#btnGestionarCoberturasFianza', function () {
             $('#modalCoberturasFianza').css('display', 'flex');
         });
+}
+
+function aplicarRestriccionesEndosoFianza() {
+    if (!polizaConfirmadaFianza && !isEndorsementFianza) return;
+
+    const form = $('#contenedorCobtar').closest('form');
+    if (!form.length) return;
+
+    form.find('input:not([type="hidden"]), select, textarea').each(function () {
+        const $field = $(this);
+        if ($field.is(':checkbox, :radio')) {
+            $field.prop('disabled', true);
+        } else if ($field.is('select')) {
+            $field.css({ pointerEvents: 'none', backgroundColor: '#f5f5f5', color: '#8c8c8c' });
+        } else {
+            $field.prop('readonly', true);
+        }
+    });
+
+    const ramo = String(policy?.lob ?? '').trim();
+    const producto = String(policy?.productCode ?? '').trim().toUpperCase();
+    const permiteFechaActo = (ramo === '81' && producto === '81PROPUESTA')
+        || (ramo === '83' && ['PROPUESTA', 'PROP_GA', 'GPESPECIAL'].includes(producto));
+
+    const camposEditables = [
+        '#valor_garantia',
+        '#desc_garantia',
+        '#desc_objeto_afianzado',
+        '#cmbEstadoFianza'
+    ];
+    if (permiteFechaActo) camposEditables.push('#f_acto_publico');
+
+    camposEditables.forEach(selector => {
+        $(selector).prop('disabled', false).prop('readonly', false)
+            .css({ pointerEvents: '', backgroundColor: '', color: '' })
+            .removeClass('disabled');
+    });
+
+    $('#toolbarCoberturasFianza button, #btnGestionarCoberturasFianza, #btnGuardarCoberturasFianza')
+        .prop('disabled', true);
+    $('#modalCoberturasFianza').hide();
 }
 
 function renderModalCoberturasFianza() {
@@ -1297,7 +1364,7 @@ function buildLifeCoverageInsertFianza(coverages) {
             return Number.isFinite(Number(value)) ? String(Number(value)) : 'NULL';
         }
         if (['basic', 'internalBonus', 'hasMaturity', 'ignoreIndexation', 'manualPremium', 'manualLimit', 'isInternal'].includes(column)) return value ? '1' : '0';
-        if (column === 'start' || column === 'end') return `'${escapeSqlFianza(new Date(value).toISOString())}'`;
+        if (column === 'start' || column === 'end') return `'${escapeSqlFianza(formatearFechaHoraFija(value))}'`;
         return `N'${escapeSqlFianza(value)}'`;
     };
 
@@ -1468,7 +1535,7 @@ function sumarDias(fechaStr, dias) {
     if (isNaN(fecha)) return "";
 
     fecha.setDate(fecha.getDate() + Number(dias));
-    return fecha.toISOString().split("T")[0]; // yyyy-MM-dd
+    return formatearFecha(fecha); // yyyy-MM-dd para los controles de fecha
 }
 
 function formatearFecha(fecha) {
@@ -1480,6 +1547,14 @@ function formatearFecha(fecha) {
     const dd = String(f.getDate()).padStart(2, "0");
 
     return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatearFechaHoraFija(fecha) {
+    const raw = String(fecha ?? '').trim();
+    const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
+    if (datePart) return `${datePart[0]}T12:00:00`;
+    const fechaCalendario = formatearFecha(fecha);
+    return fechaCalendario ? `${fechaCalendario}T12:00:00` : "";
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -1860,6 +1935,7 @@ const onDocumentReady = async () => {
         loadDataTable({reference:'#tipo_licitacion',tableName:'tipolicitacion',indexCode:0,indexDisplay:1})
     ]);
     cargarCumuloAsync();
+    aplicarRestriccionesEndosoFianza();
 
 };
 
@@ -1879,6 +1955,8 @@ async function getPolicyData(policyId) {
         noTracking: true
     });
     policy.Coverages = coverages.outData ?? [];
+    polizaConfirmadaFianza = policy.active === true
+        || String(policy.active).toLowerCase() === 'true';
 
     return policy;
 }

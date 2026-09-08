@@ -153,7 +153,9 @@ function getQuotationObject(coverageCode) {
   //Calculo de factor de vigencia, ojo
   //* calculamos la duración de la cobertura
   const coveragePolicy = poliza.Coverages.find(x => x.code == coverageCode);
-  const qDuration = item?.DURACIONDIAS ?? 0;
+  // Each coverage owns its duration. Do not reuse a duration from another
+  // coverage when the hidden form uses a slightly different field name.
+  const qDuration = getCoverageDuration(item);
   
   obj["VIGENCIA_FACTOR"] = (qDuration >= 365) ? Number((qDuration / 365).toFixed(4)) : 1;  
 
@@ -227,8 +229,8 @@ function setCurrentCoverageValues() {
     resultCoverage.premium = n(cov.premium !== undefined && cov.premium !== null ? cov.premium : cov.startPremium);
     resultCoverage.dedutible = n(cov.deductible);
     resultCoverage.description = cov.description || cov.name || cov.commercialName || "";
-    resultCoverage.fini = cov.start || null;
-    resultCoverage.ffin = cov.end || null;
+    resultCoverage.fini = formatDateAtNoon(cov.start);
+    resultCoverage.ffin = formatDateAtNoon(cov.end);
   }
 }
 
@@ -410,11 +412,32 @@ function toDateOnly(value) {
 
 function parseFechaUTCMedioDia(fechaStr) {
   if (!fechaStr) return null;
+  return formatDateAtNoon(fechaStr);
+}
 
-  const [year, month, day] = fechaStr.split("-").map(Number);
+function formatDateAtNoon(value) {
+  if (!value) return null;
 
-  // UTC a las 12:00:00 para evitar shift de zona horaria
-  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  const raw = String(value).trim();
+  const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
+  if (datePart) return `${datePart[0]}T12:00:00`;
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const pad = number => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T12:00:00`;
+}
+
+function getCoverageDuration(item) {
+  if (!item || typeof item !== "object") return 0;
+
+  const keys = ["DURACIONDIAS", "DURACION_DIAS", "DURACIONDIA", "DURACION"];
+  const key = keys.find(name => item[name] !== undefined && item[name] !== null && String(item[name]).trim() !== "");
+  if (!key) return 0;
+
+  const value = Number(String(item[key]).replace(",", "."));
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 //////////////////////////////////////////////////////////////////////
