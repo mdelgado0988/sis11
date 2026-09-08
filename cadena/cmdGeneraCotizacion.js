@@ -26,6 +26,12 @@ const Reportes = [{ lob: 1, productCode: "0", reportName: "OfertaIncendio.docx" 
 const chains = [{lob:1, name: "getOfertaModeloSisIncendio", context: `{id: ${policyId}}`},
                 {lob:6, name: "cmdDocumentoAutoDTO", context: `{policyId: ${policyId}}`}]
 
+// AXX-303: oferta por los ramos de Fianzas del catalogo verificado.
+for (const lobFianza of [81,82,83,84]) {
+  Reportes.push({lob:lobFianza,productCode:"0",reportName:"oferta_fianzas.docx"});
+  chains.push({lob:lobFianza,name:"cmdDocumentoFianzaDTO",context:`{policyId: ${policyId}}`});
+}
+
 try {
   if (policyId <= 0) {
     return { ok: false, msg: 'Id de póliza inválido o no informado' };
