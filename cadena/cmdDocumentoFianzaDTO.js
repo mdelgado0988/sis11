@@ -198,19 +198,13 @@ function partesFechaPanama(value) {
   const date = value instanceof Date ? value : fechaComoUTC(value);
   if (!date || isNaN(date.getTime())) return null;
 
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Panama',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(date);
-  const result = {};
-  parts.forEach(part => {
-    if (part.type === 'year') result.anio = Number(part.value);
-    if (part.type === 'month') result.mes = Number(part.value);
-    if (part.type === 'day') result.dia = Number(part.value);
-  });
-  return result;
+  // Panama mantiene UTC-5 durante todo el año y no utiliza horario de verano.
+  const fechaPanama = new Date(date.getTime() - (5 * 60 * 60 * 1000));
+  return {
+    anio: fechaPanama.getUTCFullYear(),
+    mes: fechaPanama.getUTCMonth() + 1,
+    dia: fechaPanama.getUTCDate()
+  };
 }
 
 function n(value) {
