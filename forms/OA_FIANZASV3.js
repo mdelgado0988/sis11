@@ -1854,8 +1854,8 @@ const onDocumentReady = async () => {
 
     await Promise.all([
         loadDataTable({reference:'#clase_riesgo',tableName:'actividadfianza',indexCode:0,indexDisplay:1}),
-        loadDataTable({reference:'#actividad',tableName:'actividadfianza',indexCode:0,indexDisplay:1}),
-        loadDataTable({reference:'#tipo_vigencia',tableName:'tipovigencia',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#actividad',tableName:'tbMaActivi',indexCode:1,indexDisplay:3}),
+        loadDataTable({reference:'#tipo_calendario',tableName:'tipovigencia',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#vigencia_fianza',tableName:'vigenciafianza',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#tipo_licitacion',tableName:'tipolicitacion',indexCode:0,indexDisplay:1})
     ]);

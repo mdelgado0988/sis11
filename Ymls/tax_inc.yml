@@ -1,0 +1,178 @@
+Rules:
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: QUOTE
+        
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: QUOTECERT  
+    
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: Anniversary
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ANNIVERSARY
+    
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: PREQUOTE    
+  
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangePolicyCapital
+    
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeAddCoverage
+    
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeRemoveCoverage
+      
+  - name: Impuesto de Seguros
+    amount: >
+      /*block*/
+      /* AXX-253 / GLOB-1209 - Endoso de Prima Incobrable.
+         Para ese endoso el impuesto se interpreta como estado final de la poliza,
+         por lo tanto debe quedar en cero. Para cualquier otra cancelacion se conserva
+         el calculo nativo (cmdCalculateISCancellation), sin cambios.
+         CUIDADO: el preprocesador de formulas reemplaza todo guion bajo por "context.", tambien
+         dentro de los literales de texto: ninguna variable ni cadena de aqui puede llevarlo. */
+      
+      const n2 = (value) => Number((Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100).toFixed(2));
+      
+      let tipoEndoso = "";
+      
+      try {
+        const jAdicional = (_change && _change.jAdditional) ? String(_change.jAdditional) : "";
+        if (jAdicional.length > 0) tipoEndoso = String(JSON.parse(jAdicional).endorsementType || "");
+      } catch (errorMarca) {
+        tipoEndoso = "";
+      }
+      
+      let impuestoCancelacion = 0;
+      
+      if (tipoEndoso === "UNCOLLECTIBLEPREMIUM") {
+        impuestoCancelacion = 0;
+      } else {
+        const contextoInterno = JSON.stringify({
+          policyId: _pol.id,
+          effectiveDate: _change.effectiveDate
+        });
+      
+        doCmd({
+          cmd: "ExeChain",
+          data: {
+            chain: "cmdCalculateISCancellation",
+            context: contextoInterno
+          }
+        });
+      
+        impuestoCancelacion = n2(ExeChain.outData || 0);
+      }
+      
+      impuestoCancelacion
+    condition: 1==1
+    event: ChangeCancellation
+  - name: Impuesto de Seguros
+    amount: >
+      /*block*/
+      /* Endoso de orden de proceder: mover la vigencia no debe modificar el impuesto.
+         Se conserva exactamente el impuesto vigente de la poliza. */
+      let tipoEndoso = "";
+      try {
+        const datosCambio = (_pol && _pol.jChangeDto && _pol.jChangeDto.data)
+          ? _pol.jChangeDto.data
+          : {};
+        const jAdicional = (_change && _change.jAdditional)
+          ? String(_change.jAdditional)
+          : (datosCambio.jAdditional ? String(datosCambio.jAdditional) : "");
+        if (jAdicional.length > 0) tipoEndoso = String(JSON.parse(jAdicional).endorsementType || "");
+      } catch (errorMarca) {
+        tipoEndoso = "";
+      }
+      
+      const resultado =( tipoEndoso === "PROCEEDORDER"
+        ? Number(Number(_pol.tax || 0).toFixed(2))
+        : Number((0.05*_pol.anualPremium).toFixed(2)))
+
+        doCmd({
+      cmd: "GetPing",
+        data: {
+          pol: _pol,
+          tipoEndoso: tipoEndoso,
+          change: _change,
+          jAdditional: _change?.jAdditional || {},
+          resultado: resultado
+        }
+      });
+
+      resultado
+    condition: 1==1
+    event: ChangeTerm
+    
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeReinstatement
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: FrequencyChange
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangePolicySurcharge
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeExclusion
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeInsuredObject
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeIntermediary
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeCoverageTechData
+
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangePaymentMethod
+
+    #Estaba pendiente GLOB-742
+  - name: Impuesto de Seguros
+    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeLoading
+    
+  - name: LIQCLAIMS
+    amount: 0.0*_pay.total
+    condition: _ben.isPerson==false
+    event: ClaimPayment
+
+  - name: LIQCLAIMS
+    amount: 0*_pay.total
+    condition: _ben.isPerson==true
+    event: ClaimPayment    
