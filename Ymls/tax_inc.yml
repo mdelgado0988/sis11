@@ -106,20 +106,32 @@ Rules:
         ? Number(Number(_pol.tax || 0).toFixed(2))
         : Number((0.05*_pol.anualPremium).toFixed(2)))
 
-        doCmd({
-      cmd: "GetPing",
-        data: {
-          pol: _pol,
-          tipoEndoso: tipoEndoso,
-          change: _change,
-          jAdditional: _change?.jAdditional || {},
-          resultado: resultado
-        }
-      });
-
       resultado
     condition: 1==1
     event: ChangeTerm
+
+  - name: Impuesto de Seguros
+    amount: >
+      /*block*/
+      /* Endoso de orden de proceder: ChangeCoverage solo mueve vigencias.
+         Se conserva exactamente el impuesto vigente de la poliza. */
+      let tipoEndoso = "";
+      try {
+        const datosCambio = (_pol && _pol.jChangeDto && _pol.jChangeDto.data)
+          ? _pol.jChangeDto.data
+          : {};
+        const jAdicional = (_change && _change.jAdditional)
+          ? String(_change.jAdditional)
+          : (datosCambio.jAdditional ? String(datosCambio.jAdditional) : "");
+        if (jAdicional.length > 0) tipoEndoso = String(JSON.parse(jAdicional).endorsementType || "");
+      } catch (errorMarca) {
+        tipoEndoso = "";
+      }
+      tipoEndoso === "PROCEEDORDER"
+        ? Number(Number(_pol.tax || 0).toFixed(2))
+        : Number((0.05*_pol.anualPremium).toFixed(2))
+    condition: 1==1
+    event: ChangeCoverage
     
   - name: Impuesto de Seguros
     amount: Number((0.05*_pol.anualPremium).toFixed(2))

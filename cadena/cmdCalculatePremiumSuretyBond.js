@@ -21,7 +21,8 @@ try {
 
   const endorsementType = getEndorsementType();
   const endorsementAction = String(action || poliza.action || "").toLowerCase();
-  const isProceedOrder = endorsementAction === "changeterm" && endorsementType === "PROCEEDORDER";
+  const isProceedOrder = (endorsementAction === "changeterm" || endorsementAction === "changecoverage")
+    && endorsementType === "PROCEEDORDER";
 
   setResultCoverages();
 

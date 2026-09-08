@@ -5,7 +5,7 @@
  * @name ProceedOrderEndorsement
  * @version 1.0
  * @purpose: Manage proceed-order endorsements by calculating coverage validity changes,
- * executing the ChangeTerm endorsement, and synchronizing insured-object data.
+ * executing the ChangeCoverage endorsement, and synchronizing insured-object data.
  */
 () => {
   const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, message } = A;
@@ -368,6 +368,27 @@
     }
   };
 
+  const getCoverageChangePayload = function (effectiveDateValue) {
+    const oldCoverages = coverages.map((coverage) => ({ ...coverage }));
+    const newCoverages = coverages.map((coverage) => {
+      const row = model.rows.filter((item) => item.code === txt(coverage.code))[0];
+      const changedCoverage = { ...coverage };
+      if (row && row.newStart && row.newEnd) {
+        changedCoverage.start = fmt(row.newStart) + 'T00:00:00';
+        changedCoverage.end = fmt(row.newEnd) + 'T00:00:00';
+      }
+      return changedCoverage;
+    });
+
+    return {
+      policyId: policyId,
+      jOldCoverages: JSON.stringify(oldCoverages),
+      jNewCoverages: JSON.stringify(newCoverages),
+      effectiveDate: effectiveDateValue,
+      jAdditional: JSON.stringify({ endorsementType: 'PROCEEDORDER' })
+    };
+  };
+
   const onCalculate = async function () {
     setTouched(true);
     if (!isValid) {
@@ -384,20 +405,10 @@
 
     try {
       const eff = fmt(toLocalDate(effectiveDate));
-      const newStart = fmt(model.mainRow.newStart);
-      const newEnd = fmt(model.mainRow.newEnd);
-      const jAdditional = JSON.stringify({ endorsementType: 'PROCEEDORDER' });
-      const quote = await exe('ChangeTerm', {
-        policyId: policyId,
-        newStart: newStart,
-        newEnd: newEnd,
-        effectiveDate: eff,
-        note: txt(observation),
-        jAdditional: jAdditional
-      });
+      const quote = await exe('ChangeCoverage', getCoverageChangePayload(eff));
 
       if (!quote || !quote.ok || !quote.outData) {
-        pushStep(t('Calculate the term change'), false, translatedMessage(quote && quote.msg, 'no response'));
+        pushStep(t('Calculate the coverage change'), false, translatedMessage(quote && quote.msg, 'no response'));
         const quoteError = t('The endorsement could not be calculated. ') + translatedMessage(quote && quote.msg, '');
         setResult({ kind: 'error', msg: quoteError });
         message.error(quoteError);
@@ -435,7 +446,7 @@
       }
 
       setCalculation({ key: calculationKey, quote: quote.outData });
-      pushStep(t('Calculate the term change'), true, '');
+      pushStep(t('Calculate the coverage change'), true, '');
       pushStep(t('Billing invariant'), true, t('Bill matches the current policy and BillDiff is zero.'));
       pushStep(t('Premium invariant (CA6)'), true, t('premium, sum insured and reinsurance unchanged'));
       setResult({ kind: 'calculated', msg: t('Calculation completed. Review the coverage changes before executing the endorsement.') });
@@ -464,21 +475,14 @@
     setChangeId(null);
     try {
       const eff = fmt(toLocalDate(effectiveDate));
-      const newStart = fmt(model.mainRow.newStart);
-      const newEnd = fmt(model.mainRow.newEnd);
 
       // --- generate the endorsement
-      const addPayload = {};
-      Object.keys(calculation.quote).forEach((k) => { addPayload[k] = calculation.quote[k]; });
-      addPayload.policyId = policyId;
-      addPayload.newStart = newStart;
-      addPayload.newEnd = newEnd;
-      addPayload.effectiveDate = eff;
+      const addPayload = getCoverageChangePayload(eff);
+      Object.keys(calculation.quote).forEach((k) => { if (addPayload[k] === undefined) addPayload[k] = calculation.quote[k]; });
       addPayload.operation = 'ADD';
       addPayload.note = txt(observation);
       addPayload.code = null;
-      addPayload.jAdditional = JSON.stringify({ endorsementType: 'PROCEEDORDER' });
-      const created = await exe('ChangeTerm', addPayload);
+      const created = await exe('ChangeCoverage', addPayload);
       if (!created || !created.ok || !created.outData || !created.outData.id) {
         pushStep(t('Generate the endorsement'), false, translatedMessage(created && created.msg, 'no endorsement was returned'));
         const createError = t('The endorsement was not generated. ') + translatedMessage(created && created.msg, '');
@@ -490,29 +494,8 @@
       setChangeId(cid);
       pushStep(t('Generate the endorsement'), true, t('endorsement ') + cid);
 
-      // --- carry the Stage 1 coverage dates into the endorsement.
-      // ChangeTerm re-quotes on save, so jNewCoverages comes back with the ORIGINAL coverage
-      // dates; ExeChangeTerm is what writes jNewCoverages onto the coverages. Setting them
-      // here is what makes the endorsement apply the dates the preview showed.
-      let jc = [];
-      try { jc = JSON.parse(created.outData.jNewCoverages || '[]'); } catch (e) { jc = []; }
-      jc.forEach((c) => {
-        const row = model.rows.filter((r) => r.code === txt(c.code))[0];
-        if (row && row.newStart && row.newEnd) { c.start = fmt(row.newStart) + 'T00:00:00'; c.end = fmt(row.newEnd) + 'T00:00:00'; }
-      });
-      const entity = { id: cid, lifePolicyId: policyId, status: created.outData.status, newStart: newStart, newEnd: newEnd, effectiveDate: eff, note: txt(observation), jAdditional: JSON.stringify({ endorsementType: 'PROCEEDORDER' }), jNewCoverages: JSON.stringify(jc) };
-      const fixed = await exe('ChangeTerm', { Entity: entity, operation: 'UPDATE' });
-      if (!fixed || !fixed.ok) {
-        pushStep(t('Set the calculated coverage dates'), false, translatedMessage(fixed && fixed.msg, 'no response'));
-        const datesError = t('The calculated dates could not be set on endorsement ') + cid + t('. It was NOT executed. ') + translatedMessage(fixed && fixed.msg, '');
-        setResult({ kind: 'error', msg: datesError });
-        message.error(datesError);
-        return;
-      }
-      pushStep(t('Set the calculated coverage dates'), true, '');
-
       // --- execute
-      const executed = await exe('ExeChangeTerm', { changeId: cid, operation: 'EXECUTE' });
+      const executed = await exe('ExeChangeCoverage', { changeId: cid, exeNow: false, operation: 'EXECUTE', noTracking: true });
       if (!executed || !executed.ok) {
         pushStep(t('Execute the endorsement'), false, translatedMessage(executed && executed.msg, 'no response'));
         const executeError = t('The endorsement was generated but NOT executed. ') + translatedMessage(executed && executed.msg, '');
@@ -592,7 +575,7 @@
     <Card className="proceed-order-endorsement-view" title={<span>{t('Proceed Order endorsement')} {policy ? <Tag color="blue">{policy.code || ('#' + policy.id)}</Tag> : null}</span>}>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message={t('Proceed Order endorsement')}
-        description={t('Preview the resulting dates, then execute. Execution generates a ChangeTerm endorsement, executes it and synchronises the insured-object data. Nothing is written until you press Execute.')} />
+        description={t('Preview the resulting dates, then execute. Execution generates a ChangeCoverage endorsement, executes it and synchronises the insured-object data. Nothing is written until you press Execute.')} />
 
       {premiumValidationError ? (
         <Alert
