@@ -35,7 +35,12 @@ SELECT
     a.[name],
     pol.[code] AS [policyCode],
     LTRIM(RTRIM(CONCAT(ISNULL(con.[name], ''), ' ', ISNULL(con.[surname1], ''), ' ', ISNULL(con.[surname2], '')))) AS [contactName],
-    ISNULL(balance.[movementBalance], 0) AS [movementBalance]
+    ISNULL(balance.[movementBalance], 0) AS [movementBalance],
+    ISNULL(requests.[pendingRefundAmount], 0) AS [pendingRefundAmount],
+    CASE
+      WHEN ISNULL(balance.[movementBalance], 0) - ISNULL(requests.[pendingRefundAmount], 0) < 0 THEN 0
+      ELSE ISNULL(balance.[movementBalance], 0) - ISNULL(requests.[pendingRefundAmount], 0)
+    END AS [availableBalance]
 FROM [Account] a
 LEFT JOIN [Contact] con ON con.[id] = a.[holderId]
 LEFT JOIN [LifePolicy] pol ON pol.[id] = a.[lifePolicyId]
@@ -46,6 +51,15 @@ OUTER APPLY (
       AND ISNULL(am.[transactionCode], '') <> 'PREMIUMPAY'
       AND ISNULL(am.[transactionCode], '') <> 'MONEYOUT'
 ) balance
+OUTER APPLY (
+    SELECT SUM(ISNULL(cp.[total], 0)) AS [pendingRefundAmount]
+    FROM [ClaimPayment] cp
+    WHERE cp.[sourceAccountId] = a.[id]
+      AND cp.[claimId] IS NULL
+      AND cp.[producer] IS NULL
+      AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
+      AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')
+) requests
 WHERE ${filter}
 ORDER BY a.[id]
 OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;

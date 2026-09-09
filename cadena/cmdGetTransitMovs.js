@@ -39,18 +39,33 @@ SELECT
     a.[code],
     pol.[code] AS [policyCode],
     LTRIM(RTRIM(CONCAT(ISNULL(con.[name], ''), ' ', ISNULL(con.[surname1], ''), ' ', ISNULL(con.[surname2], '')))) AS [contactName],
+    ISNULL(requests.[pendingRefundAmount], 0) AS [pendingRefundAmount],
+    CASE
+      WHEN ISNULL(SUM(ISNULL(am.[amount], 0)), 0) - ISNULL(requests.[pendingRefundAmount], 0) < 0 THEN 0
+      ELSE ISNULL(SUM(ISNULL(am.[amount], 0)), 0) - ISNULL(requests.[pendingRefundAmount], 0)
+    END AS [availableBalance],
     COUNT(am.[id]) AS [movementCount],
-    SUM(ISNULL(am.[amount], 0)) AS [movementBalance]
+    ISNULL(SUM(ISNULL(am.[amount], 0)), 0) AS [movementBalance]
 FROM [Account] a
 LEFT JOIN [Contact] con ON con.[id] = a.[holderId]
 LEFT JOIN [LifePolicy] pol ON pol.[id] = a.[lifePolicyId]
-INNER JOIN [AccountMov] am
+OUTER APPLY (
+    SELECT SUM(ISNULL(cp.[total], 0)) AS [pendingRefundAmount]
+    FROM [ClaimPayment] cp
+    WHERE cp.[sourceAccountId] = a.[id]
+      AND cp.[claimId] IS NULL
+      AND cp.[producer] IS NULL
+      AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
+      AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')
+) requests
+LEFT JOIN [AccountMov] am
     ON am.[accountId] = a.[id]
    AND ${movementPredicate('am', input)}
 WHERE ${filter}
 GROUP BY
     a.[id], a.[holderId], a.[lifePolicyId], a.[accNo], a.[type], a.[currency],
-    a.[name], a.[code], pol.[code], con.[name], con.[surname1], con.[surname2]
+    a.[name], a.[code], pol.[code], con.[name], con.[surname1], con.[surname2],
+    requests.[pendingRefundAmount]
 ORDER BY a.[id]
 OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
 
@@ -112,12 +127,12 @@ function normalizeInput(source) {
 }
 
 function buildFilter(input) {
-  const conditions = [
-    "a.[type] = 'TRANSIT'",
-    `EXISTS (SELECT 1 FROM [AccountMov] mx WHERE mx.[accountId] = a.[id] AND ${movementPredicate('mx', input)})`
-  ];
+  const conditions = ["a.[type] = 'TRANSIT'"];
 
   if (input.onlyWithBalance) {
+    conditions.push(`EXISTS (SELECT 1 FROM [AccountMov] mx
+      WHERE mx.[accountId] = a.[id]
+        AND ${movementPredicate('mx', input)})`);
     conditions.push(`ISNULL((SELECT SUM(ISNULL(ab.[amount], 0))
       FROM [AccountMov] ab
       WHERE ab.[accountId] = a.[id]
@@ -186,7 +201,8 @@ function movementPredicate(alias, input) {
     return `ISNULL(${alias}.[transaction], '') = 'Cancellation'`;
   }
 
-  return `ISNULL(${alias}.[transactionCode], '') <> 'PREMIUMPAY'`;
+  return `ISNULL(${alias}.[transactionCode], '') <> 'PREMIUMPAY'
+    AND ISNULL(${alias}.[transactionCode], '') <> 'MONEYOUT'`;
 }
 
 function getQueryResult() {

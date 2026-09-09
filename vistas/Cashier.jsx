@@ -1,3 +1,10 @@
+/**
+ * @author Global Development Team
+ * @created 2026/09/09
+ * @name Cashier
+ * @version 1.0
+ * @purpose: Manage cashier workspaces, movements, payments and premium reversals.
+ */
 () => {
   const {
     Button,
@@ -176,6 +183,15 @@
     </span>
   );
 
+  const CopyOutlined = () => (
+    <span role="img" aria-label="copy" className="anticon anticon-copy">
+      <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+        <path d="M832 64H296c-17.7 0-32 14.3-32 32v96h64v-64h472v472h-64v64h96c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32z"></path>
+        <path d="M696 224H160c-17.7 0-32 14.3-32 32v672c0 17.7 14.3 32 32 32h536c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32zm-32 672H192V288h472v608z"></path>
+      </svg>
+    </span>
+  );
+
   const FilterOutlined = () => (
     <span role="img" aria-label="filter" className="anticon anticon-filter">
       <svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true">
@@ -273,6 +289,7 @@
   const [transitHasSearched, setTransitHasSearched] = React.useState(false);
   const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
   const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
+  const [expandedTransitAccountKeys, setExpandedTransitAccountKeys] = React.useState([]);
   const [transitFilterForm] = Form.useForm();
   const [refundMoneyVisible, setRefundMoneyVisible] = React.useState(false);
   const [refundMoneySubmitting, setRefundMoneySubmitting] = React.useState(false);
@@ -976,6 +993,19 @@
 
       .cashier-supervisor-transit-detail .ant-table-pagination {
         margin-bottom: 4px !important;
+      }
+
+      .cashier-supervisor-transit-detail-pager {
+        display: flex;
+        justify-content: flex-end;
+        gap: 4px;
+        margin-top: 8px;
+      }
+
+      .cashier-supervisor-transit-detail-pager .ant-btn {
+        min-width: 28px;
+        height: 24px;
+        padding: 0 7px;
       }
 
       .cashier-supervisor-shell .ant-checkbox-inner {
@@ -1828,6 +1858,9 @@
           : {};
         const rows = Array.isArray(payload.data) ? payload.data : [];
         setTransitAccountRows(rows);
+        setExpandedTransitAccountKeys(current => current.filter(key =>
+          rows.some(row => String(row && row.id) === String(key))
+        ));
         setSelectedTransitAccountId(current => rows.some(row => Number(row && row.id) === Number(current))
           ? current ? String(current) : null
           : null);
@@ -1836,6 +1869,7 @@
       })
       .catch(error => {
         setTransitAccountRows([]);
+        setExpandedTransitAccountKeys([]);
         setSelectedTransitAccountId(null);
         setTransitAccountTotal(0);
         message.error(error && error.message ? error.message : String(error));
@@ -1861,10 +1895,28 @@
   }
 
   function getTransitAccountBalance(account) {
-    return getTransitMovements(account).reduce((total, movement) => {
+    const availableBalance = Number(account && account.availableBalance);
+    const reportedMovementBalance = Number(account && account.movementBalance);
+    const movementBalance = getTransitMovements(account).reduce((total, movement) => {
       const amount = Number(movement && movement.amount);
       return total + (Number.isFinite(amount) ? amount : 0);
     }, 0);
+    const pendingRefundAmount = Number(account && account.pendingRefundAmount);
+    const hasPendingRefund = Number.isFinite(pendingRefundAmount) && pendingRefundAmount > 0;
+
+    // Some account responses still expose the gross movement balance as availableBalance.
+    // Reconcile it only when it matches movementBalance, so already-net balances are not
+    // reduced twice.
+    if (Number.isFinite(availableBalance)) {
+      const isGrossBalance = Number.isFinite(reportedMovementBalance)
+        && Math.abs(availableBalance - reportedMovementBalance) < 0.005;
+      if (hasPendingRefund && isGrossBalance) {
+        return Math.max(0, reportedMovementBalance - pendingRefundAmount);
+      }
+      return availableBalance;
+    }
+
+    return Math.max(0, movementBalance - (hasPendingRefund ? pendingRefundAmount : 0));
   }
 
   function getTransitAccountLabel(account) {
@@ -1902,6 +1954,7 @@
     setTransitAccountFilters({});
     setTransitHasSearched(false);
     setTransitAccountRows([]);
+    setExpandedTransitAccountKeys([]);
     setSelectedTransitAccountId(null);
     setTransitAccountTotal(0);
     setTransitFilterVisible(false);
@@ -1914,16 +1967,73 @@
     });
   }
 
-  function getTransitDetailPage(accountId, total) {
-    const page = transitDetailPagination[accountId] || { current: 1, pageSize: 10 };
-    return { ...page, total };
+  function getTransitDetailPage(account, total) {
+    const accountId = Number(account && account.id) || 0;
+    const storedPage = account && account.__transitDetailPage
+      ? account.__transitDetailPage
+      : transitDetailPagination[accountId] || {};
+    const pageSize = Number(storedPage.pageSize) > 0 ? Number(storedPage.pageSize) : 10;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const current = Math.min(
+      Math.max(Number(storedPage.current) || 1, 1),
+      totalPages
+    );
+    return { current, pageSize, total };
   }
 
   function setTransitDetailPage(accountId, pagination) {
+    const current = Math.max(Number(pagination && pagination.current) || 1, 1);
+    const pageSize = Math.max(Number(pagination && pagination.pageSize) || 10, 1);
+    const nextPage = { current, pageSize };
+
     setTransitDetailPagination(current => ({
       ...current,
-      [accountId]: { current: pagination.current, pageSize: pagination.pageSize }
+      [accountId]: nextPage
     }));
+    setTransitAccountRows(rows => rows.map(row =>
+      Number(row && row.id) === Number(accountId)
+        ? {
+          ...row,
+          __transitDetailPage: nextPage,
+          __transitDetailVersion: Date.now()
+        }
+        : row
+    ));
+  }
+
+  function renderTransitDetailPager(accountId, page) {
+    const totalPages = Math.max(1, Math.ceil((Number(page && page.total) || 0) / (Number(page && page.pageSize) || 10)));
+    if (totalPages <= 1) return null;
+
+    const currentPage = Math.min(Math.max(Number(page && page.current) || 1, 1), totalPages);
+    const changePage = nextPage => event => {
+      if (event && event.stopPropagation) event.stopPropagation();
+      setTransitDetailPage(accountId, { current: nextPage, pageSize: page.pageSize });
+    };
+
+    return (
+      <div
+        className="cashier-supervisor-transit-detail-pager"
+        onClick={event => event.stopPropagation()}
+      >
+        <Button size="small" disabled={currentPage <= 1} onClick={changePage(currentPage - 1)}>
+          {'<'}
+        </Button>
+        {Array.from({ length: totalPages }, (_, index) => index + 1).map(pageNumber => (
+          <Button
+            key={pageNumber}
+            size="small"
+            type={pageNumber === currentPage ? 'primary' : 'default'}
+            onClick={changePage(pageNumber)}
+          >
+            {pageNumber}
+          </Button>
+        ))}
+        <Button size="small" disabled={currentPage >= totalPages} onClick={changePage(currentPage + 1)}>
+          {'>'}
+        </Button>
+      </div>
+    );
   }
 
   function getTransitSourceAccountOptions() {
@@ -1960,7 +2070,7 @@
       currency: currency,
       sourceAccount: Number(selectedAccount.id),
       sourcePercentage: 100,
-      amount: Math.max(0, getAuditNumber(selectedAccount.movementBalance)),
+      amount: Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount))),
       paymentMethod: undefined,
       beneficiary: beneficiary,
       reference: ''
@@ -1973,7 +2083,7 @@
     const selectedAccount = transitAccountRows.find(row =>
       Number(row && row.id) === Number(selectedTransitAccountId)
     );
-    const availableAmount = Math.max(0, getAuditNumber(selectedAccount && selectedAccount.movementBalance));
+    const availableAmount = Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount)));
 
     if (!Number.isFinite(percentage)) return;
 
@@ -2322,7 +2432,7 @@
     const targetField = fieldName === 'sourceAccount' ? 'sourceName' : 'destinationName';
 
     if (fieldName === 'sourceAccount') {
-      const balance = Number(account && account.movementBalance);
+      const balance = getTransitAccountBalance(account);
       setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
     }
 
@@ -2627,7 +2737,7 @@
   function parseIncomeAmount(value) {
     const normalized = getTrimmedString(value).replace(/[$,\s]/g, '');
     const amount = Number(normalized);
-    return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+    return Number.isFinite(amount) ? amount : 0;
   }
 
   function getDepositIncomeTypeOptions() {
@@ -2700,7 +2810,7 @@
   function limitIncomeAmountDecimals(value) {
     const raw = getTrimmedString(value).replace(',', '.');
     if (!raw) return '';
-    if (!/^\d*(\.\d*)?$/.test(raw)) return null;
+    if (!/^-?\d*(\.\d*)?$/.test(raw)) return null;
 
     const parts = raw.split('.');
     if (parts.length === 1) return parts[0];
@@ -3038,7 +3148,7 @@
         [targetName]: contactName
       });
       if (targetField === 'sourceAccount') {
-        const balance = Number(account && account.movementBalance);
+        const balance = getTransitAccountBalance(account);
         setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
       }
       setAccountTransferSearchTarget(null);
@@ -3490,13 +3600,17 @@
         return;
       }
 
-      if (getNewIncomeTotal() <= 0) {
-        message.error(t('Enter at least one payment amount greater than zero.'));
+      if (getNewIncomeTotal() === 0) {
+        message.error(t('The total payment amount cannot be zero.'));
         return;
       }
 
-      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
-        message.error(t('Complete the payment method and amount for every payment.'));
+      const invalidPaymentAmount = newIncomePayments.some(payment => {
+        const amount = parseIncomeAmount(payment.amount);
+        return !payment.methodCode || (transitCollectionMode ? amount <= 0 : amount === 0);
+      });
+      if (invalidPaymentAmount) {
+        message.error(t('Complete the payment method and enter a non-zero amount for every payment.'));
         return;
       }
 
@@ -5337,7 +5451,7 @@
   }
 
   function getMovementFirst(group) {
-    return getMovementChildren(group)[0] || {};
+    return group && group.id ? group : getMovementChildren(group)[0] || {};
   }
 
   async function handleMovementEditSave() {
@@ -5349,8 +5463,8 @@
         message.error(t('Select an income type.'));
         return;
       }
-      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
-        message.error(t('Complete the payment method and amount for every payment.'));
+      if (newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) === 0)) {
+        message.error(t('Complete the payment method and enter a non-zero amount for every payment.'));
         return;
       }
 
@@ -5767,7 +5881,9 @@
       return <Tag color="red">{t('Reverted')}</Tag>;
     }
 
-    return getMovementFirst(group).status
+    const first = getMovementFirst(group);
+    const executed = Boolean(first.executed || first.status);
+    return executed
       ? <Tag color="green">{t('Executed')}</Tag>
       : <Tag>{t('Pending')}</Tag>;
   }
@@ -5865,11 +5981,16 @@
     const values = [group].concat(getMovementChildren(group))
       .map(item => {
         const account = item && item.DestinationAccount;
-        return account
-          ? {
-              id: Number(account.id || account.accountId || (item && item.destinationAccountId) || 0),
-              accNo: getTrimmedString(account.accNo)
-            }
+        const id = Number(account && (account.id || account.accountId) || (item && item.destinationAccountId) || 0);
+        const displayText = getTrimmedString(account && (account.name || account.accNo || account.code))
+          || getTrimmedString(item && item.destinationName)
+          || getTrimmedString(item && item.destinationAccountId);
+        const tooltipText = [
+          displayText,
+          getTrimmedString(account && account.accNo)
+        ].filter((value, index, values) => value && values.indexOf(value) === index).join(' - ');
+        return displayText || id > 0
+          ? { id: Number.isFinite(id) ? id : 0, accNo: displayText, tooltip: tooltipText || displayText }
           : null;
       })
       .filter(value => value && (value.accNo || value.id > 0));
@@ -5899,10 +6020,23 @@
     const values = getMovementDestinationValues(group);
     if (values.length === 0) return '-';
 
-    return values.map((item, index) => (
-      <div key={`${item.id || item.accNo}-${index}`}>
-        <Tooltip title={item.accNo || item.id}>
-          {item.id > 0
+    const primaryValue = values[0];
+    const tooltipText = values
+      .map(item => item.tooltip || item.accNo || item.id)
+      .filter((value, index, items) => value && items.indexOf(value) === index)
+      .join(' - ');
+
+    return (
+      <div
+        style={{
+          maxWidth: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap'
+        }}
+      >
+        <Tooltip title={tooltipText}>
+          {primaryValue.id > 0
             ? (
               <Button
                 type="link"
@@ -5917,9 +6051,9 @@
                   display: 'inline-block',
                   verticalAlign: 'bottom'
                 }}
-                onClick={() => window.open(`#/account/${item.id}`, '_blank', 'noopener,noreferrer')}
+                onClick={() => window.open(`#/account/${primaryValue.id}`, '_blank', 'noopener,noreferrer')}
               >
-                {item.accNo || item.id}
+                {primaryValue.accNo || primaryValue.id}
               </Button>
             )
             : (
@@ -5931,20 +6065,23 @@
                 whiteSpace: 'nowrap',
                 verticalAlign: 'bottom'
               }}>
-                {item.accNo}
+                {primaryValue.accNo}
               </span>
             )}
         </Tooltip>
       </div>
-    ));
+    );
   }
 
   function renderMovementReference(group) {
     const reference = getTrimmedString(group && group.concept);
     if (!reference) return '-';
+    const displayReference = reference === 'IW'
+      ? t('Premium Payment')
+      : reference;
 
     return (
-      <Tooltip title={reference}>
+      <Tooltip title={displayReference}>
         <span style={{
           display: 'block',
           width: '100%',
@@ -5953,10 +6090,39 @@
           whiteSpace: 'nowrap',
           cursor: 'default'
         }}>
-          {reference}
+          {displayReference}
         </span>
       </Tooltip>
     );
+  }
+
+  function copyPolicyCode(value) {
+    const content = getTrimmedString(value);
+    if (!content) return;
+
+    const notifySuccess = () => message.success(t('Copied to clipboard.'));
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(content).then(notifySuccess).catch(() => {
+        copyPolicyCodeFallback(content, notifySuccess);
+      });
+      return;
+    }
+    copyPolicyCodeFallback(content, notifySuccess);
+  }
+
+  function copyPolicyCodeFallback(content, onSuccess) {
+    const input = document.createElement('textarea');
+    input.value = content;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    try {
+      if (document.execCommand('copy')) onSuccess();
+    } finally {
+      document.body.removeChild(input);
+    }
   }
 
   function getMovementPaymentMethodValues(group) {
@@ -6240,26 +6406,29 @@
     const incomeType = getTrimmedString(filters && filters.incomeType);
 
     setMovementLoading(true);
-    exe('FilterTransfer', {
-      workspaceId: workspaceId,
-      groupByAllocation: true,
-      size: pageSize,
-      page: Math.max(currentPage - 1, 0),
-      currency: null,
-      allocated: null,
-      external: null,
-      executed: filters && filters.pending === true ? false : null,
-      concept: null,
-      minAmount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
-      maxAmount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
-      month: null,
-      claimPaymentId: null,
-      allocationId: null,
-      fromDate: null,
-      toDate: null,
-      id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
-      paymentMethod: null,
-      incomeType: incomeType || null
+    exe('ExeChain', {
+      chain: 'cmdFilterCashierTransfer',
+      context: JSON.stringify({
+        workspaceId: workspaceId,
+        groupByAllocation: true,
+        size: pageSize,
+        page: Math.max(currentPage - 1, 0),
+        currency: null,
+        allocated: null,
+        external: null,
+        executed: filters && filters.pending === true ? false : null,
+        concept: null,
+        minAmount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
+        maxAmount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
+        month: null,
+        claimPaymentId: null,
+        allocationId: null,
+        fromDate: null,
+        toDate: null,
+        id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+        paymentMethod: null,
+        incomeType: incomeType || null
+      })
     })
       .then(response => {
         if (!response || response.ok === false) {
@@ -6776,14 +6945,29 @@
         const policyId = Number(record && record.lifePolicyId);
         return Number.isFinite(policyId) && policyId > 0
           ? (
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0, height: 'auto' }}
-              onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
-            >
-              {value || policyId}
-            </Button>
+            <span style={{ whiteSpace: 'nowrap' }}>
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: 'auto' }}
+                onClick={() => window.open(`#/lifepolicy/${policyId}`, '_blank', 'noopener,noreferrer')}
+              >
+                {value || policyId}
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                aria-label={t('Copy')}
+                title={t('Copy')}
+                style={{ padding: '0 0 0 5px', height: 'auto', lineHeight: 1.2 }}
+                onClick={event => {
+                  event.stopPropagation();
+                  copyPolicyCode(value || policyId);
+                }}
+              >
+                <CopyOutlined />
+              </Button>
+            </span>
           )
           : (value || '-');
       }
@@ -6923,7 +7107,13 @@
       title: t('Reference'),
       key: 'reference',
       width: 160,
-      render: (_, record) => renderPremiumReversalText(record && (record.reference || record.concept), 140)
+      render: (_, record) => {
+        const reference = record && (record.reference || record.concept);
+        const displayReference = getTrimmedString(reference) === 'IW'
+          ? t('Premium Payment')
+          : reference;
+        return renderPremiumReversalText(displayReference, 140);
+      }
     },
     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 110, align: 'right', render: renderGridMoney },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 85, align: 'center' },
@@ -7308,6 +7498,7 @@
         </Button>
       </div>
       <Table
+        key={`transit-accounts-${JSON.stringify(transitDetailPagination)}`}
         rowKey={record => String(record && record.id)}
         columns={transitAccountColumns}
         dataSource={transitAccountRows}
@@ -7322,7 +7513,7 @@
         }}
         onRow={record => ({
           onClick: event => {
-            if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper')) return;
+            if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper, .ant-pagination, .cashier-supervisor-transit-detail')) return;
             setSelectedTransitAccountId(record && record.id !== undefined && record.id !== null
               ? String(record.id)
               : null);
@@ -7338,27 +7529,34 @@
         onChange={handleTransitTableChange}
         scroll={{ x: 900, y: transferScrollY }}
         expandable={{
+          expandedRowKeys: expandedTransitAccountKeys,
+          onExpand: (expanded, record) => {
+            const key = String(record && record.id);
+            setExpandedTransitAccountKeys(current => expanded
+              ? current.concat(key).filter((item, index, list) => list.indexOf(item) === index)
+              : current.filter(item => item !== key)
+            );
+          },
           rowExpandable: record => getTransitMovements(record).length > 0,
           expandedRowRender: record => {
             const movements = getTransitMovements(record);
             const accountId = Number(record && record.id) || 0;
-            const page = getTransitDetailPage(accountId, movements.length);
+            const page = getTransitDetailPage(record, movements.length);
             const start = (page.current - 1) * page.pageSize;
             const detailRows = movements.slice(start, start + page.pageSize);
+            const detailVersion = Number(record && record.__transitDetailVersion) || 0;
 
             return (
-              <div className="cashier-supervisor-transit-detail">
+              <div
+                className="cashier-supervisor-transit-detail"
+                onClick={event => event.stopPropagation()}
+              >
                 <Table
+                  key={`transit-detail-${accountId}-${page.current}-${page.pageSize}-${detailVersion}`}
                   rowKey={item => String(item && item.id)}
                   size="small"
                   bordered
-                  pagination={{
-                    current: page.current,
-                    pageSize: page.pageSize,
-                    total: page.total,
-                    showSizeChanger: false,
-                    onChange: nextPage => setTransitDetailPage(accountId, nextPage)
-                  }}
+                  pagination={false}
                   columns={[
                     { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 120, align: 'center' },
                     { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, align: 'center', render: value => formatDate(value) },
@@ -7369,6 +7567,7 @@
                   dataSource={detailRows}
                   className="cashier-supervisor-transit-detail"
                 />
+                {renderTransitDetailPager(accountId, page)}
               </div>
             );
           }
@@ -8788,10 +8987,10 @@
                 align: 'right',
                 render: (_, record) => (
                   <Tooltip
-                    title={`${getTrimmedString(record && record.currency) || '-'} ${formatMoney(record && record.movementBalance !== undefined && record.movementBalance !== null ? record.movementBalance : 0)}`}
+                    title={`${getTrimmedString(record && record.currency) || '-'} ${formatMoney(getTransitAccountBalance(record))}`}
                   >
                     <span className="cashier-supervisor-account-cell">
-                      {getTrimmedString(record && record.currency) || '-'} {formatMoney(record && record.movementBalance !== undefined && record.movementBalance !== null ? record.movementBalance : 0)}
+                      {getTrimmedString(record && record.currency) || '-'} {formatMoney(getTransitAccountBalance(record))}
                     </span>
                   </Tooltip>
                 )
