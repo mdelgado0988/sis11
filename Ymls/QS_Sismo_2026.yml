@@ -1,0 +1,79 @@
+nonTechnicalPremium: _cov.premium*0
+Calculations:  
+  - name: dto
+    formula: |
+      //block
+      const n5 = (value) => Math.round((Number(value) + Number.EPSILON) * 100000) / 100000;
+      const contexto = JSON.stringify({policyId:_pol.id,fDesde:_pol.start,currency:_pol.currency,contractId:6,insuredSum:_cov.limit});
+      const dtoResult = doCmd({cmd:"ExeChain",data:{chain:"cmdCalCumuloEdificios",context:contexto}}).outData;
+      const dto = dtoResult?.data ?? dtoResult?.outData ?? dtoResult ?? {};      
+      const configResult = doCmd({cmd:"ExeChain",data:{chain:"cmdGetGroupalPolicyReinsuranceConfig",context:JSON.stringify({policyId:_pol.id,contractCode:_contractCode,coverageCode:_cov.code})}}).outData;  
+      const res = configResult?.data ?? {
+        pret: 0.10,
+        pcp: 0.90,
+        pfp: 0,
+        pcoa: 0,
+        pccp: 0.1814,
+        picp: 0,
+        pcfp: 0.1814,
+        pifp: 0.02,
+        pcfcoa: 0,
+        pifcoa: 0
+      };  
+            
+      const resultado = {
+        ...(dto ?? {}),
+        ...res
+      };
+
+      //Calculamos peso restando coaseguro en caso que exista.
+      const pNeto = 1 - n5(_coPercentage / 100);
+      
+      // Suma de proporciones originales
+      const pTotal = res.pret + res.pcp;
+      
+      // Calcular pret y ajustar pcp como residuo (absorbe diferencia)
+      const pretNeto = n5(pTotal > 0 ? (res.pret / pTotal) * pNeto : 0);
+      const pcpNeto  = n5(pNeto - pretNeto); // ← absorbe cualquier diferencia de redondeo
+      
+      // Verificación: pretNeto + pcpNeto + _coPercentage === 1      
+      resultado.pret = pretNeto;
+      resultado.pcp  = pcpNeto;
+
+      //Coaseguro
+      resultado.coPercentage  = n5(_coPercentage / 100);      
+      resultado.coPremiumCob = n5(_cov.premium * resultado.coPercentage);
+      resultado.coSumInsuredCob = n5(_cov.limit * resultado.coPercentage);
+      resultado.coPCommission = _coPremium > 0 ? _coCommission / _coPremium : 0;
+
+      //Neto sin Coaseguro
+      resultado.premium = n5(_cov.premium - resultado.coPremiumCob);
+      resultado.base = n5(_cov.limit - resultado.coSumInsuredCob);
+
+      const resto = Math.min(
+        Number(resultado.base) || 0,
+        Number(dto.resto) || 0
+      );
+      
+      resultado.ced = resto * res.pret;
+      resultado.re = resto * res.pcp;
+
+      resultado.coverageCode = _cov.code;
+      return resultado;
+Lines:
+    
+  - ced: _dto?.ced || 0;
+    re: _dto?.re || 0;
+    cedantPremium: _dto.premium * _proportionCed;
+    reinsurerPremium: _dto.premium * _proportionRe;
+    commission: (_re / _insuredSum) * (_dto.premium) * _dto.pccp;
+    id: Cuota Parte
+    
+  - ced: 0;
+    re: _rsi;
+    cedantPremium: 0;
+    reinsurerPremium: (_rsi / _insuredSum) * _dto.premium ;
+    commission: (_rsi / _insuredSum) * (_dto.premium) * _dto.pcfp;
+    tax: (_rsi / _insuredSum) * (_dto.premium) * _dto.pifp;
+    id: FAC
+    condition: _rsi > 0.01

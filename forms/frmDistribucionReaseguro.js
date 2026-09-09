@@ -27,6 +27,7 @@ let distributionDirty = false;
 let coCessions = [];
 let coaseguradores = [];
 let coaseguradoresData = [];
+let corredoresReaseguro = [];
 const policyId = window.location.href.split('/')[5] || 3403;
 
 const TIPO_MOVIMIENTO_ES = {
@@ -662,8 +663,8 @@ function validaTotales() {
 }
 
 function montoSiEsCobertura(coverageCode, amount) {
-  const coverageConfig = config.find(c => c.coverageCode == coverageCode);
-  const suma = coverageConfig.isCoverage.trim().toUpperCase() == "SI";
+  const coverageConfig = config.find(c => vEqual(String(c.coverageCode ?? "")) == vEqual(String(coverageCode ?? "")));
+  const suma = coverageConfig?.isCoverage?.trim?.().toUpperCase() == "SI";
   return suma ? amount : 0;
 }
 
@@ -1160,6 +1161,28 @@ async function listarAceptantes(){
   }
 }
 
+async function listarCorredoresReaseguro(){
+  try {
+    const result = await me.exe("LoadEntities", {
+      entity: "Contact",
+      fields: "id, name, middlename, surname1, surname2, isPerson",
+      filter: "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'REI')"
+    });
+    corredoresReaseguro = (result?.outData || [])
+      .map(item => ({
+        id: Number(item.id),
+        nombre: item.isPerson
+          ? [item.name, item.middlename || item.middleName, item.surname1, item.surname2].filter(Boolean).join(" ").trim()
+          : String(item.surname2 || item.name || "").trim()
+      }))
+      .filter(item => item.id > 0 && item.nombre)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  } catch (error) {
+    corredoresReaseguro = [];
+    mostrarNotificacion(`No se pudo cargar el catálogo de corredores: ${error?.msg || error}`, "warning");
+  }
+}
+
 async function loadConfigCoverages(){
   const tableName = cfgCoberturaReaseguro.find(x => x.lob == policy.lob)?.name ?? "cfgCoberturaProductoRea";
   const tableConfig = await me.exe("GetFullTable", { table: tableName });
@@ -1184,10 +1207,19 @@ async function loadDataEntities(){
   await loadCoCessions();
   await listarCoaseguradores();
 
-  const RepoCoverages = await me.exe("LoadEntities", { entity: "LifeCoverage", fields: "code, limit, basePremium", filter: `lifePolicyId = ${policyId}` });
-  coverages = RepoCoverages.outData ?? [];
+  let RepoCoverages = await me.exe("LoadEntities", { entity: "LifeCoverage", fields: "id, code, limit, basePremium, premium", filter: `lifePolicyId = ${policyId}`, size: 500, page: 0 });
+  if (!RepoCoverages?.ok) {
+    // Compatibilidad con instalaciones donde premium no está disponible en la proyección.
+    RepoCoverages = await me.exe("LoadEntities", { entity: "LifeCoverage", fields: "id, code, limit, basePremium", filter: `lifePolicyId = ${policyId}`, size: 500, page: 0 });
+  }
+  coverages = Array.isArray(RepoCoverages?.outData)
+    ? RepoCoverages.outData
+    : Array.isArray(RepoCoverages?.data)
+      ? RepoCoverages.data
+      : [];
     
   await listarAceptantes();
+  await listarCorredoresReaseguro();
   sincronizarControlesCoaseguro();
 
   if(coverages.length <= 0)
@@ -1202,14 +1234,15 @@ function calculaTotales() {
     const totales = { tp, tms, tmp, tpc, tmc, tpi, tmi};
     const forzar = true;
   
-    totales.tp = redondear($("#pret").val(),8, forzar) + redondear($("#pcp").val(),8, forzar) + redondear($("#pex1").val(),8, forzar) + redondear($("#pfp").val(),8, forzar) + redondear($("#pfo").val(),8, forzar) + redondear($("#pnot").val(),8, forzar) + redondear($("#pco").val(),8, forzar);
+    // Coaseguro es informativo y no forma parte del 100% distribuido por el contrato.
+    totales.tp = redondear($("#pret").val(),8, forzar) + redondear($("#pcp").val(),8, forzar) + redondear($("#pex1").val(),8, forzar) + redondear($("#pfp").val(),8, forzar) + redondear($("#pfo").val(),8, forzar) + redondear($("#pnot").val(),8, forzar);
     totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msex1").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val()) + redondear($("#msco").val());
     totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpex1").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val()) + redondear($("#mpco").val());
-    totales.tpc = redondear($("#pcret").val(),8, forzar) + redondear($("#pccp").val(),8, forzar) + redondear($("#pcex1").val(),8, forzar) + redondear($("#pcfp").val(),8, forzar) + redondear($("#pcfo").val(),8, forzar) + redondear($("#pcnot").val(),8, forzar) + redondear($("#pcco").val(),8, forzar);
-    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear ($("#mcex1").val()) + redondear ($("#mcfp").val()) + redondear ($("#mcfo").val()) + redondear ($("#mcnot").val()) + redondear($("#mcco").val());
-    totales.tpi = redondear ($("#piret").val(),8, forzar) + redondear ($("#picp").val(),8, forzar) + redondear($("#piex1").val(),8, forzar) + redondear($("#pifp").val(),8, forzar) + redondear($("#pifo").val(),8, forzar) + redondear($("#pinot").val(),8, forzar) + redondear($("#pico").val(),8, forzar);
-    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val()) + redondear($("#mico").val());
-    totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srex1").val()) + redondear($("#srfo").val()) + redondear($("#srco").val());
+    totales.tpc = redondear($("#pcret").val(),8, forzar) + redondear($("#pccp").val(),8, forzar) + redondear($("#pcex1").val(),8, forzar) + redondear($("#pcfp").val(),8, forzar) + redondear($("#pcfo").val(),8, forzar) + redondear($("#pcnot").val(),8, forzar);
+    totales.tmc = redondear($("#mcret").val()) + redondear($("#mccp").val()) + redondear ($("#mcex1").val()) + redondear ($("#mcfp").val()) + redondear ($("#mcfo").val()) + redondear ($("#mcnot").val());
+    totales.tpi = redondear ($("#piret").val(),8, forzar) + redondear ($("#picp").val(),8, forzar) + redondear($("#piex1").val(),8, forzar) + redondear($("#pifp").val(),8, forzar) + redondear($("#pifo").val(),8, forzar) + redondear($("#pinot").val(),8, forzar);
+    totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
+    totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srex1").val()) + redondear($("#srfo").val());
   
     totales.tp = redondear(totales.tp, 8, forzar);
     totales.tms = redondear(totales.tms);
@@ -1316,10 +1349,17 @@ async function addAceptantes(cessions, aceptantes) {
 
   //Registramos el detalle
   for (let part of aceptantes) {
+    // Solo se persiste brokerId. El objeto Broker embebido haria que el
+    // repositorio intentara insertar nuevamente el Contact asociado.
+    const entity = {
+      ...part,
+      id: 0,
+      Broker: null
+    };
 
     const resultado = await me.exe("RepoCessionPart", {
       operation: "ADD",
-      entity: part
+      entity
     });
       
     if (!resultado.ok) {
@@ -1369,8 +1409,8 @@ function redistribuirAceptantesPorCobertura(cessionCobs) {
         currency: ces.currency,
         liquidationId: null,
         reserve: 0,
-        brokerId: null,
-        Broker: null,
+        brokerId: r.brokerId || null,
+        Broker: r.Broker || null,
         fee: 0,
         jAmounts: null
       });
@@ -1538,6 +1578,7 @@ function renderReaseguradores() {
       <table id="gridReaseguradores" class="ant-table">
         <thead>
           <tr>
+            <th>Corredor de reaseguro</th>
             <th>Participante</th>
             <th>ID Participante</th>
             <th>ID de línea</th>
@@ -1599,6 +1640,8 @@ function renderReaseguradores() {
       reaseguradoresData.push({
         name: first.nombre,
         contactId: first.id,
+        brokerId: null,
+        Broker: null,
         cessionId: 0,
         lineId: tipoContratoSelected,
         split: 0,
@@ -1626,7 +1669,17 @@ function renderReaseguradores() {
       reaseguradoresData[index].name = getNameById(id);
 
       // refresca solo la celda ID (no todo el grid)
-      $tr.find("td:eq(1)").text(id);
+      $tr.find("td:eq(2)").text(id);
+    });
+
+  $("#gridReaseguradores")
+    .off("change", ".select-corredor-reaseguro")
+    .on("change", ".select-corredor-reaseguro", function () {
+      const $tr = $(this).closest("tr");
+      const index = $tr.data("index");
+      const brokerId = Number(this.value) || null;
+      reaseguradoresData[index].brokerId = brokerId;
+      reaseguradoresData[index].Broker = corredoresReaseguro.find(item => Number(item.id) === brokerId) || null;
     });
 
   // ===== INPUTS =====
@@ -2011,10 +2064,20 @@ function renderGrid() {
       const selected = a.id === r.contactId ? "selected" : "";
       return `<option value="${a.id}" ${selected}>${a.nombre}</option>`;
     }).join("");
+    const corredorOptions = [`<option value="">Seleccione</option>`, ...corredoresReaseguro.map(c => {
+      const selected = Number(c.id) === Number(r.brokerId) ? "selected" : "";
+      return `<option value="${c.id}" ${selected}>${c.nombre}</option>`;
+    })].join("");
 
     const row = $(`
       <tr data-index="${index}">
         
+        <td>
+          <select class="select-corredor-reaseguro">
+            ${corredorOptions}
+          </select>
+        </td>
+
         <td>
           <select class="select-participante">
             ${participanteOptions}
@@ -2225,8 +2288,8 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     const id = input.id;
     if (relacionesMap[id]) {
       const { tipo, montoId, sumaId, comisionId, pcomisionId, montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea } = relacionesMap[id];
-      const montoBase = (gridDataSelected?.Prima ?? 0) - (gridDataSelected?.PrimaNoTecnica ?? 0);
-      const sumaBase = gridDataSelected?.Suma ?? 0;
+      const montoBase = getBaseNetaDistribucion().prima;
+      const sumaBase = getBaseNetaDistribucion().suma;
       calcularRelacion(tipo, id, montoId, sumaId, montoBase, sumaBase, comisionId, pcomisionId,
                        montoCalculoId, pimpuestoId, montoImpuestoId, saldoRea);
     }
@@ -3916,6 +3979,23 @@ function coaseguroFormato(valor) {
   return formatearNumero(coaseguroMonto(valor));
 }
 
+function getPorcentajeCoaseguro() {
+  return (coCessions || []).reduce((total, row) =>
+    total + coaseguroNumero(row.percentage), 0);
+}
+
+function getBaseNetaDistribucion() {
+  const factorRetenido = 1 - (getPorcentajeCoaseguro() / 100);
+  const sumaBase = coaseguroNumero(gridDataSelected?.Suma);
+  const primaBase = coaseguroNumero(gridDataSelected?.Prima) -
+    coaseguroNumero(gridDataSelected?.PrimaNoTecnica);
+
+  return {
+    suma: redondear(Math.max(0, sumaBase) * factorRetenido),
+    prima: redondear(Math.max(0, primaBase) * factorRetenido)
+  };
+}
+
 function coaseguroEscapar(valor) {
   return String(valor ?? "")
     .replace(/&/g, "&amp;")
@@ -3980,14 +4060,18 @@ function getCoaseguradorNombre(id) {
 }
 
 function getCoaseguroGlobalBase() {
-  const unique = new Map();
-  (cessions || []).filter(item => normalizeCondition(item.lineId) !== "COASEGURO").forEach(item => {
-    const key = `${item.coverageId || item.lifeCoverageId || item.coverageCode || item.id}`;
-    if (!unique.has(key)) unique.set(key, item);
-  });
-  return [...unique.values()].reduce((total, item) => {
-    total.sumInsured += coaseguroNumero(item.sumInsured);
-    total.premium += coaseguroNumero(item.premium);
+  // La base debe representar las coberturas vigentes, no las lineas de reaseguro.
+  // Una cobertura puede tener varias cesiones y sumarlas produciria duplicados.
+  return (coverages || []).reduce((total, item) => {
+    const coverageConfig = config.find(c =>
+      vEqual(String(c.coverageCode ?? "")) == vEqual(String(item.code ?? ""))
+    );
+    const sumaConfigurada = coverageConfig?.isCoverage?.trim?.().toUpperCase() == "SI";
+
+    if (sumaConfigurada) {
+      total.sumInsured += coaseguroNumero(item.limit);
+    }
+    total.premium += coaseguroNumero(item.premium ?? item.basePremium);
     return total;
   }, { sumInsured: 0, premium: 0 });
 }
@@ -4000,7 +4084,9 @@ function sincronizarControlesCoaseguro() {
   const premiumCeded = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.premiumCeded), 0);
   const commissionRate = premiumCeded ? commission * 100 / premiumCeded : 0;
   const taxRate = premiumCeded ? tax * 100 / premiumCeded : 0;
-  $("#pco").val(formatearNumero(percentage));
+  // El coaseguro no es una línea del porcentaje del contrato de reaseguro.
+  // Se muestran sus importes informativos, pero su porcentaje no se acumula al 100%.
+  $("#pco").val("");
   $("#msco").val(coaseguroFormato(base.sumInsured * percentage / 100));
   $("#mpco").val(coaseguroFormato(base.premium * percentage / 100));
   $("#pcco").val(formatearNumero(commissionRate));

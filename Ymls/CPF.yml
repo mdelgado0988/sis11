@@ -1,0 +1,42 @@
+nonTechnicalPremium: 0
+Calculations:  
+  - name: reaDist
+    formula: |
+      //block
+      //La base a distribuir es la cobertura emitida menos su proporcion de coaseguro.
+      var n5 = function(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100000) / 100000; };
+      var n2 = function(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; };
+      var polId = _pol.id;
+      var covId = _cov.id;
+      var sumaEmitida = Number(_cov.limit != null ? _cov.limit : _insuredSum) || 0;
+      var primaEmitida = Number(_cov.premium != null ? _cov.premium : _premium) || 0;
+      var porcentajeCoaseguro = Number(_coPercentage || 0) || 0;
+      if (porcentajeCoaseguro < 0 || porcentajeCoaseguro > 100)
+        throw 'El porcentaje de coaseguro de la poliza ' + polId + ' debe estar entre 0 y 100. Valor: ' + porcentajeCoaseguro;
+
+      var factorRetenido = 1 - n5(porcentajeCoaseguro / 100);
+      var Suma = n2(sumaEmitida * factorRetenido);
+      var Prima = n2(primaEmitida * factorRetenido);
+      var SumaCoaseguro = n2(sumaEmitida - Suma);
+      var PrimaCoaseguro = n2(primaEmitida - Prima);
+
+      var rea = doCmd({cmd:'ExeChain',data:{chain:'cmdConfiguracionReaseguroPorSuma',context:JSON.stringify({CodigoContrato:'CPF',Suma:Suma,Prima:Prima,SumaCoaseguro:SumaCoaseguro,PrimaCoaseguro:PrimaCoaseguro,PolizaId:polId,CoberturaId:covId})}});
+      //propagar el motivo real: sin esto un fallo de la cadena llega como "Value cannot be null (Parameter 'o')"
+      if (!rea || !rea.ok || !rea.outData)
+        throw 'cmdConfiguracionReaseguroPorSuma no pudo calcular la distribucion (contrato CPF, poliza ' + polId + ', cobertura ' + covId + '): ' + (rea ? rea.msg : 'sin respuesta');
+      return rea.outData;
+Lines:
+  - ced: _reaDist.msret
+    re: _reaDist.mscp
+    cedantPremium: _reaDist.mpret
+    reinsurerPremium: _reaDist.mpcp
+    commission: _reaDist.mccp
+    tax: _reaDist.micp
+    id: Cuota Parte
+  - ced: 0;
+    re: _reaDist.msfp;
+    cedantPremium: 0;
+    reinsurerPremium: _reaDist.mpfp;
+    commission: _reaDist.mcfp;
+    tax: _reaDist.mifp;
+    id: FAC
