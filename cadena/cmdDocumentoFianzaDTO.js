@@ -36,6 +36,7 @@ setPolicy();
 setHolder();
 setInsuredObject();
 setSeller();
+const diasVigenciaDocumento = obtenerDiasVigenciaDocumento();
 
 const dateIni = fechaComoUTC(policy.start);
 const partesIni = partesFechaPanama(dateIni) || { dia: "", mes: 1, anio: "" };
@@ -56,10 +57,12 @@ resultado.AFavor = oaUserData?.nombre ?? "No Definido";
 resultado.Descripcion = oaUserData?.desc_objeto_afianzado ?? "";
 resultado.FechaActoPublico = toFecha(oaUserData?.f_acto_publico);
 resultado.ActoPublico = oaUserData?.n_acto_publico ?? "";
-resultado.Moneda = policy.currency;
+resultado.Moneda = "B/.";
 resultado.Suma = n(policy.insuredSum);
-resultado.SumaLetras = numeroALetras(policy.insuredSum ?? 0);
-resultado.DiasVigencia = oaUserData?.txtDiasVigencia ?? 0;
+resultado.SumaLetras = numeroALetras(policy.insuredSum ?? 0)
+  .toUpperCase()
+  .replace(/\s+CON\s+(\d{2}\/100)$/, " BALBOAS CON $1");
+resultado.DiasVigencia = diasVigenciaDocumento;
 resultado.NumeroContrato = oaUserData?.txtNumeroContrato ?? "0";
 
 //Fecha actual
@@ -67,6 +70,7 @@ resultado.DiaFecha = dia;
 resultado.MesFecha = mes;
 resultado.AnioFecha = anio;
 resultado.FechaActual = toFecha(hoy);
+resultado.FechaActualTextoMin = `${dia} del mes de ${String(mes).toLowerCase()} de ${anio}`;
 
 resultado.DiaVigenciaIni = diaIni;
 resultado.MesVigenciaIni = mesIni;
@@ -74,6 +78,25 @@ resultado.AnioVigenciaIni = anioIni;
 resultado.DiaVigenciaFin = diaFin;
 resultado.MesVigenciaFin = mesFin;
 resultado.AnioVigenciaFin = anioFin;
+
+const monedaMonto = resultado.Moneda;
+const sumaMonto = n(policy?.insuredSum ?? 0);
+const sumaEnLetras = resultado.SumaLetras;
+resultado.DesdeTexto = `${diaIni} DE ${String(mesIni).toUpperCase()} DEL ${anioIni}`;
+resultado.HastaTexto = `${diaFin} DE ${String(mesFin).toUpperCase()} DEL ${anioFin}`;
+const partesHasta2 = partesFechaPanama(sumarDiasUTC(dateFin, 30)) || { dia: "", mes: 1, anio: "" };
+resultado.Hasta2Texto = `${partesHasta2.dia} DE ${String(meses[partesHasta2.mes - 1]).toUpperCase()} DEL ${partesHasta2.anio}`;
+const coberturaVicio = (Array.isArray(policy?.Coverages) ? policy.Coverages : [])
+  .find(coverage => String(coverage?.code ?? "").trim() === "314");
+const partesFinVicio = coberturaVicio ? partesFechaPanama(fechaComoUTC(coberturaVicio.end)) : null;
+resultado.FechaFinVicioTexto = partesFinVicio
+  ? `${partesFinVicio.dia} DE ${String(meses[partesFinVicio.mes - 1]).toUpperCase()} DEL ${partesFinVicio.anio}`
+  : "";
+resultado.DiasVigenciaTexto = `${resultado.DiasVigencia} DÍAS A PARTIR DEL ${resultado.DesdeTexto}`;
+resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
+resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
+resultado.Prestamo = "";
+resultado.TipoLicitacion = "";
 
 resultado.NombreEncargado = "";
 resultado.TituloEncargado = "";
@@ -120,7 +143,7 @@ resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : []
     Cobertura: name ?? "",
     Limite: n(limit),
     Prima: n(premium),
-    Moneda: policy?.currency ?? ""
+    Moneda: resultado.Moneda
   }));
 //=== fin AXX-304 ===
 
@@ -348,6 +371,72 @@ function numeroALetras(num) {
 function setSeller() {
   doCmd({cmd: "GetContacts", data: { operation: "GET", filter: `id = ${Number(policy?.sellerId) || -1}` }});
   seller = (GetContacts.ok && Array.isArray(GetContacts.outData) ? GetContacts.outData[0] : null) || {};
+}
+
+function obtenerDiasVigenciaDocumento() {
+  const vigenciaPoliza = calcularDiasEntre(policy?.start, policy?.end);
+  const coverages = Array.isArray(policy?.Coverages) ? policy.Coverages : [];
+  if (!coverages.length) return vigenciaPoliza;
+
+  let configRows = [];
+  doCmd({ cmd: "GetFullTable", data: { table: "cfgCoberturaProductoReaFianza" } });
+  const tableResult = typeof GetFullTable === "undefined" ? null : GetFullTable;
+  if (tableResult?.ok && Array.isArray(tableResult.outData)) {
+    const productCode = String(policy?.productCode ?? "").trim();
+    const lobCode = String(policy?.lob ?? "").trim();
+    configRows = mapearConfiguracion(tableResult.outData).filter(row => {
+      const sameProduct = productCode && String(row.productCode ?? "").trim() === productCode;
+      const rowLob = String(row.lobCode ?? row.lob ?? "").trim();
+      return sameProduct && (!lobCode || !rowLob || rowLob === lobCode);
+    });
+  }
+
+  const getCoverageCode = row => String(row?.coverageCode ?? row?.code ?? "").trim().toUpperCase();
+  const getParentCode = row => String(row?.coverageCodeDep ?? row?.coberturaPrincipal ?? "").trim().toUpperCase();
+  const configured = coverages.map(coverage => ({
+    coverage,
+    config: configRows.find(row => getCoverageCode(row) === String(coverage.code ?? "").trim().toUpperCase())
+  }));
+  const principals = configured.filter(item => item.config && esCoberturaPrincipal(getParentCode(item.config)));
+  const principal = principals.sort((a, b) => Number(a.coverage.number ?? 0) - Number(b.coverage.number ?? 0))[0];
+
+  return principal
+    ? calcularDiasEntre(principal.coverage.start, principal.coverage.end)
+    : vigenciaPoliza;
+}
+
+function esCoberturaPrincipal(parentCode) {
+  return !parentCode || parentCode === "0" || parentCode === "NULL";
+}
+
+function mapearConfiguracion(data) {
+  if (!Array.isArray(data) || !Array.isArray(data[0])) return [];
+  const headers = [];
+  const counts = {};
+  data[0].forEach(header => {
+    const base = String(header ?? "").trim();
+    counts[base] = (counts[base] || 0) + 1;
+    headers.push(counts[base] === 1 ? base : `${base}_${counts[base]}`);
+  });
+  return data.slice(1).filter(Array.isArray).map(row => {
+    const item = {};
+    headers.forEach((header, index) => { item[header] = row[index]; });
+    return item;
+  });
+}
+
+function calcularDiasEntre(startValue, endValue) {
+  const start = fechaComoUTC(startValue);
+  const end = fechaComoUTC(endValue);
+  if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) return 0;
+  return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
+function sumarDiasUTC(value, days) {
+  const date = value instanceof Date ? new Date(value.getTime()) : fechaComoUTC(value);
+  if (!date || isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date;
 }
 
 function getIdentificacionAFavor() {

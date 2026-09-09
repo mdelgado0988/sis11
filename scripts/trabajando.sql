@@ -62,7 +62,7 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 81
+declare @ramo int = 84
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
