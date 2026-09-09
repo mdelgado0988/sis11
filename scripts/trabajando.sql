@@ -104,13 +104,22 @@ where e.cramo in (0,1) and e.iestado = 'V'
 AND e.cendoso in (select cendoso from adendoso)
 
 SELECT cramo, RTRIM(xnombrep) reporte, MAX(cplan) cplan, CONCAT( MAX(RTRIM(xdescripcion)), ' (', rtrim(xnombrep), ')') reportedoc, MAX(xdescripcion_l) reporte_l, MAX(RTRIM(xdescripcion)) reporte
+		,MAX(xformula1) FORM1
 FROM marepteccia 
-WHERE cramo = 6 AND xdpto = 'EMISION'
+WHERE cramo in (81,82,83,84) AND xdpto = 'EMISION'
 AND xnombrep not like 'endoso%'
 AND xnombrep not like 'recibo%'
+--AND xnombrep in ('FJ_GarantiaJ_Bas313','FJ_GarantiaJ_OAJ315','CondGen_314','FJ_GarantiaJ_IS313','FM_Global_VT341','FM_Tercero_VT353'
+--,'FC_GarantiaC_OG303','FC_GarantiaA_OP310','FS_Propuesta_SBG316_ASTOR','contrato_fianza_preelaborada','FC_GarantiaC_SBGobierno_319'
+--,'FC_GarantiaC_OP304','CondGen_305','FC_PagoAnticipadoPrivado','CondGen_309_Gobierno','CondGen_311','CondGen_308','CondGen_306','CondGen_307'
+--,'FC_GarantiaP_OP','FS_Propuesta_SBG316','CondGen_302','CondGen_309','FC_GarantiaA_SBAC328','FC_GarantiaA_SBP327','FC_GarantiaP_SBAC325'
+--,'FS_GarantiaP_SBG323','FS_GarantiaP_SBP324','CondGen_317','CondGen_318','FC_CumSum_BACanal_322','FM_Basico_VT341','CondGen_329'
+--,'CondGen_337','CondGen_340','FC_GarantiaC_OP321')
 GROUP BY cramo, xnombrep
 
-SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos WHERE cramo = 6 ORDER BY cproces DESC
+SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos
+WHERE cramo = 81  and itiporec = 'P'
+ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
 declare @cramo int = 81
