@@ -34,11 +34,11 @@ const discount = amount(context.discount, 'Descuento');
 function stamp(v, label) {
   const s = txt(v);
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (!m) throw 'Fecha invalida: ' + label;
+  if (!m) throw '@Fecha invalida: ' + label;
   const rest = s.length > 10 ? s.slice(10) : 'T00:00:00';
   const body = s.slice(0, 10) + (rest.charAt(0) === 'T' ? rest : 'T00:00:00');
   const t = Date.parse(body.charAt(body.length - 1) === 'Z' ? body : body + 'Z');
-  if (!isFinite(t)) throw 'Fecha invalida: ' + label;
+  if (!isFinite(t)) throw '@Fecha invalida: ' + label;
   return t;
 }
 
@@ -56,9 +56,9 @@ for (let i = 0; i < stale.length; i++) {
 // ---------- poliza y configuracion de coberturas ----------
 doCmd({ cmd: 'RepoLifePolicy', data: { operation: 'GET', filter: 'id=' + policyId, include: ['Coverages'], size: 1 } });
 const policy = (RepoLifePolicy.outData || [])[0];
-if (!policy) throw 'Poliza ' + policyId + ' no encontrada';
+if (!policy) throw '@Poliza ' + policyId + ' no encontrada';
 const covs = policy.Coverages || [];
-if (!covs.length) throw 'La poliza no tiene coberturas';
+if (!covs.length) throw '@La poliza no tiene coberturas';
 
 doCmd({ cmd: 'GetFullTable', data: { table: 'cfgCoberturaProductoReaFianza' } });
 let table = GetFullTable.outData || [];
@@ -79,7 +79,7 @@ for (let i = 0; i < covs.length; i++) {
 if (eligible.indexOf(selCode) < 0) throw 'La cobertura ' + selCode + ' no es endosable en esta poliza. Elegibles: ' + (eligible.join(', ') || 'ninguna');
 let howMany = 0;
 for (let i = 0; i < covs.length; i++) { if (txt(covs[i].code) === selCode) howMany++; }
-if (howMany !== 1) throw 'La cobertura ' + selCode + ' no es univoca en la poliza';
+if (howMany !== 1) throw '@La cobertura ' + selCode + ' no es univoca en la poliza';
 
 const jNew = JSON.parse(JSON.stringify(covs));
 let target = null;
@@ -88,15 +88,15 @@ for (let i = 0; i < jNew.length; i++) { if (txt(jNew[i].code) === selCode) targe
 const start = stamp(target.start, 'inicio vigente');
 const oldEnd = stamp(target.end, 'fin vigente');
 const newEnd = stamp(rawNewEnd.length <= 10 ? rawNewEnd + txt(target.end).slice(10) : rawNewEnd, 'nueva fecha final');
-if (oldEnd <= start) throw 'La vigencia actual de la cobertura es invalida';
-if (newEnd <= start) throw 'La nueva fecha final debe ser posterior al inicio de la cobertura (' + iso(start).slice(0, 10) + ')';
-if (newEnd === oldEnd) throw 'La nueva fecha final debe ser distinta de la vigente (' + iso(oldEnd).slice(0, 10) + ')';
+if (oldEnd <= start) throw '@La vigencia actual de la cobertura es invalida';
+if (newEnd <= start) throw '@La nueva fecha final debe ser posterior al inicio de la cobertura (' + iso(start).slice(0, 10) + ')';
+if (newEnd === oldEnd) throw '@La nueva fecha final debe ser distinta de la vigente (' + iso(oldEnd).slice(0, 10) + ')';
 
 const durationDays = (oldEnd - start) / day;
 const deltaDays = (newEnd - oldEnd) / day;
 const direction = deltaDays > 0 ? 'EXTENSION' : 'REDUCCION';
 const oldPremium = Number(target.premium == null ? Number(target.basePremium || 0) + Number(target.extraPremium || 0) : target.premium);
-if (!isFinite(oldPremium) || oldPremium < 0) throw 'La prima vigente de la cobertura es invalida';
+if (!isFinite(oldPremium) || oldPremium < 0) throw '@La prima vigente de la cobertura es invalida';
 const rawDelta = money(oldPremium / durationDays * deltaDays);
 // 🔴 Los ajustes manuales entran en la prima de la cobertura ANTES de cotizar. Si se aplican
 // sólo a la presentacion, el motor nativo calcula impuesto y total sin ellos y la ejecucion
@@ -104,7 +104,7 @@ const rawDelta = money(oldPremium / durationDays * deltaDays);
 const adjust = money(surcharge - discount);
 const proratedPremium = money(oldPremium + rawDelta);
 const newPremium = money(proratedPremium + adjust);
-if (newPremium < 0) throw 'El ajuste dejaria la prima de la cobertura en negativo';
+if (newPremium < 0) throw '@El ajuste dejaria la prima de la cobertura en negativo';
 
 target.end = iso(newEnd);
 target.premium = newPremium;
@@ -126,7 +126,7 @@ if (cfg[selCode] && cfg[selCode].principal === '-1') {
     if (!row || row.parent !== selCode) continue;
     const ps = stamp(c.start, 'inicio dependiente ' + code);
     const pe = stamp(c.end, 'fin dependiente ' + code);
-    if (pe <= ps) throw 'La vigencia de la cobertura dependiente ' + code + ' es invalida';
+    if (pe <= ps) throw '@La vigencia de la cobertura dependiente ' + code + ' es invalida';
     // Every configured dependent coverage follows the new end of the
     // principal coverage, regardless of its previous start date. Its own
     // duration is preserved when calculating the new end.
@@ -149,7 +149,7 @@ const quoteData = {
   effectiveDate: effectiveDate
 };
 doCmd({ cmd: 'ChangeCoverage', data: quoteData });
-if (!ChangeCoverage.ok) throw 'El motor de calculo nativo rechazo la cotizacion: ' + ChangeCoverage.msg;
+if (!ChangeCoverage.ok) throw '@El motor de calculo nativo rechazo la cotizacion: ' + ChangeCoverage.msg;
 const quoted = ChangeCoverage.outData;
 const bill = quoted.Bill || {};
 const diff = quoted.BillDiff || {};
