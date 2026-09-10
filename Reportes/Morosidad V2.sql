@@ -116,8 +116,8 @@ OUTER APPLY (
         SUM(ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0)) AS Pendiente,
 
         SUM(CASE
-              WHEN pp.dueDate <= @Fecha
-               AND DATEDIFF(DAY, pp.dueDate, @Fecha) BETWEEN 1 AND 30
+              WHEN pp.dueDate > @Fecha
+               AND DATEDIFF(DAY, @Fecha, pp.dueDate) BETWEEN 1 AND 30
                AND ISNULL(pp.payed, 0) < ISNULL(NULLIF(pp.expected, 0), pp.minimum)
               THEN (ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0))
               ELSE 0
@@ -156,7 +156,7 @@ OUTER APPLY (
         END) AS [120],
 
         SUM(CASE
-              WHEN pp.dueDate > @Fecha
+              WHEN pp.dueDate > DATEADD(DAY, 30, @Fecha)
                AND ISNULL(pp.payed, 0) < ISNULL(NULLIF(pp.expected, 0), pp.minimum)
               THEN (ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0))
               ELSE 0

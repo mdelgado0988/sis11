@@ -33,6 +33,13 @@ try {
     return resultCoverages;
   }
 
+  // ChangeCoverage must use the premium originally issued, not a new tariff.
+  // The endorsement variation is prorated only by calendar dates.
+  if (endorsementAction === "changecoverage") {
+    setChangeCoveragePremiums();
+    return resultCoverages;
+  }
+
   log("Calculando tarifas");
   setTarifas();
 
@@ -234,6 +241,147 @@ function setCurrentCoverageValues() {
   }
 }
 
+function setChangeCoveragePremiums() {
+  const changeRows = getChangeCoverageRows();
+  const oldRows = getOldCoverageRows();
+  const changeRowsByCode = {};
+  const oldRowsByCode = {};
+
+  changeRows.forEach(row => {
+    const code = String(row?.code ?? row?.coverageCode ?? "").trim();
+    if (code) changeRowsByCode[code] = row;
+  });
+
+  oldRows.forEach(row => {
+    const code = String(row?.code ?? row?.coverageCode ?? "").trim();
+    if (code) oldRowsByCode[code] = row;
+  });
+
+  const globalNewEnd = getChangeCoverageNewEnd(changeRows);
+  const policyStart = toDateOnly(poliza?.start);
+  const policyEnd = toDateOnly(poliza?.end);
+  const policyDays = policyStart && policyEnd
+    ? Math.max(diffDays(policyStart, policyEnd), 1)
+    : 365;
+
+  for (const cov of (poliza.Coverages || [])) {
+    const code = String(cov?.code ?? "").trim();
+    const resultCoverage = resultCoverages.find(item => item.code === code);
+    if (!resultCoverage) continue;
+
+    const changeRow = changeRowsByCode[code] || null;
+    const currentRow = oldRowsByCode[code] || cov;
+    const newEndValue = changeRow?.newEnd
+      ?? changeRow?.end
+      ?? changeRow?.ffinal
+      ?? globalNewEnd;
+    // ChangeCoverage carries independent dates per coverage. Comparing a
+    // coverage with the policy's maximum end can invert the proration when
+    // the coverage ends before the policy (for example, the main surety bond).
+    const oldEnd = toDateOnly(currentRow?.end ?? cov?.end ?? poliza?.end);
+    const newEnd = toDateOnly(newEndValue);
+    const currentPremium = getCurrentCoveragePremium(currentRow);
+    const originalPremium = getOriginalCoveragePremium(currentRow, currentPremium);
+    const changed = Boolean(newEnd && oldEnd);
+    const differenceDays = changed ? diffDays(oldEnd, newEnd) : 0;
+    const prorata = changed ? differenceDays / policyDays : 0;
+    const variation = round2(originalPremium * prorata);
+    // The calculation result is the final coverage premium, not only the
+    // endorsement movement. Use the current policy balance plus the variation.
+    const adjustedPremium = Math.max(0, round2(currentPremium + variation));
+
+    resultCoverage.limit = n(currentRow.limit !== undefined && currentRow.limit !== null ? currentRow.limit : currentRow.startLimit);
+    resultCoverage.premium = adjustedPremium;
+    resultCoverage.dedutible = n(currentRow.deductible);
+    resultCoverage.description = currentRow.description || currentRow.name || currentRow.commercialName || "";
+    resultCoverage.fini = formatDateAtNoon(changeRow?.newStart ?? cov.start);
+    resultCoverage.ffin = formatDateAtNoon(newEndValue ?? cov.end);
+    resultCoverage.premiumOriginal = originalPremium;
+    resultCoverage.prorata = prorata;
+    resultCoverage.variation = variation;
+  }
+}
+
+function getChangeData() {
+  if (extra && extra.data && typeof extra.data === "object") return extra.data;
+  if (extra && typeof extra === "object") return extra;
+  if (poliza?.jChangeDto?.data && typeof poliza.jChangeDto.data === "object") {
+    return poliza.jChangeDto.data;
+  }
+  return {};
+}
+
+function getChangeCoverageRows() {
+  const data = getChangeData();
+  const candidates = [
+    data.jNewCoverages,
+    data.newCoverages,
+    extra?.jNewCoverages,
+    poliza?.jChangeDto?.jNewCoverages
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const rows = typeof candidate === "string" ? JSON.parse(candidate) : candidate;
+      if (Array.isArray(rows)) return rows;
+    } catch (error) {
+      // Ignore malformed optional endorsement data and use the global date.
+    }
+  }
+
+  return [];
+}
+
+function getOldCoverageRows() {
+  const data = getChangeData();
+  const candidates = [
+    data.jOldCoverages,
+    data.oldCoverages,
+    extra?.jOldCoverages,
+    poliza?.jChangeDto?.jOldCoverages
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const rows = typeof candidate === "string" ? JSON.parse(candidate) : candidate;
+      if (Array.isArray(rows)) return rows;
+    } catch (error) {
+      // Ignore malformed optional endorsement data and use policy values.
+    }
+  }
+
+  return [];
+}
+
+function getChangeCoverageNewEnd(changeRows) {
+  const data = getChangeData();
+  const candidates = [
+    data.newEnd,
+    data.end,
+    data.hasta,
+    extra?.newEnd,
+    poliza?.jChangeDto?.newEnd
+  ];
+
+  const directValue = candidates.find(value => value !== undefined && value !== null && String(value).trim() !== "");
+  if (directValue) return directValue;
+
+  const firstRow = (changeRows || []).find(row => row && (row.newEnd || row.end || row.ffinal));
+  return firstRow?.newEnd ?? firstRow?.end ?? firstRow?.ffinal ?? null;
+}
+
+function getCurrentCoveragePremium(cov) {
+  return n(cov?.premium ?? cov?.startPremium ?? 0);
+}
+
+function getOriginalCoveragePremium(cov, fallback = 0) {
+  const keys = ["startPremium", "startBasePremium", "basePremium", "premium"];
+  const key = keys.find(name => cov?.[name] !== undefined && cov?.[name] !== null && String(cov[name]).trim() !== "");
+  return key ? n(cov[key]) : n(fallback);
+}
+
 function getEndorsementType() {
   let jAdditional = "";
 
@@ -402,6 +550,13 @@ function diffDays(date1, date2) {
 function toDateOnly(value) {
   if (!value) return null;
 
+  const raw = String(value).trim();
+  const isoDate = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  if (isoDate) {
+    const date = new Date(Number(isoDate[1]), Number(isoDate[2]) - 1, Number(isoDate[3]));
+    return isNaN(date.getTime()) ? null : date;
+  }
+
   const d = (value instanceof Date) ? value : new Date(value);
 
   if (isNaN(d.getTime())) return null;
@@ -462,4 +617,4 @@ poliza:
 
 
         
-        */
+*/
