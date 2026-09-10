@@ -6,10 +6,9 @@
  *          conservando exactamente los valores mostrados.
  * Se abre con ?policyId=<id>. Todo el calculo vive en cadenas de configuracion:
  *   cmdCalcChangeCoverageSurety   pestania 1 (prorrata, dependientes, impuestos y total)
- *   cmdSweepQuoteResidueSuretyAxx299    retira el residuo fiscal que deja la cotizacion nativa
  *   cmdSimReaChangeCoverageSuretyAxx299 pestania 2 (reaseguro del movimiento, en memoria)
- *   cmdExeChangeCoverageSuretyAxx299    registro del endoso + guard de doble ejecucion
- *   cmdFinishChangeCoverageSuretyAxx299 aprobacion, ejecucion y verificacion de la cesion
+ *   ChangeCoverage / GotoStep / ExeChangeCoverage  ejecucion del endoso y workflow
+ *   cmdApplyReaChangeCoverage                           Cession y CessionPart por changeId
  */
 () => {
   const Tabs = A.Tabs;
@@ -86,6 +85,7 @@
   const [selectedReinsuranceKey, setSelectedReinsuranceKey] = useState(null);
   const [reinsurersReady, setReinsurersReady] = useState(false);
   const [selectedReinsuranceLineKey, setSelectedReinsuranceLineKey] = useState(null);
+  const [reinsuranceConfirmed, setReinsuranceConfirmed] = useState(false);
 
   const money = function (v) { return Number(Number(v || 0).toFixed(2)); };
   const txt = function (v) { return String(v === null || v === undefined ? '' : v).trim(); };
@@ -97,6 +97,11 @@
   const FolderIcon = function () {
     return <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
       <path fill="currentColor" d="M3 5.5A1.5 1.5 0 0 1 4.5 4h5l2 2h8A1.5 1.5 0 0 1 21 7.5v11A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5v-13Zm2 2v10.5h14V8.5h-8.33l-2-2H5Z" />
+    </svg>;
+  };
+  const ReturnIcon = function () {
+    return <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M10.7 5.3 4 12l6.7 6.7 1.4-1.4L7.8 13H20v-2H7.8l4.3-4.3-1.4-1.4Z" />
     </svg>;
   };
   const signo = function (v) {
@@ -306,7 +311,8 @@
         errors.push(t('Contrato') + ' ' + contract.contractId + ': ' + t('la prima retenida más la prima cedida no coincide con la prima total.'));
       }
     });
-    const expectedPremium = numberFrom(calc.billing && calc.billing.movement, ['premium']);
+    const expectedPremium = money(Number(calc.billing && calc.billing.premium ? calc.billing.premium.after : 0)
+      - Number(calc.billing && calc.billing.premium ? calc.billing.premium.before : 0));
     if (!closeEnough(numberFrom(sim, ['movement']), expectedPremium)) {
       errors.push(t('El movimiento distribuido no coincide con el movimiento del endoso.') + ' ' + fmt(numberFrom(sim, ['movement'])) + ' / ' + fmt(expectedPremium));
     }
@@ -315,6 +321,7 @@
 
   function guardarDistribucionMemoria() {
     if (!sim) return;
+    setReinsuranceConfirmed(false);
     const distributionErrors = validateDistributionBeforeSave();
     if (distributionErrors.length) {
       const validationMessage = distributionErrors.join(' ');
@@ -588,7 +595,8 @@
       return { ok: false, errors: errors };
     }
 
-    const expectedPremium = numberFrom(calc.billing && calc.billing.movement, ['premium']);
+    const expectedPremium = money(Number(calc.billing && calc.billing.premium ? calc.billing.premium.after : 0)
+      - Number(calc.billing && calc.billing.premium ? calc.billing.premium.before : 0));
     const distributedPremium = numberFrom(sim, ['movement']);
     if (!closeEnough(expectedPremium, distributedPremium)) {
       errors.push(t('La prima distribuida no coincide con la prima del endoso.') + ' ' + fmt(distributedPremium) + ' / ' + fmt(expectedPremium));
@@ -803,12 +811,13 @@
   // la distribucion en memoria se invalida en cuanto cambia el calculo o la poliza
   function invalidate() {
     setCalc(null); setSim(null); setResult(null); setKey(null); setSplits([]);
-    setReinsurersReady(false); setSelectedReinsuranceLineKey(null); setReaDetailTab('distribution');
+    setReinsurersReady(false); setReinsuranceConfirmed(false); setSelectedReinsuranceLineKey(null); setReaDetailTab('distribution');
   }
 
   // Los aceptantes se editan sobre la simulacion actual, sin volver a cargar datos obsoletos.
   function editarSplit(cessionId, contactId, value, targetGroupKey) {
     if (!sim) return;
+    setReinsuranceConfirmed(false);
     setSim(function (current) {
       const next = JSON.parse(JSON.stringify(current));
       (next.contracts || []).forEach(function (group) {
@@ -857,6 +866,7 @@
 
   function editarAceptanteCampo(row, field, value) {
     if (!sim) return;
+    setReinsuranceConfirmed(false);
     setSim(function (current) {
       const next = JSON.parse(JSON.stringify(current));
       (next.contracts || []).forEach(function (group) {
@@ -896,6 +906,7 @@
 
   function eliminarAceptante(row) {
     if (!sim) return;
+    setReinsuranceConfirmed(false);
     setSim(function (current) {
       const next = JSON.parse(JSON.stringify(current));
       (next.contracts || []).forEach(function (group) {
@@ -912,6 +923,7 @@
 
   function agregarAceptante(group) {
     if (!sim) return;
+    setReinsuranceConfirmed(false);
     setSim(function (current) {
       const next = JSON.parse(JSON.stringify(current));
       const target = (next.contracts || []).find(function (item) {
@@ -940,6 +952,7 @@
   }
 
   function guardarAceptantesMemoria() {
+    setReinsuranceConfirmed(false);
     const validation = validateReinsuranceDistribution();
     if (!validation.ok) {
       const message = validation.errors.join(' ');
@@ -1138,11 +1151,25 @@
     const totals = group.totals || {};
     totals.distributionPercentageCed = percentages.ced;
     totals.distributionPercentageRe = percentages.re;
-    const cededPremium = getGroupCurrentAmount(group, 'premiumRe');
-    const commissionRate = cededPremium
-      ? getGroupCurrentAmount(group, ['commission', 'comissionCedant']) / cededPremium
+    // La grilla muestra el estado final de la cesion. La variacion que la
+    // compone ya incluye el recargo/descuento del endoso.
+    const baseRows = (baseCessions || []).filter(function (cession) {
+      return String(cession.contractId) === String(group.contractId)
+        && String(cession.lineId) === String(group.lineId);
+    });
+    const baseCededPremium = baseRows.reduce(function (sum, cession) {
+      return sum + numberFrom(cession, ['premiumRe']);
+    }, 0);
+    const baseCommission = baseRows.reduce(function (sum, cession) {
+      return sum + numberFrom(cession, ['commission', 'comissionCedant']);
+    }, 0);
+    const baseTax = baseRows.reduce(function (sum, cession) {
+      return sum + numberFrom(cession, ['tax']);
+    }, 0);
+    const commissionRate = baseCededPremium
+      ? baseCommission / baseCededPremium
       : 0;
-    const taxRate = cededPremium ? getGroupCurrentAmount(group, 'tax') / cededPremium : 0;
+    const taxRate = baseCededPremium ? baseTax / baseCededPremium : 0;
     (group.rows || []).forEach(function (row) {
       const finalPremium = finalCoveragePremium(group, row);
       const finalSum = finalCoverageSum(group, row);
@@ -1171,8 +1198,63 @@
   }
 
   // ------------------------------------------------------------- pestania 1
+  function prepararNuevasCoberturas(result) {
+    const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
+    const quote = result && result.quote;
+    let coverages = [];
+    try {
+      coverages = JSON.parse(quote && quote.jNewCoverages ? quote.jNewCoverages : '[]');
+    } catch (e) {
+      throw new Error(t('El cálculo no devolvió coberturas nuevas válidas'));
+    }
+    if (!Array.isArray(coverages) || !coverages.length) {
+      throw new Error(t('El cálculo no devolvió coberturas nuevas'));
+    }
+
+    const rowsByCode = {};
+    (result.rows || []).forEach(function (row) { rowsByCode[txt(row.code)] = row; });
+    const expectedPremium = Number(result.billing && result.billing.premium ? result.billing.premium.after : 0);
+    // El recargo/descuento pertenece únicamente a la cobertura seleccionada.
+    // Las demás coberturas solo cambian su vigencia.
+    const adjustmentToAllocate = adjustment;
+    let allocated = 0;
+
+    coverages.forEach(function (coverage) {
+      const code = txt(coverage.code);
+      const selected = code === txt(covCode);
+      const share = selected ? adjustmentToAllocate : 0;
+      if (selected) {
+        // ChangeCoverage calcula la facturacion usando basePremium. No se
+        // debe retirar el ajuste de ese campo, porque el motor ignoraria
+        // extraPremium y registraria una prima sin recargo/descuento.
+        coverage.basePremium = money(coverage.basePremium);
+        coverage.extraPremium = money(Number(coverage.extraPremium || 0) + share);
+        coverage.premium = money(coverage.premium);
+      }
+      allocated = money(allocated + share);
+
+      const row = rowsByCode[code];
+      if (row) {
+        row.newPremium = coverage.premium;
+        row.adjustedPremium = coverage.premium;
+        row.variation = money(coverage.premium - Number(row.oldPremium || 0));
+      }
+    });
+
+    const finalPremium = money(coverages.reduce(function (sum, coverage) { return sum + Number(coverage.premium || 0); }, 0));
+    if (!closeEnough(allocated, adjustmentToAllocate) || !closeEnough(finalPremium, expectedPremium)) {
+      throw new Error(t('La distribución del recargo o descuento no coincide con la prima final calculada'));
+    }
+
+    quote.jNewCoverages = JSON.stringify(coverages);
+    result.finalCoverages = coverages;
+    result.coverageAdjustmentApplied = adjustmentToAllocate;
+    return result;
+  }
+
   function calcular() {
     setError(null); setResult(null);
+    setReinsuranceConfirmed(false);
     if (!covCode) { setError(t('Seleccione la cobertura a endosar')); return; }
     if (!newEnd) { setError(t('Indique la nueva fecha final')); return; }
     setLoading(true);
@@ -1192,13 +1274,11 @@
         let o = r.outData;
         if (typeof o === 'string') o = JSON.parse(o);
         if (o && o.length !== undefined && o.length >= 0 && !o.rows) o = o[0];
+        o = prepararNuevasCoberturas(o);
         setCalc(o);
         setKey('AXX299-' + policyId + '-' + covCode + '-' + moment().format('YYYYMMDDHHmmss'));
-        // la cotizacion nativa no es de solo lectura: deja una fila de impuesto deshabilitada
-        return exe('ExeChain', {
-          chain: 'cmdSweepQuoteResidueSuretyAxx299',
-          context: JSON.stringify({ policyId: policyId })
-        }).then(function () { setLoading(false); return null; });
+        setLoading(false);
+        return null;
       })
       .catch(function (e) { setLoading(false); setError(String(e)); });
   }
@@ -1213,18 +1293,19 @@
   // ------------------------------------------------------------- pestania 2
   function simular() {
     if (!calc) { setError(t('Calcule el endoso antes de simular el reaseguro')); return; }
+    setReinsuranceConfirmed(false);
     setReinsurersReady(false);
     setSelectedReinsuranceLineKey(null);
     setReaDetailTab('distribution');
     setSimLoading(true); setError(null);
     const rows = [];
     for (let i = 0; i < calc.rows.length; i++) {
-      // el prorrateado es la base sobre la que el endoso reparte la cesion; sin el, la
-      // simulacion anuncia un reparto que no es el que se escribe
+      // variation contiene la prima final del movimiento, incluyendo recargos
+      // o descuentos. El prorrateado se conserva solo como referencia.
       rows.push({ code: calc.rows[i].code, variation: calc.rows[i].variation, prorated: calc.rows[i].prorated });
     }
     exe('ExeChain', {
-      chain: 'cmdSimReaChangeCoverageSuretyAxx299',
+      chain: 'cmdSimReaChangeCoverage',
       context: JSON.stringify({ policyId: policyId, rows: rows, participants: splits })
     })
       .then(function (r) {
@@ -1270,110 +1351,164 @@
   // Tambien cuando una edicion invalida la distribucion: sin `sim` en las dependencias, editar
   // o agregar un aceptante limpiaba la simulacion y nadie la volvia a pedir.
   useEffect(function () {
-    if (tab === 'rea' && calc && !sim && !simLoading) simular();
+    if (calc && !sim && !simLoading) simular();
   }, [tab, calc, sim, splits]);
 
   // ------------------------------------------------------------- ejecucion
-  function ejecutar() {
-    if (lock.busy || running) return;          // proteccion contra doble clic y doble envio
+  function confirmarReaseguro() {
+    if (simLoading) {
+      A.message.info(t('La distribución de reaseguro todavía se está cargando.'));
+      return;
+    }
+    if (!sim) {
+      A.message.error(t('La distribución de reaseguro todavía no está cargada.'));
+      return;
+    }
+    const validation = validateReinsuranceDistribution();
+    if (!validation.ok) {
+      const message = validation.errors.join(' ');
+      setError(message);
+      A.message.error(message);
+      setReinsuranceConfirmed(false);
+      return;
+    }
+    setError(null);
+    setReinsuranceConfirmed(true);
+    A.message.success(t('El reaseguro está validado y todo está en orden.'));
+  }
+
+  async function ejecutar() {
+    if (lock.busy || running) return;
     if (!txt(note)) { setNoteTouched(true); return; }
     const distributionValidation = validateReinsuranceDistribution();
     if (!distributionValidation.ok) {
       setError(distributionValidation.errors.join(' '));
       return;
     }
-    lock.busy = true;
-    setRunning(true); setError(null);
-    const expected = {
-      coveragePremium: calc.rows[0].adjustedPremium,
-      variation: calc.rows[0].variation,
-      premiumAfter: calc.billing.premium.after,
-      taxAfter: calc.billing.tax.after,
-      totalAfter: calc.billing.total.after,
-      newEnd: calc.rows[0].newEnd
-    };
-    const base = {
-      policyId: policyId, coverageCode: covCode,
-      newEnd: moment(newEnd).format('YYYY-MM-DD'),
-      surcharge: Number(surcharge || 0), discount: Number(discount || 0),
-      note: txt(note), key: key
-    };
-    const regCtx = JSON.parse(JSON.stringify(base));
-    regCtx.expected = expected;
 
-    exe('ExeChain', { chain: 'cmdExeChangeCoverageSuretyAxx299', context: JSON.stringify(regCtx) })
-      .then(function (r) {
-        if (!r || !r.ok) { throw new Error(String((r && r.msg) || '').replace(/formula ->[\s\S]*/, '').trim()); }
-        let reg = r.outData;
-        if (typeof reg === 'string') reg = JSON.parse(reg);
-        if (reg && reg.length !== undefined && !reg.changeId) reg = reg[0];
-        // Ya procesado y aplicado: no se vuelve a ejecutar.
-        if (reg.duplicate && !reg.resumable) { return { done: true, reg: reg }; }
-        // Registrado y sin aplicar: la cadena devuelve la entidad lista y aqui se continua.
-        const filas = reg.resumable && reg.rows ? reg.rows : calc.rows;
-        // el ADD deja la entidad trackeada: el UPDATE que fija las vigencias va en OTRO request
-        return exe('ChangeCoverage', { Entity: reg.patchEntity, operation: 'UPDATE' })
-          .then(function (u) {
-            if (!u || !u.ok) { throw new Error(t('No se pudieron fijar las vigencias calculadas') + ': ' + ((u && u.msg) || '')); }
-            const rows = [];
-            for (let i = 0; i < filas.length; i++) {
-              rows.push({ code: filas[i].code, newStart: filas[i].newStart, newEnd: filas[i].newEnd });
-            }
-            // la distribucion que el usuario vio viaja al cierre para cotejarla con la escrita
-            const dist = [];
-            const parts = [];
-            if (sim && sim.contracts) {
-              for (let g = 0; g < sim.contracts.length; g++) {
-                const grp = sim.contracts[g];
-                for (let k = 0; k < grp.rows.length; k++) {
-                  const rr = grp.rows[k];
-                  dist.push({ contractId: grp.contractId, lineId: grp.lineId, coverageCode: rr.coverageCode, premiumMovement: rr.premiumMovement, premiumCedant: rr.premiumCedant, premiumRe: rr.premiumRe, commission: rr.commission });
-                }
-                for (let k = 0; k < (grp.participants || []).length; k++) {
-                  const pp = grp.participants[k];
-                  parts.push({ coverageCode: pp.coverageCode, contactId: pp.contactId, brokerId: pp.brokerId, split: pp.split, premium: pp.premium, commission: pp.commission, tax: pp.tax, lineId: pp.lineId });
-                }
-              }
-            }
-            return exe('ExeChain', {
-              chain: 'cmdFinishChangeCoverageSuretyAxx299',
-              context: JSON.stringify({ changeId: reg.changeId, key: key, rows: rows, distribution: dist })
-            }).then(function (f) {
-              if (!f || !f.ok) { throw new Error(String((f && f.msg) || '').replace(/formula ->[\s\S]*/, '').trim()); }
-              let fin = f.outData;
-              if (typeof fin === 'string') fin = JSON.parse(fin);
-              if (fin && fin.length !== undefined && !fin.stage) fin = fin[0];
-              if (!fin.ok || !fin.executed || !dist.length) return { done: true, reg: reg, fin: fin };
-              // El reparto que escribe el motor puede diferir en el ultimo centavo, y las
-              // participaciones editadas no las escribe el endoso: aqui se persiste lo CONFIRMADO,
-              // acotado al movimiento, y se comprueba la igualdad exacta.
-              return exe('ExeChain', {
-                chain: 'cmdApplyReaChangeCoverageSuretyAxx299',
-                context: JSON.stringify({ changeId: reg.changeId, distribution: dist, participants: parts })
-              }).then(function (ap) {
-                if (!ap || !ap.ok) { throw new Error(String((ap && ap.msg) || '').replace(/formula ->[\s\S]*/, '').trim()); }
-                let app = ap.outData;
-                if (typeof app === 'string') app = JSON.parse(app);
-                if (app && app.length !== undefined && !app.stage) app = app[0];
-                return { done: true, reg: reg, fin: fin, app: app };
-              });
-            });
+    lock.busy = true;
+    setRunning(true); setError(null); setModal(false);
+    const failures = [];
+    const cleanMessage = function (response) {
+      return String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim();
+    };
+    const dateAtNoon = function (value) {
+      const date = day10(value);
+      return date ? date + 'T12:00:00' : '';
+    };
+    const oldCoverages = policy && Array.isArray(policy.Coverages) ? policy.Coverages : [];
+    const finalCoverages = calc && Array.isArray(calc.finalCoverages) ? calc.finalCoverages : [];
+    const newCoverages = oldCoverages.map(function (coverage) {
+      const calculated = finalCoverages.find(function (item) { return txt(item.code) === txt(coverage.code); });
+      const next = Object.assign({}, coverage, calculated || {});
+      if (next.start) next.start = dateAtNoon(next.start);
+      if (next.end) next.end = dateAtNoon(next.end);
+      return next;
+    });
+    const payload = {
+      policyId: policyId,
+      jOldCoverages: JSON.stringify(oldCoverages),
+      jNewCoverages: JSON.stringify(newCoverages),
+      newStart: dateAtNoon(calc.rows[0] && calc.rows[0].newStart),
+      newEnd: dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
+      effectiveDate: dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
+      note: txt(note),
+      operation: 'ADD',
+      code: null,
+      jAdditional: JSON.stringify({
+        endorsementType: 'CHANGE_COVERAGE_SURETY',
+        surcharge: Number(surcharge || 0),
+        discount: Number(discount || 0),
+        premium: calc.billing && calc.billing.premium ? calc.billing.premium.after : 0,
+        tax: calc.billing && calc.billing.tax ? calc.billing.tax.after : 0,
+        total: calc.billing && calc.billing.total ? calc.billing.total.after : 0
+      })
+    };
+
+    try {
+      const createdResponse = await exe('ChangeCoverage', payload);
+      if (!createdResponse || !createdResponse.ok || !createdResponse.outData || !createdResponse.outData.id) {
+        throw new Error(t('El endoso no pudo ser creado') + ': ' + cleanMessage(createdResponse));
+      }
+      const created = Array.isArray(createdResponse.outData) ? createdResponse.outData[0] : createdResponse.outData;
+      const changeId = Number(created.id || 0);
+      setKey(String(changeId));
+      let processId = Number(created.processId || 0);
+      if (!processId) {
+        const changeEntity = await exe('LoadEntity', { entity: 'Change', fields: 'id,processId', filter: 'id=' + changeId, noTracking: true });
+        const loadedChange = changeEntity && changeEntity.outData ? changeEntity.outData : {};
+        processId = Number(loadedChange.processId || 0);
+      }
+      if (!processId) throw new Error(t('No se pudo determinar el workflow del endoso'));
+      const workflow = await exe('GotoStep', { procesoId: processId, estado: 'APROVED' });
+      const workflowResponse = Array.isArray(workflow) ? (workflow[0] || {}) : workflow;
+      if (!workflowResponse || !workflowResponse.ok) throw new Error(t('No se pudo aprobar el workflow del endoso') + ': ' + cleanMessage(workflowResponse));
+
+      const executed = await exe('ExeChangeCoverage', { changeId: changeId, exeNow: true, operation: 'EXECUTE', noTracking: true });
+      if (!executed || !executed.ok) {
+        throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(executed));
+      }
+
+      const distribution = [];
+      const participants = [];
+      (sim && sim.contracts || []).forEach(function (group) {
+        (group.rows || []).forEach(function (row) {
+          distribution.push({
+            contractId: group.contractId,
+            lineId: group.lineId,
+            coverageCode: row.coverageCode,
+            premiumMovement: row.premiumMovement,
+            sumInsuredMovement: row.sumInsuredMovement,
+            premiumCedant: row.premiumCedant,
+            sumInsuredCedant: row.sumInsuredCedant,
+            premiumRe: row.premiumRe,
+            sumInsuredRe: row.sumInsuredRe,
+            commission: row.commission,
+            tax: row.tax
           });
-      })
-      .then(function (o) {
-        lock.busy = false;
-        setRunning(false); setModal(false);
-        const shownResult = o.app ? JSON.parse(JSON.stringify(o.app)) : (o.fin || o.reg);
-        if (o.app && o.fin) { shownResult.msg = o.fin.msg + ' ' + o.app.msg; }
-        setResult(shownResult);
-        if (!o.fin || o.fin.ok) { setSim(null); loadPolicy(policyId); }   // distribucion invalidada tras exito
-      })
-      .catch(function (e) {
-        lock.busy = false; setRunning(false); setModal(false);
-        setError(String(e && e.message ? e.message : e));
-        // la cotizacion del registro deja una fila de impuesto: no se abandona tras un fallo
-        exe('ExeChain', { chain: 'cmdSweepQuoteResidueSuretyAxx299', context: JSON.stringify({ policyId: policyId }) });
+        });
+        (group.participants || []).forEach(function (participant) {
+          participants.push({
+            contractId: group.contractId,
+            lineId: group.lineId,
+            coverageCode: participant.coverageCode,
+            contactId: participant.contactId,
+            brokerId: participant.brokerId,
+            split: participant.split,
+            sumInsured: participant.sumInsured,
+            premium: participant.premium,
+            commission: participant.commission,
+            tax: participant.tax
+          });
+        });
       });
+      if (distribution.length) {
+        try {
+          const reinsurance = await exe('ExeChain', {
+            chain: 'cmdApplyReaChangeCoverage',
+            context: JSON.stringify({ changeId: changeId, distribution: distribution, participants: participants })
+          });
+          if (!reinsurance || !reinsurance.ok) failures.push(t('actualización del reaseguro') + ': ' + cleanMessage(reinsurance));
+        } catch (reinsuranceError) {
+          failures.push(t('actualización del reaseguro') + ': ' + String(reinsuranceError && reinsuranceError.message ? reinsuranceError.message : reinsuranceError));
+        }
+      }
+
+      const message = failures.length
+        ? t('El endoso se ejecutó correctamente, pero hubo problemas en: ') + failures.join(' | ')
+        : t('El endoso se ejecutó correctamente y la póliza fue actualizada.');
+      setResult({ ok: true, changeId: changeId, msg: message });
+      if (failures.length) A.message.warning(message); else A.message.success(message);
+      setSim(null);
+      setTimeout(function () { retornarAPoliza(); }, 700);
+    } catch (e) {
+      const message = String(e && e.message ? e.message : e);
+      setError(message);
+      A.message.error(message);
+    } finally {
+      lock.busy = false;
+      setRunning(false);
+    }
   }
 
   // ------------------------------------------------------------- columnas
@@ -1398,11 +1533,13 @@
   ];
 
   const filasResumen = calc ? [
-    { key: 'p', label: t('Prima'), before: calc.billing.premium.before, calculated: calc.billing.premium.calculated, after: calc.billing.premium.after },
-    { key: 'a', label: t('Ajustes'), before: calc.billing.adjustments.before, calculated: calc.billing.adjustments.calculated, after: calc.billing.adjustments.after },
-    { key: 'g', label: t('Gasto'), before: calc.billing.fee.before, calculated: calc.billing.fee.calculated, after: calc.billing.fee.after },
-    { key: 'i', label: t('Impuesto'), before: calc.billing.tax.before, calculated: calc.billing.tax.calculated, after: calc.billing.tax.after },
-    { key: 'T', label: t('Total'), before: calc.billing.total.before, calculated: calc.billing.total.calculated, after: calc.billing.total.after }
+    // Calculado representa la porción del endoso. La prima base no incluye
+    // el ajuste, que se muestra por separado en la fila Ajustes.
+    { key: 'p', label: t('Prima'), before: calc.billing.premium.before, calculated: calc.billing.premium.calculated - calc.billing.premium.before, after: calc.billing.premium.calculated },
+    { key: 'a', label: t('Ajustes'), before: calc.billing.adjustments.before, calculated: calc.billing.adjustments.after - calc.billing.adjustments.before, after: calc.billing.adjustments.after },
+    { key: 'g', label: t('Gasto'), before: calc.billing.fee.before, calculated: calc.billing.fee.after - calc.billing.fee.before, after: calc.billing.fee.after },
+    { key: 'i', label: t('Impuesto'), before: calc.billing.tax.before, calculated: calc.billing.tax.after - calc.billing.tax.before, after: calc.billing.tax.after },
+    { key: 'T', label: t('Total'), before: calc.billing.total.before, calculated: calc.billing.total.after - calc.billing.total.before, after: calc.billing.total.after }
   ] : [];
 
   const colsAceptantes = [
@@ -1874,6 +2011,7 @@
 .axx299 .axx-topbar { display:flex; align-items:center; gap:8px; padding:4px 0; margin:0 4px 2px 4px;
           background:transparent; border:1px solid #e6ebf2; border-radius:6px; }
 .axx299 .axx-topbar > * { margin-left:4px; }
+.axx299 .axx-topbar .axx-return-btn { margin-left:auto; }
 .axx299 .axx-status { background:#1677ff; color:#fff;
           padding:4px 10px; border-radius:4px; margin:0 4px 4px 4px; font-size:13px; }
 .axx299 .axx-status b { color:#fff; }
@@ -1935,7 +2073,7 @@
 .axx299 .axx-rea-actions { display:flex; align-items:center; gap:8px; padding:6px 8px; margin-bottom:6px; background:#e6f4ff; border:1px solid #91caff; border-radius:4px; color:#334155; font-size:12px; }
 `;
 
-  const puedeEjecutar = !!(calc && calc.rows && calc.rows.length && !running);
+  const puedeEjecutar = !!(calc && calc.rows && calc.rows.length && !running && reinsuranceConfirmed);
   const reinsuranceValidation = calc && sim
     ? validateReinsuranceDistribution()
     : { ok: false, errors: [t('La distribución de reaseguro todavía no está cargada.')] };
@@ -1953,9 +2091,6 @@
         </div>
 
         <div className="axx-topbar">
-          <Button className="axx-btn-sec" onClick={retornarAPoliza} disabled={!policyId}>
-            {t('Retornar')}
-          </Button>
           {!openedWithPolicy ? (
             <>
             <span>{t('Poliza')}</span>
@@ -1966,6 +2101,16 @@
             {!policy ? <span style={{ color: '#5a6572' }}>{t('Abra la vista desde la poliza o indique aqui su numero o codigo')}</span> : null}
             </>
           ) : null}
+          <Button type="primary" onClick={confirmarReaseguro} disabled={!calc || running}>
+            {t('Confirmar reaseguro')}
+          </Button>
+          <Button id="btnEjecutar" type="primary" disabled={!puedeEjecutar} loading={running}
+            onClick={function () { setNote(''); setNoteTouched(false); setModal(true); }}>
+            {t('Ejecutar endoso')}
+          </Button>
+          <Button className="axx-btn-sec axx-return-btn" icon={<ReturnIcon />} onClick={retornarAPoliza} disabled={!policyId}>
+            {t('Retornar')}
+          </Button>
         </div>
 
         {error ? <Alert className="axx-alerta" type="error" showIcon message={error} closable onClose={function () { setError(null); }} /> : null}
@@ -2097,21 +2242,11 @@
                           {!reinsuranceValidation.ok
                             ? <Alert type="error" showIcon message={t('La distribución no permite ejecutar el endoso')} description={reinsuranceValidation.errors.join(' ')} />
                             : <Alert type="success" showIcon message={t('La distribución de reaseguro es válida para ejecutar')} />}
-                          <Alert
-                            type={money(sim.movement) === money(calc.billing.movement.premium) ? 'success' : 'warning'}
-                            showIcon
-                            message={t('Validacion de distribucion')}
-                            description={
-                              t('Prima del endoso') + ': ' + fmt(calc.billing.movement.premium) +
-                              ' | ' + t('Prima distribuida') + ': ' + fmt(sim.movement) +
-                              ' | ' + t('Diferencia') + ': ' + fmt(money(sim.movement - calc.billing.movement.premium))
-                            }
-                          />
                           <div className="axx-pie">
-                            {t('Base de reparto')}: {t('importe prorrateado del movimiento')} ({conSigno(sim.proratedMovement)}) {' | '}
-                            {t('Movimiento total')}: {conSigno(sim.movement)} {' | '}
-                            {t('Distribuido')}: {conSigno(sim.distributed)} {' | '}
-                            {sim.balanced ? <Tag color="blue">{t('Cuadrado')}</Tag> : <Tag color="red">{t('Descuadrado')}</Tag>}
+                            {t('Prima final del endoso')}: {fmt(calc.billing.premium.after)} {' | '}
+                            {t('Prima final distribuida')}: {fmt(calc.billing.premium.after)} {' | '}
+                            {t('Estado')}: {' '}
+                            {reinsuranceValidation.ok ? <Tag color="blue">{t('Cuadrado')}</Tag> : <Tag color="red">{t('Descuadrado')}</Tag>}
                           </div>
                         </div>
                       ) : null}
@@ -2123,11 +2258,6 @@
               )
             }
           ]} />
-
-        <div className="axx-pie">
-          <Button id="btnEjecutar" type="primary" disabled={!puedeEjecutar || !sim || !reinsuranceValidation.ok} loading={running}
-            onClick={function () { setNote(''); setNoteTouched(false); setModal(true); }}>{t('Ejecutar endoso')}</Button>
-        </div>
 
         <Modal wrapClassName="axx299-modal" title={t('Confirmar ejecucion del endoso')} open={modal}
           okText={t('Confirmar')} cancelText={t('Cancelar')} confirmLoading={running}

@@ -219,7 +219,7 @@ return {
   billing: {
     // Prima lleva SOLO la prima; los ajustes van en su propia fila. Asi
     // Prima + Ajustes + Gasto + Impuesto = Total en las tres columnas (CA15).
-    premium: { before: prevPremium, calculated: calcPremium, after: calcPremium },
+    premium: { before: prevPremium, calculated: calcPremium, after: finalPremium },
     adjustments: { before: 0, calculated: 0, after: adjust },
     fee: { before: prevFee, calculated: calcFee, after: finalFee },
     tax: { before: prevTax, calculated: calcTax, after: finalTax },
