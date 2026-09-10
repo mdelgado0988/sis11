@@ -1405,6 +1405,28 @@
       if (next.end) next.end = dateAtNoon(next.end);
       return next;
     });
+    const reinsuranceSnapshot = { distribution: [], participants: [] };
+    (sim && sim.contracts || []).forEach(function (group) {
+      (group.rows || []).forEach(function (row) {
+        reinsuranceSnapshot.distribution.push({
+          contractId: group.contractId, lineId: group.lineId, coverageCode: row.coverageCode,
+          premiumMovement: row.premiumMovement, sumInsuredMovement: row.sumInsuredMovement,
+          premiumCedant: row.premiumCedant, sumInsuredCedant: row.sumInsuredCedant,
+          premiumRe: row.premiumRe, sumInsuredRe: row.sumInsuredRe,
+          commission: row.commission, tax: row.tax
+        });
+      });
+      (group.participants || []).forEach(function (participant) {
+        reinsuranceSnapshot.participants.push({
+          contractId: group.contractId, lineId: group.lineId,
+          coverageCode: participantCoverageCode(group, participant),
+          cessionId: participant.cessionId,
+          contactId: participant.contactId, brokerId: participant.brokerId, split: participant.split,
+          sumInsured: participant.sumInsured, premium: participant.premium,
+          commission: participant.commission, tax: participant.tax
+        });
+      });
+    });
     const payload = {
       policyId: policyId,
       jOldCoverages: JSON.stringify(oldCoverages),
@@ -1421,7 +1443,8 @@
         discount: Number(discount || 0),
         premium: calc.billing && calc.billing.premium ? calc.billing.premium.after : 0,
         tax: calc.billing && calc.billing.tax ? calc.billing.tax.after : 0,
-        total: calc.billing && calc.billing.total ? calc.billing.total.after : 0
+        total: calc.billing && calc.billing.total ? calc.billing.total.after : 0,
+        reinsuranceSnapshot: reinsuranceSnapshot
       })
     };
 
@@ -1508,44 +1531,11 @@
         failures.push(t('actualización de vigencia y duración') + ': ' + String(validityError && validityError.message ? validityError.message : validityError));
       }
 
-      const distribution = [];
-      const participants = [];
-      (sim && sim.contracts || []).forEach(function (group) {
-        (group.rows || []).forEach(function (row) {
-          distribution.push({
-            contractId: group.contractId,
-            lineId: group.lineId,
-            coverageCode: row.coverageCode,
-            premiumMovement: row.premiumMovement,
-            sumInsuredMovement: row.sumInsuredMovement,
-            premiumCedant: row.premiumCedant,
-            sumInsuredCedant: row.sumInsuredCedant,
-            premiumRe: row.premiumRe,
-            sumInsuredRe: row.sumInsuredRe,
-            commission: row.commission,
-            tax: row.tax
-          });
-        });
-        (group.participants || []).forEach(function (participant) {
-          participants.push({
-            contractId: group.contractId,
-            lineId: group.lineId,
-            coverageCode: participant.coverageCode,
-            contactId: participant.contactId,
-            brokerId: participant.brokerId,
-            split: participant.split,
-            sumInsured: participant.sumInsured,
-            premium: participant.premium,
-            commission: participant.commission,
-            tax: participant.tax
-          });
-        });
-      });
-      if (distribution.length) {
+      if (reinsuranceSnapshot.distribution.length) {
         try {
           const reinsurance = await exe('ExeChain', {
             chain: 'cmdApplyReaChangeCoverage',
-            context: JSON.stringify({ changeId: changeId, distribution: distribution, participants: participants })
+            context: JSON.stringify({ changeId: changeId })
           });
           if (!reinsurance || !reinsurance.ok) failures.push(t('actualización del reaseguro') + ': ' + cleanMessage(reinsurance));
         } catch (reinsuranceError) {

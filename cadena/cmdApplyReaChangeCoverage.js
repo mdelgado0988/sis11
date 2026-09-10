@@ -52,12 +52,11 @@ const sqlValue = function (value) {
 
 const changeId = Number(context && context.changeId || 0);
 if (!changeId) throw 'Falta el identificador del endoso';
-const requestedRows = Array.isArray(context && context.distribution) ? context.distribution : [];
-if (!requestedRows.length) throw 'No hay distribucion confirmada que escribir';
-const requestedParts = Array.isArray(context && context.participants) ? context.participants : [];
+let requestedRows = Array.isArray(context && context.distribution) ? context.distribution : [];
+let requestedParts = Array.isArray(context && context.participants) ? context.participants : [];
 
 doCmd({ cmd: 'LoadEntity', data: {
-  entity: 'Change', fields: 'id,lifePolicyId,status,jNewCoverages',
+  entity: 'Change', fields: 'id,lifePolicyId,status,jNewCoverages,jAdditional',
   filter: 'id = ' + changeId, noTracking: true
 } });
 const change = LoadEntity.outData;
@@ -65,6 +64,25 @@ if (!change) throw 'El endoso ' + changeId + ' no existe';
 if (Number(change.status) !== 1) throw 'El endoso ' + changeId + ' no esta ejecutado';
 const policyId = Number(change.lifePolicyId || 0);
 if (!policyId) throw 'El endoso no tiene poliza asociada';
+
+// La configuracion confirmada se guarda en el propio endoso antes de
+// ejecutarlo. Se usa como fuente principal para permitir reintentos sin
+// depender del payload temporal de la vista.
+let additional = {};
+try {
+  const rawAdditional = change.jAdditional || '{}';
+  additional = typeof rawAdditional === 'string'
+    ? JSON.parse(rawAdditional || '{}')
+    : (rawAdditional || {});
+} catch (error) {
+  additional = {};
+}
+const snapshot = additional.reinsuranceSnapshot;
+if (snapshot && Array.isArray(snapshot.distribution)) {
+  requestedRows = snapshot.distribution;
+  requestedParts = Array.isArray(snapshot.participants) ? snapshot.participants : [];
+}
+if (!requestedRows.length) throw 'El endoso no tiene distribucion de reaseguro guardada';
 
 let finalCoverages = [];
 try { finalCoverages = JSON.parse(change.jNewCoverages || '[]'); }
@@ -105,7 +123,41 @@ doCmd({ cmd: 'LoadEntities', data: {
 } });
 const currentCessions = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
 if (!currentCessions.length) throw 'La poliza no tiene reaseguro vigente para versionar';
-const currentIds = currentCessions.map(function (cession) { return Number(cession.id); }).filter(Boolean);
+
+// Reintento idempotente: una ejecucion exitosa deja una sola fila vigente por
+// clave y todas esas filas quedan asociadas al mismo changeId. En ese caso no
+// se debe volver a sumar el movimiento ni generar otra anulacion.
+const activeKeys = {};
+let alreadyApplied = true;
+for (let i = 0; i < currentCessions.length; i++) {
+  const active = currentCessions[i];
+  const key = keyOf(active);
+  if (Number(active.changeId || 0) !== changeId ||
+      txt(active.premiumType).toUpperCase() === 'CANCELLATION' || activeKeys[key]) {
+    alreadyApplied = false;
+    break;
+  }
+  activeKeys[key] = true;
+}
+if (alreadyApplied) {
+  return {
+    ok: true,
+    exact: true,
+    retry: true,
+    stage: 'ALREADY_APPLIED',
+    changeId: changeId,
+    policyId: policyId,
+    created: currentCessions.length,
+    msg: 'El reaseguro del endoso ya estaba aplicado; no se duplicaron cesiones ni aceptantes.'
+  };
+}
+// Las filas nativas del mismo endoso no son la base del nuevo reaseguro.
+// Se eliminan antes de leer/versionar la configuracion anterior.
+const sourceCessions = currentCessions.filter(function (cession) {
+  return Number(cession.changeId || 0) !== changeId;
+});
+if (!sourceCessions.length) throw 'No hay una configuracion anterior vigente para versionar';
+const currentIds = sourceCessions.map(function (cession) { return Number(cession.id); }).filter(Boolean);
 doCmd({ cmd: 'LoadEntities', data: {
   entity: 'CessionPart',
   filter: 'cessionId IN (' + currentIds.join(',') + ')', noTracking: true
@@ -123,7 +175,7 @@ const sourceRank = function (cession) {
   const isOriginal = Number(cession.changeId || 0) === 0;
   return (isOriginal ? 2 : 1) + (isCancellation ? -1 : 0);
 };
-currentCessions.forEach(function (cession) {
+sourceCessions.forEach(function (cession) {
   const key = keyOf(cession);
   const previous = currentByKey[key];
   // Preferimos la fila base a la fila temporal creada por ChangeCoverage.
@@ -192,9 +244,9 @@ const cancellationCessions = baseCessions.map(function (source) {
 requestedRows.forEach(function (requested) {
   const key = keyOf(requested);
   if (currentByKey[key]) return;
-  let template = currentCessions.find(function (cession) {
+  let template = sourceCessions.find(function (cession) {
     return txt(cession.coverageCode) === txt(requested.coverageCode);
-  }) || currentCessions[0];
+  }) || sourceCessions[0];
   const created = clone(template);
   const coverage = coverageByCode[txt(requested.coverageCode)] || {};
   created.id = 0;
@@ -238,8 +290,13 @@ cancellationCessions.forEach(function (cession, index) {
 finalCessions.forEach(function (cession) {
   const key = keyOf(cession);
   const requested = rowsByKey[key];
-  if (requested) {
-    (partsByKey[key] || []).forEach(function (part) {
+  const configuredParts = partsByKey[key] || [];
+  if (requested || configuredParts.length) {
+    // El snapshot confirmado es la fuente principal. Si por compatibilidad
+    // una vista anterior no guardo las partes, se usa la configuracion base.
+    const fallbackParts = partsByCession[Number(cession._sourceId || 0)] || [];
+    const parts = configuredParts.length ? configuredParts : fallbackParts;
+    parts.forEach(function (part) {
       const child = clone(part);
       child.id = 0;
       child.cessionId = 0;
@@ -267,7 +324,9 @@ const insertSql = function (table, columns, entity, overrides) {
 // Versionado atomico: primero se anula la version vigente y luego se inserta
 // la fotografia final y sus hijos con nuevos identificadores.
 const statements = ['BEGIN TRANSACTION;'];
-statements.push('UPDATE Cession SET overwritten = 1 WHERE lifePolicyId = ' + policyId + ' AND overwritten = 0;');
+statements.push('DELETE FROM CessionPart WHERE cessionId IN (SELECT id FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ');');
+statements.push('DELETE FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ';');
+statements.push('UPDATE Cession SET overwritten = 1 WHERE lifePolicyId = ' + policyId + ' AND overwritten = 0 AND (changeId IS NULL OR changeId <> ' + changeId + ');');
 const cessionsToInsert = cancellationCessions.concat(finalCessions);
 cessionsToInsert.forEach(function (cession, index) {
   const variable = '@NewCession_' + (index + 1);
@@ -279,7 +338,12 @@ cessionsToInsert.forEach(function (cession, index) {
   }));
   statements.push('SET ' + variable + ' = SCOPE_IDENTITY();');
   cancellationParts.concat(finalParts).filter(function (entry) { return entry.cession === cession; }).forEach(function (entry) {
-    statements.push(insertSql('CessionPart', CESSION_PART_COLUMNS, entry.part, { cessionId: variable }));
+    statements.push(insertSql('CessionPart', CESSION_PART_COLUMNS, entry.part, {
+      cessionId: variable,
+      // La columna es obligatoria aunque el snapshot no la incluya.
+      reserve: entry.part.reserve == null ? 0 : entry.part.reserve,
+      fee: entry.part.fee == null ? 0 : entry.part.fee
+    }));
   });
 });
 statements.push('COMMIT TRANSACTION;');
