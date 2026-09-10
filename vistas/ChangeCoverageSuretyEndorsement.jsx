@@ -1449,6 +1449,65 @@
         throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(executed));
       }
 
+      // ChangeCoverage actualiza las coberturas, pero la duracion de la
+      // poliza debe quedar sincronizada con la vigencia final resultante.
+      try {
+        const parseAtNoon = function (value) {
+          const raw = String(value || '').trim();
+          if (!raw) return null;
+          const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : raw + 'Z';
+          const date = new Date(normalized);
+          return Number.isNaN(date.getTime()) ? null : date;
+        };
+        const addYears = function (date, years) {
+          const result = new Date(date.getTime());
+          const month = result.getUTCMonth();
+          result.setUTCDate(1);
+          result.setUTCFullYear(result.getUTCFullYear() + years);
+          result.setUTCMonth(month);
+          result.setUTCDate(Math.min(date.getUTCDate(), new Date(Date.UTC(result.getUTCFullYear(), month + 1, 0)).getUTCDate()));
+          return result;
+        };
+        const addMonths = function (date, months) {
+          const result = new Date(date.getTime());
+          const day = result.getUTCDate();
+          result.setUTCDate(1);
+          result.setUTCMonth(result.getUTCMonth() + months);
+          result.setUTCDate(Math.min(day, new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate()));
+          return result;
+        };
+        const dates = newCoverages.map(function (coverage) {
+          return { start: parseAtNoon(coverage.start), end: parseAtNoon(coverage.end) };
+        }).filter(function (item) { return item.start && item.end; });
+        if (!dates.length) throw new Error(t('No se pudo determinar la vigencia final de la póliza'));
+        const startDate = new Date(Math.min.apply(null, dates.map(function (item) { return item.start.getTime(); })));
+        const endDate = new Date(Math.max.apply(null, dates.map(function (item) { return item.end.getTime(); })));
+        let years = endDate.getUTCFullYear() - startDate.getUTCFullYear();
+        let cursor = addYears(startDate, years);
+        if (cursor.getTime() > endDate.getTime()) { years -= 1; cursor = addYears(startDate, years); }
+        let months = (endDate.getUTCFullYear() - cursor.getUTCFullYear()) * 12 + endDate.getUTCMonth() - cursor.getUTCMonth();
+        cursor = addMonths(cursor, months);
+        if (cursor.getTime() > endDate.getTime()) { months -= 1; cursor = addMonths(startDate, years * 12 + months); }
+        const days = Math.floor((endDate.getTime() - cursor.getTime()) / 86400000);
+        const validityResponse = await exe('SetField', {
+          entity: 'LifePolicy',
+          entityId: policyId,
+          fieldValue: [
+            "start='" + dateAtNoon(startDate.toISOString()) + "'",
+            "[end]='" + dateAtNoon(endDate.toISOString()) + "'",
+            'duration=' + years,
+            'durationMonths=' + months,
+            'durationDays=' + days
+          ].join(', '),
+          raw: true
+        });
+        if (!validityResponse || !validityResponse.ok) {
+          failures.push(t('actualización de vigencia y duración') + ': ' + cleanMessage(validityResponse));
+        }
+      } catch (validityError) {
+        failures.push(t('actualización de vigencia y duración') + ': ' + String(validityError && validityError.message ? validityError.message : validityError));
+      }
+
       const distribution = [];
       const participants = [];
       (sim && sim.contracts || []).forEach(function (group) {
