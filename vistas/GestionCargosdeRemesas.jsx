@@ -1252,7 +1252,13 @@
     INNER JOIN LifePolicy policy ON policy.id = allocationInstallment.lifePolicyId
     LEFT JOIN [Change] policyChange ON policyChange.id = payPlan.changeId
     LEFT JOIN Bill bill ON bill.changeId = policyChange.id
-    WHERE TRY_CAST(transfer.processIdAux AS INT) = ${Number(batchId)}
+    OUTER APPLY (
+      SELECT TOP (1)
+        TRY_CAST(JSON_VALUE(formField.value, '$.userData[0]') AS INT) AS remittanceId
+      FROM OPENJSON(transfer.jIncomeTypeForm) formField
+      WHERE JSON_VALUE(formField.value, '$.name') = 'hiddenIdRemesa'
+    ) remittance
+    WHERE remittance.remittanceId = ${Number(batchId)}
       AND policy.code IN (${sqlList(policies)})
       AND (policy.fiscalNumber IN (${sqlList(receipts)}) OR bill.fiscalNumber IN (${sqlList(receipts)}))`;
 

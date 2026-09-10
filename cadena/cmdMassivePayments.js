@@ -239,9 +239,10 @@ function CreateHolderAccount( intermediaryId, policyId ){
     return LoadEntity.outData.id
 }
 
-function buildIncomeTypeForm(formId, payerId, payerName) {
+function buildIncomeTypeForm(formId, payerId, payerName, batchId) {
     const validatedFormId = validatePositiveId(formId, 'El formulario del tipo de ingreso no es válido.');
     const validatedPayerId = validatePositiveId(payerId, 'El código del pagador no es válido.');
+    const validatedBatchId = validateBatchId(batchId);
     if (typeof payerName !== 'string' || payerName.trim() === '') {
         throw new Error('No se encontró el nombre del pagador.');
     }
@@ -283,6 +284,22 @@ function buildIncomeTypeForm(formId, payerId, payerName) {
 
     payerNameFields[0].userData = [payerName.trim()];
     payerIdFields[0].userData = [String(validatedPayerId)];
+
+    const remittanceIdFields = fields.filter(field => field.name === 'hiddenIdRemesa');
+    if (remittanceIdFields.length > 1) {
+        throw new Error('El formulario no puede contener más de un campo hiddenIdRemesa.');
+    }
+    if (remittanceIdFields.length === 1) {
+        remittanceIdFields[0].userData = [String(validatedBatchId)];
+    } else {
+        fields.push({
+            type: 'hidden',
+            name: 'hiddenIdRemesa',
+            access: false,
+            userData: [String(validatedBatchId)]
+        });
+    }
+
     return JSON.stringify(fields);
 }
 
@@ -416,7 +433,7 @@ function executeTransfer({ amount, workspaceId, batchId, payerId, payerName }) {
         throw new Error('No existe un tipo de ingreso configurado para PREMIUM.');
     }
 
-    const incomeTypeForm = buildIncomeTypeForm(premiumIncomeType.formId, payerId, payerName);
+    const incomeTypeForm = buildIncomeTypeForm(premiumIncomeType.formId, payerId, payerName, validatedBatchId);
 
     doCmd({
         cmd: 'RepoTransfer',
@@ -439,8 +456,7 @@ function executeTransfer({ amount, workspaceId, batchId, payerId, payerName }) {
                 isExternal: true,
                 concept: 'IW',
                 DestinationAccount: null,
-                transferWorkspaceId: cashDeskId,
-                processIdAux: validatedBatchId
+                transferWorkspaceId: cashDeskId
             },
             otherReceivables: []
         }
