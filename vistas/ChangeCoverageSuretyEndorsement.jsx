@@ -807,6 +807,9 @@
     for (let i = 0; i < eligible.length; i++) { if (eligible[i].code === covCode) return eligible[i]; }
     return null;
   })();
+  const selectedPolicyCoverage = (policy && Array.isArray(policy.Coverages)
+    ? policy.Coverages.find(function (coverage) { return txt(coverage.code) === txt(covCode); })
+    : null) || selected;
 
   // la distribucion en memoria se invalida en cuanto cambia el calculo o la poliza
   function invalidate() {
@@ -1036,14 +1039,24 @@
     });
     Object.keys(grouped).forEach(function (participantKey) {
       const participant = grouped[participantKey];
-      const split = (Number(participant.split) || 0) / 100;
-      // La grilla agrupada muestra la participacion sobre el total de la linea,
-      // no la suma de importes redondeados individualmente por cobertura.
-      // Asi 50% de 924.56 siempre es 462.28.
-      participant.sumInsured = money(numberFrom(group.totals, ['sumRe']) * split);
-      participant.premium = money(numberFrom(group.totals, ['re']) * split);
-      participant.commission = money(numberFrom(group.totals, ['commission']) * split);
-      participant.tax = money(numberFrom(group.totals, ['tax']) * split);
+      // La fila agrupada debe representar el movimiento real de sus
+      // aceptantes. No usar los totales generales de la linea, porque pueden
+      // corresponder al estado final y mezclarlo con una variacion negativa.
+      const sourceParticipants = (group.participants || []).filter(function (item) {
+        return String(item.contactId || '') + '|' + String(item.brokerId || '') === participantKey;
+      });
+      participant.sumInsured = money(sourceParticipants.reduce(function (sum, item) {
+        return sum + numberFrom(item, ['sumInsured']);
+      }, 0));
+      participant.premium = money(sourceParticipants.reduce(function (sum, item) {
+        return sum + numberFrom(item, ['premium']);
+      }, 0));
+      participant.commission = money(sourceParticipants.reduce(function (sum, item) {
+        return sum + numberFrom(item, ['commission']);
+      }, 0));
+      participant.tax = money(sourceParticipants.reduce(function (sum, item) {
+        return sum + numberFrom(item, ['tax']);
+      }, 0));
       const brokerCatalog = group.brokers && group.brokers.length
         ? group.brokers
         : (group.reinsuranceBrokers && group.reinsuranceBrokers.length ? group.reinsuranceBrokers : reinsuranceBrokers);
@@ -2194,7 +2207,9 @@
                         <Select id="cbxCobertura" value={covCode} style={{ width: 260 }}
                           onChange={function (v) {
                             setCovCode(v);
-                            const selectedCoverage = eligible.find(function (item) { return item.code === v; });
+                            const selectedCoverage = (policy && Array.isArray(policy.Coverages)
+                              ? policy.Coverages.find(function (item) { return txt(item.code) === txt(v); })
+                              : null) || eligible.find(function (item) { return item.code === v; });
                             setNewEnd(selectedCoverage && selectedCoverage.end
                               ? moment(day10(selectedCoverage.end), 'YYYY-MM-DD', true)
                               : null);
@@ -2204,7 +2219,7 @@
                       </div>
                       <div className="axx-campo">
                         <label>{t('Fecha final actual')}</label>
-                        <Input id="txtFinActual" readOnly style={{ width: 140 }} value={selected ? day10(selected.end) : ''} />
+                        <Input id="txtFinActual" readOnly style={{ width: 140 }} value={selectedPolicyCoverage ? day10(selectedPolicyCoverage.end) : ''} />
                       </div>
                       <div className="axx-campo">
                         <label>{t('Nueva fecha final')}</label>
