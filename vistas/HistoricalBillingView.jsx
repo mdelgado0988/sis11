@@ -25,6 +25,7 @@
     Switch,
     Table,
     Tabs,
+    Alert,
     message
   } = A;
   const { Option } = Select;
@@ -133,6 +134,7 @@
   const [restructureLoading, setRestructureLoading] = React.useState(false);
   const [restructurePreviewRows, setRestructurePreviewRows] = React.useState([]);
   const [restructurePreviewDirty, setRestructurePreviewDirty] = React.useState(false);
+  const [restructureTotalError, setRestructureTotalError] = React.useState('');
   const [policyReloadToken, setPolicyReloadToken] = React.useState(0);
   const [restructureForm] = Form.useForm();
   const [endorsementForm] = Form.useForm();
@@ -304,6 +306,28 @@
         padding: 5px 8px !important;
         font-size: 12px;
         line-height: 18px;
+      }
+
+      .historical-billing-modal .historical-billing-restructure-table {
+        border: 1px solid #cbd1d8;
+      }
+
+      .historical-billing-modal .historical-billing-restructure-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .historical-billing-modal .historical-billing-restructure-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+        vertical-align: middle;
       }
 
       .historical-billing-view .historical-billing-table {
@@ -1333,12 +1357,12 @@
     { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Current Amount'), dataIndex: 'current', key: 'current', width: 115, align: 'right', render: value => renderMoney(value) },
-    { title: t('Overdue'), dataIndex: 'overdue', key: 'overdue', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Due soon'), dataIndex: 'dueSoon', key: 'dueSoon', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: '30-60', dataIndex: 'm30a60', key: 'm30a60', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '61-90', dataIndex: 'm60a90', key: 'm60a90', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '91-120', dataIndex: 'm90a120', key: 'm90a120', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '>120', dataIndex: 'mmas120', key: 'mmas120', width: 105, align: 'right', render: value => renderMoney(value) },
-    { title: t('Due soon'), dataIndex: 'dueSoon', key: 'dueSoon', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Overdue'), dataIndex: 'overdue', key: 'overdue', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: delinquencyGrouped ? t('Entry date') : t('Installment date'), dataIndex: delinquencyGrouped ? 'entryDate' : 'dueDate', key: 'delinquencyDate', width: 120, align: 'center', render: formatDate }
   ];
   const coverageRows = Array.isArray(detailPolicy.Coverages) ? detailPolicy.Coverages : [];
@@ -1710,13 +1734,34 @@
     });
     setRestructurePreviewRows([]);
     setRestructurePreviewDirty(false);
+    setRestructureTotalError('');
     setRestructureModalOpen(true);
+  }
+
+  function getRestructureAmountTotal(rows) {
+    return (Array.isArray(rows) ? rows : []).reduce((total, row) => (
+      total + firstNumber(row, ['minimum', 'expected'], 0)
+    ), 0);
+  }
+
+  function getRestructureTotalError(rows) {
+    const currentTotal = getRestructureAmountTotal(installmentRows);
+    const previewTotal = getRestructureAmountTotal(rows);
+    if (Math.abs(currentTotal - previewTotal) <= 0.005) return '';
+
+    return t('The restructuring cannot be executed because the total installment amount changed.')
+      + ' ' + t('Current total') + ': ' + formatMoney(currentTotal)
+      + '. ' + t('New total') + ': ' + formatMoney(previewTotal) + '.';
   }
 
   function calculateRestructure(values) {
     const currentRows = installmentRows.slice();
     const desiredInstallments = Number(values && values.newInstallments);
-    const paidRows = currentRows.filter(row => number(row && row.payed) > 0);
+    const paidRows = currentRows.filter(row => {
+      const amount = number(row && row.minimum);
+      const paid = number(row && row.payed);
+      return amount > 0 && paid >= amount - 0.005;
+    });
     const startDate = values && values.startDate;
     const policyStart = detailPolicy.start && typeof moment !== 'undefined' ? moment(detailPolicy.start) : null;
     const policyEnd = detailPolicy.end && typeof moment !== 'undefined' ? moment(detailPolicy.end) : null;
@@ -1738,12 +1783,14 @@
       throw new Error(t('The start date cannot be later than the policy end date.'));
     }
 
-    const pendingAmount = currentRows.reduce((total, row) => total + number(row && row.minimum) - number(row && row.payed), 0);
+    const editableRows = currentRows.filter(row => paidRows.indexOf(row) < 0);
+    // Fully paid installments remain locked. Partially paid installments are
+    // editable, but their new amount must remain at least the amount paid.
+    const pendingAmount = editableRows.reduce((total, row) => total + number(row && row.minimum), 0);
     const remainingSlots = desiredInstallments - paidRows.length;
     const baseCents = Math.max(0, Math.round(pendingAmount * 100));
     const centsPerRow = Math.floor(baseCents / remainingSlots);
     const remainder = baseCents - centsPerRow * remainingSlots;
-    const unpaidRows = currentRows.filter(row => number(row && row.payed) <= 0);
      const lockedRows = paidRows.map(row => ({
        ...row,
        dueAmount: 0,
@@ -1757,13 +1804,17 @@
     const newRows = [];
 
     for (let index = 0; index < remainingSlots; index += 1) {
-      const originalRow = unpaidRows[index] || null;
-      const sourceRow = originalRow || unpaidRows[unpaidRows.length - 1] || {};
+      const originalRow = editableRows[index] || null;
+      const sourceRow = originalRow || editableRows[editableRows.length - 1] || {};
       const dueDate = startDate.clone().add(frequencyMonths * index, 'months');
       const coveredUntil = dueDate.clone().add(frequencyMonths, 'months');
       const amount = (centsPerRow + (index === remainingSlots - 1 ? remainder : 0)) / 100;
       const dueDateIso = toRestructureUtcIso(dueDate);
       const coveredUntilIso = toRestructureUtcIso(coveredUntil);
+      const paidAmount = originalRow ? number(originalRow.payed) : 0;
+      if (amount + 0.005 < paidAmount) {
+        throw new Error(t('The new installment amount cannot be less than the amount already paid.'));
+      }
       const edited = !!originalRow && (
         String(sourceRow.dueDate || sourceRow.normalDueDate || '') !== String(dueDateIso) ||
         number(sourceRow.minimum) !== amount ||
@@ -1777,14 +1828,14 @@
         numberInYear: paidRows.length + index + 1,
         minimum: amount,
         expected: amount,
-        dueAmount: amount,
-        pendingAmount: amount,
-        payed: 0,
-        payedDate: null,
+        dueAmount: Math.max(0, amount - paidAmount),
+        pendingAmount: Math.max(0, amount - paidAmount),
+        payed: originalRow ? originalRow.payed : 0,
+        payedDate: originalRow ? originalRow.payedDate : null,
         dueDate: dueDateIso,
         normalDueDate: dueDateIso,
         coveredUntil: coveredUntilIso,
-        pending: true,
+        pending: amount - paidAmount > 0,
         final: index === remainingSlots - 1,
         edited,
         PayPlanDetail: Array.isArray(sourceRow.PayPlanDetail)
@@ -1793,14 +1844,26 @@
       });
     }
 
-    setRestructurePreviewRows(lockedRows.concat(newRows));
+    const previewRows = lockedRows.concat(newRows);
+    const totalError = getRestructureTotalError(previewRows);
+    setRestructurePreviewRows(previewRows);
+    setRestructureTotalError(totalError);
     setRestructurePreviewDirty(false);
+    if (totalError) {
+      message.warning(totalError);
+      return;
+    }
     message.success(t('Preview updated successfully'));
   }
 
   function openEndorsementModal() {
     if (!restructurePreviewRows.length) {
       message.warning(t('Calculate the new installments before executing the endorsement.'));
+      return;
+    }
+    const totalError = getRestructureTotalError(restructurePreviewRows);
+    if (totalError || restructureTotalError) {
+      message.warning(totalError || restructureTotalError);
       return;
     }
     if (restructurePreviewDirty) {
@@ -1823,7 +1886,7 @@
     if (!row || typeof moment === 'undefined') return null;
     const value = row.dueDate || row.normalDueDate || row.coveredUntil;
     if (!value) return null;
-    const date = moment(value);
+    const date = typeof moment.utc === 'function' ? moment.utc(value) : moment(value);
     return date.isValid() ? date : null;
   }
 
@@ -1963,6 +2026,10 @@
   async function executeRestructure(values) {
     if (!restructurePreviewRows.length) {
       throw new Error(t('Calculate the new installments before executing the endorsement.'));
+    }
+    const totalError = getRestructureTotalError(restructurePreviewRows);
+    if (totalError || restructureTotalError) {
+      throw new Error(totalError || restructureTotalError);
     }
     const effectiveDate = buildRestructureEffectiveDate(values && values.effectiveDate);
     if (!effectiveDate || !values.startDate || !text(values && values.description)) {
@@ -2582,12 +2649,12 @@
                         <Table.Summary.Cell index={4} align="right">{renderMoney(delinquencyTotals.paid)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={5} align="right">{renderMoney(delinquencyTotals.pending)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={6} align="right">{renderMoney(delinquencyTotals.current)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.overdue)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={10} align="right">{renderMoney(delinquencyTotals.m90a120)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={11} align="right">{renderMoney(delinquencyTotals.mmas120)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.overdue)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={13}></Table.Summary.Cell>
                         </Table.Summary.Row>
                       </Table.Summary>
@@ -2781,6 +2848,14 @@
               layout="vertical"
               onValuesChange={() => setRestructurePreviewDirty(true)}
             >
+              {restructureTotalError && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={restructureTotalError}
+                  style={{ marginBottom: 12 }}
+                />
+              )}
               <div className="historical-billing-toolbar">
                 <Button type="primary" htmlType="button" onClick={() => restructureForm.validateFields(['newFrequency', 'newInstallments', 'startDate']).then(calculateRestructure).catch(() => {
                   message.error(t('Please complete the required fields.'));
@@ -2809,12 +2884,37 @@
                 </Col>
               </Row>
               <Table
-                className="historical-billing-table"
+                className="historical-billing-table historical-billing-restructure-table"
                 size="small"
                 bordered
                 pagination={false}
                 rowKey={(row, index) => String(row && row.id ? `${row.id}-${index}` : index)}
                 dataSource={restructurePreviewRows}
+                summary={() => {
+                  const totals = restructurePreviewRows.reduce((result, row) => ({
+                    amountDue: result.amountDue + firstNumber(row, ['minimum', 'expected'], 0),
+                    paid: result.paid + firstNumber(row, ['payed', 'paid'], 0)
+                  }), { amountDue: 0, paid: 0 });
+
+                  return (
+                    <Table.Summary>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={2}>
+                          <strong>{t('Totals')}</strong>
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={2} align="right">
+                          {renderMoney(totals.amountDue)}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={3} align="right">
+                          {renderMoney(totals.paid)}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={4} colSpan={2}>
+                          {t('Total installments')}: {restructurePreviewRows.length}
+                        </Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  );
+                }}
                 columns={[
                    { title: t('Installment'), dataIndex: 'numberInYear', key: 'numberInYear', width: 78, align: 'center' },
                    { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: 150, ellipsis: true },

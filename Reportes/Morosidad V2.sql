@@ -22,6 +22,7 @@ SELECT
     p.holderId AS [Cod. Tenedor],
     c.id [Id Cliente],
     ISNULL(c.nationalId,'0') AS Cobis,
+    ISNULL(c.email, '') AS [Correo del Pagador],
 
     CASE
         WHEN c.isPerson = 1 THEN CONCAT_WS(' ', c.name, c.surname1, c.surname2)
@@ -47,6 +48,7 @@ SELECT
 
     ISNULL(oa.NumeroPrestamo,'0') AS Prestamo,
 	ISNULL(oa.NumeroFinca,'0') AS Finca,
+    ISNULL(oa.Placa, '') AS Placa,
     ISNULL(s.Facturado, 0) AS Facturado,
     ISNULL([s].Pagado, 0)    AS Pagado,
     ISNULL([s].Pendiente, 0) AS Pendiente,
@@ -176,6 +178,11 @@ OUTER APPLY (
 /*-- Objeto Asegurado */
 OUTER APPLY (
     SELECT TOP (1)
+        MAX(CASE
+                WHEN JSON_VALUE(component.value, '$.name') = 'tbplaca'
+                THEN JSON_VALUE(component.value, '$.userData[0]')
+            END) AS Placa,
+
         MAX(CASE 
                 WHEN JSON_VALUE(component.value, '$.name') = 'txtFinca'
                 THEN JSON_VALUE(component.value, '$.userData[0]')
@@ -194,7 +201,7 @@ OUTER APPLY (
     ) component
     WHERE io.lifePolicyId = p.id
       AND ISJSON(component.value) = 1
-      AND JSON_VALUE(component.value, '$.name') IN ('txtFinca', 'txtNoPrestamo')
+      AND JSON_VALUE(component.value, '$.name') IN ('tbplaca', 'txtFinca', 'txtNoPrestamo')
 ) oa
 
 WHERE
