@@ -96,6 +96,8 @@
   const [uploading, setUploading] = React.useState(false);
   const [processingBatchId, setProcessingBatchId] = React.useState(null);
   const [deletingBatchId, setDeletingBatchId] = React.useState(null);
+  const [validationModalOpen, setValidationModalOpen] = React.useState(false);
+  const [validationErrors, setValidationErrors] = React.useState([]);
   const [newCashDeskOpen, setNewCashDeskOpen] = React.useState(false);
   const [newCashDeskLoading, setNewCashDeskLoading] = React.useState(false);
   const [currentUserEmail, setCurrentUserEmail] = React.useState('');
@@ -114,6 +116,7 @@
   const batchExecutionRef = React.useRef({});
   const batchDeletionRef = React.useRef({});
   const batchStatusPollRef = React.useRef(0);
+  const batchStatusPollInFlightRef = React.useRef(false);
   const shellRef = React.useRef(null);
 
   const toNumber = (value) => {
@@ -798,6 +801,9 @@
   };
 
   const refreshActiveBatchRows = () => {
+    if (batchStatusPollInFlightRef.current) return Promise.resolve();
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return Promise.resolve();
+
     const pollId = batchStatusPollRef.current + 1;
     batchStatusPollRef.current = pollId;
 
@@ -808,6 +814,7 @@
 
     if (!activeIds.length) return Promise.resolve();
 
+    batchStatusPollInFlightRef.current = true;
     return Promise.all(activeIds.map((batchId) => exe('SetBatchResults', { batchId: batchId })
       .then((result) => {
         if (result && result.ok === false) {
@@ -821,6 +828,9 @@
       })
       .catch(() => {
         // A transient polling error must not interrupt the user's work.
+      })
+      .then(() => {
+        batchStatusPollInFlightRef.current = false;
       });
   };
 
@@ -839,6 +849,115 @@
     if (!validationRows.length) throw new Error(t('La remesa no contiene filas para validar.'));
     return validationRows;
   });
+
+  const validationBatchSize = 500;
+
+  const validationDetailsFromText = (messageText) => String(messageText || '')
+    .split(' | ')
+    .filter(Boolean)
+    .map((detail, index) => {
+      const rowMatch = detail.match(/^Fila\s+(\d+):\s*(.*)$/i);
+      return {
+        key: String(index + 1),
+        row: rowMatch ? rowMatch[1] : EMPTY_VALUE,
+        detail: rowMatch ? rowMatch[2] : detail
+      };
+    });
+
+  const duplicateValidationErrors = (validationRows) => {
+    const seen = {};
+    const errors = [];
+
+    validationRows.forEach((row, index) => {
+      const policyCode = normalizedCashDeskValue(row && row.policyCode).toUpperCase();
+      const receiptNumber = normalizedCashDeskValue(row && row.numRecibo).toUpperCase();
+      if (!policyCode || !receiptNumber) return;
+
+      const key = policyCode + '|' + receiptNumber;
+      if (seen[key]) {
+        errors.push({
+          key: 'duplicate-' + String(index + 1),
+          row: String(index + 1),
+          detail: t('recibo duplicado') + ' ' + receiptNumber
+            + ' ' + t('para la póliza') + ' ' + policyCode
+            + ' (' + t('también aparece en la fila') + ' ' + seen[key] + ').'
+        });
+      } else {
+        seen[key] = index + 1;
+      }
+    });
+
+    return errors;
+  };
+
+  const validateRemittanceInBatches = (batchId, validationRows) => {
+    const validationErrorsForDisplay = duplicateValidationErrors(validationRows);
+    const batches = [];
+
+    for (let start = 0; start < validationRows.length; start += validationBatchSize) {
+      batches.push(validationRows.slice(start, start + validationBatchSize));
+    }
+
+    return batches.reduce((promise, rowsBatch, batchIndex) => promise.then(() => exe('ExeChain', {
+      chain: PRE_OPERATION_CHAIN,
+      context: JSON.stringify({
+        batchId: batchId,
+        rows: rowsBatch,
+        skipDuplicateValidation: true,
+        skipPremiumIncomeTypeValidation: batchIndex > 0
+      })
+    }).then((validationResult) => {
+      const validationPayload = validationResult
+        && validationResult.outData
+        && !Array.isArray(validationResult.outData)
+        ? validationResult.outData
+        : validationResult;
+
+      if (!validationResult
+        || validationResult.ok === false
+        || !validationPayload
+        || validationPayload.ok === false) {
+        throw new Error(validationPayload && validationPayload.msg
+          ? validationPayload.msg
+          : (validationResult && validationResult.msg
+            ? validationResult.msg
+            : t('La validación previa de la remesa fue rechazada.')));
+      }
+    }).catch((error) => {
+      const messageText = error && error.message ? String(error.message) : String(error || '');
+      const validationStart = messageText.indexOf('PRE OPERATION rechazada.');
+      const validationPrefix = 'PRE OPERATION rechazada. No se realizó ningún cobro.';
+      if (validationStart >= 0) {
+        validationErrorsForDisplay.push(...validationDetailsFromText(
+          messageText.slice(validationStart + validationPrefix.length).replace(/^\s+/, '')
+        ));
+      } else {
+        throw error;
+      }
+    })), Promise.resolve()).then(() => {
+      if (!validationErrorsForDisplay.length) return;
+
+      const details = validationErrorsForDisplay.map((item) => item.row !== EMPTY_VALUE
+        ? 'Fila ' + item.row + ': ' + item.detail
+        : item.detail);
+      throw new Error('@PRE OPERATION rechazada. No se realizó ningún cobro. ' + details.join(' | '));
+    });
+  };
+
+  const showValidationErrors = (error) => {
+    const messageText = error && error.message ? String(error.message) : String(error || '');
+    const validationStart = messageText.indexOf('PRE OPERATION rechazada.');
+    const validationPrefix = 'PRE OPERATION rechazada. No se realizó ningún cobro.';
+    if (validationStart < 0) return false;
+
+    const details = validationDetailsFromText(
+      messageText.slice(validationStart + validationPrefix.length).replace(/^\s+/, '')
+    ).map((item, index) => Object.assign({}, item, { key: String(index + 1) }));
+
+    setValidationErrors(details);
+    setValidationModalOpen(true);
+    return true;
+  };
 
   const processSelectedRemittance = () => {
     const batch = selectedBatch;
@@ -882,29 +1001,9 @@
             mergeFreshBatch(freshBatch);
             const freshBlockedMessage = executionBlockedMessage(freshBatch);
             if (freshBlockedMessage) throw new Error(freshBlockedMessage);
-            return loadBatchValidationRows(batchId).then((validationRows) => exe('ExeChain', {
-              chain: PRE_OPERATION_CHAIN,
-              context: JSON.stringify({ batchId: batchId, rows: validationRows })
-            })).then((validationResult) => {
-              const validationPayload = validationResult
-                && validationResult.outData
-                && !Array.isArray(validationResult.outData)
-                ? validationResult.outData
-                : validationResult;
-
-              if (!validationResult
-                || validationResult.ok === false
-                || !validationPayload
-                || validationPayload.ok === false) {
-                throw new Error(validationPayload && validationPayload.msg
-                  ? validationPayload.msg
-                  : (validationResult && validationResult.msg
-                    ? validationResult.msg
-                    : t('La validación previa de la remesa fue rechazada.')));
-              }
-
-              return exe('DoBatch', { batchId: batchId });
-            });
+            return loadBatchValidationRows(batchId)
+              .then((validationRows) => validateRemittanceInBatches(batchId, validationRows))
+              .then(() => exe('DoBatch', { batchId: batchId }));
           })
           .then((result) => {
             if (!result || result.ok === false) {
@@ -916,7 +1015,9 @@
             message.success(result.msg || (t('La remesa') + ' ' + batchId + ' ' + t('fue enviada a procesamiento.')));
           })
           .catch((error) => {
-            message.error(error && error.message ? error.message : String(error || t('No se pudo ejecutar la remesa.')));
+            if (!showValidationErrors(error)) {
+              message.error(error && error.message ? error.message : String(error || t('No se pudo ejecutar la remesa.')));
+            }
           })
           .then(() => {
             delete batchExecutionRef.current[batchId];
@@ -1921,6 +2022,38 @@
         align-self: flex-end;
       }
 
+      .gestion-remesas-validation-modal .ant-modal-header {
+        border-bottom: 1px solid #cbd1d8;
+      }
+
+      .gestion-remesas-validation-table .ant-table-container {
+        border: 1px solid #cbd1d8;
+      }
+
+      .gestion-remesas-validation-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        background-clip: padding-box;
+        border-inline-end: 1px solid #cbd1d8 !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .gestion-remesas-validation-table .ant-table-tbody > tr > td {
+        border-inline-end: 0 !important;
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .gestion-remesas-validation-table .ant-table-pagination {
+        margin: 8px 0 0 !important;
+      }
+
       .gestion-remesas-grid-column .ant-table-wrapper,
       .gestion-remesas-grid-column .ant-spin-nested-loading,
       .gestion-remesas-grid-column .ant-spin-container,
@@ -2098,6 +2231,7 @@
       listRequestRef.current += 1;
       detailRequestRef.current += 1;
       batchStatusPollRef.current += 1;
+      batchStatusPollInFlightRef.current = false;
     };
   }, []);
 
@@ -2719,6 +2853,30 @@
             showSizeChanger={false}
             onChange={(page) => setLineDetailPage(page)}
             showTotal={(total, range) => t('Showing') + ' ' + range[0] + ' - ' + range[1] + ' ' + t('of') + ' ' + total}
+          />
+        </Modal>
+
+        <Modal
+          title={t('Resultado de validación de la remesa')}
+          className="gestion-remesas-validation-modal"
+          open={validationModalOpen}
+          onCancel={() => setValidationModalOpen(false)}
+          footer={null}
+          width={760}
+          destroyOnClose={false}
+        >
+          <Table
+            className="gestion-remesas-validation-table"
+            size="small"
+            bordered
+            rowKey="key"
+            columns={[
+              { title: t('Fila'), dataIndex: 'row', key: 'row', width: 90, align: 'center' },
+              { title: t('Detalle'), dataIndex: 'detail', key: 'detail' }
+            ]}
+            dataSource={validationErrors}
+            pagination={{ pageSize: 10, showSizeChanger: false }}
+            locale={{ emptyText: t('No se encontraron errores de validación.') }}
           />
         </Modal>
       </Card>

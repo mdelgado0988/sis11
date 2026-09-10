@@ -9,7 +9,9 @@
  */
 const { row } = context;
 const errors = [];
+const batchId = validateBatchId(context && context.batchId);
 
+hydrateBatchPayer(row, batchId);
 ValidateDto(row,errors);
 
 doCmd({
@@ -26,18 +28,20 @@ if(IsNull(cashier))
     throw '@No existe caja con el id: ' + cashier.id;
 
 
+const policyReference = findPolicyByFiscalNumber(row.numRecibo, row.policyCode);
+
 doCmd({
     cmd:'RepoLifePolicy',
     data:{ 
         operation:'GET',
-        filter:`[code]='${row.policyCode}'`,
+        filter:`[id]=${policyReference.lifePolicyId}`,
         include:['Accounts','Holder','ComContract'],
         noTracking: true 
 }});
 
-const Policy = RepoLifePolicy.outData.pop();
-if(Policy == null)
-    throw '@Policy Not found';
+const Policy = RepoLifePolicy.outData?.pop();
+if(IsNull(Policy))
+    throw '@No se encontró el recibo o la póliza indicada';
 
 //Michael Delgado. 2026.05.20. GLOB-748. Se permite aplicar a pólizas inactivas siempre y cuando tengan saldo.
 /*if(Policy.entityState === 'INACTIVE' || !Policy.active || !!Policy.inactiveDate)
@@ -45,6 +49,8 @@ if(Policy == null)
 
 if(Policy.holderId != row.holderId)
     throw '@El contratante propocionado no pertenece a la poliza';
+
+const payer = resolvePayer(row, Policy);
 
 setPaylan(Policy);
 
@@ -54,15 +60,13 @@ const pago = Policy.PayPlan.find(item => item.id === numRecibo);
 if(IsNull(pago))
     throw '@No se encontró recibo '+ row.numRecibo + ' en la poliza: ' + Policy.code;
 */
-//GLOB-588: Validamos número fiscal (recibo) según campo correcto
-let changeId = validateFiscalNumber(Policy, row);
-const Installments = GetInstallments(Policy.PayPlan, changeId);
+const Installments = GetInstallments(Policy.PayPlan, policyReference.changeId, Policy.code);
 //return Policy.PayPlan
 //return Installments.installments;
 
 let account =Policy.Accounts.pop();
 if(IsNull(account)){
-    const accountId = CreateHolderAccount(row.holderId, row.policyId)
+    const accountId = CreateHolderAccount(row.holderId, Policy.id)
     doCmd({
         cmd:'RepoAccount',
         data:{ 
@@ -80,7 +84,13 @@ if(IsNull(account)){
 //    throw '@ La cuenta asociada no cuenta con suficiente fondos';
 
 
-const Transfer = DoTransfer({amount:row.monto,workspaceId:row.workspaceId});
+const Transfer = executeTransfer({
+    amount: row.monto,
+    workspaceId: row.workspaceId,
+    batchId: batchId,
+    payerId: payer.id,
+    payerName: payer.name
+});
 
 const supplementaryPremium = [{
   compensationAmount: 0,
@@ -129,7 +139,7 @@ const entity = {
         currency: Policy.currency,
         custom: false,
         ...item,
-        payerId: Policy.holderId,
+        payerId: payer.id,
         policyCode: Policy.code,
         policyHolderName: Policy.Holder.FullName,
         sellerName: '  ',
@@ -164,36 +174,38 @@ function setPaylan(Policy) {
   
 }
 
-//GLOB-588: Validamos número fiscal (recibo) según campo correcto
-function validateFiscalNumber(Policy, row) {
+// GLOB-588: Resuelve la póliza desde el número fiscal, ya sea de la póliza o de un endoso.
+function findPolicyByFiscalNumber(fiscalNumber, policyCode) {
+  const escapedFiscalNumber = String(fiscalNumber).replace(/'/g, "''");
+  const escapedPolicyCode = String(policyCode).replace(/'/g, "''");
+  const query = `SELECT TOP 1 receipt.lifePolicyId, receipt.changeId
+  FROM (
+    SELECT lp.id AS lifePolicyId, 0 AS changeId, 0 AS sourceOrder
+    FROM LifePolicy lp
+    WHERE lp.fiscalNumber = '${escapedFiscalNumber}'
+      AND lp.code = '${escapedPolicyCode}'
 
-  let changeId = 0;
-  const fiscalNumber = row.numRecibo
+    UNION ALL
 
-  //if it doesn´t existe, look for changes
-  if(Policy.fiscalNumber != fiscalNumber){
+    SELECT c.lifePolicyId, b.changeId, 1 AS sourceOrder
+    FROM Bill b
+    INNER JOIN Change c ON c.id = b.changeId
+    INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId
+    WHERE b.fiscalNumber = '${escapedFiscalNumber}'
+      AND lp.code = '${escapedPolicyCode}'
+  ) receipt
+  ORDER BY receipt.sourceOrder`;
 
-    log(`Buscando recibo como endoso`);
+  doCmd({ cmd: 'DoQuery', data: { sql: query } });
+  const result = DoQuery.outData?.[0];
 
-    //MAD: 2026.04.28. es necesario hacer el JOIN para buscar el recibo en la póliza, podría repetirse.
-    const query = `SELECT b.changeId
-    FROM Change c 
-    INNER JOIN Bill b ON b.changeId = c.id
-    WHERE c.lifePolicyId = ${Policy.id} AND b.fiscalNumber = '${fiscalNumber}'`
+  if(IsNull(result?.lifePolicyId))
+    throw '@No se encontró el recibo o la póliza indicada';
 
-    doCmd({ cmd: "DoQuery", data: { sql: query } });
-    const resultado = DoQuery.outData?.[0];
-    if(!resultado)
-      throw '@No se encontró recibo '+ row.numRecibo + ' en la poliza: ' + Policy.code;
-    else {
-      changeId = resultado.changeId ?? 0;
-      log(`id encontrado: ${changeId}`);
-    }
-
-  }
-
-  return changeId;
-  
+  return {
+    lifePolicyId: result.lifePolicyId,
+    changeId: result.changeId ?? 0
+  };
 }
 
 function CreateHolderAccount( intermediaryId, policyId ){
@@ -205,7 +217,7 @@ function CreateHolderAccount( intermediaryId, policyId ){
                 currency: 'USD',
                 holderId: intermediaryId,
                 type: 'TRANSIT',
-                accNo: `TRA${row.policyId}`,
+                accNo: `TRA${policyId}`,
                 name: 'Cuenta Depósito',
                 lifePolicyId: policyId
              }
@@ -227,50 +239,259 @@ function CreateHolderAccount( intermediaryId, policyId ){
     return LoadEntity.outData.id
 }
 
-function DoTransfer({amount,workspaceId}){
-    
+function buildIncomeTypeForm(formId, payerId, payerName) {
+    const validatedFormId = validatePositiveId(formId, 'El formulario del tipo de ingreso no es válido.');
+    const validatedPayerId = validatePositiveId(payerId, 'El código del pagador no es válido.');
+    if (typeof payerName !== 'string' || payerName.trim() === '') {
+        throw new Error('No se encontró el nombre del pagador.');
+    }
+
+    doCmd({
+        cmd: 'DoQuery',
+        data: {
+            sql: `SELECT [json] FROM [dbo].[Form] WHERE [id] = ${validatedFormId}`
+        }
+    });
+
+    const formResult = typeof DoQuery !== 'undefined' ? DoQuery : null;
+    if (!formResult || formResult.ok !== true) {
+        throw new Error(formResult && formResult.msg
+            ? formResult.msg
+            : 'No fue posible consultar el formulario del tipo de ingreso.');
+    }
+    if (!Array.isArray(formResult.outData) || formResult.outData.length !== 1
+        || !formResult.outData[0] || typeof formResult.outData[0].json !== 'string') {
+        throw new Error('No se encontró la definición del formulario del tipo de ingreso.');
+    }
+
+    let fields;
+    try {
+        fields = JSON.parse(formResult.outData[0].json);
+    } catch (error) {
+        throw new Error('La definición del formulario del tipo de ingreso no contiene JSON válido.');
+    }
+    if (!Array.isArray(fields) || fields.some(field => !field
+        || typeof field !== 'object' || Array.isArray(field))) {
+        throw new Error('La definición del formulario del tipo de ingreso no es una lista de campos válida.');
+    }
+
+    const payerNameFields = fields.filter(field => field.name === 'clientePA');
+    const payerIdFields = fields.filter(field => field.name === 'hiddenCodigoCliente');
+    if (payerNameFields.length !== 1 || payerIdFields.length !== 1) {
+        throw new Error('El formulario debe contener un campo clientePA y un campo hiddenCodigoCliente.');
+    }
+
+    payerNameFields[0].userData = [payerName.trim()];
+    payerIdFields[0].userData = [String(validatedPayerId)];
+    return JSON.stringify(fields);
+}
+
+function resolvePayer(paymentRow, Policy) {
+    const hasPayerId = paymentRow.payerId !== null && paymentRow.payerId !== undefined
+        && String(paymentRow.payerId).trim() !== '';
+    const hasPayerName = typeof paymentRow.payerName === 'string'
+        && paymentRow.payerName.trim() !== '';
+
+    // Legacy batches did not persist payer metadata and used the policy holder as payer.
+    if (!hasPayerId && !hasPayerName) {
+        return {
+            id: validatePositiveId(Policy.holderId, 'El código del pagador no es válido.'),
+            name: String(Policy.Holder?.FullName || '').trim()
+        };
+    }
+    if (!hasPayerId || !hasPayerName) {
+        throw new Error('La remesa no contiene los datos completos del pagador.');
+    }
+
+    return {
+        id: validatePositiveId(paymentRow.payerId, 'El código del pagador no es válido.'),
+        name: paymentRow.payerName.trim()
+    };
+}
+
+function hydrateBatchPayer(paymentRow, batchId) {
+    doCmd({
+        cmd: 'DoQuery',
+        data: {
+            sql: `SELECT [id], [name], [jData] FROM [dbo].[Batch] WHERE [id] = ${batchId}`
+        }
+    });
+
+    const batchResult = typeof DoQuery !== 'undefined' ? DoQuery : null;
+    if (!batchResult || batchResult.ok !== true) {
+        throw new Error(batchResult && batchResult.msg
+            ? batchResult.msg
+            : 'No fue posible cargar la remesa para validar el pagador.');
+    }
+    const batchData = batchResult && batchResult.outData;
+    const batches = Array.isArray(batchData)
+        ? batchData
+        : (batchData && Array.isArray(batchData.data)
+            ? batchData.data
+            : (batchData ? [batchData] : []));
+    const batch = batches[0] || null;
+    if (!batch || Number(batch.id) !== batchId) {
+        throw new Error('No fue posible cargar la remesa para validar el pagador.');
+    }
+
+    let batchRows = [];
+    try {
+        batchRows = typeof batch.jData === 'string' ? JSON.parse(batch.jData) : batch.jData;
+    } catch (error) {
+        batchRows = [];
+    }
+    const metadata = Array.isArray(batchRows)
+        ? batchRows.reduce((found, item) => found || (Array.isArray(item)
+            ? item.find(value => value && typeof value === 'object' && !Array.isArray(value)
+                && String(value.type || '').toUpperCase() === 'REMITTANCE_METADATA')
+            : null), null)
+        : null;
+    const metadataHasPayer = metadata && (metadata.payerId !== undefined || metadata.payerName !== undefined);
+
+    if (metadataHasPayer) {
+        if (paymentRow.payerId !== undefined && String(paymentRow.payerId) !== String(metadata.payerId)) {
+            throw new Error('El pagador de la fila no coincide con el pagador de la remesa.');
+        }
+        if (paymentRow.payerName !== undefined
+            && String(paymentRow.payerName).trim() !== String(metadata.payerName || '').trim()) {
+            throw new Error('El nombre del pagador de la fila no coincide con la remesa.');
+        }
+        paymentRow.payerId = metadata.payerId;
+        paymentRow.payerName = metadata.payerName;
+        return;
+    }
+
+    const isNewPayerBatch = String(batch.name || '').indexOf('Cobro Remesa - ') === 0;
+    if (isNewPayerBatch && (paymentRow.payerId === undefined || paymentRow.payerName === undefined)) {
+        throw new Error('La remesa nueva no contiene los datos obligatorios del pagador.');
+    }
+}
+
+function validatePositiveId(value, message) {
+    if ((typeof value !== 'number' && typeof value !== 'string')
+        || !/^\d+$/.test(String(value).trim())
+        || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) {
+        throw new Error(message);
+    }
+    return Number(value);
+}
+
+function executeTransfer({ amount, workspaceId, batchId, payerId, payerName }) {
+    const transferAmount = Number(amount);
+    const cashDeskId = Number(workspaceId);
+    const validatedBatchId = validateBatchId(batchId);
+
+    if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
+        throw new Error('El monto de la transferencia debe ser mayor que cero.');
+    }
+
+    if (!Number.isFinite(cashDeskId) || cashDeskId <= 0) {
+        throw new Error('El workspaceId de la caja no es válido.');
+    }
+
+    doCmd({
+        cmd: 'RepoIncomeTypeCatalog',
+        data: {
+            operation: 'GET',
+            filter: "internalType = 'PREMIUM'"
+        }
+    });
+
+    const incomeTypeResult = typeof RepoIncomeTypeCatalog !== 'undefined'
+        ? RepoIncomeTypeCatalog
+        : null;
+    if (!incomeTypeResult || incomeTypeResult.ok === false) {
+        throw new Error(incomeTypeResult && incomeTypeResult.msg
+            ? incomeTypeResult.msg
+            : 'No fue posible consultar los tipos de ingreso.');
+    }
+
+    const incomeTypes = Array.isArray(incomeTypeResult.outData)
+        ? incomeTypeResult.outData
+        : [];
+    const premiumIncomeType = incomeTypes.find(item => item
+        && String(item.internalType || '').trim().toUpperCase() === 'PREMIUM'
+        && String(item.code || '').trim() !== '');
+    if (!premiumIncomeType) {
+        throw new Error('No existe un tipo de ingreso configurado para PREMIUM.');
+    }
+
+    const incomeTypeForm = buildIncomeTypeForm(premiumIncomeType.formId, payerId, payerName);
+
     doCmd({
         cmd: 'RepoTransfer',
         data: {
             operation: 'ADD',
             entity: {
                 currency: 'USD',
-                amount: amount,
+                amount: transferAmount,
                 SplitPayments: [
                     {
-                        amount: amount,
+                        amount: transferAmount,
                         paymentMethod: 'ACH',
-                        paymentMethodName: 'ACH',
+                        paymentMethodName: 'ACH'
                     }
                 ],
-                incomeType: 'IT7',
+                incomeType: String(premiumIncomeType.code).trim(),
+                jIncomeTypeForm: incomeTypeForm,
                 sourceExternal: 'CajaAhUSD',
                 destinationAccountId: 208,
                 isExternal: true,
                 concept: 'IW',
                 DestinationAccount: null,
-                transferWorkspaceId: workspaceId
+                transferWorkspaceId: cashDeskId,
+                processIdAux: validatedBatchId
             },
             otherReceivables: []
         }
     });
 
-    const Transfer = RepoTransfer.outData.pop();
+    const repoResult = typeof RepoTransfer !== 'undefined' ? RepoTransfer : null;
+    if (!repoResult || repoResult.ok === false) {
+        throw new Error(repoResult && repoResult.msg
+            ? repoResult.msg
+            : 'No fue posible crear la transferencia.');
+    }
 
-// Move wf to Approval
-//!Dejo en comentario porque aun no hay WF, cuando exista este paso sera necesario
-//doCmd({cmd:'GotoStep', data:{ procesoId: Transfer.processId, estado: 'APROVED' }}); 
+    const transfers = Array.isArray(repoResult.outData)
+        ? repoResult.outData
+        : (repoResult.outData ? [repoResult.outData] : []);
+    const transfer = transfers.length ? transfers[transfers.length - 1] : null;
+    if (!transfer || !transfer.id) {
+        throw new Error('La transferencia fue creada, pero no se obtuvo su identificador.');
+    }
 
     doCmd({
-        cmd:'DoTransfer',
-        data:{ 
-            transferId: Transfer.id 
+        cmd: 'DoTransfer',
+        data: {
+            transferId: transfer.id
         }
     });
-    return DoTransfer.outData.pop();
+
+    const executionResult = typeof DoTransfer !== 'undefined' ? DoTransfer : null;
+    if (!executionResult || executionResult.ok === false) {
+        throw new Error(executionResult && executionResult.msg
+            ? executionResult.msg
+            : 'La transferencia no pudo ejecutarse.');
+    }
+
+    const executedTransfers = Array.isArray(executionResult.outData)
+        ? executionResult.outData
+        : (executionResult.outData ? [executionResult.outData] : []);
+    return executedTransfers.length
+        ? executedTransfers[executedTransfers.length - 1]
+        : executionResult;
 }
 
-function GetInstallments(payPlan, changeId){
+function validateBatchId(value) {
+    const batchId = Number(value);
+    if (!Number.isInteger(batchId) || batchId <= 0) {
+        throw '@El id de la remesa no es válido';
+    }
+    return batchId;
+}
+
+function GetInstallments(payPlan, changeId, policyCode){
     
     //let payments = payPlan.filter(item => IsNull(item.payed) || item.payed === 0 )?.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
     let available = Number(row.monto), installments = [];
@@ -288,7 +509,7 @@ function GetInstallments(payPlan, changeId){
       payments = payments.filter(item => item.changeId == changeId)?.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
     }
   
-    if(!payments || payments.length === 0) throw `@No hay primas pendientes en la poliza: ${row.policyCode}, recibo: ${row.numRecibo}`;
+    if(!payments || payments.length === 0) throw `@No hay primas pendientes en la poliza: ${policyCode}, recibo: ${row.numRecibo}`;
     
      for(const inst of payments){
 
