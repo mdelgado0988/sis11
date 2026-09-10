@@ -293,7 +293,7 @@
       const cededPremium = rows.reduce(function (sum, row) {
         return sum + (row.canViewReinsurers ? Number(row.premium || 0) : 0);
       }, 0);
-      if (Math.abs(totalPercentage - 100) > 0.0001) {
+      if (!percentageCloseTo100(totalPercentage)) {
         errors.push(t('Contrato') + ' ' + contract.contractId + ': ' + t('la distribución debe sumar 100%.'));
       }
       if (!closeEnough(totalSum, contract.sum)) {
@@ -570,6 +570,11 @@
     return Math.abs(money(left) - money(right)) <= 0.01;
   }
 
+  function percentageCloseTo100(value) {
+    // Evita rechazar combinaciones validas por la precision binaria de JavaScript.
+    return Math.abs(Number(value || 0) - 100) <= 0.000100001;
+  }
+
   function sumField(rows, names) {
     return money((rows || []).reduce(function (total, row) {
       return total + numberFrom(row, names);
@@ -652,7 +657,7 @@
     // La colocacion del 100% se valida acumulada por cobertura, no por linea.
     Object.keys(coverageDistribution).forEach(function (code) {
       const item = coverageDistribution[code];
-      if (Math.abs(item.placement - 1) > 0.0001) {
+      if (!percentageCloseTo100(item.placement * 100)) {
         errors.push(t('La colocacion de la cobertura') + ' ' + code + ' ' + t('debe sumar 100%.'));
       }
       if (!closeEnough(item.premium, item.expectedPremium)) {
