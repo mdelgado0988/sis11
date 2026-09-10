@@ -1132,7 +1132,7 @@ function filterCurrentCessions(cessions, lifePolicyId) {
 async function listarAceptantes(){
   try {   
     
-    const filtroRol = " exists (select 1 from contactRole r where r.contactId = contact.id and r.role IN ('RIN','REI'))";
+    const filtroRol = " exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'RIN')";
     
     const result = await me.exe("LoadEntities", {
         entity: "Contact",
