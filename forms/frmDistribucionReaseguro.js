@@ -2744,12 +2744,18 @@ function eventosGrid() {
   $(document).off("click", "#btnRecalcular")
     .on("click", "#btnRecalcular", async () => {
       try {
-        showLoading("Recalculando distribución...");
-        const resultado = await me.exe("ReComputeRe", { policyId: policyId });
+        const requiereRecotizar = Array.isArray(coCessions) && coCessions.length > 0;
+        if (requiereRecotizar) {
+          mostrarNotificacion("Existe al menos un coasegurador; es necesario recotizar la póliza. Se ejecutará QuotePolicy.", "warning");
+        }
+        showLoading(requiereRecotizar ? "Recotizando póliza..." : "Recalculando distribución...");
+        const resultado = requiereRecotizar
+          ? await me.exe("QuotePolicy", { policyId: policyId, policy: null, dbMode: true, save: true, action: "PREQUOTE" })
+          : await me.exe("ReComputeRe", { policyId: policyId });
         if(!resultado.ok)
-          mostrarNotificacion(`Error aplicando contrato del reaseguro, contacte a sistemas : ${resultado.msg}` , "warning");
+          mostrarNotificacion(`${requiereRecotizar ? "Error recotizando la póliza" : "Error aplicando contrato del reaseguro"}, contacte a sistemas : ${resultado.msg}` , "warning");
         else{
-          mostrarNotificacion(`Contrato aplicado satisfactoriamente` , "success"); 
+          mostrarNotificacion(requiereRecotizar ? "La póliza fue recotizada y el reaseguro fue actualizado satisfactoriamente" : "Contrato aplicado satisfactoriamente" , "success");
           await loadCessions();
           cargarDataGrid();
           preserveDistribution();
@@ -3641,6 +3647,16 @@ $("<style>")
       background: #fff;
     }
 
+    #panelCoaseguro .coaseguro-recotizacion-aviso {
+      margin: 8px 0;
+      padding: 8px 10px;
+      border: 1px solid #ffe58f;
+      border-radius: 4px;
+      background: #fffbe6;
+      color: #614700;
+      font-size: 13px;
+    }
+
     #panelCoaseguro .grid-coaseguradores {
       width: 100%;
       min-width: 900px;
@@ -4132,6 +4148,7 @@ function renderCoaseguradores() {
       </label>
       <span style="font-weight:600;">Participación de la compañía: ${formatearNumero(companyPercentage)}%</span>
     </div>
+    ${coCessions.length > 0 ? `<div class="coaseguro-recotizacion-aviso">Existe al menos un coasegurador. Es necesario recotizar la póliza al aplicar el contrato.</div>` : ""}
     <div class="table-scroll"><table class="ant-table grid-coaseguradores">
       <thead><tr><th>Acciones</th><th>Coasegurador</th><th>Líder</th><th>Porcentaje</th><th>Suma</th><th>Prima</th><th>Comisión</th><th>Impuesto</th></tr></thead>
       <tbody>${coaseguradoresData.map((row, index) => `
