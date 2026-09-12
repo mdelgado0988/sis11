@@ -1495,6 +1495,7 @@
     lock.busy = true;
     setRunning(true); setError(null); setModal(false);
     const failures = [];
+    let keepExecutionLocked = false;
     const cleanMessage = function (response) {
       return String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim();
     };
@@ -1688,7 +1689,9 @@
       setResult({ ok: true, changeId: changeId, msg: message });
       if (failures.length) A.message.warning(message); else A.message.success(message);
       setSim(null);
-      setTimeout(function () { retornarAPoliza(); }, 700);
+      keepExecutionLocked = true;
+      await new Promise(function (resolve) { setTimeout(resolve, 700); });
+      retornarAPoliza();
     } catch (e) {
       if (reinsurancePrepared && !reinsuranceExecuted && changeId) {
         try {
@@ -1704,8 +1707,10 @@
       setError(message);
       A.message.error(message);
     } finally {
-      lock.busy = false;
-      setRunning(false);
+      if (!keepExecutionLocked) {
+        lock.busy = false;
+        setRunning(false);
+      }
     }
   }
 
@@ -2333,6 +2338,8 @@
 .axx299 .axx-coverage-participants-title { margin-bottom:4px; color:#334155; font-weight:600; font-size:12px; }
 .axx299 .axx-coverage-participants .ant-table-wrapper { border:1px solid #d9e2ec; }
 .axx299 .axx-rea-actions { display:flex; align-items:center; gap:8px; padding:6px 8px; margin-bottom:6px; background:#e6f4ff; border:1px solid #91caff; border-radius:4px; color:#334155; font-size:12px; }
+.axx299 .axx-execution-mask { position:fixed; inset:0; z-index:1000000; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.58); cursor:wait; }
+.axx299 .axx-execution-mask > div { display:flex; align-items:center; gap:10px; padding:14px 18px; background:#fff; border:1px solid #91caff; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.16); color:#1677ff; font-weight:600; }
 `;
 
   const puedeEjecutar = !!(calc && calc.rows && calc.rows.length && !running && reinsuranceConfirmed);
@@ -2345,6 +2352,12 @@
     <DefaultPage title={t('Endoso de vigencia de Fianzas')} subTitle={policy ? policy.code : ''}>
       <div className="axx299">
         <style>{css}</style>
+
+        {running ? (
+          <div className="axx-execution-mask" role="alert" aria-busy="true">
+            <div><Spin size="small" /> {t('Procesando endoso, espere por favor...')}</div>
+          </div>
+        ) : null}
 
         <div className="axx-status">
           <b>{t('Poliza')}:</b> {policy ? policy.code + ' — ' + ((policy.Product && (policy.Product.name || policy.Product.description)) || policy.productCode) + ' — ' + ((policy.Currency && (policy.Currency.name || policy.Currency.description)) || policy.currency) : t('sin cargar')}
@@ -2370,7 +2383,7 @@
             onClick={function () { setNote(''); setNoteTouched(false); setModal(true); }}>
             {t('Ejecutar endoso')}
           </Button>
-          <Button className="axx-btn-sec axx-return-btn" icon={<ReturnIcon />} onClick={retornarAPoliza} disabled={!policyId}>
+          <Button className="axx-btn-sec axx-return-btn" icon={<ReturnIcon />} onClick={retornarAPoliza} disabled={!policyId || running}>
             {t('Retornar')}
           </Button>
         </div>
