@@ -170,3 +170,13 @@ from maplancob c
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 inner join macoberturas mc on mc.cramo = c.cramo and mc.ccobertura = c.ccobertura
 WHERE c.cramo IN (81,82,83,84)
+
+--reportes endosos de fianzas
+select rtrim(xnombrep) xnombrep, MAX(rtrim(xdescripcion)) xdescripcion
+from marepteccia
+where cramo in (81,82,83,84)
+and xnombrep like '%endoso%'
+AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
+'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_corredorseguros','endoso_poliza_fianza_descrp',
+'endoso_poliza_fianza_OP','endoso_poliza_fianza_orden_pro','endoso_poliza_fianza_valor_garantia','endoso_poliza_fianza_Vig')
+group by xnombrep

@@ -31,6 +31,13 @@ const CESSION_PART_COLUMNS = [
   'liquidationId', 'currency', 'commission', 'tax', 'brokerId', 'reserve', 'fee'
 ];
 
+const COCESSION_COLUMNS = [
+  'lifePolicyId', 'contactId', 'sumInsured', 'premium', 'sumInsuredCeded',
+  'premiumCeded', 'commission', 'percentage', 'created', 'leader', 'currency',
+  'liquidationId', 'paidOnCollection', 'parentCoCession', 'brokerCommission',
+  'tax', 'changeId', 'overwritten', 'allocationId', 'lifeCoverageId', 'brokerId'
+];
+
 const money = function (value) { return Number(Number(value || 0).toFixed(2)); };
 const num = function (value) {
   const result = Number(value);
@@ -52,8 +59,11 @@ const sqlValue = function (value) {
 
 const changeId = Number(context && context.changeId || 0);
 if (!changeId) throw 'Falta el identificador del endoso';
+const mode = txt(context && context.mode).toUpperCase() || 'FINALIZE';
+if (['PREPARE', 'FINALIZE', 'ROLLBACK'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
 let requestedRows = Array.isArray(context && context.distribution) ? context.distribution : [];
 let requestedParts = Array.isArray(context && context.participants) ? context.participants : [];
+let requestedCoinsurance = [];
 
 doCmd({ cmd: 'LoadEntity', data: {
   entity: 'Change', fields: 'id,lifePolicyId,status,jNewCoverages,jAdditional',
@@ -61,9 +71,21 @@ doCmd({ cmd: 'LoadEntity', data: {
 } });
 const change = LoadEntity.outData;
 if (!change) throw 'El endoso ' + changeId + ' no existe';
-if (Number(change.status) !== 1) throw 'El endoso ' + changeId + ' no esta ejecutado';
+if (mode === 'FINALIZE' && Number(change.status) !== 1) throw 'El endoso ' + changeId + ' no esta ejecutado';
 const policyId = Number(change.lifePolicyId || 0);
 if (!policyId) throw 'El endoso no tiene poliza asociada';
+
+if (mode === 'ROLLBACK') {
+  const rollbackSql = 'SET XACT_ABORT ON; BEGIN TRANSACTION; '
+    + 'DELETE FROM CessionPart WHERE cessionId IN (SELECT id FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ' AND overwritten = 0); '
+    + 'DELETE FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ' AND overwritten = 0; '
+    + 'COMMIT TRANSACTION;';
+  doCmd({ cmd: 'DoQuery', data: { sql: rollbackSql } });
+  if (!DoQuery || DoQuery.ok === false) return { ok: false, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
+    msg: 'No fue posible limpiar las cesiones temporales del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
+  return { ok: true, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
+    msg: 'Las cesiones temporales del endoso fueron limpiadas correctamente.' };
+}
 
 // La configuracion confirmada se guarda en el propio endoso antes de
 // ejecutarlo. Se usa como fuente principal para permitir reintentos sin
@@ -81,6 +103,7 @@ const snapshot = additional.reinsuranceSnapshot;
 if (snapshot && Array.isArray(snapshot.distribution)) {
   requestedRows = snapshot.distribution;
   requestedParts = Array.isArray(snapshot.participants) ? snapshot.participants : [];
+  requestedCoinsurance = Array.isArray(snapshot.coinsurance) ? snapshot.coinsurance : [];
 }
 if (!requestedRows.length) throw 'El endoso no tiene distribucion de reaseguro guardada';
 
@@ -98,6 +121,42 @@ requestedParts.forEach(function (part) {
   if (!partsByKey[key]) partsByKey[key] = [];
   partsByKey[key].push(part);
 });
+
+// El endoso solo actualiza coaseguradores que ya existen. La compañía no
+// llega en este snapshot porque es una línea sintética de la vista.
+let currentCoinsurance = [];
+let coinsuranceSources = [];
+if (requestedCoinsurance.length) {
+  doCmd({ cmd: 'LoadEntities', data: {
+    entity: 'CoCession',
+    filter: 'lifePolicyId = ' + policyId + ' AND parentCoCession IS NULL AND overwritten = 0',
+    noTracking: true
+  } });
+  currentCoinsurance = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
+  const currentCoinsuranceIds = {};
+  currentCoinsurance.forEach(function (cession) { currentCoinsuranceIds[Number(cession.id)] = cession; });
+  const usedCoinsuranceIds = {};
+  coinsuranceSources = requestedCoinsurance.map(function (cession) {
+    let source = currentCoinsuranceIds[Number(cession.id)];
+    if (source && usedCoinsuranceIds[Number(source.id)]) source = null;
+    if (!source) {
+      source = currentCoinsurance.find(function (current) {
+        return !usedCoinsuranceIds[Number(current.id)]
+          && Number(current.contactId) === Number(cession.contactId);
+      });
+    }
+    if (source) usedCoinsuranceIds[Number(source.id)] = true;
+    return source || null;
+  });
+  const missingCoinsurance = coinsuranceSources.filter(function (cession) {
+    return !cession;
+  });
+  if (missingCoinsurance.length) {
+    throw 'El endoso referencia coaseguradores que no existen en la poliza: ' + requestedCoinsurance
+      .filter(function (cession, index) { return !coinsuranceSources[index]; })
+      .map(function (cession) { return Number(cession.id || 0) + '/' + Number(cession.contactId || 0); }).join(', ');
+  }
+}
 
 // Validacion previa: no se escribe nada si el reparto confirmado es invalido.
 const errors = [];
@@ -122,7 +181,105 @@ doCmd({ cmd: 'LoadEntities', data: {
   entity: 'Cession', filter: 'lifePolicyId = ' + policyId + ' AND overwritten = 0', noTracking: true
 } });
 const currentCessions = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
-if (!currentCessions.length) throw 'La poliza no tiene reaseguro vigente para versionar';
+if (!currentCessions.length && mode === 'FINALIZE') throw 'La poliza no tiene reaseguro vigente para versionar';
+
+const insertSql = function (table, columns, entity, overrides) {
+  const values = columns.map(function (column) {
+    return sqlValue(overrides && overrides[column] !== undefined ? overrides[column] : entity[column]);
+  });
+  return 'INSERT INTO [' + table + '] (' + columns.map(function (column) { return '[' + column + ']'; }).join(', ') +
+    ') VALUES (' + values.join(', ') + ');';
+};
+
+if (mode === 'PREPARE') {
+  const requestedByKey = {};
+  requestedRows.forEach(function (row) { requestedByKey[keyOf(row)] = row; });
+  const temporaryByKey = {};
+  currentCessions.forEach(function (cession) {
+    if (Number(cession.changeId || 0) === changeId && Number(cession.overwritten || 0) === 0) {
+      temporaryByKey[keyOf(cession)] = cession;
+    }
+  });
+  const templates = currentCessions.filter(function (cession) {
+    return Number(cession.changeId || 0) !== changeId;
+  });
+  if (!templates.length && !Object.keys(temporaryByKey).length) {
+    throw 'No existe una cesion base para preparar el reaseguro del endoso';
+  }
+
+  const prepareStatements = ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'];
+  const preparedKeys = Object.keys(requestedByKey);
+  preparedKeys.forEach(function (key, index) {
+    const requested = requestedByKey[key];
+    const existing = temporaryByKey[key];
+    const template = existing || templates.find(function (cession) {
+      return txt(cession.coverageCode) === txt(requested.coverageCode);
+    }) || templates[0] || currentCessions[0];
+    if (!template) throw 'No existe plantilla de cesion para ' + key;
+
+    const overrides = {
+      contractId: requested.contractId,
+      lineId: requested.lineId,
+      coverageCode: requested.coverageCode,
+      sumInsuredCedant: money(requested.sumInsuredCedant),
+      premiumCedant: money(requested.premiumCedant),
+      sumInsuredRe: money(requested.sumInsuredRe),
+      premiumRe: money(requested.premiumRe),
+      comissionCedant: money(requested.commission),
+      participantCommission: money(requested.commission),
+      tax: money(requested.tax),
+      proportionCed: requested.proportionCed,
+      proportionRe: requested.proportionRe,
+      changeId: changeId,
+      overwritten: 0
+    };
+    let cessionId;
+    if (existing) {
+      cessionId = Number(existing.id);
+      prepareStatements.push('UPDATE Cession SET '
+        + 'contractId = ' + sqlValue(overrides.contractId) + ', lineId = ' + sqlValue(overrides.lineId) + ', '
+        + 'coverageCode = ' + sqlValue(overrides.coverageCode) + ', sumInsuredCedant = ' + sqlValue(overrides.sumInsuredCedant) + ', '
+        + 'premiumCedant = ' + sqlValue(overrides.premiumCedant) + ', sumInsuredRe = ' + sqlValue(overrides.sumInsuredRe) + ', '
+        + 'premiumRe = ' + sqlValue(overrides.premiumRe) + ', comissionCedant = ' + sqlValue(overrides.comissionCedant) + ', '
+        + 'tax = ' + sqlValue(overrides.tax)
+        + (overrides.proportionCed === undefined ? '' : ', proportionCed = ' + sqlValue(overrides.proportionCed))
+        + (overrides.proportionRe === undefined ? '' : ', proportionRe = ' + sqlValue(overrides.proportionRe))
+        + ' WHERE id = ' + cessionId + ' AND lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ';');
+      prepareStatements.push('DELETE FROM CessionPart WHERE cessionId = ' + cessionId + ';');
+    } else {
+      const prepared = clone(template);
+      Object.keys(overrides).forEach(function (property) {
+        if (overrides[property] !== undefined) prepared[property] = overrides[property];
+      });
+      prepared.id = 0;
+      prepared.lifePolicyId = policyId;
+      prepared.premium = money(requested.premiumMovement);
+      prepared.sumInsured = money(requested.sumInsuredMovement);
+      const variable = '@PreparedCession_' + (index + 1);
+      prepareStatements.push('DECLARE ' + variable + ' INT;');
+      prepareStatements.push(insertSql('Cession', CESSION_COLUMNS, prepared, { overwritten: 0, changeId: changeId }));
+      prepareStatements.push('SET ' + variable + ' = SCOPE_IDENTITY();');
+      cessionId = variable;
+    }
+    (partsByKey[key] || []).forEach(function (part) {
+      const child = clone(part);
+      child.id = 0;
+      child.cessionId = cessionId;
+      child.lineId = txt(part.lineId || requested.lineId);
+      prepareStatements.push(insertSql('CessionPart', CESSION_PART_COLUMNS, child, {
+        cessionId: cessionId,
+        reserve: child.reserve == null ? 0 : child.reserve,
+        fee: child.fee == null ? 0 : child.fee
+      }));
+    });
+  });
+  prepareStatements.push('COMMIT TRANSACTION;');
+  doCmd({ cmd: 'DoQuery', data: { sql: prepareStatements.join('\n') } });
+  if (!DoQuery || DoQuery.ok === false) return { ok: false, stage: 'PREPARE', changeId: changeId, policyId: policyId,
+    msg: 'No fue posible preparar el reaseguro del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
+  return { ok: true, stage: 'PREPARE', changeId: changeId, policyId: policyId,
+    prepared: preparedKeys.length, msg: 'La distribucion temporal del reaseguro fue preparada correctamente.' };
+}
 
 // Reintento idempotente: una ejecucion exitosa deja una sola fila vigente por
 // clave y todas esas filas quedan asociadas al mismo changeId. En ese caso no
@@ -313,17 +470,28 @@ finalCessions.forEach(function (cession) {
   }
 });
 
-const insertSql = function (table, columns, entity, overrides) {
-  const values = columns.map(function (column) {
-    return sqlValue(overrides && overrides[column] !== undefined ? overrides[column] : entity[column]);
-  });
-  return 'INSERT INTO [' + table + '] (' + columns.map(function (column) { return '[' + column + ']'; }).join(', ') +
-    ') VALUES (' + values.join(', ') + ');';
-};
-
-// Versionado atomico: primero se anula la version vigente y luego se inserta
-// la fotografia final y sus hijos con nuevos identificadores.
+// Versionado atomico: primero se anulan las versiones vigentes y luego se
+// inserta una nueva fotografia con nuevos identificadores.
 const statements = ['BEGIN TRANSACTION;'];
+if (requestedCoinsurance.length) {
+  statements.push('UPDATE CoCession SET overwritten = 1 WHERE lifePolicyId = ' + policyId
+    + ' AND parentCoCession IS NULL AND overwritten = 0;');
+  requestedCoinsurance.forEach(function (cession, index) {
+    const source = coinsuranceSources[index];
+    const next = clone(source);
+    next.lifePolicyId = policyId;
+    next.contactId = Number(cession.contactId || next.contactId || 0);
+    next.sumInsured = money(cession.sumInsured);
+    next.premium = money(cession.premium);
+    next.sumInsuredCeded = money(cession.sumInsuredCeded);
+    next.premiumCeded = money(cession.premiumCeded);
+    next.commission = money(cession.commission);
+    next.tax = money(cession.tax);
+    next.changeId = changeId;
+    next.overwritten = 0;
+    statements.push(insertSql('CoCession', COCESSION_COLUMNS, next));
+  });
+}
 statements.push('DELETE FROM CessionPart WHERE cessionId IN (SELECT id FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ');');
 statements.push('DELETE FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ';');
 statements.push('UPDATE Cession SET overwritten = 1 WHERE lifePolicyId = ' + policyId + ' AND overwritten = 0 AND (changeId IS NULL OR changeId <> ' + changeId + ');');
@@ -333,7 +501,7 @@ cessionsToInsert.forEach(function (cession, index) {
   statements.push('DECLARE ' + variable + ' INT;');
   const isCancellation = txt(cession.premiumType).toUpperCase() === 'CANCELLATION';
   statements.push(insertSql('Cession', CESSION_COLUMNS, cession, {
-    overwritten: isCancellation ? 1 : 0,
+  overwritten: isCancellation ? 1 : 0,
     changeId: changeId
   }));
   statements.push('SET ' + variable + ' = SCOPE_IDENTITY();');
@@ -354,6 +522,24 @@ if (!DoQuery || DoQuery.ok === false) {
     msg: 'No fue posible versionar el reaseguro: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
 }
 
+if (requestedCoinsurance.length) {
+  doCmd({ cmd: 'LoadEntities', data: {
+    entity: 'CoCession',
+    filter: 'lifePolicyId = ' + policyId + ' AND parentCoCession IS NULL AND overwritten = 0',
+    noTracking: true
+  } });
+  const activeCoinsurance = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
+  const invalidActiveCoinsurance = activeCoinsurance.filter(function (cession) {
+    return Number(cession.changeId) !== changeId;
+  });
+  if (activeCoinsurance.length !== requestedCoinsurance.length || invalidActiveCoinsurance.length) {
+    return { ok: false, stage: 'VERIFY_COINSURANCE', changeId: changeId, policyId: policyId,
+      active: activeCoinsurance.length, expected: requestedCoinsurance.length,
+      previousActive: invalidActiveCoinsurance.length,
+      msg: 'El coaseguro no quedo versionado completamente' };
+  }
+}
+
 doCmd({ cmd: 'LoadEntities', data: {
   entity: 'Cession', filter: 'lifePolicyId = ' + policyId + ' AND overwritten = 0', noTracking: true
 } });
@@ -370,6 +556,9 @@ return {
   overwritten: currentCessions.length, created: finalCessions.length,
   cancellationsCreated: cancellationCessions.length,
   participantsCreated: finalParts.length,
+  coinsuranceUpdated: requestedCoinsurance.length,
+  coinsuranceVersioned: requestedCoinsurance.length,
   msg: 'El reaseguro final fue versionado correctamente: ' + cancellationCessions.length +
-    ' anulaciones historicas y ' + finalCessions.length + ' nuevas cesiones vigentes.'
+    ' anulaciones historicas, ' + finalCessions.length + ' nuevas cesiones vigentes y ' +
+    requestedCoinsurance.length + ' coaseguradores versionados.'
 };

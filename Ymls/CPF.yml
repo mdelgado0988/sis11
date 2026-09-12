@@ -2,23 +2,40 @@ nonTechnicalPremium: 0
 Calculations:  
   - name: reaDist
     formula: |
-      //block
+      //block      
       //La base a distribuir es la cobertura emitida menos su proporcion de coaseguro.
-      var n5 = function(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100000) / 100000; };
+      //AXX-633: la base NETA de coaseguro ya la entrega el motor en _insuredSum/_premium, y se usa
+      //tal cual. No se recalcula desde _coPercentage: ese porcentaje llega inflado en los endosos
+      //(se acumula una vez por cobertura de la poliza), con lo que el contrato recibia una fraccion
+      //de la base, el resto quedaba sin colocar y se marcaba como facultativo pendiente, bloqueando
+      //la emision del endoso. _coSumInsured/_coPremium (importes por cobertura) se usan solo como
+      //tope de seguridad por si algun flujo entregara la base sin netear.
       var n2 = function(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; };
       var polId = _pol.id;
       var covId = _cov.id;
       var sumaEmitida = Number(_cov.limit != null ? _cov.limit : _insuredSum) || 0;
       var primaEmitida = Number(_cov.premium != null ? _cov.premium : _premium) || 0;
-      var porcentajeCoaseguro = Number(_coPercentage || 0) || 0;
-      if (porcentajeCoaseguro < 0 || porcentajeCoaseguro > 100)
-        throw 'El porcentaje de coaseguro de la poliza ' + polId + ' debe estar entre 0 y 100. Valor: ' + porcentajeCoaseguro;
+      var coSuma = Number(_coSumInsured || 0) || 0;
+      var coPrima = Number(_coPremium || 0) || 0;
 
-      var factorRetenido = 1 - n5(porcentajeCoaseguro / 100);
-      var Suma = n2(sumaEmitida * factorRetenido);
-      var Prima = n2(primaEmitida * factorRetenido);
+      var Suma = n2(Number(_insuredSum || 0) || 0);
+      var Prima = n2(Number(_premium || 0) || 0);
+
+      //Tope de seguridad: la base nunca puede superar lo emitido menos el coaseguro informado.
+      var topeSuma = n2(sumaEmitida - coSuma);
+      var topePrima = n2(primaEmitida - coPrima);
+      if (sumaEmitida > 0 && Suma > topeSuma) Suma = topeSuma;
+      if (primaEmitida > 0 && Prima > topePrima) Prima = topePrima;
+
       var SumaCoaseguro = n2(sumaEmitida - Suma);
       var PrimaCoaseguro = n2(primaEmitida - Prima);
+
+      if (Suma < 0)
+        throw 'Contrato CPF: el coaseguro supera la SUMA emitida. Poliza ' + polId + ', cobertura ' + covId +
+              '. Suma emitida ' + sumaEmitida + ', coaseguro ' + SumaCoaseguro + ', a distribuir ' + Suma;
+      if (Prima < 0)
+        throw 'Contrato CPF: el coaseguro supera la PRIMA emitida. Poliza ' + polId + ', cobertura ' + covId +
+              '. Prima emitida ' + primaEmitida + ', coaseguro ' + PrimaCoaseguro + ', a distribuir ' + Prima;
 
       var rea = doCmd({cmd:'ExeChain',data:{chain:'cmdConfiguracionReaseguroPorSuma',context:JSON.stringify({CodigoContrato:'CPF',Suma:Suma,Prima:Prima,SumaCoaseguro:SumaCoaseguro,PrimaCoaseguro:PrimaCoaseguro,PolizaId:polId,CoberturaId:covId})}});
       //propagar el motivo real: sin esto un fallo de la cadena llega como "Value cannot be null (Parameter 'o')"

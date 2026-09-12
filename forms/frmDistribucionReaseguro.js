@@ -2813,6 +2813,17 @@ function isOferta(){
   return isOferta;
 }
 
+function coaseguroEdicionBloqueada() {
+  return !isOferta();
+}
+
+function bloquearEdicionCoaseguroSiCorresponde() {
+  const bloqueada = coaseguroEdicionBloqueada();
+  $("#btnAgregarCoasegurador, #coaseguradoraCompaniaLider, .btn-editar-coasegurador, .btn-eliminar-coasegurador")
+    .prop("disabled", bloqueada)
+    .attr("aria-disabled", bloqueada ? "true" : "false");
+}
+
 //Validaremos el estado de la póliza con el activeDate, si es null entonces es oferta y habilitamos los botones, en caso contrario deshabilitamos los botones para evitar que se realicen cambios en pólizas activas. Esta validación se realizará cada vez que se cargue la información de la póliza, para asegurar que el estado esté siempre actualizado.
 function validateState(){
   
@@ -2821,6 +2832,7 @@ function validateState(){
   $("#btnRecalcular").prop("disabled", !enabled);
   $("#btnAgregarReasegurador").prop("disabled", !enabled);
   $("#btnGuardarDistribucion").prop("disabled", !enabled);
+  bloquearEdicionCoaseguroSiCorresponde();
 
 }
 
@@ -4034,7 +4046,7 @@ async function loadCoCessions() {
   try {
     const result = await me.exe("RepoCoCession", {
       operation: "GET",
-      filter: `lifePolicyId = ${parseInt(policyId, 10)} AND parentCoCession IS NULL`,
+      filter: `lifePolicyId = ${parseInt(policyId, 10)} AND parentCoCession IS NULL AND overwritten = 0`,
       include: ["Contact"],
       entity: null,
       bulkJson: null,
@@ -4137,11 +4149,11 @@ function renderCoaseguradores() {
 
   $tab.html(`
     <div class="coaseguro-toolbar" style="display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap;">
-      <button type="button" class="ant-btn ant-btn-primary" id="btnAgregarCoasegurador">+ Agregar coasegurador</button>
+      <button type="button" class="ant-btn ant-btn-primary" id="btnAgregarCoasegurador" ${coaseguroEdicionBloqueada() ? "disabled aria-disabled=\"true\"" : ""}>+ Agregar coasegurador</button>
       <button type="button" class="ant-btn" id="btnActualizarCoaseguradores">&#8635; Actualizar</button>
       <label for="coaseguradoraCompaniaLider" style="display:flex; align-items:center; gap:6px; margin-left:4px;">
         Compañía líder
-        <select id="coaseguradoraCompaniaLider" class="ant-input" style="width:88px; height:30px;">
+        <select id="coaseguradoraCompaniaLider" class="ant-input" style="width:88px; height:30px;" ${coaseguroEdicionBloqueada() ? "disabled aria-disabled=\"true\"" : ""}>
           <option value="no" ${Number(policy?.coinsurance) === 1 ? "" : "selected"}>No</option>
           <option value="si" ${Number(policy?.coinsurance) === 1 ? "selected" : ""}>Sí</option>
         </select>
@@ -4154,8 +4166,8 @@ function renderCoaseguradores() {
       <tbody>${coaseguradoresData.map((row, index) => `
         <tr data-index="${index}">
           <td class="acciones-coasegurador">
-            <button type="button" class="ant-btn ant-btn-link btn-editar-coasegurador" data-index="${index}" title="Editar coasegurador" aria-label="Editar coasegurador">&#9998;</button>
-            <button type="button" class="ant-btn ant-btn-link btn-eliminar btn-eliminar-coasegurador" data-index="${index}" title="Eliminar coasegurador" aria-label="Eliminar coasegurador">&#128465;</button>
+            <button type="button" class="ant-btn ant-btn-link btn-editar-coasegurador" data-index="${index}" title="Editar coasegurador" aria-label="Editar coasegurador" ${coaseguroEdicionBloqueada() ? "disabled aria-disabled=\"true\"" : ""}>&#9998;</button>
+            <button type="button" class="ant-btn ant-btn-link btn-eliminar btn-eliminar-coasegurador" data-index="${index}" title="Eliminar coasegurador" aria-label="Eliminar coasegurador" ${coaseguroEdicionBloqueada() ? "disabled aria-disabled=\"true\"" : ""}>&#128465;</button>
           </td>
           <td class="col-participante" title="${coaseguroEscapar(row.name || `Contacto ${row.contactId}`)}">&#128100; ${coaseguroEscapar(row.name || `Contacto ${row.contactId}`)}</td>
           <td>${row.leader ? "Sí" : "No"}</td>
@@ -4170,9 +4182,11 @@ function renderCoaseguradores() {
     </table></div>
     <div class="resumen-card" style="margin-top:10px;">Suma total: <strong>${coaseguroFormato(base.sumInsured)}</strong> &nbsp; Prima total: <strong>${coaseguroFormato(base.premium)}</strong></div>
   `);
+  bloquearEdicionCoaseguroSiCorresponde();
 
   $(document).off("click.coaseguro", "#btnAgregarCoasegurador")
     .on("click.coaseguro", "#btnAgregarCoasegurador", function () {
+      if (coaseguroEdicionBloqueada()) return;
       abrirModalAgregarCoasegurador();
     });
   $(document).off("click.coaseguro", "#btnActualizarCoaseguradores")
@@ -4190,10 +4204,12 @@ function renderCoaseguradores() {
     });
   $(document).off("click.coaseguro", ".btn-editar-coasegurador")
     .on("click.coaseguro", ".btn-editar-coasegurador", function () {
+      if (coaseguroEdicionBloqueada()) return;
       abrirModalAgregarCoasegurador(Number($(this).data("index")));
     });
   $(document).off("change.coaseguro", "#coaseguradoraCompaniaLider")
     .on("change.coaseguro", "#coaseguradoraCompaniaLider", async function () {
+    if (coaseguroEdicionBloqueada()) return;
     const $select = $(this);
     const companiaEsLider = $select.val() === "si";
     $select.prop("disabled", true);
@@ -4217,6 +4233,7 @@ function renderCoaseguradores() {
     }
   });
   $tab.find(".btn-eliminar-coasegurador").off("click.coaseguro").on("click.coaseguro", async function () {
+    if (coaseguroEdicionBloqueada()) return;
     const index = Number($(this).data("index"));
     if (!Number.isInteger(index)) return;
     showLoading("Eliminando coasegurador...");
@@ -4284,6 +4301,7 @@ async function preguntarAplicarDistribucionCoaseguro() {
 }
 
 function abrirModalAgregarCoasegurador(index = null) {
+  if (coaseguroEdicionBloqueada()) return;
   $("#modalAgregarCoasegurador").remove();
 
   const rowEdit = index === null ? null : coaseguradoresData[index];

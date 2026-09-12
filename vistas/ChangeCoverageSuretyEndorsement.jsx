@@ -780,7 +780,7 @@
           exe('GetFullTable', { table: 'cfgCoberturaProductoReaFianza' }),
           exe('RepoCurrency', { operation: 'GET', filter: "code='" + txt(p.currency).replace(/'/g, "''") + "'", size: 1 }),
           exe('RepoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND overwritten=0' }),
-          exe('RepoCoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND parentCoCession IS NULL', include: ['Contact'], size: 0 })
+          exe('RepoCoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND parentCoCession IS NULL AND overwritten=0', include: ['Contact'], size: 0 })
             .catch(function () { return { outData: [] }; }),
           exe('LoadEntities', {
             entity: 'Contact',
@@ -1511,7 +1511,24 @@
       if (next.end) next.end = dateAtNoon(next.end);
       return next;
     });
-    const reinsuranceSnapshot = { distribution: [], participants: [] };
+    const reinsuranceSnapshot = { distribution: [], participants: [], coinsurance: [] };
+    const coinsuranceBase = finalCoinsuranceBase();
+    (coinsuranceCessions || []).forEach(function (cession) {
+      const percentage = coinsuranceNumber(cession.percentage);
+      const sourcePremium = coinsuranceNumber(cession.premiumCeded || cession.premium);
+      const premiumCeded = money(coinsuranceBase.premium * percentage / 100);
+      reinsuranceSnapshot.coinsurance.push({
+        id: Number(cession.id || 0),
+        contactId: Number(cession.contactId || 0),
+        percentage: percentage,
+        sumInsured: money(coinsuranceBase.sum),
+        premium: money(coinsuranceBase.premium),
+        sumInsuredCeded: money(coinsuranceBase.sum * percentage / 100),
+        premiumCeded: premiumCeded,
+        commission: sourcePremium ? money(premiumCeded * coinsuranceNumber(cession.commission) / sourcePremium) : 0,
+        tax: sourcePremium ? money(premiumCeded * coinsuranceNumber(cession.tax) / sourcePremium) : 0
+      });
+    });
     (sim && sim.contracts || []).forEach(function (group) {
       (group.rows || []).forEach(function (row) {
         reinsuranceSnapshot.distribution.push({
@@ -1519,7 +1536,8 @@
           premiumMovement: row.premiumMovement, sumInsuredMovement: row.sumInsuredMovement,
           premiumCedant: row.premiumCedant, sumInsuredCedant: row.sumInsuredCedant,
           premiumRe: row.premiumRe, sumInsuredRe: row.sumInsuredRe,
-          commission: row.commission, tax: row.tax
+          commission: row.commission, tax: row.tax,
+          proportionCed: row.proportionCed, proportionRe: row.proportionRe
         });
       });
       (group.participants || []).forEach(function (participant) {
@@ -1554,13 +1572,16 @@
       })
     };
 
+    let changeId = 0;
+    let reinsurancePrepared = false;
+    let reinsuranceExecuted = false;
     try {
       const createdResponse = await exe('ChangeCoverage', payload);
       if (!createdResponse || !createdResponse.ok || !createdResponse.outData || !createdResponse.outData.id) {
         throw new Error(t('El endoso no pudo ser creado') + ': ' + cleanMessage(createdResponse));
       }
       const created = Array.isArray(createdResponse.outData) ? createdResponse.outData[0] : createdResponse.outData;
-      const changeId = Number(created.id || 0);
+      changeId = Number(created.id || 0);
       setKey(String(changeId));
       let processId = Number(created.processId || 0);
       if (!processId) {
@@ -1573,10 +1594,22 @@
       const workflowResponse = Array.isArray(workflow) ? (workflow[0] || {}) : workflow;
       if (!workflowResponse || !workflowResponse.ok) throw new Error(t('No se pudo aprobar el workflow del endoso') + ': ' + cleanMessage(workflowResponse));
 
+      if (reinsuranceSnapshot.distribution.length) {
+        reinsurancePrepared = true;
+        const prepared = await exe('ExeChain', {
+          chain: 'cmdApplyReaChangeCoverage',
+          context: JSON.stringify({ changeId: changeId, mode: 'PREPARE' })
+        });
+        if (!prepared || !prepared.ok) {
+          throw new Error(t('No se pudo preparar el reaseguro del endoso') + ': ' + cleanMessage(prepared));
+        }
+      }
+
       const executed = await exe('ExeChangeCoverage', { changeId: changeId, exeNow: true, operation: 'EXECUTE', noTracking: true });
       if (!executed || !executed.ok) {
         throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(executed));
       }
+      reinsuranceExecuted = true;
 
       // ChangeCoverage actualiza las coberturas, pero la duracion de la
       // poliza debe quedar sincronizada con la vigencia final resultante.
@@ -1641,7 +1674,7 @@
         try {
           const reinsurance = await exe('ExeChain', {
             chain: 'cmdApplyReaChangeCoverage',
-            context: JSON.stringify({ changeId: changeId })
+            context: JSON.stringify({ changeId: changeId, mode: 'FINALIZE' })
           });
           if (!reinsurance || !reinsurance.ok) failures.push(t('actualización del reaseguro') + ': ' + cleanMessage(reinsurance));
         } catch (reinsuranceError) {
@@ -1657,6 +1690,16 @@
       setSim(null);
       setTimeout(function () { retornarAPoliza(); }, 700);
     } catch (e) {
+      if (reinsurancePrepared && !reinsuranceExecuted && changeId) {
+        try {
+          await exe('ExeChain', {
+            chain: 'cmdApplyReaChangeCoverage',
+            context: JSON.stringify({ changeId: changeId, mode: 'ROLLBACK' })
+          });
+        } catch (rollbackError) {
+          failures.push(t('limpieza del reaseguro temporal') + ': ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));
+        }
+      }
       const message = String(e && e.message ? e.message : e);
       setError(message);
       A.message.error(message);
