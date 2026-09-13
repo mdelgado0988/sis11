@@ -1241,6 +1241,8 @@ function aplicarRestriccionesEndosoFianza() {
         || (ramo === '83' && ['PROPUESTA', 'PROP_GA', 'GPESPECIAL'].includes(producto));
 
     const camposEditables = [
+        '#txtNumeroContratoFianza',
+        '#text-1770999106315',
         '#valor_garantia',
         '#desc_garantia',
         '#desc_objeto_afianzado',

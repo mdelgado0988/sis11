@@ -10,6 +10,7 @@
 
 const changeId = context.changeId;
 const ExeOrgin = context.ExeOrgin;
+const isTest = context.isTest || false;
 const xContactsFilterArray = [];
 const vfieldsCotizacionAsegurados = "lifePolicyId,contactId";
 const vfieldsContacto = "id,name,middlename,surname1,surname2,cnp,nif,isPerson,phone,email"
@@ -29,7 +30,16 @@ if (changeName == "CancellationChange" && ExeOrgin == 'WF'){
   return;
 } 
 
-const template = changeName == "LoadingChange" ? 'FormatoEndososSinCobertura.docx' : 'FormatoEndosos.docx';
+const reportesEndoso = {
+  incendio: {
+    conPrima: 'FormatoEndosos.docx',
+    sinPrima: 'FormatoEndososSinCobertura.docx'
+  },
+  fianza: {
+    conPrima: 'FormatoEndososFianza.docx',
+    sinPrima: 'FormatoEndososSinCoberturaFianza.docx'
+  }
+};
 const { eventName, nombreEndoso } = mapChangeName(changeName);
 // return change
 // -----------------------------
@@ -47,6 +57,11 @@ if(!policy.productCode === "1_9"){
 }*/
 
 if (!policy) throw `La póliza [${change.lifePolicyId}] no ha sido encontrada.`;
+
+const template = seleccionarReporteEndoso(policy, change, billDiff, reportesEndoso);
+
+const nombreRamo = getNombreRamo(policy);
+const nombreProducto = getNombreProducto(policy);
 
 //Set contact list to look for data;
 setContactsList();
@@ -70,6 +85,8 @@ const row = {
   numcoverages: 0,
   totalPercCoInsurances: 0,
   Changeid: change.id,
+  NombreRamo: nombreRamo,
+  NombreProducto: nombreProducto,
   Policy: sanitizePolicy(policy),
   Commissions: [],
   Cessions: []
@@ -126,14 +143,16 @@ row.numcoverages = detCovs.length;
 //Michael Delgado. 2026-05-22. GLOB-689. Generamos número de endoso.
 generateChangeCode(change);
 
-/*//test mad:
-//return billDiff;
-const arrayResult = [{ outdata: row }];
-const custom = buildCustomForTemplate({ row, policy, change, arrayResult, billDiff });
-//return custom
-calculateEndorsmentNote(change, changeName, custom, policy);
-return custom;
-//fin test mad*/
+//test mad:
+if(isTest){
+  //return billDiff;
+  const arrayResult = [{ outdata: row }];
+  const custom = buildCustomForTemplate({ row, policy, change, arrayResult, billDiff });
+  //return custom
+  calculateEndorsmentNote(change, changeName, custom, policy);
+  return custom;
+  //fin test mad
+}
 
 // -----------------------------
 // 6) Generar documento con custom (lo que el template pide)
@@ -166,6 +185,29 @@ function getPolicy(policyId) {
 
   return (RepoLifePolicy.outData && RepoLifePolicy.outData[0]) || null;
     
+}
+
+function getNombreRamo(policy) {
+  doCmd({
+    cmd: 'RepoLob',
+    data: { operation: 'GET', filter: `code = '${String(policy?.lob ?? '').replace(/'/g, "''")}'` }
+  });
+
+  const ramo = RepoLob.outData?.[0];
+  const nombre = String(ramo?.name ?? '').trim();
+  return nombre.replace(/^\s*\d+\s*-\s*/, '').trim().toUpperCase();
+}
+
+function getNombreProducto(policy) {
+  doCmd({
+    cmd: 'RepoProduct',
+    data: { operation: 'GET', filter: `code = '${String(policy?.productCode ?? '').replace(/'/g, "''")}'` }
+  });
+
+  const producto = RepoProduct.outData?.[0];
+  const nombre = String(producto?.name ?? '').trim();
+  const code = String(policy?.productCode ?? '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return nombre.replace(new RegExp(`^\\s*${code}\\s*-\\s*`, 'i'), '').trim().toUpperCase();
 }
 
 function setContactsList() {
@@ -215,46 +257,280 @@ function getInsuredObjects(change) {
   if(changeName === 'InsuredObjectChange')
     return getChangeInsuredObjects(change);
 
-  let objectDefinitionId = 0;
-
-  if(policy?.productCode === '1_17'){
-    doCmd({"cmd":"RepoObjectDefinition","data":{"operation":"GET","filter":"code = 'DTINCENDIO_SUMA'"}});
-    objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
-  }
-  else {
-    doCmd({"cmd":"RepoObjectDefinition","data":{"operation":"GET","filter":"code = 'DT_INCENDIO_V3'"}});
-    objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
-  }
+  const lob = String(policy?.lob ?? '').trim();
+  const isSurety = ['81', '82', '83', '84'].includes(lob);
+  const objectDefinitionCode = isSurety
+    ? 'OBJFIANZA'
+    : (policy?.productCode === '1_17' ? 'DTINCENDIO_SUMA' : 'DT_INCENDIO_V3');
 
   doCmd({
-    "cmd": "RepoInsuredObject",
-    "data": {
-      operation: "GET",
-      filter: `lifePolicyId=${change.lifePolicyId} AND objectDefinitionId = ${objectDefinitionId}`,
-        "include": [
-            "ObjectDefinition"
-        ]
-    }
-  })
-  
-  const InsuredObject = (RepoInsuredObject.outData && RepoInsuredObject.outData[0]) || null;
-  return InsuredObject
+    cmd: 'RepoObjectDefinition',
+    data: { operation: 'GET', filter: `code = '${objectDefinitionCode}'` }
+  });
+  const objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
+
+  const filter = objectDefinitionId
+    ? `lifePolicyId=${change.lifePolicyId} AND objectDefinitionId = ${objectDefinitionId}`
+    : `lifePolicyId=${change.lifePolicyId}`;
+  doCmd({
+    cmd: 'RepoInsuredObject',
+    data: { operation: 'GET', filter, include: ['ObjectDefinition'] }
+  });
+
+  const insuredObject = (RepoInsuredObject.outData && RepoInsuredObject.outData[0]) || null;
+  return normalizeInsuredObject(insuredObject);
 }
 
 function getChangeInsuredObjects(change) {
-  const newInsuredObjects = JSON.parse(change.jNewInsuredObjects)?.[0] ?? {};
+  const newInsuredObjects = parseChangeInsuredObjects(change?.jNewInsuredObjects);
+  return newInsuredObjects[0] || { userData: {} };
+}
 
-  if(newInsuredObjects){
-    const data = JSON.parse(newInsuredObjects.jValues) ?? [];
+function parseChangeInsuredObjects(rawObjects) {
+  const objects = safeJson(rawObjects, []);
+  const list = Array.isArray(objects) ? objects : [objects];
+
+  return list.map(object => {
+    if (!object || typeof object !== 'object') return { userData: {} };
+
+    const data = safeJson(object.jValues, object.userData || []);
+    const fields = Array.isArray(data) ? data : [];
     const userData = Object.fromEntries(
-      data
-        .filter(x => x.name && x.userData?.length)
-        .map(x => [x.name, x.userData[0]])
+      fields
+        .filter(field => field && field.name)
+        .map(field => [
+          field.name,
+          Array.isArray(field.userData) ? field.userData[0] : field.userData
+        ])
     );
-    newInsuredObjects.userData = userData;
-  } 
-  
-  return newInsuredObjects;
+
+    return { ...object, userData };
+  });
+}
+
+function getChangeInsuredObjectValues(change, propertyName) {
+  const objects = parseChangeInsuredObjects(change?.[propertyName]);
+  const object = objects.find(item => item && item.userData && Object.keys(item.userData).length)
+    || objects[0]
+    || {};
+  return object.userData || {};
+}
+
+function normalizeInsuredObject(insuredObject) {
+  if (!insuredObject) return { userData: {} };
+
+  let userData = insuredObject.userData;
+  if (typeof userData === 'string') {
+    try { userData = JSON.parse(userData); } catch (error) { userData = {}; }
+  }
+
+  if (!userData && insuredObject.jValues) {
+    try { userData = JSON.parse(insuredObject.jValues); } catch (error) { userData = {}; }
+  }
+
+  if (Array.isArray(userData)) {
+    userData = Object.fromEntries(userData
+      .filter(field => field && field.name)
+      .map(field => [field.name, Array.isArray(field.userData) ? field.userData[0] : field.userData]));
+  }
+
+  insuredObject.userData = userData && typeof userData === 'object' ? userData : {};
+  return insuredObject;
+}
+
+function isSuretyPolicy(policy) {
+  return ['81', '82', '83', '84'].includes(String(policy?.lob ?? '').trim());
+}
+
+function getSuretyEndorsementFields(policy) {
+  const ramo = String(policy?.lob ?? '').trim();
+  const producto = String(policy?.productCode ?? '').trim().toUpperCase();
+  const permiteFechaActo = (ramo === '81' && producto === '81PROPUESTA')
+    || (ramo === '83' && ['PROPUESTA', 'PROP_GA', 'GPESPECIAL'].includes(producto));
+
+  const fields = [
+    { label: 'No. Contrato / No. AutoSecuestro', names: ['txtNumeroContratoFianza', 'txtNumeroContrato', 'text-1770999106315'] },
+    { label: 'Valor de Garantía', names: ['valor_garantia'], numeric: true },
+    { label: 'Descripción de Garantía', names: ['desc_garantia'] },
+    { label: 'Descripción del Objeto Afianzado', names: ['desc_objeto_afianzado'] },
+    { label: 'Estado de la Fianza', names: ['cmbEstadoFianza'] }
+  ];
+
+  if (permiteFechaActo) {
+    fields.push({ label: 'Fecha Acto Público/Licitacion', names: ['f_acto_publico'], date: true });
+  }
+
+  return fields;
+}
+
+function comparisonValue(value, field) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === null || raw === undefined) return '';
+
+  const text = String(raw).trim();
+  if (field.numeric) return numericValue(text).toFixed(6);
+  if (field.date) return text.substring(0, 10);
+  return text;
+}
+
+function displayComparisonValue(value, field, catalogs) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const text = raw === null || raw === undefined ? '' : String(raw).trim();
+  if (!text) return 'Sin valor';
+  if (field.catalog) {
+    const [catalogName, valueIndex, textIndex] = field.catalog;
+    return catalogText(catalogs?.[catalogName], text, valueIndex, textIndex);
+  }
+  return field.numeric ? n(numericValue(text)) : text;
+}
+
+function buildSuretyInsuredObjectChangeNote(change, policy, catalogs) {
+  const oldValues = getChangeInsuredObjectValues(change, 'jOldInsuredObjects');
+  const newValues = getChangeInsuredObjectValues(change, 'jNewInsuredObjects');
+
+  const changes = getSuretyEndorsementFields(policy)
+    .filter(field => {
+      const oldValue = field.names.map(name => oldValues?.[name]).find(value => value !== undefined);
+      const newValue = field.names.map(name => newValues?.[name]).find(value => value !== undefined);
+      return comparisonValue(oldValue, field) !== comparisonValue(newValue, field);
+    })
+    .map(field => {
+      const oldValue = field.names.map(name => oldValues?.[name]).find(value => value !== undefined);
+      const newValue = field.names.map(name => newValues?.[name]).find(value => value !== undefined);
+      return `${field.label}: ${displayComparisonValue(oldValue, field, catalogs)} => ${displayComparisonValue(newValue, field, catalogs)}`;
+    })
+    .join(', ');
+
+  return changes ? `Cambios: ${changes}` : '';
+}
+
+function numericValue(value) {
+  const parsed = Number(String(value ?? '').replace(/,/g, '').trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function hasEndorsementPremium(billDiff, change) {
+  const premiumValues = [
+    billDiff?.annualPremium,
+    billDiff?.coverages,
+    billDiff?.premium,
+    change?.annualPremium,
+    change?.premium
+  ];
+
+  return premiumValues.some(value => Math.abs(numericValue(value)) > 0.000001);
+}
+
+function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
+  if (!isSuretyPolicy(policy)) {
+    return change.Discriminator === "LoadingChange"
+      ? reportes.incendio.sinPrima
+      : reportes.incendio.conPrima;
+  }
+
+  return hasEndorsementPremium(billDiff, change)
+    ? reportes.fianza.conPrima
+    : reportes.fianza.sinPrima;
+}
+
+function suretyValue(userData, names) {
+  for (const name of names) {
+    const rawValue = userData?.[name];
+    const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+    if (value !== null && value !== undefined && String(value).trim() !== '') {
+      return value;
+    }
+  }
+  return '';
+}
+
+function loadSuretyCatalog(table) {
+  doCmd({ cmd: 'GetFullTable', data: { table } });
+  const result = typeof GetFullTable !== 'undefined' ? GetFullTable : null;
+  return result?.ok && Array.isArray(result.outData) ? result.outData : [];
+}
+
+function catalogText(rows, value, valueIndex, textIndex) {
+  const code = String(value ?? '').trim();
+  if (!code || !Array.isArray(rows)) return code;
+
+  const row = rows.slice(1).find(item => String(item?.[valueIndex] ?? '').trim() === code);
+  return row?.[textIndex] ?? code;
+}
+
+function loadSuretyCatalogs() {
+  return {
+    claseRiesgo: loadSuretyCatalog('actividadfianza'),
+    actividad: loadSuretyCatalog('tbMaActivi'),
+    tipoVigencia: loadSuretyCatalog('tipovigencia'),
+    vigenciaFianza: loadSuretyCatalog('vigenciafianza'),
+    tipoLicitacion: loadSuretyCatalog('tipolicitacion')
+  };
+}
+
+function buildSuretyRisk(userData, catalogs) {
+  const data = userData || {};
+  const numeroLicitacion = suretyValue(data, ['n_licitacion']);
+  const lookup = catalogs || {};
+  return {
+    NombreAFavor: suretyValue(data, ['nombre']),
+    CodigoSIS: suretyValue(data, ['rut', 'contacto_ruc']),
+    Secuestrante: suretyValue(data, ['secuestrante']),
+    VigenciaFianza: catalogText(lookup.vigenciaFianza, suretyValue(data, ['vigencia_fianza']), 0, 1),
+    OrdenDeProceder: suretyValue(data, ['orden_de_proceder']),
+    NumeroContrato: suretyValue(data, ['txtNumeroContrato', 'text-1770999106315']),
+    ActoPublico: suretyValue(data, ['n_acto_publico']),
+    SolicitudPrecio: suretyValue(data, ['n_sol_precio']),
+    Licitacion: numeroLicitacion,
+    NumeroLicitacion: numeroLicitacion,
+    OrdenCompra: suretyValue(data, ['n_oc']),
+    ClaseRiesgo: catalogText(lookup.claseRiesgo, suretyValue(data, ['clase_riesgo']), 0, 1),
+    TipoLicitacion: catalogText(lookup.tipoLicitacion, suretyValue(data, ['tipo_licitacion']), 0, 1),
+    CompraMenor: suretyValue(data, ['n_compra_menor']),
+    RefrendoDeclaracion: suretyValue(data, ['n_contrato']),
+    NumeroProyecto: suretyValue(data, ['n_proyecto']),
+    FechaActoPublico: suretyValue(data, ['f_acto_publico']),
+    Actividad: catalogText(lookup.actividad, suretyValue(data, ['actividad']), 1, 3),
+    TipoVigencia: catalogText(lookup.tipoVigencia, suretyValue(data, ['tipo_vigencia']), 0, 1),
+    TipoCalendario: catalogText(lookup.tipoVigencia, suretyValue(data, ['tipo_calendario']), 0, 1),
+    DiasVigencia: suretyValue(data, ['txtDiasVigencia']),
+    SumaAfianzada: suretyValue(data, ['suma_afianzada']),
+    ValorGarantia: suretyValue(data, ['valor_garantia']),
+    DescripcionObjetoAfianzado: suretyValue(data, ['desc_objeto_afianzado']),
+    Observaciones: suretyValue(data, ['observaciones']),
+    DescripcionGarantia: suretyValue(data, ['desc_garantia']),
+    DescripcionEndoso: suretyValue(data, ['desc_endoso']),
+    // Alias utilizado por plantillas que esperan una descripcion generica.
+    Descripcion: suretyValue(data, ['desc_objeto_afianzado'])
+  };
+}
+
+function buildFireRisk(userData, countries, sectors, procincias, Municipios) {
+  const data = userData || {};
+  return {
+    TipoObjeto: data.cmbTipoObjeto,
+    NombreDistrito: data.cmbMunicipio
+      ? (Municipios.find(itm => itm.code === data.cmbMunicipio)?.name || String(data.cmbMunicipio))
+      : '',
+    Manzana: data.manzana,
+    NombreEdificio: data.txtEdificios ?? '',
+    Direccion: data.direccionexacta,
+    NombrePais: data.cmbPais
+      ? (countries.find(itm => itm.code === data.cmbPais)?.name || String(data.cmbPais))
+      : '',
+    NombreCorregimiento: data.cmbSector
+      ? (sectors.find(itm => itm.code === data.cmbSector)?.name || String(data.cmbSector))
+      : '',
+    NombreProvincia: data.cmbProvincia
+      ? (procincias.find(itm => itm.code === data.cmbProvincia)?.name || String(data.cmbProvincia))
+      : '',
+    NombreBarriada: data.txtBarriadas ?? '',
+    Finca: data.txtFinca,
+    Rollo: data.txtRollo,
+    Doc: data.txtDoc,
+    Descripcion: data.Descripcion,
+    Calle: data.calleoavenida ?? ''
+  };
 }
 
 function setCessionBeneficiaryChangeData(change, policy, xContactsFilterArray) {
@@ -295,8 +571,8 @@ function setFrequencyChangeData(change, policy) {
 }
 
 function calculateEndorsmentNote(change, changeName, custom, policy) {
-  
-  if(custom.Endoso.DetalleEndoso !== "Sin Detalles")
+  const currentNote = String(custom?.Endoso?.DetalleEndoso ?? '').trim();
+  if (currentNote && currentNote !== "Sin Detalles")
     return;
 
   if(changeName == "CessionBeneficiaryChange"){
@@ -313,6 +589,11 @@ function calculateEndorsmentNote(change, changeName, custom, policy) {
 
   if(changeName == "FrequencyChange"){
     custom.Endoso.DetalleEndoso = `Cambio de frecuencia, anterior: ${frequencyName(policy.oldFrequency ?? "No Tiene")} => nueva: ${frequencyName(policy.newFrequency ?? "No Tiene")}`
+  }
+
+  if (changeName === "InsuredObjectChange" && isSuretyPolicy(policy)) {
+    const insuredObjectNote = buildSuretyInsuredObjectChangeNote(change, policy, loadSuretyCatalogs());
+    if (insuredObjectNote) custom.Endoso.DetalleEndoso = insuredObjectNote;
   }
       
 }
@@ -417,6 +698,11 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const Municipios = Array.isArray(RepoCityCatalog.outData) ? RepoCityCatalog.outData : [];
   
   const addr = (holder.Addresses && holder.Addresses[0]) || {};
+  const insuredData = InsuredObject.userData || {};
+  const suretyCatalogs = isSuretyPolicy(policy) ? loadSuretyCatalogs() : null;
+  const riesgo = isSuretyPolicy(policy)
+    ? buildSuretyRisk(insuredData, suretyCatalogs)
+    : buildFireRisk(insuredData, countries, sectors, procincias, Municipios);
 
   // Lookups seguros (sin [0].name)
   const sectorName = addr.sector
@@ -484,6 +770,8 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const custom = {
     Aseguradora: { NombreSocial: "GLOBAL ASEGURADORA S.A." },
     code: policy?.code || "",
+    NombreRamo: row.NombreRamo || "",
+    NombreProducto: row.NombreProducto || "",
 
     Tomador: { NombreCompleto: holderFullName },
 
@@ -542,22 +830,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       Nombre: row.nombreEndoso,
       DetalleEndoso: change?.note || "Sin Detalles"
     },
-    Riesgo:{
-      TipoObjeto : InsuredObject.userData.cmbTipoObjeto,
-      NombreDistrito : InsuredObject.userData.cmbMunicipio?  (Municipios.find(itm => itm.code === InsuredObject.userData.cmbMunicipio)?.name || String(InsuredObject.userData.cmbMunicipio)): "",
-      Manzana : InsuredObject.userData.manzana,
-      NombreEdificio : InsuredObject.userData.txtEdificios ?? "",
-      Direccion :InsuredObject.userData.direccionexacta,
-      NombrePais : InsuredObject.userData.cmbPais? (countries.find(itm => itm.code === InsuredObject.userData.cmbPais)?.name || String(InsuredObject.userData.cmbPais)): "",
-      NombreCorregimiento : InsuredObject.userData.cmbSector ? (sectors.find(itm => itm.code === InsuredObject.userData.cmbSector)?.name || String(InsuredObject.userData.cmbSector)): "",
-      NombreProvincia :InsuredObject.userData.cmbProvincia ? (procincias.find(itm => itm.code === InsuredObject.userData.cmbProvincia)?.name || String(InsuredObject.userData.cmbProvincia)): "",
-      NombreBarriada : InsuredObject.userData.txtBarriadas ?? "",
-      Finca : InsuredObject.userData.txtFinca,
-      Rollo : InsuredObject.userData.txtRollo,
-      Doc : InsuredObject.userData.txtDoc,
-      Descripcion : InsuredObject.userData.Descripcion,
-      Calle: InsuredObject.userData.calleoavenida ?? ""
-    }
+    Riesgo: riesgo
     
   };
 
