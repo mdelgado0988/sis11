@@ -7,8 +7,8 @@
  * @purpose: Manage the surety activity catalog, including consultation, filtering, creation, and editing.
  */
 function SuretyActivityCatalog() {
-  const TABLE_ID = 1419;
   const TABLE_NAME = 'tbMaActivi';
+  let tableId = null;
   const VIEW_PATH = String(window.location.hash || window.location.pathname).replace(/^#/,'').split('?')[0];
   const HEADER = ['cmercado','cactividad','u_version','xactividad','pactividad','usuario','fRegistro','usuarioModifica','fModifica'];
   const h = React.createElement;
@@ -41,7 +41,8 @@ function SuretyActivityCatalog() {
     return result.outData;
   }
   function decode(entity) {
-    if(!entity || Number(entity.id)!==TABLE_ID || entity.name!==TABLE_NAME)throw new Error(t('No se pudo verificar el origen del catálogo.'));
+    if(!entity || String(entity.name || '').trim().toLocaleLowerCase()!==TABLE_NAME.toLocaleLowerCase())throw new Error(t('No se pudo verificar el origen del catálogo.'));
+    tableId=entity.id;
     const data=JSON.parse(entity.data);
     if(!Array.isArray(data) || JSON.stringify(data[0])!==JSON.stringify(HEADER))throw new Error(t('El catálogo no tiene el formato esperado.'));
     return data;
@@ -50,7 +51,7 @@ function SuretyActivityCatalog() {
     return data.slice(1).map(function(row,index){return {key:String(row[1])+'-'+index,id:String(row[1]),version:row[2]==null?'':String(row[2]),name:String(row[3]||'').trim(),percent:row[4],createdBy:row[5],createdAt:row[6],modifiedBy:row[7],modifiedAt:row[8],raw:row.slice()};});
   }
   function fetchCatalog() {
-    return exe('GetTables',{filter:'id='+TABLE_ID,size:1}).then(function(r){const data=checked(r,'No se pudo consultar el catálogo.');return decode(data && data[0]);});
+    return exe('DoQuery',{sql:"SELECT TOP 1 id,name,data FROM [Table] WHERE [name]='"+TABLE_NAME+"'"}).then(function(r){const data=checked(r,'No se pudo consultar el catálogo.');const entity=Array.isArray(data)?data[0]:data;return decode(entity);});
   }
   function refresh() {
     const run=++generation.current;
@@ -115,7 +116,7 @@ function SuretyActivityCatalog() {
         if(!Number.isSafeInteger(max+1))throw new Error(t('No se pudo generar el identificador.'));
         row=[String(max+1),String(max+1),form.version,name,percent,current.email,timestamp,'',''];nextData.push(row);
       }
-      return exe('AddOrUpdateTable',{id:TABLE_ID,name:TABLE_NAME,data:JSON.stringify(nextData)});
+      return exe('AddOrUpdateTable',{id:tableId,name:TABLE_NAME,data:JSON.stringify(nextData)});
     }).then(function(r){
       checked(r,'No se pudo guardar la actividad.');
       setRows(mapRows(nextData));setModal(false);setEditing(null);

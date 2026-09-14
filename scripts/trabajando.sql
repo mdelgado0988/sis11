@@ -176,7 +176,10 @@ select rtrim(xnombrep) xnombrep, MAX(rtrim(xdescripcion)) xdescripcion
 from marepteccia
 where cramo in (81,82,83,84)
 and xnombrep like '%endoso%'
-AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
-'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_corredorseguros','endoso_poliza_fianza_descrp',
-'endoso_poliza_fianza_OP','endoso_poliza_fianza_orden_pro','endoso_poliza_fianza_valor_garantia','endoso_poliza_fianza_Vig')
+/*AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
+'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_descrp',
+'endoso_poliza_fianza_OP','endoso_poliza_fianza_orden_pro','endoso_poliza_fianza_valor_garantia','endoso_poliza_fianza_Vig')*/
 group by xnombrep
+
+
+--endoso_orden_cambio, endoso_generico_fianzas, endoso_poliza_fianza_acreedor, endoso_poliza_fianza_descrp
