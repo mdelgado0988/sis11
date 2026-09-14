@@ -119,6 +119,13 @@ if (mergedChildConcept && (isMerged || mergedChild)) {
 
 formatOutputAmounts(dataContex);
 
+// La referencia no debe repetirse en el recibo cuando describe el mismo concepto.
+const normalizedReference = String(dataContex.reference ?? '').trim().toLocaleLowerCase();
+const normalizedConcept = String(dataContex.concept ?? '').trim().toLocaleLowerCase();
+if (normalizedReference && normalizedConcept && normalizedReference === normalizedConcept) {
+  dataContex.reference = '';
+}
+
 return dataContex
 
 /* =========================
