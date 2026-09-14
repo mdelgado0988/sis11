@@ -9531,7 +9531,7 @@ Management Type: Management Type
 Direct Treasury Payment: Direct Treasury Payment
 Service Order: Service Order
 Showing: Showing
-Current claim: Current claim
+Current claim: Siniestro actual
 All policy movements: All policy movements
 #New keys found at #/contact/3 - 06/13/2026 21:34:42
 Antes de la Vigencia                                                                                                                                                                                    : Antes de la Vigencia                                                                                                                                                                                    
@@ -9568,7 +9568,7 @@ In grace period: In grace period
 Lapsed: Lapsed
 Expiring in next 90 days: Expiring in next 90 days
 Not yet issued: Not yet issued
-Pending requirements: Pending requirements
+Pending requirements: Requisitos Pendientes
 Deactivated: Deactivated
 #New keys found at #/lifePolicy/3374/tab12 - 06/15/2026 22:31:35
 Coverage : Cobertura 
@@ -9861,7 +9861,7 @@ Traditional: Traditional
 Cash basis: Cash basis
 #New keys found at #/chains - 07/15/2026 21:50:12
 base: base
-changes: changes
+changes: Endosos
 #New keys found at #/proc/381 - 07/15/2026 23:38:29
 Different User Than: Different User Than
 #New keys found at backend - 07/17/2026 18:14:54
@@ -10165,7 +10165,7 @@ Select a branch.: Seleccione una sucursal
 #New keys found at #/view/37 - 08/08/2026 02:45:27
 Cash desk created successfully.: Caja creada satisfactoriamente.
 #New keys found at #/view/37 - 08/08/2026 02:56:14
-Item id: Item id
+Item id: ID del ítem
 Transferred: Transferido
 Days overdue: Días vencidos
 Premium collections: Primas
@@ -10385,7 +10385,7 @@ Sin Identificación Persona Jur                                                 
 Sociedad Extranjera                                                                                                                                                                                     : Sociedad Extranjera                                                                                                                                                                                     
 #New keys found at #/view/37 - 08/14/2026 21:57:53
 Cash desk filters: Cash desk filters
-Date range: Date range
+Date range: Rango de fechas
 #New keys found at #/view/37 - 08/14/2026 22:10:11
 Export detail: Export detail
 Remittance format: Formato Remesa
@@ -10504,7 +10504,7 @@ Total Premiums: Total Primas
 Total Deposit: Total Depósito
 Total Discrepancy: Total Diferencia
 Processed by: Procesado por
-FINISHED: FINISHED
+FINISHED: Terminado
 #New keys found at #/view/38 - 08/18/2026 20:09:37
 Remittance name: Nombre Remesa
 Cash desk date: Fech de caja
@@ -10559,7 +10559,7 @@ Fraud flagged: Fraud flagged
 Late notification: Late notification
 With salvage/recovery: With salvage/recovery
 Master claims: Master claims
-Sub-claims: Sub-claims
+Sub-claims: Sub-Siniestros
 #New keys found at backend - 08/19/2026 15:57:02
 "Control.presentationCurrency is not set, so {0} were counted at 1:1 alongside {1}": "Control.presentationCurrency is not set, so {0} were counted at 1:1 alongside {1}"
 #New keys found at #/executiveCollection - 08/19/2026 15:57:02
@@ -10648,10 +10648,10 @@ Select fund: Select fund
 Collection rate: Collection rate
 Premium due: Premium due
 Total outstanding: Total outstanding
-days: days
+days: Días
 instalments: instalments
 Premium at risk of lapse: Premium at risk of lapse
-Annual premium: Annual premium
+Annual premium: Prima anual
 Policies still in force with unpaid instalments already due: Policies still in force with unpaid instalments already due
 #New keys found at #/contact/1 - 08/19/2026 23:43:18
 Cooperativa                                                                                                                                                                                             : Cooperativa                                                                                                                                                                                             
@@ -10801,7 +10801,7 @@ Account information: Account information
 Account code: Account code
 Search by account code: Search by account code
 #New keys found at #/view/37 - 08/21/2026 01:48:12
-Available balance: Available balance
+Available balance: Saldo disponible
 Amount to transfer: Amount to transfer
 Final balance: Final balance
 #New keys found at #/view/37 - 08/21/2026 01:51:26
@@ -10813,7 +10813,7 @@ The selected transit account has no available balance.: The selected transit acc
 #New keys found at #/view/37 - 08/21/2026 02:41:41
 The policy associated with the transit account has no pending premiums.: The policy associated with the transit account has no pending premiums.
 #New keys found at #/view/37 - 08/21/2026 02:42:58
-Transit account: Transit account
+Transit account: Cuenta de tránsito
 #New keys found at #/view/38 - 08/21/2026 14:55:23
 Process remittance: Cobrar Remesa
 Finalizado: Finalizado
@@ -10837,7 +10837,7 @@ Treaties expiring soon: Treaties expiring soon
 No treaties expiring in the alert window: No treaties expiring in the alert window
 Ends: Ends
 Largest accumulations by policyholder: Largest accumulations by policyholder
-Sum insured: Sum insured
+Sum insured: Suma Asegurada
 Share of exposure: Share of exposure
 as of now: as of now
 SLA breached: SLA breached
@@ -10858,10 +10858,10 @@ Unbalanced entries: Unbalanced entries
 Prior year: Prior year
 Executive Cockpit: Executive Cockpit
 Gross written premium: Gross written premium
-months: months
+months: Meses
 Mix by line of business: Mix by line of business
 Needs your attention: Needs your attention
-WARNING: WARNING
+WARNING: Advertencia
 Open the detail behind this alert: Open the detail behind this alert
 Net earned premium: Net earned premium
 Change versus the same period last year: Change versus the same period last year
@@ -10875,10 +10875,10 @@ Policies in force: Policies in force
 New Opportunity: New Opportunity
 Opportunity or external ref...: Opportunity or external ref...
 EVALUATION: EVALUATION
-APPROVED: APPROVED
+APPROVED: Aprobado
 BOUND: BOUND
-PENDING: PENDING
-BLOCKED: BLOCKED
+PENDING: Pendiente
+BLOCKED: bloqueado
 OVERRIDE: OVERRIDE
 Structured/Alternative: Structured/Alternative
 Opportunity: Opportunity
@@ -11301,7 +11301,7 @@ Facturas - Pólizas: Facturas - Pólizas
 #New keys found at #/view/39 - 08/31/2026 23:21:26
 Facturas: Facturas
 #New keys found at #/view/39 - 08/31/2026 23:22:38
-test: test
+test: Prueba
 #New keys found at #/view/40 - 08/31/2026 23:23:02
 Búsqueda personalizada: Búsqueda personalizada
 #New keys found at #/view/39 - 08/31/2026 23:24:00
@@ -11404,7 +11404,7 @@ The policy identifier was not found.: Póliza no encontrada.
 #New keys found at #/view/40 - 09/02/2026 14:24:22
 Restructure installments: Re-estructurar cuotas
 #New keys found at #/view/40 - 09/02/2026 14:34:00
-Semiannual: Semiannual
+Semiannual: Semestral
 New payment frequency: New frecuencia de pago
 Select the new payment frequency.: Seleccione la frecuencia de pago.
 Number of installments: Número de cuotas
@@ -11622,7 +11622,7 @@ Delinquency: Delinquency
 Select a policy from the search results to view its delinquency.: Select a policy from the search results to view its delinquency.
 #New keys found at #/executiveGrowth - 09/04/2026 04:52:12
 Where the premium came from: Where the premium came from
-Policy type: Policy type
+Policy type: Tipo de póliza
 Average premium: Average premium
 Average sum insured: Average sum insured
 Days to issue: Days to issue
@@ -11634,7 +11634,7 @@ Weighted: Weighted
 Stalled 30d: Stalled 30d
 Written: Written
 Growth: Growth
-In force: In force
+In force: En vigor
 No policies carry a channel: No policies carry a channel
 Expiring 30d: Expiring 30d
 New business: New business
@@ -11710,7 +11710,7 @@ Uncollectible Premium Endorsement: Uncollectible Premium Endorsement
 This action is only available for cancelled policies. This policy is not cancelled.: This action is only available for cancelled policies. This policy is not cancelled.
 Not cancelled: Not cancelled
 Pending premium balance: Pending premium balance
-Cancellation reason: Cancellation reason
+Cancellation reason: Motivo de cancelación
 This endorsement is not available for this policy: This endorsement is not available for this policy
 #New keys found at #/view/44?policyId=3942 - 09/04/2026 17:58:11
 This action is only available for surety lines of business (fianzas). This policy belongs to line of business : This action is only available for surety lines of business (fianzas). This policy belongs to line of business 
@@ -11719,9 +11719,9 @@ Sub-cause: Sub-cause
 Observation: Observation
 Uncollectible Premium Endorsement: Uncollectible Premium Endorsement
 This policy has no positive pending premium balance, so there is nothing to write off.: This policy has no positive pending premium balance, so there is nothing to write off.
-Current balance: Current balance
+Current balance: Saldo actual
 Pending premium balance: Pending premium balance
-Cancellation reason: Cancellation reason
+Cancellation reason: Motivo de cancelación
 Please select cause: Please select cause
 Please select sub-cause: Please select sub-cause
 Endorsement observation: Endorsement observation
@@ -11738,7 +11738,7 @@ This endorsement is not available for this policy: This endorsement is not avail
 #New keys found at #/contact/1/tabother - 09/04/2026 19:23:36
 is required in custom tab : is required in custom tab 
 #New keys found at #/healthclaim/98 - 09/04/2026 19:57:41
-Main Info: Main Info
+Main Info: Información principal
 #New keys found at backend - 09/04/2026 20:39:23
 No API token is set for this environment. Ask an administrator to generate one under Settings > API Tokens and set it in the configuration profile as Missions.apiToken.: No API token is set for this environment. Ask an administrator to generate one under Settings > API Tokens and set it in the configuration profile as Missions.apiToken.
 #New keys found at #/mission/0 - 09/04/2026 20:39:28
@@ -11978,28 +11978,28 @@ Main coverage (from configuration): Cobertura principal (de configuración)
 Main coverage duration (days): Duración de cobertura principal (días)
 Dependent: Dependiente
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:15:53
-Back to policy: Back to policy
+Back to policy: Regresar a la póliza
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:16:01
-Calculate before executing the endorsement.: Calculate before executing the endorsement.
+Calculate before executing the endorsement.: Calcule antes de ejecutar el endoso.
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:19:06
-Calculate the term change: Calculate the term change
-Premium invariant (CA6): Premium invariant (CA6)
-premium, sum insured and reinsurance unchanged: premium, sum insured and reinsurance unchanged
-Calculation completed. Review the coverage changes before executing the endorsement.: Calculation completed. Review the coverage changes before executing the endorsement.
-Endorsement applied: Endorsement applied
-Calculation completed successfully.: Calculation completed successfully.
+Calculate the term change: Calcular el cambio de vigencia
+Premium invariant (CA6): Invariante de prima (CA6)
+premium, sum insured and reinsurance unchanged: prima, suma asegurada y reaseguro sin cambios
+Calculation completed. Review the coverage changes before executing the endorsement.: Cálculo completado. Revise los cambios de cobertura antes de ejecutar el endoso.
+Endorsement applied: Endoso aplicado
+Calculation completed successfully.: Cálculo completado correctamente.
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:22:46
-Execute endorsement?: Execute endorsement?
-This action will create and execute the endorsement using the current calculation.: This action will create and execute the endorsement using the current calculation.
+Execute endorsement?: ¿Ejecutar endoso?
+This action will create and execute the endorsement using the current calculation.: Esta acción creará y ejecutará el endoso utilizando el cálculo actual.
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:22:55
-Execution status: Execution status
-Calculation completed: Calculation completed
+Execution status: Estado de ejecución
+Calculation completed: Cálculo completado
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:26:49
 The property 'Bill' is not a navigation property of entity type 'LifePolicy'. The 'Include(string)' method can only be used with a '.' separated list of navigation property names.: The property 'Bill' is not a navigation property of entity type 'LifePolicy'. The 'Include(string)' method can only be used with a '.' separated list of navigation property names.
-The view could not be loaded: The view could not be loaded
+The view could not be loaded: No se pudo cargar la vista
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:29:33
-Annual total: Annual total
-Billing invariant: Billing invariant
+Annual total: Total anual
+Billing invariant: Invariante de facturación
 The endorsement was blocked because the calculation changes the policy billing. : The endorsement was blocked because the calculation changes the policy billing. 
 #New keys found at #/view/42?policyId=3948 - 09/08/2026 01:33:09
 The endorsement was blocked because the calculation changes the policy billing. : The endorsement was blocked because the calculation changes the policy billing. 
@@ -12008,30 +12008,30 @@ Preview the resulting dates, then execute. Execution generates a ChangeCoverage 
 #New keys found at #/view/42?policyId=3959 - 09/08/2026 02:44:08
 Preview the resulting dates, then execute. Execution generates a ChangeCoverage endorsement, executes it and synchronises the insured-object data. Nothing is written until you press Execute.: Preview the resulting dates, then execute. Execution generates a ChangeCoverage endorsement, executes it and synchronises the insured-object data. Nothing is written until you press Execute.
 #New keys found at #/view/42?policyId=3959 - 09/08/2026 02:44:16
-Calculate the coverage change: Calculate the coverage change
+Calculate the coverage change: Calcular el cambio de cobertura
 Bill matches the current policy and BillDiff is zero.: Bill matches the current policy and BillDiff is zero.
 #New keys found at #/contact/0/tabaml - 09/08/2026 14:07:15
 No hay registros: No hay registros
 #New keys found at #/config - 09/08/2026 14:16:49
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/view/42?policyId=3960 - 09/08/2026 14:23:03
-Generate the endorsement: Generate the endorsement
+Generate the endorsement: Generar el endoso
 endorsement : endorsement 
-Execute the endorsement: Execute the endorsement
+Execute the endorsement: Ejecutar el endoso
 Este cambio no ha sido aprobado. Por favor revisar proceso 5941: Este cambio no ha sido aprobado. Por favor revisar proceso 5941
-The endorsement was generated but NOT executed. : The endorsement was generated but NOT executed. 
+The endorsement was generated but NOT executed. : El endoso fue generado pero NO ejecutado.
 #New keys found at #/view/42?policyId=3960 - 09/08/2026 14:23:11
 Este cambio no ha sido aprobado. Por favor revisar proceso 5942: Este cambio no ha sido aprobado. Por favor revisar proceso 5942
 #New keys found at #/view/42?policyId=3960 - 09/08/2026 14:29:27
-Change date: Change date
+Change date: Fecha del cambio
 #New keys found at #/lifePolicy/3960 - 09/08/2026 14:31:22
-Approve endorsement workflow: Approve endorsement workflow
+Approve endorsement workflow: Aprobar flujo del endoso
 Póliza modificada: Póliza modificada
-Update policy validity: Update policy validity
-Synchronise the insured object: Synchronise the insured object
-The date cannot be equal to or earlier than the policy issue/start date.: The date cannot be equal to or earlier than the policy issue/start date.
+Update policy validity: Actualizar vigencia de la póliza
+Synchronise the insured object: Sincronizar el objeto asegurado
+The date cannot be equal to or earlier than the policy issue/start date.: La fecha no puede ser igual o anterior a la fecha de emisión/inicio de la póliza.
 Endorsement : Endorsement 
-The endorsement was applied successfully.: The endorsement was applied successfully.
+The endorsement was applied successfully.: El endoso fue aplicado correctamente.
 #New keys found at backend - 09/08/2026 14:36:10
 API Token rotated. Store the new token securely — it will not be shown again.: API Token rotated. Store the new token securely — it will not be shown again.
 #New keys found at #/config - 09/08/2026 15:13:20
@@ -12043,7 +12043,7 @@ Mantenimiento: Mantenimiento
 #New keys found at #/home - 09/08/2026 16:11:41
 Zonas crestas: Zonas crestas
 #New keys found at #/missions - 09/08/2026 16:12:20
-Check again: Check again
+Check again: Revisar nuevamente
 #New keys found at #/contact/3 - 09/08/2026 17:11:58
 Antes de la Vigencia                                                                                                                                                                                    : Antes de la Vigencia                                                                                                                                                                                    
 Cédula Natural                                                                                                                                                                                          : Cédula Natural                                                                                                                                                                                          
@@ -12107,22 +12107,22 @@ Modelo: Modelo
 Categoría (código): Categoría (código)
 Nuevo Modelo: Nuevo Modelo
 #New keys found at backend - 09/08/2026 17:38:09
-Mission created: Mission created
+Mission created: Misión creada
 #New keys found at backend - 09/08/2026 17:38:09
 "Mission {0}": "Mission {0}"
 #New keys found at #/mission/1 - 09/08/2026 17:38:16
-Delete this draft?: Delete this draft?
-Delete draft: Delete draft
-Technical notes, treaties, commission tables, emails saved as PDF.: Technical notes, treaties, commission tables, emails saved as PDF.
-No documents yet. You can also send a mission with just a goal.: No documents yet. You can also send a mission with just a goal.
-Notes for AIDEN: Notes for AIDEN
+Delete this draft?: ¿Eliminar este borrador?
+Delete draft: Eliminar borrador
+Technical notes, treaties, commission tables, emails saved as PDF.: Notas técnicas, contratos, tablas de comisiones y correos guardados como PDF.
+No documents yet. You can also send a mission with just a goal.: Aún no hay documentos. También puede enviar una misión solo con un objetivo.
+Notes for AIDEN: Notas para AIDEN
 Anything else AIDEN should know? Product codes, dates, preferences…: Anything else AIDEN should know? Product codes, dates, preferences…
-Add note: Add note
-Continue to review: Continue to review
+Add note: Agregar nota
+Continue to review: Continuar a la revisión
 #New keys found at backend - 09/08/2026 17:38:19
-Input added: Input added
+Input added: Entrada agregada
 #New keys found at backend - 09/08/2026 17:38:24
-Input updated: Input updated
+Input updated: Entrada actualizada
 #New keys found at #/mission/1 - 09/08/2026 17:38:24
 What is this? Optional. A few words help AIDEN, e.g. broker commission table, still valid: What is this? Optional. A few words help AIDEN, e.g. broker commission table, still valid
 #New keys found at backend - 09/08/2026 17:38:45
@@ -12144,23 +12144,23 @@ AIDEN picks the most reasonable value, applies it and tells you what it assumed.
 Ask me first: Ask me first
 AIDEN pauses that task with a question and a recommended answer, and continues with the rest.: AIDEN pauses that task with a question and a recommended answer, and continues with the rest.
 Either way, AIDEN still asks when documents contradict each other on a value that moves money, or when it cannot continue without you.: Either way, AIDEN still asks when documents contradict each other on a value that moves money, or when it cannot continue without you.
-What happens next: What happens next
+What happens next: Qué sucede después
 AIDEN usually starts within a few minutes and posts its plan first. You will get a notification when it needs you and when it is done. You can add documents or notes at any time.: AIDEN usually starts within a few minutes and posts its plan first. You will get a notification when it needs you and when it is done. You can add documents or notes at any time.
-Send to AIDEN: Send to AIDEN
-Sent to AIDEN: Sent to AIDEN
-Add documents: Add documents
+Send to AIDEN: Enviar a AIDEN
+Sent to AIDEN: Enviado a AIDEN
+Add documents: Agregar documentos
 Cancel this mission? AIDEN will stop at its next step.: Cancel this mission? AIDEN will stop at its next step.
-Cancel mission: Cancel mission
-Live: Live
+Cancel mission: Cancelar misión
+Live: En vivo
 Waiting for it to start; this usually takes a couple of minutes.: Waiting for it to start; this usually takes a couple of minutes.
 tasks done: tasks done
 more: more
-Working: Working
-Assumptions: Assumptions
+Working: Trabajando
+Assumptions: Supuestos
 AIDEN will list here every value it had to assume. You can confirm or change them at any time.: AIDEN will list here every value it had to assume. You can confirm or change them at any time.
-Conversation: Conversation
+Conversation: Conversación
 Add a note for AIDEN…: Add a note for AIDEN…
-Nothing yet: Nothing yet
+Nothing yet: Nada todavía
 #New keys found at backend - 09/08/2026 17:39:06
 "Mission {0}": "Mission {0}"
 #New keys found at backend - 09/08/2026 17:40:47
@@ -12190,7 +12190,7 @@ Seleccione una zona CRESTA: Seleccione una zona CRESTA
 Nueva zona CRESTA: Nueva zona CRESTA
 Automático: Automático
 #New keys found at #/missions - 09/08/2026 17:50:27
-Quiet: Quiet
+Quiet: Silencioso
 #New keys found at backend - 09/08/2026 17:50:36
 Input added: Input added
 #New keys found at backend - 09/08/2026 17:50:43
@@ -12222,8 +12222,8 @@ Editar zona CRESTA: Editar zona CRESTA
 "Mission {0}": "Mission {0}"
 #New keys found at #/mission/3 - 09/08/2026 18:30:03
 assumptions to review: assumptions to review
-Done.: Done.
-tasks completed: tasks completed
+Done.: Listo.
+tasks completed: tareas completadas
 See what changed below.: See what changed below.
 added by AIDEN: added by AIDEN
 Added by AIDEN: Added by AIDEN
@@ -12642,18 +12642,18 @@ Keep running: Keep running
 Pause while in this state: Pause while in this state
 Restart when entering this state: Restart when entering this state
 End when entering this state: End when entering this state
-SLA warning at (%): SLA warning at (%)
-"% of the step SLA, e.g. 80": "% of the step SLA, e.g. 80"
-SLA escalation team: SLA escalation team
-Team that receives the request on breach: Team that receives the request on breach
-Escalate at (%): Escalate at (%)
-Not set: Not set
-Formula...: Formula...
+SLA warning at (%): Advertencia de SLA en (%)
+"% of the step SLA, e.g. 80": "% del SLA del paso, por ejemplo 80"
+SLA escalation team: Equipo de escalamiento del SLA
+Team that receives the request on breach: Equipo que recibe la solicitud al incumplirse
+Escalate at (%): Escalar en (%)
+Not set: No establecido
+Formula...: Fórmula...
 #New keys found at #/ - 09/13/2026 22:19:39
-Report Subscriptions: Report Subscriptions
-Field Changes: Field Changes
-Requests: Requests
+Report Subscriptions: Suscripciones de reportes
+Field Changes: Cambios de campos
+Requests: Solicitudes
 #New keys found at #/config - 09/13/2026 22:57:57
-Out of office: Out of office
+Out of office: Fuera de la oficina
 #New keys found at #/config - 09/13/2026 23:37:55
-Out of office: Out of office
+Out of office: Fuera de la oficina

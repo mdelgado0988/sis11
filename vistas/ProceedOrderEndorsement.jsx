@@ -519,6 +519,17 @@
     }
   };
 
+  const generateEndorsementDocument = async function (changeId) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdGenertFormatoEmdoso',
+      context: JSON.stringify({ changeId: Number(changeId) })
+    });
+    const data = response && response.outData;
+    if (!response || !response.ok || (data && data.ok === false)) {
+      throw new Error((data && data.msg) || (response && response.msg) || t('The endorsement document could not be generated.'));
+    }
+  };
+
   const onExecute = async function () {
     setTouched(true);
     if (!isValid) { message.error(t('Required: ') + missing.join(', ')); return; }
@@ -575,6 +586,13 @@
         return;
       }
       pushStep(t('Execute the endorsement'), true, translatedMessage(executed.msg, ''));
+
+      try {
+        await generateEndorsementDocument(cid);
+      } catch (documentError) {
+        pushStep(t('Generate the endorsement document'), false, String(documentError && documentError.message ? documentError.message : documentError));
+        message.warning(t('The endorsement was applied, but its document could not be generated.') + ' ' + String(documentError && documentError.message ? documentError.message : documentError));
+      }
 
       // ChangeCoverage updates the coverages but does not necessarily update the
       // LifePolicy validity. Persist the dates represented by the endorsement.

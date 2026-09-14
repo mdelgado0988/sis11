@@ -465,6 +465,17 @@
     setSaving(false);
   };
 
+  const generateEndorsementDocument = async function (changeId) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdGenertFormatoEmdoso',
+      context: JSON.stringify({ changeId: Number(changeId) })
+    });
+    const data = response && response.outData;
+    if (!response || !response.ok || (data && data.ok === false)) {
+      throw new Error((data && data.msg) || (response && response.msg) || t('The endorsement document could not be generated.'));
+    }
+  };
+
   const onExecute = async function () {
     setActionError('');
     if (!formValid || !quote || !detail || !savedChange) return;
@@ -508,6 +519,11 @@
       const exeRes = await exe('ExeChangeCancellation', { changeId: target.changeId });
       if (!exeRes || !exeRes.ok) {
         throw new Error(t('The endorsement was saved as number ') + target.changeId + t(' but it could NOT be executed, so it was not applied. Review it from the policy change list.'));
+      }
+      try {
+        await generateEndorsementDocument(target.changeId);
+      } catch (documentError) {
+        message.warning(t('The endorsement was applied, but its document could not be generated.') + ' ' + String(documentError && documentError.message ? documentError.message : documentError));
       }
       const after = await exe('GetPendingPremiums', { policyId: policyId });
       setDone({ changeId: target.changeId, balance: after && after.ok ? Number((after.outData || {}).pending || 0) : null });

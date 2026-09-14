@@ -1573,6 +1573,17 @@
       })
     };
 
+    const generateEndorsementDocument = async function (endorsementChangeId) {
+      const response = await exe('ExeChain', {
+        chain: 'cmdGenertFormatoEmdoso',
+        context: JSON.stringify({ changeId: Number(endorsementChangeId) })
+      });
+      const data = response && response.outData;
+      if (!response || !response.ok || (data && data.ok === false)) {
+        throw new Error((data && data.msg) || (response && response.msg) || t('No se pudo generar el documento del endoso'));
+      }
+    };
+
     let changeId = 0;
     let reinsurancePrepared = false;
     let reinsuranceExecuted = false;
@@ -1681,6 +1692,12 @@
         } catch (reinsuranceError) {
           failures.push(t('actualización del reaseguro') + ': ' + String(reinsuranceError && reinsuranceError.message ? reinsuranceError.message : reinsuranceError));
         }
+      }
+
+      try {
+        await generateEndorsementDocument(changeId);
+      } catch (documentError) {
+        failures.push(t('documento del endoso') + ': ' + String(documentError && documentError.message ? documentError.message : documentError));
       }
 
       const message = failures.length
