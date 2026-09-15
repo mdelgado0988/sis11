@@ -8,6 +8,57 @@
 
   var me = this;
 
+  function cargarContactoInicial() {
+    const params = me && me.params ? me.params : {};
+    const holderId = Number(params.holderId || 0);
+    const holderName = String(params.holderName || '').trim();
+    const $input = $('#clientePA');
+    const $inputCodigo = $('#hiddenCodigoCliente');
+    const $inputIdentificacion = $('#identificacionPagador');
+
+    if (!holderId || !$input.length) return;
+
+    const asignarContacto = contacto => {
+      const nombre = String(contacto && contacto.nombreCompleto || holderName).trim();
+      const identificacion = String(contacto && contacto.identificacion || '').trim();
+      const selectedItem = {
+        nombreCompleto: nombre,
+        identificacion: identificacion,
+        noCobis: contacto && contacto.noCobis || '',
+        codigo: holderId
+      };
+
+      $input.val(nombre);
+      $inputCodigo.val(holderId);
+      $inputIdentificacion.val(identificacion);
+      $input.data('selectedItem', selectedItem);
+    };
+
+    asignarContacto({ nombreCompleto: holderName });
+
+    if (!me || typeof me.exe !== 'function') return;
+
+    me.exe('GetContacts', {
+      size: 1,
+      page: 0,
+      filter: `id = ${holderId}`
+    }).then(result => {
+      const contact = result && Array.isArray(result.outData) ? result.outData[0] : null;
+      if (!contact) return;
+
+      asignarContacto({
+        nombreCompleto: [contact.name, contact.middlename, contact.surname1, contact.surname2]
+          .map(value => String(value || '').trim())
+          .filter(Boolean)
+          .join(' '),
+        identificacion: contact.isPerson === true
+          ? (contact.idType === 'PAS' ? contact.passport : contact.cnp)
+          : contact.nif,
+        noCobis: contact.nationalId
+      });
+    }).catch(() => {});
+  }
+
   function logica() {
     try {
 
@@ -17,6 +68,7 @@
         //para evitar sugerencias
         campoPagador.setAttribute('autocomplete', 'off');
         agregarAutocomplete(10);
+        cargarContactoInicial();
       
     } catch (error) {
       

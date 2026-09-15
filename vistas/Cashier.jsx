@@ -2855,6 +2855,66 @@
     return !internalType.startsWith('DEPOSIT-') && internalType !== 'REFUND';
   }
 
+  function normalizeIncomeTypeFormName(value) {
+    return getTrimmedString(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  function isPremiumContactForm(form) {
+    return ['name', 'code', 'formName'].some(property =>
+      normalizeIncomeTypeFormName(form && form[property]) === 'frmcontactoprimaanticipada'
+    );
+  }
+
+  function getPremiumContactFormContext(form) {
+    const baseContext = { exe: exe };
+    if (!collectionChargeVisible || !isPremiumContactForm(form)) return baseContext;
+
+    const selectedRow = getSelectedCollectionRows()[0] || {};
+    const policyRow = transitCollectionPolicyRow || {};
+    const account = transitCollectionAccount || {};
+    const policyId = Number(
+      selectedRow.lifePolicyId
+      || selectedRow.policyId
+      || policyRow.lifePolicyId
+      || policyRow.policyId
+      || account.lifePolicyId
+      || account.policyId
+      || 0
+    );
+    const holderId = Number(
+      selectedRow.holderId
+      || policyRow.holderId
+      || account.holderId
+      || account.contactId
+      || 0
+    );
+    const holderName = getTrimmedString(
+      selectedRow.payer
+      || selectedRow.holderName
+      || selectedRow.holder
+      || policyRow.payer
+      || policyRow.holderName
+      || account.contactName
+      || account.holderName
+      || account.holder
+    );
+    const params = {
+      policyId: Number.isFinite(policyId) && policyId > 0 ? policyId : 0,
+      holderId: Number.isFinite(holderId) && holderId > 0 ? holderId : 0,
+      holderName: holderName
+    };
+
+    return {
+      ...baseContext,
+      ...params,
+      params: params
+    };
+  }
+
   function activateNewIncomePaymentForm(paymentKey, control) {
     setNewIncomeActiveFormKey(String(paymentKey));
     if (control && typeof control.focus === 'function') {
@@ -3940,7 +4000,7 @@
         applyDynamicFormLayout(container);
 
         try {
-          evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+          evalNewIncomeFormLogic(config.form.logic, getPremiumContactFormContext(config.form));
         } catch (error) {
           message.error(error && error.message ? error.message : String(error));
         }
