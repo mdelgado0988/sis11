@@ -1930,10 +1930,10 @@
       dateLike.year(),
       dateLike.month(),
       dateLike.date(),
-      dateLike.hour(),
-      dateLike.minute(),
-      dateLike.second(),
-      dateLike.millisecond()
+      12,
+      0,
+      0,
+      0
     ));
     return utcDate.toISOString();
   }
