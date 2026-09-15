@@ -88,8 +88,6 @@
   const EMPTY_VALUE = '—';
   const IMPORT_CONFIG_NAME = 'Notificaciones MASIVAS';
   const PREPROCESSOR_CHAIN = 'cmdImportPreloadMassiveNotification';
-  const REQUIRED_IMPORT_HEADERS = ['poliza'];
-  const REQUIRED_XLSX_COLUMNS = REQUIRED_IMPORT_HEADERS.join(', ');
 
   const [form] = Form.useForm();
   const [rows, setRows] = React.useState([]);
@@ -257,6 +255,38 @@
       title: 'Motivo',
       dataIndex: 'motivo',
       key: 'motivo',
+      render: renderLongText
+    }
+  ];
+
+  const uploadValidationColumns = [
+    {
+      title: 'Fila',
+      dataIndex: 'fila',
+      key: 'fila',
+      width: 70,
+      align: 'center',
+      render: displayValue
+    },
+    {
+      title: 'Póliza',
+      dataIndex: 'poliza',
+      key: 'poliza',
+      width: 160,
+      render: displayValue
+    },
+    {
+      title: 'Estado',
+      dataIndex: 'estado',
+      key: 'estado',
+      width: 110,
+      align: 'center',
+      render: value => <Tag color={value === 'Válida' ? 'green' : 'red'}>{value}</Tag>
+    },
+    {
+      title: 'Mensaje de validación',
+      dataIndex: 'mensaje',
+      key: 'mensaje',
       render: renderLongText
     }
   ];
@@ -988,28 +1018,11 @@
   });
 
   const validateWorkbookRows = (workbookRows) => {
-    const hasDataRow = workbookRows.slice(1)
-      .some((row) => row.some((value) => String(value).trim() !== ''));
-    if (workbookRows.length < 2 || !hasDataRow) {
-      throw new Error('La primera hoja debe incluir el encabezado y al menos una póliza.');
-    }
-
-    const header = workbookRows[0].map((value) => String(value).trim());
-    const missingHeaders = REQUIRED_IMPORT_HEADERS.filter((requiredHeader) => header.indexOf(requiredHeader) < 0);
-    if (missingHeaders.length) {
-      throw new Error('Falta la columna obligatoria: ' + missingHeaders.join(', ') + '.');
-    }
-
-    const repeatedHeaders = header.filter((value, index, values) => value && values.indexOf(value) !== index);
-    if (repeatedHeaders.length) {
-      throw new Error('El archivo contiene columnas duplicadas: '
-        + repeatedHeaders.filter((value, index, values) => values.indexOf(value) === index).join(', ') + '.');
-    }
-
-    const unexpectedHeaders = header.filter((value) => value && REQUIRED_IMPORT_HEADERS.indexOf(value) < 0);
-    if (unexpectedHeaders.length) {
-      throw new Error('El archivo contiene columnas no permitidas: ' + unexpectedHeaders.join(', ')
-        + '. El encabezado requerido es: ' + REQUIRED_XLSX_COLUMNS + '.');
+    const firstHeader = workbookRows[0] && String(workbookRows[0][0] || '').trim();
+    const hasPolicyData = workbookRows.slice(1)
+      .some((row) => String(row && row[0] || '').trim() !== '');
+    if (workbookRows.length < 2 || !firstHeader || !hasPolicyData) {
+      throw new Error('La primera hoja debe incluir una primera columna con el código de póliza y al menos un registro.');
     }
   };
 
@@ -1117,7 +1130,21 @@
     return false;
   };
 
-  const processSelectedFile = () => {
+  const getUploadValidationRows = () => invalidUploadRows.map((row, index) => ({
+    key: String(row && row.fila || index + 2) + '-' + index,
+    fila: row && row.fila || index + 2,
+    poliza: row && row.poliza,
+    estado: 'No válida',
+    mensaje: Array.isArray(row && row.errores)
+      ? row.errores.join(' ')
+      : String(row && (row.errores || row.mensaje || row.message || row.motivo) || 'La póliza no pudo ser validada.')
+  }));
+
+  const getPreprocessorRows = () => parsedUploadRows
+    .filter((row) => Array.isArray(row))
+    .map((row, index) => index === 0 ? ['poliza'] : [row[0]]);
+
+  const validateSelectedFile = () => {
     if (selectedLoadType === null || selectedLoadType === undefined) {
       message.warning('Seleccione un tipo de carga para continuar.');
       return;
@@ -1138,10 +1165,12 @@
     }
 
     setProcessingFile(true);
+    setPrevalidatedUploadRows([]);
+    setInvalidUploadRows([]);
     exe('ExeChain', {
       chain: PREPROCESSOR_CHAIN,
       context: JSON.stringify({
-        rows: parsedUploadRows,
+        rows: getPreprocessorRows(),
         templateId: Number(selectedLoadType),
         usuario: currentUserEmail
       })
@@ -1157,48 +1186,80 @@
         setPrevalidatedUploadRows(validRows);
         setInvalidUploadRows(invalidRows);
 
-        if (!result || result.ok === false || !payload || payload.ok === false || validCount <= 0) {
+        if (!result || result.ok === false || !payload || payload.ok === false) {
           throw new Error(payload && payload.msg
             ? payload.msg
-            : (result && result.msg ? result.msg : 'No se encontraron pólizas válidas para crear el lote.'));
+            : (result && result.msg ? result.msg : 'No se pudo validar el archivo.'));
         }
 
-        const summary = payload.msg || ('Prevalidación finalizada: ' + validCount
-          + ' válidas y ' + invalidRows.length + ' no válidas.');
-        return resolveImportConfigId()
-          .then((configId) => exe('RepoBatch', {
-            operation: 'ADD',
-            entity: {
-              importConfigId: configId,
-              jData: JSON.stringify(invalidRows.length
-                ? { validRows: validRows, invalidRows: invalidRows }
-                : validRows),
-              name: selectedFile.name,
-              processingType: 0,
-              records: validCount,
-              success: 0,
-              error: 0
-            }
-          }))
-          .then((batchResult) => {
-            if (!batchResult || batchResult.ok === false) {
-              throw new Error(batchResult && batchResult.msg
-                ? batchResult.msg
-                : 'No se pudo crear el lote de notificaciones masivas.');
-            }
-
-            if (invalidRows.length) message.warning(summary + ' Se creó el lote únicamente con los casos válidos.');
-            else message.success(summary + ' Lote creado correctamente.');
-
-            setUploadOpen(false);
-            clearUploadSelection();
-            setSelectedLoadType(undefined);
-            return loadBatches(1, pagination.pageSize || PAGE_SIZE, filters);
-          });
+        if (validCount <= 0) {
+          message.warning('No se encontraron pólizas válidas. Revise el detalle de validación antes de cargar el archivo.');
+        } else {
+          message.success('Validación finalizada: ' + validCount + ' válidas y ' + invalidRows.length + ' no válidas.');
+        }
       })
       .catch((error) => {
-        setPrevalidatedUploadRows([]);
-        message.error(error && error.message ? error.message : String(error));
+        message.error(error && error.message ? error.message : 'No se pudo validar el archivo.');
+      })
+      .then(() => setProcessingFile(false));
+  };
+
+  const processSelectedFile = () => {
+    if (selectedLoadType === null || selectedLoadType === undefined) {
+      message.warning('Seleccione un tipo de carga para continuar.');
+      return;
+    }
+    if (!selectedFile) {
+      message.warning('Seleccione un archivo para continuar.');
+      return;
+    }
+    if (!prevalidatedUploadRows.length) {
+      message.warning('Valide el archivo antes de cargarlo.');
+      return;
+    }
+
+    const validCount = Math.max(0, prevalidatedUploadRows.length - 1);
+    if (validCount <= 0) {
+      message.warning('No hay pólizas válidas para crear el lote. Corrija el archivo y vuelva a validarlo.');
+      return;
+    }
+    if (!currentUserEmail || processingFile) return;
+
+    setProcessingFile(true);
+    resolveImportConfigId()
+      .then((configId) => exe('RepoBatch', {
+        operation: 'ADD',
+        entity: {
+          importConfigId: configId,
+          jData: JSON.stringify(invalidUploadRows.length
+            ? { validRows: prevalidatedUploadRows, invalidRows: invalidUploadRows }
+            : prevalidatedUploadRows),
+          name: selectedFile.name,
+          processingType: 0,
+          records: validCount,
+          success: 0,
+          error: 0
+        }
+      }))
+      .then((batchResult) => {
+        if (!batchResult || batchResult.ok === false) {
+          throw new Error(batchResult && batchResult.msg
+            ? batchResult.msg
+            : 'No se pudo crear el lote de notificaciones masivas.');
+        }
+
+        if (invalidUploadRows.length) {
+          message.warning('Lote creado únicamente con las ' + validCount + ' pólizas válidas.');
+        } else {
+          message.success('Lote creado correctamente con ' + validCount + ' pólizas.');
+        }
+        setUploadOpen(false);
+        clearUploadSelection();
+        setSelectedLoadType(undefined);
+        return loadBatches(1, pagination.pageSize || PAGE_SIZE, filters);
+      })
+      .catch((error) => {
+        message.error(error && error.message ? error.message : 'No se pudo crear el lote de notificaciones masivas.');
       })
       .then(() => setProcessingFile(false));
   };
@@ -1522,6 +1583,20 @@
         padding-top: 8px;
       }
 
+      .notificaciones-masivas-upload-validation {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .notificaciones-masivas-upload-validation-summary {
+        padding: 8px 10px;
+        background: #eaf4ff;
+        border: 1px solid #b7d7f5;
+        color: #174f7c;
+        font-size: 12px;
+      }
+
       .notificaciones-masivas-inconsistency-table .ant-table-container {
         border: 1px solid #cbd1d8;
       }
@@ -1777,7 +1852,7 @@
         <Modal
           className="notificaciones-masivas-upload-modal"
           title="Carga de archivo para notificaciones masivas"
-          width={520}
+          width={760}
           open={uploadOpen}
           onCancel={closeUpload}
           closable={!processingFile}
@@ -1789,11 +1864,22 @@
               Cerrar
             </Button>,
             <Button
+              key="validate"
+              loading={processingFile || uploadFileParsing}
+              disabled={!selectedFile || !parsedUploadRows.length || uploadFileParsing || processingFile
+                || selectedLoadType === null || selectedLoadType === undefined}
+              onClick={validateSelectedFile}
+            >
+              <EyeIcon />
+              Validar archivo
+            </Button>,
+            <Button
               key="load"
               type="primary"
-              loading={processingFile || uploadFileParsing}
+              loading={processingFile}
               disabled={!selectedFile || !parsedUploadRows.length || uploadFileParsing
-                || selectedLoadType === null || selectedLoadType === undefined}
+                || selectedLoadType === null || selectedLoadType === undefined
+                || !prevalidatedUploadRows.length || prevalidatedUploadRows.length <= 1}
               onClick={processSelectedFile}
             >
               <UploadIcon />
@@ -1815,7 +1901,11 @@
               <Form.Item label="Tipo de carga">
                 <Select
                   value={selectedLoadType}
-                  onChange={setSelectedLoadType}
+                  onChange={(value) => {
+                    setSelectedLoadType(value);
+                    setPrevalidatedUploadRows([]);
+                    setInvalidUploadRows([]);
+                  }}
                   loading={loadTypesLoading}
                   disabled={loadTypesLoading || !loadTypeOptions.length || processingFile}
                   placeholder={loadTypesLoading
@@ -1849,6 +1939,25 @@
               </Form.Item>
             </Form>
           </fieldset>
+
+          {(prevalidatedUploadRows.length > 0 || invalidUploadRows.length > 0) && (
+            <div className="notificaciones-masivas-upload-validation">
+              <div className="notificaciones-masivas-upload-validation-summary">
+                <strong>Resultado de validación:</strong>{' '}
+                {Math.max(0, prevalidatedUploadRows.length - 1)} válidas, {invalidUploadRows.length} no válidas.
+              </div>
+              <Table
+                className="notificaciones-masivas-inconsistency-table"
+                rowKey="key"
+                size="small"
+                bordered
+                columns={uploadValidationColumns}
+                dataSource={getUploadValidationRows()}
+                pagination={{ pageSize: 8, hideOnSinglePage: true }}
+                locale={{ emptyText: 'No se encontraron inconsistencias.' }}
+              />
+            </div>
+          )}
         </Modal>
 
         <Modal
