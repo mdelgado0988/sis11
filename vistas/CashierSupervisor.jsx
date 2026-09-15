@@ -2621,13 +2621,71 @@
     }
   }
 
+  function isCashReceiptReport(report) {
+    const normalize = value => getTrimmedString(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+    const name = normalize(report && report.name);
+    const reportCode = normalize(report && report.report);
+
+    return (name.includes('recibo') && name.includes('caja'))
+      || ['reciboglobal', 'reciboglobaloriginal', 'recibodecaja', 'roc', 'rociv'].includes(name)
+      || ['reciboglobal', 'reciboglobaloriginal', 'recibodecaja', 'roc', 'rociv'].includes(reportCode);
+  }
+
+  function getSelectedSupervisorReportTransfers() {
+    const selectedGroups = movementSelectedRowKeys
+      .map(key => movementRows.find(row => String(row && row.id) === String(key)))
+      .filter(Boolean);
+    const transfers = [];
+
+    selectedGroups.forEach(group => {
+      const children = getSupervisorMovementChildren(group);
+      const items = children.length > 0 ? children : [group];
+      items.forEach(item => {
+        const transferId = Number(item && item.id);
+        if (!Number.isFinite(transferId) || transferId <= 0) return;
+        const allocationValue = Number(item && (item.allocationId || item.Allocation && item.Allocation.id)
+          || group && (group.allocationId || group.Allocation && group.Allocation.id)
+          || 0);
+        transfers.push({
+          transferId: transferId,
+          allocationId: Number.isFinite(allocationValue) && allocationValue > 0 ? allocationValue : 0
+        });
+      });
+    });
+
+    return Array.from(new Map(transfers.map(item => [item.transferId, item])).values());
+  }
+
   function openSupervisorMovementReport(report) {
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
     const reportName = getTrimmedString(report && report.report);
     if (!workspaceId || !reportName) return;
     const ids = movementSelectedRowKeys.map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0);
-    const transferId = ids.length ? `[${ids.join(',')}]` : '0';
-    window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`, '_blank', 'noopener,noreferrer');
+
+    if (!isCashReceiptReport(report)) {
+      const transferId = ids.length ? `[${ids.join(',')}]` : '0';
+      window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    const selectedTransfers = getSelectedSupervisorReportTransfers();
+    if (selectedTransfers.length === 0) return;
+
+    const allocatedTransfers = selectedTransfers.filter(item => item.allocationId > 0);
+    const unallocatedTransfers = selectedTransfers.filter(item => item.allocationId <= 0);
+
+    if (allocatedTransfers.length > 0) {
+      const allocatedIds = allocatedTransfers.map(item => item.transferId);
+      window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=[${allocatedIds.join(',')}]`, '_blank', 'noopener,noreferrer');
+    }
+
+    unallocatedTransfers.forEach(item => {
+      window.open(`#/reportview/ROC_IV/workspaceId=${workspaceId}&transferId=${item.transferId}`, '_blank', 'noopener,noreferrer');
+    });
   }
 
   function openSupervisorCustomerStatement() {

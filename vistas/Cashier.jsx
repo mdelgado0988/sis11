@@ -3260,7 +3260,7 @@
 
       const container = document.getElementById(`cashier-payment-form-${payment.key}-${getNewIncomeFormScope()}`)
         || newIncomeFormRefs.current[payment.key];
-      const definition = getDynamicFormDefinition(config.form);
+      const definition = getPaymentFormDefinition(getDynamicFormDefinition(config.form));
       const requiredFields = Array.isArray(definition)
         ? definition.filter(field => field && field.required && field.name)
         : [];
@@ -3356,7 +3356,95 @@
       }
     }
 
-    return Array.isArray(definition) ? definition : null;
+    if (!Array.isArray(definition)) return null;
+
+    // Some saved payment forms contain duplicated controls with the same name.
+    // Keep one definition per field so the form is rendered only once.
+    const fieldNames = new Set();
+    return definition.filter(field => {
+      const name = getTrimmedString(field && field.name);
+      if (!name) return true;
+      if (fieldNames.has(name)) return false;
+      fieldNames.add(name);
+      return true;
+    });
+  }
+
+  function normalizePaymentFormFieldText(value) {
+    return getTrimmedString(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '')
+      .replace(/\d+$/, '');
+  }
+
+  function getPaymentFormFieldKey(field) {
+    const name = normalizePaymentFormFieldText(field && field.name);
+    const label = normalizePaymentFormFieldText(field && field.label);
+
+    if (name.includes('numerocheque') || label.includes('numerodecheque')) return 'numeroCheque';
+    if (name.includes('fechacheque') || label.includes('fechadelcheque')) return 'fechaCheque';
+    if (name.includes('bancocheque') || label === 'banco') return 'bancoCheque';
+    if (name.includes('numerotarjeta') || label.includes('numerodetarjeta')) return 'numeroTarjeta';
+    return '';
+  }
+
+  function getPaymentFormDefinition(formData) {
+    const seen = new Set();
+    return (Array.isArray(formData) ? formData : []).filter(field => {
+      const key = getPaymentFormFieldKey(field);
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function removeDuplicatedPaymentRenderedFields(container) {
+    if (!container) return;
+
+    const seen = new Set();
+    const groups = [];
+    const registeredGroups = new Set();
+
+    container.querySelectorAll('label').forEach(label => {
+      const group = label.closest('.form-group') || label.parentElement;
+      if (!group || group === container || registeredGroups.has(group)) return;
+      registeredGroups.add(group);
+      groups.push(group);
+    });
+
+    container.querySelectorAll('[name]').forEach(control => {
+      const group = control.closest('.form-group') || control.parentElement;
+      if (!group || group === container || registeredGroups.has(group)) return;
+      registeredGroups.add(group);
+      groups.push(group);
+    });
+
+    groups.forEach(group => {
+      const label = group.querySelector('label');
+      const control = group.querySelector('[name]');
+      const key = getPaymentFormFieldKey({
+        label: label ? label.textContent : '',
+        name: control ? control.getAttribute('name') : ''
+      });
+
+      if (!key) return;
+      if (!seen.has(key)) {
+        seen.add(key);
+        return;
+      }
+
+      group.remove();
+    });
+  }
+
+  function schedulePaymentRenderedFieldsCleanup(container) {
+    removeDuplicatedPaymentRenderedFields(container);
+    [0, 100, 300].forEach(delay => {
+      setTimeout(() => removeDuplicatedPaymentRenderedFields(container), delay);
+    });
   }
 
   function mergeDynamicFormValues(form, savedValues) {
@@ -3446,7 +3534,7 @@
     const config = newIncomeDynamicForms[paymentKey];
     const container = document.getElementById(`cashier-payment-form-${paymentKey}-${getNewIncomeFormScope()}`)
       || newIncomeFormRefs.current[paymentKey];
-    return getDynamicFormJson(config, container);
+    return getDynamicFormJson(config, container, form => getPaymentFormDefinition(getDynamicFormDefinition(form)));
   }
 
   function getIncomeTypeFormJson() {
@@ -3461,10 +3549,12 @@
     return 'new';
   }
 
-  function getDynamicFormJson(config, container) {
+  function getDynamicFormJson(config, container, getDefinition) {
     if (!config || !config.form) return null;
 
-    const definition = getDynamicFormDefinition(config.form);
+    const definition = typeof getDefinition === 'function'
+      ? getDefinition(config.form)
+      : getDynamicFormDefinition(config.form);
     if (!definition) return null;
 
     const values = container
@@ -3779,20 +3869,25 @@
       if (!config || config.loading || !config.form) return;
       if (typeof $ === 'undefined' || !$.fn || typeof $.fn.formRender !== 'function') return;
 
-      const formData = getDynamicFormDefinition(config.form);
+      const formData = getPaymentFormDefinition(getDynamicFormDefinition(config.form));
       if (!formData) return;
 
       document.querySelectorAll(`[id^="cashier-payment-form-${paymentKey}-"]`).forEach(container => {
         const formSignature = JSON.stringify(formData);
-        if (container.dataset.formSignature === formSignature) return;
+        if (container.dataset.formSignature === formSignature) {
+          schedulePaymentRenderedFieldsCleanup(container);
+          return;
+        }
 
         container.innerHTML = '';
         $(container).formRender({ formData: formData });
+        schedulePaymentRenderedFieldsCleanup(container);
         applyDynamicFormLayout(container);
         container.dataset.formSignature = formSignature;
 
         try {
           evalNewIncomeFormLogic(config.form.logic, { exe: exe });
+          schedulePaymentRenderedFieldsCleanup(container);
         } catch (error) {
           message.error(error && error.message ? error.message : String(error));
         }
@@ -4615,6 +4710,42 @@
       });
   }
 
+  function isCashReceiptReport(report) {
+    const normalize = value => getTrimmedString(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+    const name = normalize(report && report.name);
+    const reportCode = normalize(report && report.report);
+
+    return (name.includes('recibo') && name.includes('caja'))
+      || ['reciboglobal', 'reciboglobaloriginal', 'recibodecaja', 'roc', 'rociv'].includes(name)
+      || ['reciboglobal', 'reciboglobaloriginal', 'recibodecaja', 'roc', 'rociv'].includes(reportCode);
+  }
+
+  function getSelectedCashierReportTransfers() {
+    const selectedGroups = movementSelectedRowKeys
+      .map(key => movementRows.find(row => String(row && row.id) === String(key)))
+      .filter(Boolean);
+    const transfers = [];
+
+    selectedGroups.forEach(group => {
+      const children = getMovementChildren(group);
+      const items = children.length > 0 ? children : [group];
+      items.forEach(item => {
+        const transferId = Number(item && item.id);
+        if (!Number.isFinite(transferId) || transferId <= 0) return;
+        transfers.push({
+          transferId: transferId,
+          allocationId: getMovementAllocationId(item) || getMovementAllocationId(group)
+        });
+      });
+    });
+
+    return Array.from(new Map(transfers.map(item => [item.transferId, item])).values());
+  }
+
   function openCashierReport(report) {
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
     const reportName = getTrimmedString(report && report.report);
@@ -4623,13 +4754,39 @@
     const transferIds = movementSelectedRowKeys
       .map(value => Number(value))
       .filter(value => Number.isFinite(value) && value > 0);
-    const transferId = transferIds.length > 0 ? `[${transferIds.join(',')}]` : '0';
 
-    window.open(
-      `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
+    if (!isCashReceiptReport(report)) {
+      const transferId = transferIds.length > 0 ? `[${transferIds.join(',')}]` : '0';
+      window.open(
+        `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
+      return;
+    }
+
+    const selectedTransfers = getSelectedCashierReportTransfers();
+    if (selectedTransfers.length === 0) return;
+
+    const allocatedTransfers = selectedTransfers.filter(item => item.allocationId > 0);
+    const unallocatedTransfers = selectedTransfers.filter(item => item.allocationId <= 0);
+
+    if (allocatedTransfers.length > 0) {
+      const allocatedIds = allocatedTransfers.map(item => item.transferId);
+      window.open(
+        `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=[${allocatedIds.join(',')}]`,
+        '_blank',
+        'noopener,noreferrer'
+      );
+    }
+
+    unallocatedTransfers.forEach(item => {
+      window.open(
+        `#/reportview/ROC_IV/workspaceId=${workspaceId}&transferId=${item.transferId}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
+    });
   }
 
   function loadCollection(params = {}) {
