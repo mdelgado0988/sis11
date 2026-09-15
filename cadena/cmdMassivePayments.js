@@ -5,11 +5,12 @@
  * @created 2026-01-01
  * @name cmdMassivePayments
  * @version 1.0
- * @summary This command makes a premium payment according to the policy indicated..
+ * @summary This command makes a premium payment according to the policy id provided.
  */
 const { row } = context;
 const errors = [];
 const batchId = validateBatchId(context && context.batchId);
+const policyId = validatePositiveId(row && row.policyId);
 
 hydrateBatchPayer(row, batchId);
 ValidateDto(row,errors);
@@ -28,20 +29,18 @@ if(IsNull(cashier))
     throw '@No existe caja con el id: ' + cashier.id;
 
 
-const policyReference = findPolicyByFiscalNumber(row.numRecibo, row.policyCode);
-
 doCmd({
     cmd:'RepoLifePolicy',
     data:{ 
         operation:'GET',
-        filter:`[id]=${policyReference.lifePolicyId}`,
+        filter:`[id]=${policyId}`,
         include:['Accounts','Holder','ComContract'],
         noTracking: true 
 }});
 
 const Policy = RepoLifePolicy.outData?.pop();
 if(IsNull(Policy))
-    throw '@No se encontró el recibo o la póliza indicada';
+    throw '@No se encontró la póliza indicada';
 
 //Michael Delgado. 2026.05.20. GLOB-748. Se permite aplicar a pólizas inactivas siempre y cuando tengan saldo.
 /*if(Policy.entityState === 'INACTIVE' || !Policy.active || !!Policy.inactiveDate)
@@ -54,13 +53,7 @@ const payer = resolvePayer(row, Policy);
 
 setPaylan(Policy);
 
-/*
-const numRecibo = Number(row.numRecibo);
-const pago = Policy.PayPlan.find(item => item.id === numRecibo);
-if(IsNull(pago))
-    throw '@No se encontró recibo '+ row.numRecibo + ' en la poliza: ' + Policy.code;
-*/
-const Installments = GetInstallments(Policy.PayPlan, policyReference.changeId, Policy.code);
+const Installments = GetInstallments(Policy.PayPlan, 0, Policy.code);
 //return Policy.PayPlan
 //return Installments.installments;
 
@@ -172,40 +165,6 @@ function setPaylan(Policy) {
 
   Policy.PayPlan = resultado;
   
-}
-
-// GLOB-588: Resuelve la póliza desde el número fiscal, ya sea de la póliza o de un endoso.
-function findPolicyByFiscalNumber(fiscalNumber, policyCode) {
-  const escapedFiscalNumber = String(fiscalNumber).replace(/'/g, "''");
-  const escapedPolicyCode = String(policyCode).replace(/'/g, "''");
-  const query = `SELECT TOP 1 receipt.lifePolicyId, receipt.changeId
-  FROM (
-    SELECT lp.id AS lifePolicyId, 0 AS changeId, 0 AS sourceOrder
-    FROM LifePolicy lp
-    WHERE lp.fiscalNumber = '${escapedFiscalNumber}'
-      AND lp.code = '${escapedPolicyCode}'
-
-    UNION ALL
-
-    SELECT c.lifePolicyId, b.changeId, 1 AS sourceOrder
-    FROM Bill b
-    INNER JOIN Change c ON c.id = b.changeId
-    INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId
-    WHERE b.fiscalNumber = '${escapedFiscalNumber}'
-      AND lp.code = '${escapedPolicyCode}'
-  ) receipt
-  ORDER BY receipt.sourceOrder`;
-
-  doCmd({ cmd: 'DoQuery', data: { sql: query } });
-  const result = DoQuery.outData?.[0];
-
-  if(IsNull(result?.lifePolicyId))
-    throw '@No se encontró el recibo o la póliza indicada';
-
-  return {
-    lifePolicyId: result.lifePolicyId,
-    changeId: result.changeId ?? 0
-  };
 }
 
 function CreateHolderAccount( intermediaryId, policyId ){
@@ -519,13 +478,13 @@ function GetInstallments(payPlan, changeId, policyCode){
       .filter(item => onlyPositive ? item.minimum > 0 : item.minimum < 0)
       .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
   
-    //GLOB-588: Validamos número fiscal (recibo), si se filtra por un cambio, que se busquen solo las cuotas asociadas a dicho cambio.
+    // Las cuotas se toman de la póliza completa.
     if(changeId > 0) {
       log(`cambio: ${changeId}`);
       payments = payments.filter(item => item.changeId == changeId)?.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
     }
   
-    if(!payments || payments.length === 0) throw `@No hay primas pendientes en la poliza: ${policyCode}, recibo: ${row.numRecibo}`;
+    if(!payments || payments.length === 0) throw `@No hay primas pendientes en la poliza: ${policyCode}`;
     
      for(const inst of payments){
 
@@ -581,6 +540,13 @@ function ValidateDto(row,errors){
         throw '@'+GetMsgErrors(errors,',');
 }
 
+function validatePositiveId(value){
+    const id = Number(value);
+    if(!Number.isInteger(id) || id <= 0)
+        throw '@El id de la póliza no es válido';
+    return id;
+}
+
 function IsNull(valor){
     return (!valor || valor === null || typeof valor === 'undefined' || valor === '')
 }
@@ -600,8 +566,7 @@ function n2(value) {
 test:
 row:
   workspaceId: 52
-  policyCode: 'IN-IL-003094'
-  numRecibo: '000000097'
+  policyId: 3094
   monto: 0.82
   holderId: 3
 */

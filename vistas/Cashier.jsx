@@ -285,7 +285,7 @@
   const [transitAccountLoading, setTransitAccountLoading] = React.useState(false);
   const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transitAccountTotal, setTransitAccountTotal] = React.useState(0);
-  const [transitAccountFilters, setTransitAccountFilters] = React.useState({});
+  const [transitAccountFilters, setTransitAccountFilters] = React.useState({ showAll: false });
   const [transitHasSearched, setTransitHasSearched] = React.useState(false);
   const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
   const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
@@ -1845,7 +1845,7 @@
         currency: getTrimmedString(filters && filters.currency),
         name: getTrimmedString(filters && filters.name),
         cancellations: filters && filters.cancellations === true,
-        onlyWithBalance: filters && filters.onlyWithBalance === true
+        onlyWithBalance: !(filters && filters.showAll === true)
       })
     })
       .then(response => {
@@ -1935,7 +1935,7 @@
       currency: getTrimmedString(values && values.currency),
       name: getTrimmedString(values && values.name),
       cancellations: values && values.cancellations === true,
-      onlyWithBalance: values && values.onlyWithBalance === true
+      showAll: values && values.showAll === true
     };
     setTransitAccountFilters(nextFilters);
     setTransitHasSearched(true);
@@ -1948,10 +1948,11 @@
 
   function clearTransitFilters() {
     transitFilterForm.resetFields();
+    transitFilterForm.setFieldsValue({ showAll: false });
     if (Array.isArray(currencyOptions) && currencyOptions.length === 1) {
       transitFilterForm.setFieldsValue({ currency: currencyOptions[0].value });
     }
-    setTransitAccountFilters({});
+    setTransitAccountFilters({ showAll: false });
     setTransitHasSearched(false);
     setTransitAccountRows([]);
     setExpandedTransitAccountKeys([]);
@@ -4787,7 +4788,7 @@
         ? rows.map(row => ({
           Codigo_Poliza: row.poliza || '',
           ID_Cliente: row.holderId || '',
-          Numero_Recibo: row.recibo || '',
+          ID_Poliza: row.lifePolicyId || row.policyId || '',
           Monto_Pago: Number(row.pendiente || 0)
         }))
         : rows.map(row => ({
@@ -5415,6 +5416,15 @@
 
     if (key === 'balances' && selectedCashierRow && selectedCashierRow.id) {
       loadCashDeskBalances();
+    }
+
+    if (key === 'transit-premiums' && selectedCashierRow && selectedCashierRow.id) {
+      loadTransitAccounts({
+        filters: transitAccountFilters && Object.keys(transitAccountFilters).length
+          ? transitAccountFilters
+          : { showAll: false },
+        pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
+      });
     }
 
   }
@@ -9418,8 +9428,8 @@
             <Form.Item name="cancellations" valuePropName="checked">
               <Checkbox>{t('Search cancellations')}</Checkbox>
             </Form.Item>
-            <Form.Item name="onlyWithBalance" valuePropName="checked">
-              <Checkbox>{t('Only accounts with balance')}</Checkbox>
+            <Form.Item name="showAll" valuePropName="checked" initialValue={false}>
+              <Checkbox>{t('Show all')}</Checkbox>
             </Form.Item>
           </Form>
         </Drawer>

@@ -738,6 +738,14 @@
     return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
   }
 
+  // Policy validity, due dates and paid-through are calendar dates: show the stored day as written, never
+  // shifted to the browser time zone (a UTC-5 browser showed 2025-09-01 as 31/08/2025, AXX-815).
+  function formatCalendarDate(value) {
+    const raw = text(value);
+    const calendarDay = raw.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/);
+    return calendarDay ? `${calendarDay[3]}/${calendarDay[2]}/${calendarDay[1]}` : formatDate(value);
+  }
+
   function calculatePremiumAccrual(startValue, endValue, premiumValue) {
     const startText = text(startValue);
     const endText = text(endValue);
@@ -1199,8 +1207,8 @@
     { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150, render: (value, record) => renderPolicyLink(value, record && record.policyId) },
     { title: t('Year-Month'), dataIndex: 'yearMonth', key: 'yearMonth', width: 105, align: 'center' },
     { title: t('Status'), dataIndex: 'status', key: 'status', width: 110, render: value => t(value || '') },
-    { title: t('Start'), dataIndex: 'start', key: 'start', width: 110, align: 'center', render: formatDate },
-    { title: t('End date'), dataIndex: 'end', key: 'end', width: 110, align: 'center', render: formatDate },
+    { title: t('Start'), dataIndex: 'start', key: 'start', width: 110, align: 'center', render: formatCalendarDate },
+    { title: t('End date'), dataIndex: 'end', key: 'end', width: 110, align: 'center', render: formatCalendarDate },
     { title: t('Total'), dataIndex: 'total', key: 'total', width: 110, align: 'right', render: renderMoney },
     { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 110, align: 'right', render: renderMoney },
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 110, align: 'right', render: renderMoney }
@@ -1224,7 +1232,7 @@
     { title: t('Amount due'), key: 'amountDue', width: 130, align: 'right', render: (_, installment) => renderMoney(firstNumber(installment, ['minimum', 'expected'], 0)) },
     { title: t('Paid'), key: 'paid', width: 110, align: 'right', render: (_, installment) => renderMoney(firstNumber(installment, ['payed', 'paid'], 0)) },
     { title: t('Payment date'), key: 'paymentDate', width: 125, align: 'center', render: (_, installment) => formatDate(installment && (installment.payedDate || installment.paymentDate)) },
-    { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 125, align: 'center', render: formatDate },
+    { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 125, align: 'center', render: formatCalendarDate },
     { title: t('Installment Number'), dataIndex: 'numberInYear', key: 'numberInYear', width: 100, align: 'center' },
     { title: t('Contract year'), dataIndex: 'contractYear', key: 'contractYear', width: 120, align: 'center' }
   ];
@@ -1256,6 +1264,11 @@
       return Number(left && left.numberInYear || 0) - Number(right && right.numberInYear || 0);
     })
     : [];
+  // Instalments cancelled by a cancellation/annulment change are not collectible; the policy's own
+  // payment plan hides them, so the grid, the aging and the invoice balance leave them out too.
+  const collectibleInstallmentRows = installmentRows.filter(installment => !(installment && installment.cancellationDate));
+  const hasCancelledInstallments = collectibleInstallmentRows.length !== installmentRows.length
+    || (policyInfo && policyInfo.active === false);
   const getLocalDateOnly = value => {
     const raw = text(value);
     if (!raw) return null;
@@ -1312,7 +1325,7 @@
     if (currency && typeof currency === 'object') return text(currency.code || currency.name || currency.id) || '-';
     return text(policy && (policy.currencyCode || policy.currencyName || currency)) || text(generalData.currency) || '-';
   };
-  const delinquencyRows = installmentRows.map((installment, index) => ({
+  const delinquencyRows = collectibleInstallmentRows.map((installment, index) => ({
     key: String(installment && installment.id || index),
     policy: detailPolicy.code || generalData.policy || '-',
     currency: getPolicyCurrency(detailPolicy),
@@ -1363,12 +1376,13 @@
     { title: '91-120', dataIndex: 'm90a120', key: 'm90a120', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '>120', dataIndex: 'mmas120', key: 'mmas120', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: t('Overdue'), dataIndex: 'overdue', key: 'overdue', width: 115, align: 'right', render: value => renderMoney(value) },
-    { title: delinquencyGrouped ? t('Entry date') : t('Installment date'), dataIndex: delinquencyGrouped ? 'entryDate' : 'dueDate', key: 'delinquencyDate', width: 120, align: 'center', render: formatDate }
+    { title: delinquencyGrouped ? t('Entry date') : t('Installment date'), dataIndex: delinquencyGrouped ? 'entryDate' : 'dueDate', key: 'delinquencyDate', width: 120, align: 'center', render: value => (delinquencyGrouped ? formatDate(value) : formatCalendarDate(value)) }
   ];
   const coverageRows = Array.isArray(detailPolicy.Coverages) ? detailPolicy.Coverages : [];
   const sumCoverageField = fields => coverageRows.reduce((total, coverage) => total + firstNumber(coverage, fields, 0), 0);
-  const totalInstallmentDue = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['minimum', 'expected'], 0), 0);
-  const totalInstallmentPaid = installmentRows.reduce((total, installment) => total + firstNumber(installment, ['payed', 'paid'], 0), 0);
+  const totalInstallmentDue = collectibleInstallmentRows.reduce((total, installment) => total + firstNumber(installment, ['minimum', 'expected'], 0), 0);
+  const totalInstallmentPaid = collectibleInstallmentRows.reduce((total, installment) => total + firstNumber(installment, ['payed', 'paid'], 0), 0);
+  const totalInstallmentPending = collectibleInstallmentRows.reduce((total, installment) => total + Math.max(0, firstNumber(installment, ['minimum', 'expected'], 0) - firstNumber(installment, ['payed', 'paid'], 0)), 0);
   const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
   const collectionPaymentInsuredObjects = (Array.isArray(detailPolicy.InsuredObjects)
     ? detailPolicy.InsuredObjects
@@ -1789,7 +1803,17 @@
     const pendingAmount = editableRows.reduce((total, row) => total + number(row && row.minimum), 0);
     const remainingSlots = desiredInstallments - paidRows.length;
     const baseCents = Math.max(0, Math.round(pendingAmount * 100));
-    const centsPerRow = Math.floor(baseCents / remainingSlots);
+    // The regular installment comes from the whole plan, paid installments included, rounded to the
+    // cent, and the last one absorbs the difference, as in the original plan (76.02 in 12 = 6.34 x 11
+    // + 6.28, also when installment 1 is already paid). When locked installments make that impossible
+    // (the last one would drift more than the rounding allows) the pending balance is split evenly.
+    const planCents = Math.max(0, Math.round(getRestructureAmountTotal(currentRows) * 100));
+    const regularCents = Math.round(planCents / desiredInstallments);
+    const regularLastCents = baseCents - regularCents * (remainingSlots - 1);
+    const evenCents = Math.round(baseCents / remainingSlots);
+    const centsPerRow = regularCents > 0 && regularLastCents >= 0 && Math.abs(regularLastCents - regularCents) <= desiredInstallments
+      ? regularCents
+      : (evenCents * (remainingSlots - 1) > baseCents ? Math.floor(baseCents / remainingSlots) : evenCents);
     const remainder = baseCents - centsPerRow * remainingSlots;
      const lockedRows = paidRows.map(row => ({
        ...row,
@@ -1802,11 +1826,21 @@
          : []
      }));
     const newRows = [];
+    // Locked (fully paid) installments keep their dates. The new installments continue one period after
+    // the last of them, never repeating or preceding it (a plan of 1 paid + 11 must not reuse the start date).
+    const slotStart = startDate.clone().add(frequencyMonths * paidRows.length, 'months');
+    const lastLockedDue = paidRows
+      .map(row => getRestructureDueDateMoment(row))
+      .filter(Boolean)
+      .reduce((latest, date) => (!latest || date.format('YYYY-MM-DD') > latest.format('YYYY-MM-DD') ? date : latest), null);
+    const firstNewDueDate = lastLockedDue && slotStart.format('YYYY-MM-DD') <= lastLockedDue.format('YYYY-MM-DD')
+      ? lastLockedDue.clone().add(frequencyMonths, 'months')
+      : slotStart;
 
     for (let index = 0; index < remainingSlots; index += 1) {
       const originalRow = editableRows[index] || null;
       const sourceRow = originalRow || editableRows[editableRows.length - 1] || {};
-      const dueDate = startDate.clone().add(frequencyMonths * index, 'months');
+      const dueDate = firstNewDueDate.clone().add(frequencyMonths * index, 'months');
       const coveredUntil = dueDate.clone().add(frequencyMonths, 'months');
       const amount = (centsPerRow + (index === remainingSlots - 1 ? remainder : 0)) / 100;
       const dueDateIso = toRestructureUtcIso(dueDate);
@@ -2505,10 +2539,10 @@
                     </div>
                     <div className="historical-billing-data-card">
                       <div className="historical-billing-section-title">{t('Dates')}</div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Start')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.start || generalData.start)}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('End date')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.end || generalData.end)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Start')}</div><div className="historical-billing-data-value">{formatCalendarDate(detailPolicy.start || generalData.start)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('End date')}</div><div className="historical-billing-data-value">{formatCalendarDate(detailPolicy.end || generalData.end)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Issued')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.activeDate || detailPolicy.issueDate)}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid through')}</div><div className="historical-billing-data-value">{formatDate(detailPolicy.paidUntil || detailPayPlan.dueDate)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid through')}</div><div className="historical-billing-data-value">{formatCalendarDate(detailPolicy.paidUntil || detailPayPlan.dueDate)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Accounted')}</div><div className="historical-billing-data-value">{formatDate(detailAccountingDate)}</div></div>
                     </div>
                   </div>
@@ -2521,8 +2555,8 @@
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Taxes')}</div><div className="historical-billing-data-value">{renderMoney(detailTax)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Interest')}</div><div className="historical-billing-data-value">{renderMoney(detailInterest)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Total')}</div><div className="historical-billing-data-value">{renderMoney(detailTotal)}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid')}</div><div className="historical-billing-data-value">{renderMoney(detailPaid)}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Pending')}</div><div className="historical-billing-data-value">{renderMoney(detailPending)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid')}</div><div className="historical-billing-data-value">{renderMoney(hasCancelledInstallments ? totalInstallmentPaid : detailPaid)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Pending')}</div><div className="historical-billing-data-value">{renderMoney(hasCancelledInstallments ? totalInstallmentPending : detailPending)}</div></div>
                     </div>
                     <div className="historical-billing-data-card">
                       <div className="historical-billing-section-title">{t('Premiums')}</div>
@@ -2595,14 +2629,14 @@
                     size="small"
                     bordered
                     columns={installmentColumns}
-                    dataSource={installmentRows}
+                    dataSource={collectibleInstallmentRows}
                     summary={() => (
                       <Table.Summary>
                         <Table.Summary.Row>
                           <Table.Summary.Cell index={0} colSpan={2}><strong>{t('Totals')}</strong></Table.Summary.Cell>
                           <Table.Summary.Cell index={2} align="right">{renderMoney(totalInstallmentDue)}</Table.Summary.Cell>
                           <Table.Summary.Cell index={3} align="right">{renderMoney(totalInstallmentPaid)}</Table.Summary.Cell>
-                          <Table.Summary.Cell index={4} colSpan={2}>{t('Total installments')}: {installmentRows.length}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={4} colSpan={2}>{t('Total installments')}: {collectibleInstallmentRows.length}</Table.Summary.Cell>
                           <Table.Summary.Cell index={6}></Table.Summary.Cell>
                           <Table.Summary.Cell index={7}></Table.Summary.Cell>
                         </Table.Summary.Row>

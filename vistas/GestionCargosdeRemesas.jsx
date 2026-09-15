@@ -62,9 +62,9 @@
   const PAGE_SIZE = 50;
   const IMPORT_CONFIG_NAME = 'Cobros Masivos';
   const PRE_OPERATION_CHAIN = 'cmdValidateMassivePaymentsPreOperation';
-  const BATCH_IMPORT_HEADERS = ['ID_Caja', 'Codigo_Poliza', 'ID_Cliente', 'Numero_Recibo', 'Monto_Pago'];
-  const REQUIRED_IMPORT_HEADERS = ['Codigo_Poliza', 'ID_Cliente', 'Numero_Recibo', 'Monto_Pago'];
-  const REQUIRED_XLSX_COLUMNS = 'Codigo_Poliza, ID_Cliente, Numero_Recibo y Monto_Pago';
+  const BATCH_IMPORT_HEADERS = ['ID_Caja', 'Codigo_Poliza', 'ID_Cliente', 'ID_Poliza', 'Monto_Pago'];
+  const REQUIRED_IMPORT_HEADERS = ['Codigo_Poliza', 'ID_Cliente', 'ID_Poliza', 'Monto_Pago'];
+  const REQUIRED_XLSX_COLUMNS = 'Codigo_Poliza, ID_Cliente, ID_Poliza y Monto_Pago';
   const BATCH_METADATA_TYPE = 'REMITTANCE_METADATA';
   const EMPTY_VALUE = '—';
 
@@ -870,15 +870,15 @@
 
     validationRows.forEach((row, index) => {
       const policyCode = normalizedCashDeskValue(row && row.policyCode).toUpperCase();
-      const receiptNumber = normalizedCashDeskValue(row && row.numRecibo).toUpperCase();
-      if (!policyCode || !receiptNumber) return;
+      const policyId = normalizedCashDeskValue(row && row.policyId).toUpperCase();
+      if (!policyCode || !policyId) return;
 
-      const key = policyCode + '|' + receiptNumber;
+      const key = policyId + '|' + normalizedCashDeskValue(row && row.monto);
       if (seen[key]) {
         errors.push({
           key: 'duplicate-' + String(index + 1),
           row: String(index + 1),
-          detail: t('recibo duplicado') + ' ' + receiptNumber
+          detail: t('póliza duplicada') + ' ' + policyId
             + ' ' + t('para la póliza') + ' ' + policyCode
             + ' (' + t('también aparece en la fila') + ' ' + seen[key] + ').'
         });
@@ -1116,7 +1116,7 @@
           workspaceId: item[0],
           policyCode: item[1],
           holderId: item[2],
-          numRecibo: item[3],
+          policyId: item[3],
           monto: item[4],
           result: paymentRowResult(item),
           accountNumber: null,
@@ -1135,7 +1135,7 @@
         workspaceId: source.workspaceId !== undefined ? source.workspaceId : source.ID_Caja,
         policyCode: source.policyCode !== undefined ? source.policyCode : source.Codigo_Poliza,
         holderId: source.holderId !== undefined ? source.holderId : source.ID_Cliente,
-        numRecibo: source.numRecibo !== undefined ? source.numRecibo : source.Numero_Recibo,
+        policyId: source.policyId !== undefined ? source.policyId : source.ID_Poliza,
         monto: source.monto !== undefined ? source.monto : source.Monto_Pago,
         result: source.result !== undefined ? source.result
           : (source.status !== undefined ? source.status
@@ -1185,9 +1185,8 @@
     return amount === null ? '' : amount.toFixed(2);
   };
 
-  const paymentCompositeKey = (policy, receipt, amount) => [
-    normalizedCompositeText(policy),
-    normalizedCompositeText(receipt),
+  const paymentCompositeKey = (policyId, amount) => [
+    normalizedCompositeText(policyId),
     normalizedAmountKey(amount)
   ].join('|');
 
@@ -1231,20 +1230,16 @@
   const loadBatchPaymentReferences = (batchId, paymentRows) => {
     const policies = paymentRows.map((item) => normalizedCashDeskValue(item.policyCode)).filter(Boolean)
       .filter((value, index, values) => values.indexOf(value) === index);
-    const receipts = paymentRows.map((item) => normalizedCashDeskValue(item.numRecibo)).filter(Boolean)
+    const policyIds = paymentRows.map((item) => Number(item.policyId)).filter((value) => Number.isInteger(value) && value > 0)
       .filter((value, index, values) => values.indexOf(value) === index);
-    if (!policies.length || !receipts.length) return Promise.resolve([]);
+    if (!policies.length || !policyIds.length) return Promise.resolve([]);
 
     const sqlList = (values) => values.map((value) => "N'" + escapeSqlString(value) + "'").join(',');
     const sql = `SELECT DISTINCT
       transfer.id AS paymentNumber,
       transfer.amount AS transferAmount,
       policy.code AS policyCode,
-      CASE
-        WHEN bill.fiscalNumber IN (${sqlList(receipts)}) THEN bill.fiscalNumber
-        WHEN policy.fiscalNumber IN (${sqlList(receipts)}) THEN policy.fiscalNumber
-        ELSE NULL
-      END AS receiptNumber
+      policy.id AS policyId
     FROM Transfer transfer
     INNER JOIN AllocationInstallment allocationInstallment
       ON allocationInstallment.allocationId = transfer.allocationId
@@ -1260,7 +1255,7 @@
     ) remittance
     WHERE remittance.remittanceId = ${Number(batchId)}
       AND policy.code IN (${sqlList(policies)})
-      AND (policy.fiscalNumber IN (${sqlList(receipts)}) OR bill.fiscalNumber IN (${sqlList(receipts)}))`;
+      AND policy.id IN (${policyIds.join(',')})`;
 
     return exe('DoQuery', { sql: sql }).then((result) => {
       if (!result || result.ok === false) {
@@ -1276,10 +1271,10 @@
 
     references.forEach((reference) => {
       const policy = queryValue(reference, ['policyCode', 'PolicyCode']);
-      const receipt = queryValue(reference, ['receiptNumber', 'ReceiptNumber']);
+      const policyId = queryValue(reference, ['policyId', 'PolicyId']);
       const transferAmount = queryValue(reference, ['transferAmount', 'TransferAmount']);
       const paymentNumber = Number(queryValue(reference, ['paymentNumber', 'PaymentNumber']) || 0);
-      const compositeKey = paymentCompositeKey(policy, receipt, transferAmount);
+      const compositeKey = paymentCompositeKey(policyId, transferAmount);
 
       if (paymentNumber > 0) {
         if (!transferIdsByKey[compositeKey]) transferIdsByKey[compositeKey] = [];
@@ -1301,7 +1296,7 @@
     });
 
     return paymentRows.map((item) => {
-      const transferIds = transferIdsByKey[paymentCompositeKey(item.policyCode, item.numRecibo, item.monto)] || [];
+      const transferIds = transferIdsByKey[paymentCompositeKey(item.policyId, item.monto)] || [];
       const clientNames = clientNamesByHolderId[holderIdentityKey(item.holderId)] || [];
       const existingClient = normalizedCashDeskValue(item.client);
       const safeExistingClient = existingClient
@@ -2304,7 +2299,7 @@
       key: index + 1,
       line: index + 1,
       policy: item.policyCode,
-      receipt: item.numRecibo,
+      policyId: item.policyId,
       amount: item.monto,
       status: paymentStatus(item),
       systemMessage: paymentSystemMessage(item),
@@ -2343,7 +2338,7 @@
   const lineDetailColumns = [
     { title: t('Line'), dataIndex: 'line', key: 'line', width: 70, align: 'center' },
     { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 180, render: displayValue },
-    { title: t('Receipt'), dataIndex: 'receipt', key: 'receipt', width: 120, render: displayValue },
+    { title: t('Policy ID'), dataIndex: 'policyId', key: 'policyId', width: 120, render: displayValue },
     { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: formatAmount },
     {
       title: t('Status'),
@@ -2370,7 +2365,7 @@
       return [
         row.line,
         displayValue(row.policy),
-        displayValue(row.receipt),
+        displayValue(row.policyId),
         amount === null ? '' : amount,
         t(row.status),
         displayValue(row.systemMessage),
@@ -2381,7 +2376,7 @@
     const headers = [
       t('Line'),
       t('Policy'),
-      t('Receipt'),
+      t('Policy ID'),
       t('Amount'),
       t('Status'),
       t('System message'),

@@ -143,7 +143,7 @@ function buildFilter(input) {
 
   if (input.clientId > 0) conditions.push(`AND lp.[holderId] = ${input.clientId}`);
   if (input.policyId > 0) conditions.push(`AND lp.[id] = ${input.policyId}`);
-  if (input.policyCode) conditions.push(`AND lp.[code] LIKE N'${escapeSql(input.policyCode)}%'`);
+  if (input.policyCode) conditions.push(`AND lp.[code] LIKE N'%${escapeSql(input.policyCode)}%'`);
   if (input.line) conditions.push(`AND lp.[lob] = N'${escapeSql(input.line)}'`);
   if (input.product) conditions.push(`AND lp.[productCode] = N'${escapeSql(input.product)}'`);
   if (input.status === 'ACTIVE') conditions.push(`AND lp.[active] = 1 AND lp.[entityState] = 'ACTIVE'`);

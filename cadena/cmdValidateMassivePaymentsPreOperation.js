@@ -83,7 +83,7 @@ function resolveRows(source) {
             workspaceId: row[0],
             policyCode: row[1],
             holderId: row[2],
-            numRecibo: row[3],
+            policyId: row[3],
             monto: row[4]
         };
     });
@@ -100,20 +100,20 @@ function parseJsonRows(value) {
 }
 
 function validateDuplicates(rowsToValidate, validationErrors) {
-    const policyReceipts = {};
+    const policyPayments = {};
 
     rowsToValidate.forEach(function (row, index) {
         const rowNumber = index + 1;
         const policyCode = normalize(row && row.policyCode).toUpperCase();
-        const receiptNumber = normalize(row && row.numRecibo).toUpperCase();
+        const policyId = normalize(row && row.policyId);
+        const amount = normalize(row && row.monto);
 
-        if (policyCode && receiptNumber) {
-            const policyReceiptKey = policyCode + '|' + receiptNumber;
-            if (policyReceipts[policyReceiptKey]) {
-                validationErrors.push('Fila ' + rowNumber + ': recibo duplicado ' + receiptNumber
-                    + ' para la póliza ' + policyCode
-                    + ' (también aparece en la fila ' + policyReceipts[policyReceiptKey] + ').');
-            } else policyReceipts[policyReceiptKey] = rowNumber;
+        if (policyId && amount) {
+            const policyPaymentKey = policyId + '|' + amount;
+            if (policyPayments[policyPaymentKey]) {
+                validationErrors.push('Fila ' + rowNumber + ': póliza duplicada ' + policyId
+                    + ' (también aparece en la fila ' + policyPayments[policyPaymentKey] + ').');
+            } else policyPayments[policyPaymentKey] = rowNumber;
         }
     });
 }
@@ -145,7 +145,7 @@ function validateRow(row, rowNumber, validationErrors, cashDeskCache) {
     const workspaceId = Number(row && row.workspaceId);
     const policyCode = normalize(row && row.policyCode);
     const holderId = Number(row && row.holderId);
-    const receiptNumber = normalize(row && row.numRecibo);
+    const policyId = Number(row && row.policyId);
     const amount = Number(row && row.monto);
 
     if (!Number.isInteger(workspaceId) || workspaceId <= 0) {
@@ -155,28 +155,25 @@ function validateRow(row, rowNumber, validationErrors, cashDeskCache) {
     if (!Number.isInteger(holderId) || holderId <= 0) {
         validationErrors.push(prefix + 'ID_Cliente es obligatorio y debe ser válido.');
     }
-    if (!receiptNumber) validationErrors.push(prefix + 'Numero_Recibo es obligatorio.');
+    if (!Number.isInteger(policyId) || policyId <= 0) {
+        validationErrors.push(prefix + 'ID_Poliza es obligatorio y debe ser válido.');
+    }
     if (!Number.isFinite(amount) || amount <= 0) {
         validationErrors.push(prefix + 'Monto_Pago debe ser mayor que cero.');
     }
 
     if (!Number.isInteger(workspaceId) || workspaceId <= 0
         || !policyCode || !Number.isInteger(holderId) || holderId <= 0
-        || !receiptNumber || !Number.isFinite(amount) || amount <= 0) return;
+        || !Number.isInteger(policyId) || policyId <= 0
+        || !Number.isFinite(amount) || amount <= 0) return;
 
     validateCashDesk(workspaceId, prefix, validationErrors, cashDeskCache);
-
-    const reference = findPolicyByReceipt(receiptNumber, policyCode);
-    if (!reference) {
-        validationErrors.push(prefix + 'no se encontró el recibo o la póliza indicada.');
-        return;
-    }
 
     doCmd({
         cmd: 'RepoLifePolicy',
         data: {
             operation: 'GET',
-            filter: '[id] = ' + Number(reference.lifePolicyId),
+            filter: '[id] = ' + policyId,
             noTracking: true
         }
     });
@@ -187,21 +184,19 @@ function validateRow(row, rowNumber, validationErrors, cashDeskCache) {
     const policy = policies.length ? policies[policies.length - 1] : null;
 
     if (!policy) {
-        validationErrors.push(prefix + 'no se encontró la póliza asociada al recibo.');
+        validationErrors.push(prefix + 'no se encontró la póliza indicada.');
         return;
     }
 
     if (normalize(policy.code).toUpperCase() !== policyCode.toUpperCase()) {
-        validationErrors.push(prefix + 'el recibo ' + receiptNumber
-            + ' pertenece a la póliza ' + normalize(policy.code)
-            + ', no a ' + policyCode + '.');
+        validationErrors.push(prefix + 'el código de póliza no coincide con la póliza indicada.');
     }
 
     if (Number(policy.holderId) !== holderId) {
         validationErrors.push(prefix + 'El contratante proporcionado no pertenece a la poliza.');
     }
 
-    validatePendingInstallments(policy.id, reference.changeId, amount, policyCode, receiptNumber, prefix, validationErrors);
+    validatePendingInstallments(policy.id, amount, policyCode, prefix, validationErrors);
 }
 
 function validateCashDesk(workspaceId, prefix, validationErrors, cache) {
@@ -226,28 +221,7 @@ function validateCashDesk(workspaceId, prefix, validationErrors, cache) {
     if (!isOpen) validationErrors.push(prefix + 'la caja ' + workspaceId + ' no existe o está cerrada.');
 }
 
-function findPolicyByReceipt(receiptNumber, policyCode) {
-    const escapedReceipt = escapeSql(receiptNumber);
-    const escapedPolicyCode = escapeSql(policyCode);
-    const query = "SELECT TOP 1 receipt.lifePolicyId, receipt.changeId "
-        + "FROM ("
-        + " SELECT lp.id AS lifePolicyId, 0 AS changeId, 0 AS sourceOrder"
-        + " FROM LifePolicy lp WHERE lp.fiscalNumber = N'" + escapedReceipt + "'"
-        + " AND lp.code = N'" + escapedPolicyCode + "'"
-        + " UNION ALL"
-        + " SELECT c.lifePolicyId, b.changeId, 1 AS sourceOrder"
-        + " FROM Bill b INNER JOIN [Change] c ON c.id = b.changeId"
-        + " INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId"
-        + " WHERE b.fiscalNumber = N'" + escapedReceipt + "'"
-        + " AND lp.code = N'" + escapedPolicyCode + "'"
-        + ") receipt ORDER BY receipt.sourceOrder";
-
-    doCmd({ cmd: 'DoQuery', data: { sql: query } });
-    const results = DoQuery && Array.isArray(DoQuery.outData) ? DoQuery.outData : [];
-    return results.length ? results[0] : null;
-}
-
-function validatePendingInstallments(policyId, changeId, amount, policyCode, receiptNumber, prefix, validationErrors) {
+function validatePendingInstallments(policyId, amount, policyCode, prefix, validationErrors) {
     doCmd({
         cmd: 'LoadEntities',
         data: {
@@ -266,19 +240,13 @@ function validatePendingInstallments(policyId, changeId, amount, policyCode, rec
         return pending > 0;
     });
 
-    if (Number(changeId) > 0) {
-        installments = installments.filter(function (item) {
-            return Number(item.changeId) === Number(changeId);
-        });
-    }
-
     installments.sort(function (left, right) {
         return new Date(left.dueDate) - new Date(right.dueDate);
     });
 
     if (!installments.length) {
         validationErrors.push(prefix + 'no hay primas pendientes para la póliza '
-            + policyCode + ', recibo ' + receiptNumber + '.');
+            + policyCode + '.');
         return;
     }
 
@@ -302,10 +270,6 @@ function validatePendingInstallments(policyId, changeId, amount, policyCode, rec
 
 function normalize(value) {
     return String(value === null || value === undefined ? '' : value).trim();
-}
-
-function escapeSql(value) {
-    return normalize(value).replace(/'/g, "''");
 }
 
 function number2(value) {
