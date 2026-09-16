@@ -100,22 +100,32 @@ function evitarSugerencias(){
     input.setAttribute('autocomplete', 'off');    
 }
 
-function cargarCumuloAsync() {
-  return new Promise(resolve => {
-    setTimeout(() => {
-      
-        me.exe("ExeChain", { chain: "cmdGetAcummulationSuretyBond", context: `{ policyId: ${policyId}, type: '' }` }).then(res => {
+async function cargarCumuloAsync() {
+    const $status = $("#contenedorCobtar .statusBar");
+    $status.empty().text("Cargando cúmulo...");
 
-            const cumulos = res.outData ?? [];
+    try {
+        const res = await me.exe("ExeChain", {
+            chain: "cmdGetAcummulationSuretyBond",
+            context: `{ policyId: ${policyId}, type: '' }`
+        });
 
-            const html = cumulos.map(x => `<div>${x.accumulationType} ${x.accumulation} / ${x.limit}</div>`).join("");
-            $("#contenedorCobtar .statusBar").empty().html(html);
+        if (!res || res.ok === false) {
+            throw new Error((res && res.msg) || "No se pudo consultar el cúmulo.");
+        }
 
-        });      
+        const cumulos = Array.isArray(res.outData) ? res.outData : [];
+        if (!cumulos.length) {
+            $status.empty().text("No hay información de cúmulo disponible.");
+            return;
+        }
 
-      resolve();
-    }, 2000);
-  });
+        const html = cumulos.map(x => `<div>${x.accumulationType} ${x.accumulation} / ${x.limit}</div>`).join("");
+        $status.empty().html(html);
+    } catch (error) {
+        console.error("Error consultando cúmulo:", error);
+        $status.empty().text("No se pudo consultar el cúmulo.");
+    }
 }
 
 function formatear(valor){
@@ -973,15 +983,22 @@ function cargarCobtarDesdeHidden(
 
   // recorrer cada objeto (cada cobertura)
   $.each(data, function (_, item) {
-    const coverage = item.coverageCode;
+    const coverage = String(item.coverageCode ?? '').trim();
 
     // recorrer propiedades dinámicas (SA, CGRUPO, etc)
     $.each(item, function (key, value) {
       if (key === "coverageCode" || key === "coverageName") return;
 
-      const $input = $(containerSelector).find(
+      let $input = $(containerSelector).find(
         `[data-coverage="${coverage}"][data-field="${key}"]`
       );
+
+      if (!$input.length) {
+        const normalizedKey = String(key).trim().toLowerCase();
+        $input = $(containerSelector).find(`[data-coverage="${coverage}"][data-field]`).filter(function () {
+          return String($(this).attr("data-field") || '').trim().toLowerCase() === normalizedKey;
+        }).first();
+      }
 
       if (!$input.length) return;
 
@@ -989,7 +1006,10 @@ function cargarCobtarDesdeHidden(
       if ($input.is("select")) {
         $input.val(value);
       } else if ($input.attr("type") === "number") {
-        $input.val(value != null ? Number(value) : "");
+        const numericValue = value === null || value === undefined || value === ''
+          ? ''
+          : Number(String(value).replace(/[^0-9.-]/g, '').trim());
+        $input.val(Number.isFinite(numericValue) ? numericValue : '');
       } else {
         $input.val(value ?? "");
       }
@@ -1041,7 +1061,7 @@ function construirCobtar(containerSelector = "#tab2") {
 }
 
 function bindEventosCobtar() {
-  $("#tab2").on("input change", "input, select", function () {
+  $("#tab2").off("input change.cobtar").on("input change.cobtar", "input, select", function () {
     const data = construirCobtar("#tab2");
     $("#hiddenCobtar").val(JSON.stringify(data));
     // debug opcional

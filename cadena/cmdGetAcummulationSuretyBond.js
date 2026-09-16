@@ -13,22 +13,17 @@
 
 const policyId = context.policyId;
 const accumulationType = context?.type ?? "";
-const objectDefinitionCode = "OBJFIANZA";
-let objectDefinitionId;
-let oaUserData;
-let principal;
 let accumulationConfig;
 let policy;
 let accumulationByPolicy;
 let accumulationByClient;
 let accumulationByEconomicGroup;
-const ramos = ["81"]
+const ramos = ["81", "82", "83", "84"]
 let resultado = [];
 
 try {
-    
+  
   setPolicy();
-  setInsuredObject();
   setAccumulationConfig();
 
   switch(accumulationType){
@@ -108,39 +103,39 @@ function setAccumulationByEconomicGroup() {
   const filterRamos = ramos.map(x => `'${x}'`).join(',');
   doCmd({cmd: "LoadEntity", data: { entity: "Contact", fields: "jCustomForms", filter: `id = ${clientId}` }});
   const jCustomForms = LoadEntity.outData?.jCustomForms;
+  const grupoEconomico = obtenerGrupoEconomico(jCustomForms);
 
-  const customForms = jCustomForms ? JSON.parse(jCustomForms) : [];
-  if(customForms.length == 0){
-    setDefaultaccumulationByEconomicGroup();
-  }
-
-  const jGECForm = customForms["Grupo Económico"];
-  if(!jGECForm){
+  if(!grupoEconomico){
     setDefaultaccumulationByEconomicGroup();
     return;
   }
 
-  const GECForm = jGECForm ? JSON.parse(jGECForm) : [];
-  if(!GECForm){
+  // La pertenencia al GEC se guarda en Información de Compañías.grupoEconomico.
+  // Se consulta el campo dinámico directamente para no depender del campo auxiliar grupoEconomicoTag.
+  const grupoEscapado = grupoEconomico.replace(/'/g, "''");
+  const queryContactos = `SELECT DISTINCT c.id
+  FROM Contact c
+  CROSS APPLY OPENJSON(c.jCustomForms) tabs
+  CROSS APPLY OPENJSON(tabs.value) fields
+  CROSS APPLY OPENJSON(JSON_QUERY(fields.value, '$.userData')) userData
+  WHERE tabs.[key] = N'Información de Compañías'
+    AND JSON_VALUE(fields.value, '$.name') = 'grupoEconomico'
+    AND LTRIM(RTRIM(CONVERT(NVARCHAR(4000), userData.value))) = N'${grupoEscapado}';`;
+  doCmd({cmd: "DoQuery", data: { sql: queryContactos }});
+
+  const integrantes = (DoQuery.outData ?? [])
+    .map(x => Number(x.id))
+    .filter(x => Number.isInteger(x) && x > 0);
+
+  if(!integrantes.includes(Number(clientId))) integrantes.push(Number(clientId));
+  if(integrantes.length == 0){
     setDefaultaccumulationByEconomicGroup();
     return;
   }
-
-  const jConfig = GECForm.find(x => x.name == "hiddenValidaGEC")?.userData?.[0];
-  const GEC = jConfig ? JSON.parse(jConfig) : [];
-
-  if(GEC.length == 0){
-    setDefaultaccumulationByEconomicGroup();
-    return;
-  }
-  
-  const integrantes = GEC
-  .map(x => `${x.codigoEmpresa}`)
-  .join(',');
 
   const query = `SELECT SUM(P.insuredSum) suma
   FROM LifePolicy p
-  WHERE p.holderId in  (${integrantes},${clientId}) AND p.lob in (${filterRamos})
+  WHERE p.holderId in  (${integrantes.join(',')}) AND p.lob in (${filterRamos})
     AND CAST(GETDATE() AS date) BETWEEN CAST(p.[start] AS DATE) AND CAST(p.[end] AS DATE)
     AND p.activeDate IS NOT NULL AND p.active = 1;`
   
@@ -149,6 +144,22 @@ function setAccumulationByEconomicGroup() {
   accumulationByEconomicGroup = DoQuery.outData?.[0]?.suma ?? 0;
   accumulationByEconomicGroup += policy.insuredSum; //sumamos la oferta para que forme parte del cúmulo
   
+}
+
+function obtenerGrupoEconomico(jCustomForms) {
+  try {
+    const customForms = typeof jCustomForms === "string"
+      ? JSON.parse(jCustomForms || "{}")
+      : (jCustomForms || {});
+    const formulario = customForms["Información de Compañías"];
+    const campos = typeof formulario === "string"
+      ? JSON.parse(formulario || "[]")
+      : (formulario || []);
+    const campo = campos.find(x => x && x.name == "grupoEconomico");
+    return campo?.userData?.[0] ? String(campo.userData[0]).trim() : "";
+  } catch (error) {
+    return "";
+  }
 }
 
 function setDefaultaccumulationByEconomicGroup() {
@@ -161,30 +172,6 @@ function setPolicy() {
   policy = LoadEntity.outData;
   if(!policy)
     throw new Error("No se encontró la póliza indicada ");
-}
-
-function setInsuredObject() {
-  
-  doCmd({cmd: "RepoObjectDefinition", data:{ operation: "GET", filter: `code = '${objectDefinitionCode}'`}});
-  objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
-  if(objectDefinitionId == 0)
-    throw new Error("No se encontró configuración del objeto asegurado ")
-  
-  doCmd({
-      cmd: "RepoInsuredObject",
-      data: {
-          operation: 'GET',
-          filter: `lifePolicyId = ${policyId} and objectDefinitionId in (${objectDefinitionId})`,
-          noTracking: true
-      }
-  });
-
-  if (!(RepoInsuredObject.total > 0) || !RepoInsuredObject.outData) {
-      throw ' Debe Guardar el Objeto Asegurado'
-  }
-
-  oaUserData = RepoInsuredObject.outData[0].userData;
-
 }
 
 function setAccumulationConfig() {

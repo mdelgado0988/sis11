@@ -202,7 +202,7 @@
       //$("#btnGuardarEmpresa").click(()=>{
       $(document)
       .off("click", "#btnGuardarEmpresa")
-      .on("click", "#btnGuardarEmpresa", function () {
+      .on("click", "#btnGuardarEmpresa", async function () {
         try {
           const nombre = $modalEmpresa.find("input[name='Empresa']").val().trim();
           const codigo = $("#hiddenCodigoContacto").val();
@@ -212,6 +212,12 @@
           // AXX-233: el % se retira de la interfaz. El valor historico ya guardado se conserva.
           const porcentaje = (editar!==undefined && empresas[editar] && empresas[editar].porcentaje!==undefined)
             ? empresas[editar].porcentaje : 0;
+
+          // La empresa solo se agrega después de confirmar la reasignación.
+          if (codigo && editar === undefined) {
+            const sincronizada = await gecSincronizarIntegrante(codigo);
+            if (!sincronizada) return;
+          }
     
           if(editar!==undefined){
             empresas[editar].nombreEmpresa = nombre;
@@ -225,9 +231,6 @@
               accionistas:[]});
           }
           persistirEmpresas(); cerrarModalEmpresa(); renderizarTabla();
-          // AXX-233 (CA14): al agregar un integrante se le asigna el grupo economico
-          // y se persiste en su formulario 609, sin perder el resto de su informacion.
-          if (codigo && editar === undefined) { gecSincronizarIntegrante(codigo); }
         } catch (error) {
           mostrarMensaje(error, 'error', 3000);
         }        
@@ -280,254 +283,103 @@
         }
       });
   
-      // Renderizar tabla
-      /* ------------------------------------------------------------------
-       * AXX-248 — detalle de accionistas registrado en frmAccionistasContacto.
-       * SOLO CONSULTA VISUAL: se lee del propio contacto de cada empresa y se
-       * resuelve en tiempo real. Sin agregar, editar, eliminar ni cambiar %.
-       * No toca la captura manual preexistente (hiddenValidaGEC).
-       * ---------------------------------------------------------------- */
-      const ACC_TAB_666 = 'Accionistas';
+      // AXX-301: one participant snapshot supplies both count and child rows.
       const accSisCache = {};
-
-      // [{id, porcentaje}] guardado en la pestania Accionistas del contacto empresa.
+      const accExpanded = {};
+      let accGeneration = 0;
+      const accText = function(s) { return typeof t === 'function' ? t(s) : s; };
+      function accSisEsc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
       function accSisLeer(jcf) {
-        try {
-          const obj = typeof jcf === 'string' ? JSON.parse(jcf || '{}') : (jcf || {});
-          const tab = obj[ACC_TAB_666];
-          if (!tab) return [];
-          const campos = typeof tab === 'string' ? JSON.parse(tab) : tab;
-          const f = (campos || []).filter(function (c) { return c && c.name === 'Accionistas'; })[0];
-          const raw = (f && f.userData && f.userData[0]) ? String(f.userData[0]).trim() : '';
-          if (!raw) return [];
-          const arr = JSON.parse(raw);
-          return Array.isArray(arr) ? arr : [];
-        } catch (e) { return []; }
+        const obj = typeof jcf === 'string' ? JSON.parse(jcf || '{}') : (jcf || {});
+        const tab = typeof obj.Accionistas === 'string' ? JSON.parse(obj.Accionistas) : (obj.Accionistas || []);
+        const f = tab.find(function(x) { return x && x.name === 'Accionistas'; });
+        const arr = f && f.userData && f.userData[0] ? JSON.parse(f.userData[0]) : [];
+        if (!Array.isArray(arr)) throw Error(accText('No se pudo interpretar la lista de accionistas'));
+        return arr;
       }
-
-      function accSisNombre(c) {
-        if (!c) return '';
-        if (c.isPerson) return [c.name, c.surname1].filter(function (x) { return String(x || '').trim(); }).join(' ').trim();
-        return String(c.surname2 || c.name || '').trim();
-      }
-
-      function accSisEsc(s) {
-        return String(s === null || s === undefined ? '' : s)
-          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-      }
-
-      // CA15/CA16: cada empresa muestra SU propio detalle, aislado por el id de contacto.
-      async function accSisPintarFila(tbody, empresa, indexEmpresa) {
-        try {
-          const codigo = empresa.codigoEmpresa;
-          if (!codigo) return;
-          let emp = accSisCache['e' + codigo];
-          if (!emp) {
-            const re = await mi.exe('GetContacts', { filter: 'id = ' + (parseInt(codigo, 10) || 0), size: 1 });
-            emp = (re && re.ok && re.outData) ? re.outData[0] : null;
-            if (emp) accSisCache['e' + codigo] = emp;
-          }
-          if (!emp) return;
-
-          const lista = accSisLeer(emp.jCustomForms);
-          const $padre = tbody.find('.empresaRow[data-index="' + indexEmpresa + '"]');
-          const actualizarContador = function (cantidadSIS) {
-            if ($padre.length) {
-              $padre.find('.accionistaCount').text(empresa.accionistas.length + cantidadSIS);
-            }
-          };
-
-          if (!lista.length) {
-            actualizarContador(0);
-            return;
-          }
-
-          // CA10/CA14: los datos del accionista se releen del contacto, no de lo guardado.
-          const ids = lista.map(function (a) { return parseInt(a.id, 10) || 0; }).filter(function (i) { return i; });
-          const rc = await mi.exe('GetContacts', { size: ids.length, page: 0, filter: 'id IN (' + ids.join(',') + ')' });
-          const porId = {};
-          if (rc && rc.ok) (rc.outData || []).forEach(function (c) { porId[String(c.id)] = c; });
-
-          const visible = $padre.data('expanded') === true;
-          const $ancla = $('.accSisCab_' + indexEmpresa);
-          actualizarContador(lista.length);
-          if ($ancla.length) return;   // idempotente
-
-          const $cab = $('<tr class="detalleAcc_' + indexEmpresa + ' accSisCab_' + indexEmpresa + '"' +
-            ' style="background:#f0f5ff' + (visible ? '' : ';display:none') + '">' +
-            '<td></td><td colspan="3" style="font-size:12px;color:#555">' +
-            'Accionistas registrados (solo consulta) — Número (SIS) · Nombre · % · COBIS · PEP</td></tr>');
-
-          // Insertar el detalle debajo de su empresa, no al final de la grilla.
-          let $insertAfter = tbody.find('.detalleAcc_' + indexEmpresa).last();
-          if (!$insertAfter.length) $insertAfter = $padre;
-          $insertAfter.after($cab);
-          $insertAfter = $cab;
-
-          lista.forEach(function (a) {
-            const c = porId[String(a.id)] || null;
-            const pep = c ? (c.publicStatus ? 'Sí' : 'No') : '—';
-            const cobis = c ? accSisEsc(c.nationalId || '') : '—';
-            const $tr = $('<tr class="detalleAcc_' + indexEmpresa + ' accSisRow_' + indexEmpresa + '"' +
-              ' style="background:#fafafa' + (visible ? '' : ';display:none') + '">' +
-              '<td>' + accSisEsc(a.id) + '</td>' +
-              '<td>' + accSisEsc(c ? accSisNombre(c) : '(contacto no disponible)') + '</td>' +
-              '<td>' + accSisEsc(a.porcentaje) + '% · COBIS: ' + cobis + ' · PEP: ' + pep + '</td>' +
-              '<td style="color:#999;font-size:12px">Solo consulta</td>' +
-              '</tr>');
-            $insertAfter.after($tr);
-            $insertAfter = $tr;
-          });
-        } catch (e) { console.error('AXX-248 detalle accionistas:', e); }
-      }
-
-      function renderizarTabla(){       
-        try {
-          
-          const tbody = table.find("tbody"); 
-          tbody.empty();
-      
-          if(empresas.length === 0){ 
-              tbody.append('<tr><td colspan="4" style="text-align:center;">No hay registros</td></tr>'); 
-              return; 
-          }
-          
-          empresas.forEach((empresa, indexEmpresa)=>{
-              if(!empresa.accionistas) empresa.accionistas = []; // Asegurar arreglo de accionistas
-              const totalAcc = empresa.accionistas.reduce((s,a)=> s + (parseFloat(a.porcentaje)||0), 0);
-      
-              // Fila empresa con ícono desplegable
-              const trPadre = $(`
-                  <tr class="empresaRow" data-index="${indexEmpresa}" style="background:#e6f7ff; font-weight:bold; cursor:pointer">
-                      <td>${empresa.codigoEmpresa}</td>
-                      <td>${empresa.nombreEmpresa}</td>
-                      <td style="display:flex; align-items:center;">
-                          <span class="toggleAcc" style="margin-right:6px; transition: transform 0.2s;">▶</span>
-                          Accionistas: <span class="accionistaCount">${empresa.accionistas.length}</span>
-                      </td>
-                      <td>
-                          <button class="ant-btn ant-btn-primary btnAddAccionista" data-index="${indexEmpresa}">+ Accionista</button>
-                          <button class="ant-btn ant-btn-default btnEditarEmpresa" data-index="${indexEmpresa}" style="margin-left:4px">Editar</button>
-                      </td>
-                  </tr>
-              `);
-              tbody.append(trPadre);
-      
-              // Filas de accionistas
-              empresa.accionistas.forEach((acc, indexAcc)=>{
-                  const trAcc = $(`
-                      <tr class="detalleAcc_${indexEmpresa}" style="display:none; background:#fafafa">
-                          <td></td><td></td>
-                          <td>${acc.nombre}</td>
-                          <td>
-                              <button class="ant-btn ant-btn-small ant-btn-default btnEditarAcc" data-emp="${indexEmpresa}" data-acc="${indexAcc}">Editar</button>
-                          </td>
-                      </tr>
-                  `);
-                  tbody.append(trAcc);
-              });
-
-              // AXX-248: detalle de accionistas de frmAccionistasContacto, solo consulta.
-              accSisPintarFila(tbody, empresa, indexEmpresa);
-          });
-      
-          // Expandir / colapsar accionistas
-          $(".empresaRow").off("click").on("click", function(){
-            try {
-              const indexEmpresa = $(this).data("index");
-              const $detalles = $(`.detalleAcc_${indexEmpresa}`);
-              $detalles.toggle();
-              $(this).data('expanded', $detalles.is(':visible'));
-      
-              // Rotar ícono
-              const $icon = $(this).find(".toggleAcc");
-              $icon.css("transform", $detalles.is(":visible") ? "rotate(90deg)" : "rotate(0deg)");
-            } catch (error) {
-              console.error(error);
-            }            
-          });
-      
-          // Botón agregar accionista
-          $(".btnAddAccionista").off("click").on("click", function(e){
-            try {
-              e.stopPropagation();
-              const indexEmpresa = $(this).data("index");
-              abrirModalAccionista(null, null, indexEmpresa);
-            } catch (error) {
-             console.error(error);
-            }
-          });
-  
-          $(".btnEditarEmpresa").off("click").on("click", function(e){
-            try {
-              e.stopPropagation();
-              const index = $(this).data("index");
-              abrirModalEmpresa(empresas[index], index); // Abrir modal con datos para editar
-            } catch (error) {
-              console.error(error)  ;
-            }
-          });
-      
-          // Editar empresa
-          $(".btnAddAccionista").off("click").on("click", function(e){
-            try {           
-              e.stopPropagation();
-              const indexEmpresa = $(this).data("index");
-              abrirModalAccionista(null, null, indexEmpresa);
-            } catch (error) {
-              console.error(error);
-            }
-          });        
-      
-          // Eliminar / editar accionista
-          table.off("click",".btnEliminarAcc").on("click",".btnEliminarAcc",function(e){
-            try {
-              
-              e.stopPropagation();
-              const emp = $(this).data("emp");
-              const acc = $(this).data("acc");
-              empresas[emp].accionistas.splice(acc,1);
-              persistirEmpresas();
-              renderizarTabla();
-            } catch (error) {
-              console.error(error);
-            }
-          });
-      
-          table.off("click", ".btnEditarAcc").on("click", ".btnEditarAcc", function(e){
-            try {
-              
-              e.stopPropagation();
-              const emp = $(this).data("emp");
-              const acc = $(this).data("acc");
-              abrirModalAccionista(empresas[emp].accionistas[acc], {empresaIndex: emp, accionistaIndex: acc});
-            } catch (error) {
-              console.error(error);
-            }
-          });
-      
-          // Eliminar empresa completa
-          table.off("click",".btnEliminarEmpresa").on("click",".btnEliminarEmpresa",function(e){
-            try {
-              
-              e.stopPropagation();
-              const index = $(this).data("index");
-              empresas.splice(index,1); 
-              persistirEmpresas();
-              renderizarTabla();
-            } catch (error) {
-              console.error(error);
-            }
-          });
-
-        } catch (error) {
-          console.error(error);
+      function accSisNombre(c) { return c.isPerson ? [c.name,c.surname1,c.surname2].filter(Boolean).join(' ') : (c.surname2 || c.name || ''); }
+      async function accContacts(ids, batchSize) {
+        const result = {};
+        for (let start=0;start<ids.length;start+=batchSize) {
+          const batch = ids.slice(start,start+batchSize);
+          const r = await mi.exe('GetContacts',{filter:'id IN ('+batch.join(',')+')',size:batch.length,page:0});
+          if (!r || !r.ok) throw Error(r && r.msg || accText('No se pudieron cargar los contactos'));
+          (r.outData || []).forEach(function(c) { result[String(c.id)] = c; });
         }
+        return result;
       }
-  
+      function renderizarTabla() {
+        const generation = ++accGeneration;
+        const tbody = table.find('tbody').empty();
+        if (!empresas.length) { tbody.append($('<tr>').append($('<td colspan="4">').text(accText('No hay registros')))); return; }
+        const rows = empresas.map(function(empresa,index) {
+          const id = /^\d+$/.test(String(empresa.codigoEmpresa || '')) ? Number(empresa.codigoEmpresa) : 0;
+          const key = String(empresa.codigoEmpresa || 'historico') + ':' + index;
+          const parent = $('<tr class="empresaRow">').attr({'data-index':index,'data-contact-id':id,'aria-expanded':!!accExpanded[key]}).css({background:'#e6f7ff',fontWeight:'bold'});
+          parent.append($('<td>').text(empresa.codigoEmpresa || ''));
+          parent.append($('<td>').text(empresa.nombreEmpresa || ''));
+          const toggle = $('<button type="button" class="ant-btn toggleAcc">').attr('aria-label',accText('Mostrar accionistas'));
+           const count = $('<span class="accionistaCount">').text(accSisCache[id] ? accSisCache[id].length : (id ? '…' : '0'));
+           parent.append($('<td>').append(toggle,$('<span>').text(accText('Accionistas')+': '),count));
+           parent.append($('<td>'));
+          const slot = $('<tr class="accStatus">').attr('data-owner',key).append($('<td colspan="4">'));
+          tbody.append(parent,slot);
+          const row={empresa,id,key,parent,count,slot,children:$(),list:accSisCache[id] || []};
+          row.sync=function() {
+            const expanded=!!accExpanded[key]; parent.attr('aria-expanded',expanded); toggle.text(expanded?'▼':'▶').attr('aria-expanded',expanded);
+            row.children.toggle(expanded); slot.toggle(expanded);
+          };
+          row.status=function(msg,retry) {
+            slot.children().empty().append($('<span>').text(msg));
+            if(retry) slot.children().append($('<button type="button" class="ant-btn accRetry">').text(accText('Reintentar')).on('click',function(e){e.stopPropagation();renderizarTabla();}));
+          };
+          parent.on('click',function(){accExpanded[key]=!accExpanded[key];row.sync();});
+          row.status(id?accText('Cargando accionistas…'):accText('Sin accionistas registrados'),false);
+          row.sync();
+          return row;
+        });
+        (async function() {
+          try {
+            const ids=Array.from(new Set(rows.map(function(r){return r.id;}).filter(Boolean)));
+            const contacts=await accContacts(ids,50);
+            if(generation!==accGeneration || !table[0].isConnected) return;
+            rows.forEach(function(row) {
+              if(row.id && !contacts[row.id]) {row.error=true;row.status(accText('Contacto no disponible'),true);return;}
+              try {row.list=row.id?accSisLeer(contacts[row.id].jCustomForms):[];accSisCache[row.id]=row.list;row.count.text(row.list.length);}
+              catch(e){row.error=true;row.status(e.message,true);}
+            });
+            const shareIds=Array.from(new Set(rows.filter(function(r){return !r.error;}).flatMap(function(r){return r.list.map(function(a){return /^\d+$/.test(String(a.id))?Number(a.id):0;});}).filter(Boolean)));
+            let shares={}, detailError=false;
+            try {shares=await accContacts(shareIds,100);} catch(e){detailError=true;}
+            if(generation!==accGeneration || !table[0].isConnected) return;
+            rows.forEach(function(row) {
+              if(row.error) return;
+              let anchor=row.parent;
+              row.list.forEach(function(a) {
+                const c=shares[a.id];
+                const child=$('<tr class="accSisRow">').attr('data-owner',row.key).css('background','#fafafa');
+                child.append($('<td>').text(a.id),$('<td>').css('padding-left','24px').text(c?accSisNombre(c):accText('Contacto no disponible')),
+                  $('<td>').text(String(a.porcentaje == null?'':a.porcentaje)+'% · COBIS: '+(c?c.nationalId || '':'—')+' · PEP: '+(c?accText(c.publicStatus?'Sí':'No'):'—')),
+                  $('<td>').text(accText('Solo consulta')));
+                anchor.after(child);anchor=child;row.children=row.children.add(child);
+              });
+              // Preserve old manual information, explicitly separate from the registered count.
+              const legacy=Array.isArray(row.empresa.accionistas)?row.empresa.accionistas:[];
+              if(legacy.length) {
+                const historical=$('<tr class="accHistorical">').append($('<td colspan="4">').text(accText('Captura histórica (no incluida en Accionista)')+': '+legacy.map(function(a){return a.nombre || '';}).join(' · ')));
+                anchor.after(historical);row.children=row.children.add(historical);
+              }
+              row.status(detailError && row.list.length?accText('No se pudo cargar el detalle; se conserva el total'):row.list.length?accText('Accionistas registrados — solo consulta'):accText('Sin accionistas registrados'),detailError && row.list.length>0);
+              row.sync();
+            });
+          }catch(e) {
+            if(generation!==accGeneration) return;
+            rows.forEach(function(row){row.status(accText('No se pudo cargar la lista; se conserva el total disponible'),true);row.sync();});
+          }
+        })();
+      }
+
       function persistirEmpresas(){ $("#hiddenValidaGEC").val(JSON.stringify(empresas)); }
-      function cargarEmpresasDesdeHidden(){ try{ empresas = $("#hiddenValidaGEC").val().trim()?JSON.parse($("#hiddenValidaGEC").val()):[]; }catch(e){ empresas=[]; } }
   
       /* ------------------------------------------------------------------
        * AXX-233 — carga por defecto de los integrantes del grupo economico
@@ -539,6 +391,7 @@
       // la lectura simple las devuelve en null y el guardado no lo tolera.
       const GEC_INCLUDE = ['Roles', 'Phones', 'Emails', 'Addresses', 'Tags', 'Documents',
         'Comments', 'Relationships', 'MedicalHistory', 'FamilyRecord', 'Branches'];
+      let grupoEconomicoCatalogo = null;
 
       function gecLeerGrupo(jcf) {
         try {
@@ -568,32 +421,46 @@
         return { contactoId: contactoId, grupo: c ? gecLeerGrupo(c.jCustomForms) : '' };
       }
 
-      // CA12: la grilla muestra por defecto todos los contactos del mismo grupo.
-      // Lo ya guardado se conserva: los integrantes encontrados se AGREGAN.
-      async function gecCargarIntegrantes() {
+      // CA12: la grilla se construye en línea con los contactos del grupo actual.
+      // No se usa hiddenValidaGEC como fuente de lectura para evitar datos obsoletos.
+      async function gecCargarIntegrantes(grupoOverride) {
         try {
           const ctx = await gecContextoActual();
-          if (!ctx.grupo) return;
-          const r = await mi.exe('GetContacts', {
-            size: 200, page: 0,
-            filter: "jCustomForms LIKE '%GEC#" + ctx.grupo + "#%'"
-          });
+          const grupo = grupoOverride !== undefined
+            ? String(grupoOverride || '').trim()
+            : String(window.__gecGrupoEconomicoPendiente || ctx.grupo || '').trim();
+          if (!grupo) {
+            empresas = [];
+            renderizarTabla();
+            return;
+          }
+          const grupoEscapado = grupo.replace(/'/g, "''");
+          const query = `SELECT DISTINCT c.id, c.name, c.surname1, c.surname2, c.isPerson
+            FROM Contact c
+            CROSS APPLY OPENJSON(c.jCustomForms) tabs
+            CROSS APPLY OPENJSON(tabs.value) fields
+            CROSS APPLY OPENJSON(JSON_QUERY(fields.value, '$.userData')) userData
+            WHERE tabs.[key] = N'Información de Compañías'
+              AND JSON_VALUE(fields.value, '$.name') = 'grupoEconomico'
+              AND LTRIM(RTRIM(CONVERT(NVARCHAR(4000), userData.value))) = N'${grupoEscapado}';`;
+          const r = await mi.exe('DoQuery', { sql: query });
           if (!r || !r.ok) return;
-          const yaEstan = {};
-          empresas.forEach(function (e) { yaEstan[String(e.codigoEmpresa)] = true; });
-          let agregadas = 0;
-          (r.outData || []).forEach(function (c) {
-            if (String(c.id) === String(ctx.contactoId)) return;   // el propio contacto no es integrante de si mismo
-            if (yaEstan[String(c.id)]) return;                     // ya listado: conserva sus accionistas
-            empresas.push({
-              codigoEmpresa: c.id,
-              nombreEmpresa: String(c.surname2 || c.FullName || '').trim(),
-              porcentaje: 0,
-              accionistas: []
+
+          empresas = (r.outData || [])
+            .filter(function (c) { return String(c.id) !== String(ctx.contactoId); })
+            .map(function (c) {
+              const nombre = c.isPerson
+                ? [c.name, c.surname1, c.surname2].filter(Boolean).join(' ')
+                : (c.surname2 || c.name || '');
+              return {
+                codigoEmpresa: c.id,
+                nombreEmpresa: String(nombre).trim(),
+                porcentaje: 0,
+                accionistas: []
+              };
             });
-            agregadas++;
-          });
-          if (agregadas > 0) { persistirEmpresas(); renderizarTabla(); }
+
+          renderizarTabla();
         } catch (e) { console.error('GEC integrantes:', e); }
       }
 
@@ -607,9 +474,7 @@
         const actual = gecLeerGrupo(c.jCustomForms);
         if (String(actual) === String(grupo)) return { ok: true, msg: 'ya pertenecia al grupo' };
         if (actual) {
-          const seguir = window.confirm(
-            'El contacto ya pertenece al grupo economico ' + actual + '.\n\n' +
-            'Un contacto solo puede pertenecer a un grupo. Desea reasignarlo al grupo ' + grupo + '?');
+          const seguir = await confirmarReasignacionGrupo(actual, grupo);
           if (!seguir) return { ok: false, msg: 'reasignacion cancelada por el usuario' };
         }
 
@@ -648,22 +513,122 @@
         return { ok: ok, msg: ok ? 'grupo asignado' : 'el grupo no quedo guardado en el contacto' };
       }
 
-      function gecSincronizarIntegrante(contactoId) {
-        gecContextoActual().then(function (ctx) {
-          if (!ctx.grupo) {
-            mostrarMensaje('Este contacto no tiene grupo economico asignado: el integrante no se sincronizo.', 'warning', 4000);
-            return null;
+      async function obtenerDescripcionGrupoEconomico(codigo) {
+        try {
+          if (!grupoEconomicoCatalogo) {
+            const r = await mi.exe('GetFullTable', { table: 'cfgGrupoEconomico' });
+            const filas = r && r.ok && Array.isArray(r.outData) ? r.outData.slice(1) : [];
+            grupoEconomicoCatalogo = filas.map(function (fila) {
+              return { id: String(fila[0]), nombre: String(fila[1] || '').trim() };
+            });
           }
-          return gecAsignarGrupo(contactoId, ctx.grupo).then(function (res) {
-            mostrarMensaje(res.ok ? 'Integrante sincronizado con el grupo economico.' : ('No se sincronizo: ' + res.msg),
-              res.ok ? 'success' : 'warning', 4000);
+
+          const grupo = grupoEconomicoCatalogo.find(function (item) {
+            return item.id === String(codigo);
           });
-        }).catch(function (e) { mostrarMensaje('Error sincronizando el integrante: ' + e, 'error', 4000); });
+          return grupo && grupo.nombre ? grupo.nombre : String(codigo);
+        } catch (error) {
+          return String(codigo);
+        }
       }
 
-      cargarEmpresasDesdeHidden();
+      async function confirmarReasignacionGrupo(grupoActual, grupoNuevo) {
+        return new Promise(function (resolve) {
+          $('#modalConfirmarGrupoEconomico').remove();
+
+          const $modal = $(`
+            <div id="modalConfirmarGrupoEconomico" class="ant-modal-root" role="presentation" style="position:fixed; inset:0; z-index:10001;">
+              <div class="ant-modal-mask"></div>
+              <div class="ant-modal-wrap" role="dialog" aria-modal="true" aria-labelledby="tituloConfirmarGrupoEconomico">
+                <div class="ant-modal" style="max-width:440px;">
+                  <div class="ant-modal-content">
+                    <button type="button" class="ant-modal-close" aria-label="Cerrar">
+                      <span class="ant-modal-close-x">×</span>
+                    </button>
+                    <div class="ant-modal-header">
+                      <div id="tituloConfirmarGrupoEconomico" class="ant-modal-title">Confirmar grupo económico</div>
+                    </div>
+                    <div class="ant-modal-body"></div>
+                    <div class="ant-modal-footer">
+                      <button type="button" class="ant-btn btnCancelarGrupoEconomico">Cancelar</button>
+                      <button type="button" class="ant-btn ant-btn-primary btnContinuarGrupoEconomico" disabled>Continuar</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `);
+
+          const $body = $modal.find('.ant-modal-body');
+          $('<p>').text('Este contacto ya pertenece a otro grupo económico.').appendTo($body);
+          $('<p>').append(
+            $('<strong>').text('Grupo actual: '),
+            $('<span class="descripcionGrupoActual">').text('Cargando...'),
+            $('<br>'),
+            $('<strong>').text('Nuevo grupo: '),
+            $('<span class="descripcionGrupoNuevo">').text('Cargando...')
+          ).appendTo($body);
+          $('<p>').text('¿Desea reasignarlo al nuevo grupo económico?').appendTo($body);
+
+          function cerrar(confirmado) {
+            $(document).off('keydown.confirmarGrupoEconomico');
+            $modal.remove();
+            resolve(confirmado);
+          }
+
+          $modal.on('click', '.btnCancelarGrupoEconomico, .ant-modal-close, .ant-modal-mask', function () {
+            cerrar(false);
+          });
+          $modal.on('click', '.btnContinuarGrupoEconomico', function () {
+            cerrar(true);
+          });
+          $(document).off('keydown.confirmarGrupoEconomico').on('keydown.confirmarGrupoEconomico', function (event) {
+            if (event.key === 'Escape') cerrar(false);
+          });
+
+          $('body').append($modal);
+          $modal.find('.btnCancelarGrupoEconomico').trigger('focus');
+
+          Promise.all([
+            obtenerDescripcionGrupoEconomico(grupoActual),
+            obtenerDescripcionGrupoEconomico(grupoNuevo)
+          ]).then(function (descripciones) {
+            if (!$modal.closest('html').length) return;
+            $modal.find('.descripcionGrupoActual').text(descripciones[0]);
+            $modal.find('.descripcionGrupoNuevo').text(descripciones[1]);
+            $modal.find('.btnContinuarGrupoEconomico').prop('disabled', false).trigger('focus');
+          }).catch(function () {
+            if (!$modal.closest('html').length) return;
+            $modal.find('.descripcionGrupoActual').text(String(grupoActual));
+            $modal.find('.descripcionGrupoNuevo').text(String(grupoNuevo));
+            $modal.find('.btnContinuarGrupoEconomico').prop('disabled', false).trigger('focus');
+          });
+        });
+      }
+
+      async function gecSincronizarIntegrante(contactoId) {
+        try {
+          const ctx = await gecContextoActual();
+          if (!ctx.grupo) {
+            mostrarMensaje('Este contacto no tiene grupo economico asignado: el integrante no se sincronizo.', 'warning', 4000);
+            return false;
+          }
+          const res = await gecAsignarGrupo(contactoId, ctx.grupo);
+          mostrarMensaje(res.ok ? 'Integrante sincronizado con el grupo economico.' : ('No se sincronizo: ' + res.msg),
+            res.ok ? 'success' : 'warning', 4000);
+          return res.ok;
+        } catch (e) {
+          mostrarMensaje('Error sincronizando el integrante: ' + e, 'error', 4000);
+          return false;
+        }
+      }
+
       renderizarTabla();
       gecCargarIntegrantes();
+
+      $(document).off('gec:grupoEconomicoChanged').on('gec:grupoEconomicoChanged', function (event, grupo) {
+        gecCargarIntegrantes(grupo);
+      });
 
       async function obtenerContactos(pagina, cantidad, filtro) {
         try {
