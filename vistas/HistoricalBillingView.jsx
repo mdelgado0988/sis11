@@ -120,6 +120,7 @@
   const [selectedLine, setSelectedLine] = React.useState('');
   const [selectedRow, setSelectedRow] = React.useState(null);
   const [policyInfo, setPolicyInfo] = React.useState(null);
+  const [latestCancellationDetail, setLatestCancellationDetail] = React.useState(null);
   const [collectionCutoffValue, setCollectionCutoffValue] = React.useState(undefined);
   const [collectionPaymentMethodOptions, setCollectionPaymentMethodOptions] = React.useState([]);
   const [relationshipOptions, setRelationshipOptions] = React.useState([]);
@@ -157,6 +158,7 @@
     const policyId = Number(selectedRow && selectedRow.policyId) || 0;
     if (!policyId) {
       setPolicyInfo(null);
+      setLatestCancellationDetail(null);
       setCollectionCutoffValue(undefined);
       setRenewalInfo(null);
       setAccountingInfo(null);
@@ -169,6 +171,7 @@
     setPolicyLoading(true);
     setRenewalInfo(null);
     setAccountingInfo(null);
+    setLatestCancellationDetail(null);
 
     const policyRequest = exe('RepoLifePolicy', {
       operation: 'GET',
@@ -188,6 +191,12 @@
       filter: `[entity] = N'LifePolicy' AND [entityId] = ${policyId}`,
       noTracking: true
     });
+    const changesRequest = exe('LoadEntities', {
+      entity: 'Change',
+      fields: 'id,Discriminator,status,executionDate,effectiveDate,creationDate,jDetail',
+      filter: `lifePolicyId=${policyId} AND status=1`,
+      noTracking: true
+    });
     policyRequest.then(response => {
       if (!response || response.ok === false) {
         throw new Error(response && response.msg ? response.msg : t('The policy could not be loaded.'));
@@ -198,6 +207,30 @@
       setPolicyInfo(null);
       message.error(error && error.message ? error.message : t('The policy could not be loaded.'));
     }).finally(() => setPolicyLoading(false));
+
+    changesRequest.then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The policy changes could not be loaded.'));
+      }
+      const changes = getRows(response).sort((left, right) => {
+        const leftDate = new Date(left && (left.executionDate || left.effectiveDate || left.creationDate) || 0).getTime();
+        const rightDate = new Date(right && (right.executionDate || right.effectiveDate || right.creationDate) || 0).getTime();
+        return rightDate - leftDate || Number(right && right.id || 0) - Number(left && left.id || 0);
+      });
+      const latestChange = changes[0];
+      if (!latestChange || text(latestChange.Discriminator).toUpperCase() !== 'CANCELLATIONCHANGE') {
+        setLatestCancellationDetail(null);
+        return;
+      }
+      try {
+        const detail = typeof latestChange.jDetail === 'string'
+          ? JSON.parse(latestChange.jDetail)
+          : latestChange.jDetail;
+        setLatestCancellationDetail(detail && typeof detail === 'object' ? detail : null);
+      } catch (error) {
+        setLatestCancellationDetail(null);
+      }
+    }).catch(() => setLatestCancellationDetail(null));
 
     renewalRequest.then(response => {
       if (!response || response.ok === false) {
@@ -1245,15 +1278,27 @@
   const generalData = selectedRow || {};
   const detailPolicy = policyInfo || {};
   const detailPayPlan = getSelectedPayPlan(detailPolicy);
-  const detailGross = firstNumber(detailPolicy, ['anualPremium', 'annualPremium'], Number(generalData.total) || 0);
+  const hasLatestCancellation = latestCancellationDetail && typeof latestCancellationDetail === 'object';
+  const detailGross = hasLatestCancellation
+    ? firstNumber(latestCancellationDetail, ['oldCoverages'], 0)
+    : firstNumber(detailPolicy, ['anualPremium', 'annualPremium'], Number(generalData.total) || 0);
   const detailExpenses = firstNumber(detailPolicy, ['fee', 'expenses', 'fees'], 0);
   const detailOtherExpenses = firstNumber(detailPolicy, ['otherExpenses', 'otherFee'], 0);
-  const detailTax = firstNumber(detailPolicy, ['tax', 'taxes'], 0);
+  const detailTax = hasLatestCancellation
+    ? firstNumber(latestCancellationDetail, ['oldTax'], 0)
+    : firstNumber(detailPolicy, ['tax', 'taxes'], 0);
   const detailInterest = firstNumber(detailPolicy, ['interest', 'interests'], 0);
-  const detailTotal = firstNumber(detailPolicy, ['anualTotal', 'annualTotal'], Number(generalData.total) || 0);
+  const detailTotal = hasLatestCancellation
+    ? firstNumber(latestCancellationDetail, ['oldAnnualPremium'], 0)
+    : firstNumber(detailPolicy, ['anualTotal', 'annualTotal'], Number(generalData.total) || 0);
   const detailPaid = firstNumber(detailPayPlan, ['payed', 'paid'], Number(generalData.paid) || 0);
   const detailPending = detailTotal - detailPaid;
-  const detailPremium = firstNumber(detailPolicy, ['coverages', 'premium'], detailGross);
+  const detailPremium = hasLatestCancellation
+    ? firstNumber(latestCancellationDetail, ['oldCoverages'], 0)
+    : firstNumber(detailPolicy, ['coverages', 'premium'], detailGross);
+  const detailCancellation = hasLatestCancellation
+    ? firstNumber(latestCancellationDetail, ['annualPremiumDif'], 0)
+    : 0;
   const detailCoinsurance = firstNumber(detailPolicy, ['coinsurance', 'coInsurance', 'coInsurancePremium'], 0);
   const detailAccrual = calculatePremiumAccrual(detailPolicy.start || generalData.start, detailPolicy.end || generalData.end, detailGross);
   const detailEarned = detailAccrual ? detailAccrual.earned : firstNumber(detailPolicy, ['earnedPremium', 'accruedPremium', 'devengada'], 0);
@@ -2593,6 +2638,7 @@
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Total')}</div><div className="historical-billing-data-value">{renderMoney(detailTotal)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid')}</div><div className="historical-billing-data-value">{renderMoney(hasCancelledInstallments ? totalInstallmentPaid : detailPaid)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Pending')}</div><div className="historical-billing-data-value">{renderMoney(hasCancelledInstallments ? totalInstallmentPending : detailPending)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Cancelled')}</div><div className="historical-billing-data-value">{renderMoney(detailCancellation)}</div></div>
                     </div>
                     <div className="historical-billing-data-card">
                       <div className="historical-billing-section-title">{t('Premiums')}</div>
