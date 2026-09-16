@@ -44,13 +44,34 @@ WITH BillingRows AS (
         MAX(pp.[dueDate]) AS [end],
         SUM(ISNULL(pp.[minimum], pp.[expected])) AS [total],
         SUM(ISNULL(pp.[payed], 0)) AS [paid],
-        SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0)) AS [pending]
+        SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0)) AS [pending],
+        COALESCE(cancellation.[annualPremiumDif], 0) AS [cancellation],
+        SUM(ISNULL(pp.[minimum], pp.[expected]))
+            + COALESCE(cancellation.[annualPremiumDif], 0) AS [balance]
     FROM [PayPlan] pp
     INNER JOIN [LifePolicy] lp ON lp.[id] = pp.[lifePolicyId]
     LEFT JOIN [Product] pro
         ON pro.[lobCode] = lp.[lob]
        AND pro.[code] = lp.[productCode]
+    LEFT JOIN (
+        SELECT [lifePolicyId], [annualPremiumDif]
+        FROM (
+            SELECT
+                ch.[lifePolicyId],
+                TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(ch.[jDetail], '$.annualPremiumDif')) AS [annualPremiumDif],
+                ROW_NUMBER() OVER (
+                    PARTITION BY ch.[lifePolicyId]
+                    ORDER BY COALESCE(ch.[executionDate], ch.[effectiveDate], ch.[creationDate]) DESC, ch.[id] DESC
+                ) AS [rowNumber]
+            FROM [Change] ch
+            WHERE ch.[Discriminator] = N'CancellationChange'
+              AND ch.[status] = 1
+        ) latestCancellation
+        WHERE [rowNumber] = 1
+    ) cancellation
+        ON cancellation.[lifePolicyId] = lp.[id]
     WHERE 1 = 1
+      AND ISNULL(pp.[concept], '') <> N'Cancellation'
       ${where}
     GROUP BY
         lp.[id],
@@ -58,7 +79,8 @@ WITH BillingRows AS (
         lp.[code],
         lp.[active],
         lp.[entityState],
-        lp.[start]
+        lp.[start],
+        cancellation.[annualPremiumDif]
 )
 SELECT
     [policyId],
@@ -71,6 +93,8 @@ SELECT
     [total],
     [paid],
     [pending],
+    [cancellation],
+    [balance],
     COUNT(1) OVER() AS [totalRows]
 FROM BillingRows
 ORDER BY [policyId], [end]
@@ -96,6 +120,7 @@ FROM (
         ON pro.[lobCode] = lp.[lob]
        AND pro.[code] = lp.[productCode]
     WHERE 1 = 1
+      AND ISNULL(pp.[concept], '') <> N'Cancellation'
       ${where}
     GROUP BY lp.[id]
 ) groupedPolicies;`;
@@ -187,7 +212,9 @@ function mapRow(row) {
     end: item.end || null,
     total: toNumber(item.total),
     paid: toNumber(item.paid),
-    pending: toNumber(item.pending)
+    pending: toNumber(item.pending),
+    cancellation: toNumber(item.cancellation),
+    balance: toNumber(item.balance)
   };
 }
 

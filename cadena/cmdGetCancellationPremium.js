@@ -31,8 +31,7 @@ try {
   const endorsementMovements = buildEndorsementMovements(
     policy,
     movementsData.changes,
-    cancellationDate,
-    anniversaryMovement?.contractYear
+    cancellationDate
   );
   movements.push(...endorsementMovements);
 
@@ -244,10 +243,9 @@ function buildAnniversaryMovement(policy, anniversaries, cancellationDate) {
   });
 }
 
-function buildEndorsementMovements(policy, changes, cancellationDate, contractYear) {
+function buildEndorsementMovements(policy, changes, cancellationDate) {
   const rows = asArray(changes)
     .filter(change => Number(change?.id ?? 0) > 0)
-    .filter(change => contractYear === null || contractYear === undefined || Number(change?.contractYear ?? 0) === Number(contractYear))
     .sort((a, b) => compareDatesAsc(a?.executionDate ?? a?.effectiveDate, b?.executionDate ?? b?.effectiveDate));
 
   return rows
@@ -258,7 +256,10 @@ function buildEndorsementMovements(policy, changes, cancellationDate, contractYe
         return null;
       }
 
-      const start = change?.effectiveDate ?? change?.creationDate ?? policy?.start;
+      const isLoadingChange = normalizeText(change?.Discriminator).toUpperCase() === "LOADINGCHANGE";
+      const start = isLoadingChange
+        ? policy?.start
+        : (change?.effectiveDate ?? change?.creationDate ?? policy?.start);
       const end = policy?.end;
 
       if (!start || !end) {
@@ -272,7 +273,7 @@ function buildEndorsementMovements(policy, changes, cancellationDate, contractYe
         start,
         end,
         cancellationDate,
-        contractYear: change?.contractYear ?? contractYear ?? null,
+        contractYear: change?.contractYear ?? null,
         referenceId: change?.id ?? 0
       });
     })
