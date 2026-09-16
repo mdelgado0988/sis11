@@ -5,6 +5,7 @@
  * Name: cmdValidateEffectiveDatePolicy
  * Description: Validates that an effective date is not before the policy start date.
  * Dates are compared as calendar dates in Panama local time, ignoring the time.
+ * Date-time values without an explicit offset are interpreted as UTC.
  */
 
 const input = context || {};
@@ -26,10 +27,16 @@ function getPanamaDateKey(value) {
     return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
   }
 
-  // An ISO timestamp without an offset is treated as a Panama local date.
+  // Date-only values are calendar dates and do not need timezone conversion.
   const localDateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})[T ]/);
   if (localDateMatch && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
-    return `${localDateMatch[1]}-${localDateMatch[2]}-${localDateMatch[3]}`;
+    // Values from LifePolicy without an offset are stored as UTC.
+    const parsedUtc = new Date(`${text.replace(' ', 'T')}Z`);
+    if (Number.isNaN(parsedUtc.getTime())) {
+      return '';
+    }
+    const panamaDate = new Date(parsedUtc.getTime() - (5 * 60 * 60 * 1000));
+    return `${panamaDate.getUTCFullYear()}-${pad(panamaDate.getUTCMonth() + 1)}-${pad(panamaDate.getUTCDate())}`;
   }
 
   const parsed = new Date(value);
