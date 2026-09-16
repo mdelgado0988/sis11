@@ -1450,11 +1450,11 @@
     { title: t('Cancelled'), dataIndex: 'cancelled', key: 'cancelled', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Current Amount'), dataIndex: 'current', key: 'current', width: 115, align: 'right', render: value => renderMoney(value) },
-    { title: t('Due soon'), dataIndex: 'dueSoon', key: 'dueSoon', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: '30-60', dataIndex: 'm30a60', key: 'm30a60', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '61-90', dataIndex: 'm60a90', key: 'm60a90', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '91-120', dataIndex: 'm90a120', key: 'm90a120', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '>120', dataIndex: 'mmas120', key: 'mmas120', width: 105, align: 'right', render: value => renderMoney(value) },
+    { title: t('Due soon'), dataIndex: 'dueSoon', key: 'dueSoon', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Overdue'), dataIndex: 'overdue', key: 'overdue', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: delinquencyGrouped ? t('Entry date') : t('Installment date'), dataIndex: delinquencyGrouped ? 'entryDate' : 'dueDate', key: 'delinquencyDate', width: 120, align: 'center', render: value => (delinquencyGrouped ? formatDate(value) : formatCalendarDate(value)) }
   ];
@@ -2771,11 +2771,11 @@
                         <Table.Summary.Cell index={5} align="right">{renderMoney(delinquencyTotals.cancelled)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={6} align="right">{renderMoney(delinquencyTotals.pending)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.current)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={10} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={11} align="right">{renderMoney(delinquencyTotals.m90a120)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.mmas120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} align="right">{renderMoney(delinquencyTotals.m90a120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={11} align="right">{renderMoney(delinquencyTotals.mmas120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={13} align="right">{renderMoney(delinquencyTotals.overdue)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={14}></Table.Summary.Cell>
                         </Table.Summary.Row>

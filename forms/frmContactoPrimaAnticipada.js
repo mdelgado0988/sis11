@@ -81,8 +81,8 @@
         //reemplazamos cualquier caracter especial para evitar inyección de código o errores en la consulta
         search = search.replace(/[%_]/g, '\\$&');
 
-        // filtro por nombre (puedes ampliar luego)
-        let filters = `isPerson = 1`;
+        // Las personas se buscan por nombre y primer apellido; las empresas por razon social.
+        let filters = `(isPerson = 1 OR isPerson = 0)`;
 
         //si search es numérico, también busco por identificación y nationalId (noCobis)
         const isNumeric = /^\d+$/.test(search);
@@ -97,7 +97,10 @@
             if (hasNumbers) {
                 filters += ` AND (cnp LIKE '${search}%' OR passport LIKE '${search}%' OR nif LIKE '${search}%')`;
             } else {
-                filters += `AND TRIM(CONCAT_WS(' ', name, middlename, surname1, surname2)) LIKE '${search}%'`;
+                filters += ` AND (
+                    (isPerson = 1 AND TRIM(CONCAT_WS(' ', name, surname1)) LIKE '${search}%')
+                    OR (isPerson = 0 AND surname2 LIKE '${search}%')
+                )`;
             }
         }
         

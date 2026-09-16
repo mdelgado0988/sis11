@@ -1,17 +1,17 @@
 use sis11
 go
 
-DECLARE  @Fecha DATE = '20260730'
-		,@ramo varchar(50) = '1'
+DECLARE  @Fecha DATE = '20260916'
+		,@ramo varchar(50) = null
 		,@producto varchar(50) = null,
-		@poliza varchar(50) = 'IN-GL-000160',
+		@poliza varchar(50) = 'IN-IL-003249',
 		@holder varchar(50) = null
 
 SELECT 
 
     ROW_NUMBER() OVER (ORDER BY p.code) AS Id,
 	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,ISNULL(p.fiscalNumber,'0')) END AS Recibo,
-    p.code AS [Póliza],
+    p.code AS [PÃ³liza],
     0 AS Ref_Banco,
     pr.name AS Ramo,
     p.commercial AS [Plan],
@@ -25,7 +25,7 @@ SELECT
     ISNULL(c.email, '') AS [Correo del Pagador],
 
     CASE
-        WHEN c.isPerson = 1 THEN CONCAT_WS(' ', c.name, c.surname1, c.surname2)
+        WHEN c.isPerson = 1 THEN LTRIM(RTRIM(CONCAT_WS(' ', c.name, c.surname1, c.surname2)))
         ELSE c.surname2
     END AS Cliente,
 
@@ -49,7 +49,7 @@ SELECT
     ISNULL(oa.NumeroPrestamo,'0') AS Prestamo,
 	ISNULL(oa.NumeroFinca,'0') AS Finca,
     ISNULL(oa.Placa, '') AS Placa,
-    ISNULL(s.Facturado, 0) AS Facturado,
+    ISNULL(f.Facturado, 0) AS Facturado,
     ISNULL([s].Pagado, 0)    AS Pagado,
     ISNULL([s].Pendiente, 0) AS Pendiente,
     ISNULL([s].Corriente, 0) AS Corriente,
@@ -59,9 +59,9 @@ SELECT
     ISNULL([s].[120], 0)     AS [120],
     ISNULL([s].[Por vencer], 0) AS [Por vencer],
     ISNULL([s].[Vencido], 0)    AS [Vencido],
-	s.FechaPago [Fecha Último Pago],
-	ISNULL(DATEDIFF(DAY, s.FMaxVence, GETDATE()),0) [Dias Vencidos],
-    p.branchCode AS [Codigo Ramo],
+	s.FechaPago [Fecha Ãšltimo Pago],
+	ISNULL(DATEDIFF(DAY, s.FMaxVence, @Fecha),0) [Dias Vencidos],
+    p.lob AS [Codigo Ramo],
     CASE WHEN p.active = 1 THEN 'V' ELSE 'I' END AS Estatus,
     0 AS [Tipo Operacion],
     ISNULL(
@@ -85,7 +85,7 @@ LEFT JOIN Anniversary an on an.lifePolicyId = p.id AND an.contractYear = 1
 OUTER APPLY (SELECT CASE WHEN an.[start] IS NOT NULL THEN an.[start] ELSE p.[start] END AS [start]
 				, CASE WHEN an.anniversary IS NOT NULL THEN an.anniversary ELSE p.[end] END AS [end]) fechas
 
-/* información de la póliza según snapshot  */
+/* informaciÃ³n de la pÃ³liza segÃºn snapshot  */
 LEFT JOIN [dbo].[FiscalDocGenerated] fr ON fr.policyId = p.id AND fr.[action] = 'IssuePolicy'
 INNER JOIN Product pr ON pr.code = p.productCode
 INNER JOIN Contact c  ON c.id = p.holderId
@@ -94,11 +94,19 @@ LEFT JOIN Contact sl ON sl.id = p.sellerId
 
 OUTER APPLY (SELECT TOP (1) 1 Tiene
 			 FROM PayPlan pl
-			 WHERE pl.lifePolicyId = p.id AND pl.contractYear = ISNULL(an.contractYear,pl.contractYear)
+			 WHERE pl.lifePolicyId = p.id
+			 AND pl.cancellationDate IS NULL
 			 AND pl.payed = 0 AND pl.minimum > 0) tpl
 
 LEFT JOIN PaymentMethodCatalog pm ON pm.code = p.paymentMethod
 
+OUTER APPLY (
+    SELECT
+        SUM(ISNULL(NULLIF(ppFact.expected, 0), ppFact.minimum)) AS Facturado
+    FROM PayPlan ppFact
+    WHERE ppFact.lifePolicyId = p.id
+      AND ISNULL(ppFact.concept, '') <> 'Cancellation'
+) f
 
 OUTER APPLY (
     SELECT
@@ -172,7 +180,18 @@ OUTER APPLY (
 		,COUNT(DISTINCT pp.numberInYear) Cuotas
 
     FROM PayPlan pp
-    WHERE pp.lifePolicyId = p.id AND pp.contractYear = ISNULL(an.contractYear,pp.contractYear)
+    WHERE pp.lifePolicyId = p.id
+      AND (
+            (
+                pp.concept = 'Cancellation'
+                AND ISNULL(NULLIF(pp.expected, 0), pp.minimum) > 0
+            )
+            OR
+            (
+                ISNULL(pp.concept, '') <> 'Cancellation'
+                AND pp.cancellationDate IS NULL
+            )
+          )
 ) AS [s]
 
 /*-- Objeto Asegurado */
