@@ -62,7 +62,7 @@ function getTrimmedString(value) {
 }
 
 function loadPayment(paymentId) {
-  const result = doCmd({
+  doCmd({
     cmd: 'RepoClaimPayment',
     data: {
       operation: 'GET',
@@ -70,6 +70,10 @@ function loadPayment(paymentId) {
       noTracking: true
     }
   });
+
+  const result = typeof RepoClaimPayment === 'undefined'
+    ? null
+    : RepoClaimPayment;
 
   if (!result || result.ok === false) {
     throw new Error(result && result.msg

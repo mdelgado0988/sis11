@@ -1,0 +1,670 @@
+//block
+//noreplace
+
+/**
+ * @author Michael Delgado
+ * @email support@axxis-systems.com
+ * @created 2026/08/09
+ * @name cmdPremiumsPayment
+ * @version 1.0
+ * @purpose: Apply one payment to multiple policies and send any excess to transit.
+ * @context: {
+ *   workspaceId: number,
+ *   currency?: string,
+ *   amount?: number,
+ *   payments: [{ policyId: number, amount: number }],
+ *   supplementaryPayments?: [{ policyId: number, amount: number }],
+ *   sourceTransitAccountId?: number,
+ *   transitIncomeType?: string,
+ *   transferEntity?: object
+ * }
+ * @notes:
+ *   - The payment is distributed by policy without validating a payer or fiscal receipt.
+ *   - Each policy amount is applied to its pending installments in due-date order.
+ *   - Supplementary payments settle eligible installments before any remainder goes to transit.
+ *   - When sourceTransitAccountId is provided, a second negative transfer is created and executed
+ *     against the transit account after the premium allocation succeeds.
+ *   - The transfer entity can be provided by the payment form to preserve split-payment details.
+ */
+
+try {
+  const commandContext = context || {};
+  const input = getContextInput(commandContext);
+  validateInput(input);
+
+  const workspaceId = getPositiveInteger(input.workspaceId);
+  const payments = getPaymentRows(input);
+  const supplementaryPayments = getSupplementaryPaymentRows(input);
+  const requestedAmount = getMoney(input.amount);
+  const sourceTransitAccountId = getPositiveInteger(input.sourceTransitAccountId);
+  const calculatedAmount = roundMoney(
+    payments.reduce((total, item) => total + item.amount, 0)
+    + supplementaryPayments.reduce((total, item) => total + item.amount, 0)
+  );
+  const totalAmount = requestedAmount > 0 ? requestedAmount : calculatedAmount;
+
+  if (Math.abs(totalAmount - calculatedAmount) > 0.01) {
+    throw new Error('El monto total no coincide con la suma de los montos asignados a las pólizas.');
+  }
+
+  if (sourceTransitAccountId > 0) {
+    const availableBalance = loadTransitAccountBalance(sourceTransitAccountId);
+    if (totalAmount > availableBalance + 0.01) {
+      throw new Error(`La cuenta en tránsito no tiene saldo suficiente. Disponible: ${roundMoney(availableBalance)}, solicitado: ${roundMoney(totalAmount)}.`);
+    }
+  }
+
+  // AXX-823: settle eligible debt across selected policies before transit.
+  // AXX-823: both cashier inputs describe money to apply to eligible debt.
+  // Merge repeated policies before allocation so an installment is never paid twice.
+  const combinedPayments = [];
+  payments.concat(supplementaryPayments).forEach(payment => {
+    const existing = combinedPayments.find(item => item.policyId === payment.policyId);
+    if (existing) existing.amount = roundMoney(existing.amount + payment.amount);
+    else combinedPayments.push({ policyId: payment.policyId, amount: payment.amount });
+  });
+  const details = combinedPayments.map(payment => {
+    const policy = loadPolicy(payment.policyId);
+    return { policy, amount: payment.amount, payPlan: loadPayPlan(policy.id) };
+  });
+  details.forEach(item => {
+    item.allocation = distributePayment(item.payPlan, item.amount);
+  });
+  // Keep the requested amounts where possible; move only their unused excess.
+  for (const source of details) {
+    for (const target of details) {
+      if (source.allocation.transitAmount <= 0) break;
+      if (source === target) continue;
+      const available = roundMoney(target.payPlan.reduce((sum, row) =>
+        sum + Math.max(0, getMoney(row.minimum) - getMoney(row.payed)), 0)
+        - target.allocation.appliedAmount);
+      const moved = roundMoney(Math.min(source.allocation.transitAmount, available));
+      if (moved <= 0) continue;
+      source.amount = roundMoney(source.amount - moved);
+      source.allocation = distributePayment(source.payPlan, source.amount);
+      target.amount = roundMoney(target.amount + moved);
+      target.allocation = distributePayment(target.payPlan, target.amount);
+    }
+  }
+  details.forEach(item => {
+    if (item.allocation.transitAmount > 0) ensureTransitAccount(item.policy);
+  });
+
+  const totals = calculateTotals(details);
+  validateTotals(totalAmount, totals);
+
+  const transfer = createTransfer(input, workspaceId, totalAmount);
+  const entity = buildPaymentAllocationEntity(input, workspaceId, totalAmount, transfer, details, totals);
+
+  doCmd({
+    cmd: 'DoPaymentAllocation',
+    data: { entity: entity }
+  });
+
+  if (!DoPaymentAllocation || DoPaymentAllocation.ok === false) {
+    throw new Error(DoPaymentAllocation && DoPaymentAllocation.msg
+      ? DoPaymentAllocation.msg
+      : 'No fue posible aplicar el pago.');
+  }
+
+  const transitTransfer = sourceTransitAccountId > 0
+    ? createTransitDebitTransfer(input, workspaceId, totalAmount, sourceTransitAccountId, details)
+    : null;
+
+  return {
+    ok: true,
+    msg: 'Pago de primas aplicado correctamente',
+    data: {
+      amount: totalAmount,
+      appliedAmount: totals.appliedAmount,
+      transitAmount: totals.transitAmount,
+      difference: totals.difference,
+      transitTransfer: transitTransfer,
+      policies: details.map(item => ({
+        policyId: item.policy.id,
+        amount: item.amount,
+        appliedAmount: item.allocation.appliedAmount,
+        transitAmount: item.allocation.transitAmount,
+        installments: item.allocation.installments.map(row => ({
+          payPlanId: row.id,
+          amount: row.dueAmount
+        }))
+      }))
+    }
+  };
+} catch (error) {
+  throw new TypeError(`@${getErrorMessage(error)}`);
+}
+
+function getContextInput(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  return {};
+}
+
+function validateInput(input) {
+  if (getPositiveInteger(input.workspaceId) <= 0) {
+    throw new Error('El identificador de la caja es obligatorio y debe ser válido.');
+  }
+
+  const payments = getPaymentRows(input);
+  const supplementaryPayments = getSupplementaryPaymentRows(input);
+  if (payments.length === 0 && supplementaryPayments.length === 0) {
+    throw new Error('Debe indicar al menos una póliza para realizar el cobro.');
+  }
+
+  const policyIds = new Set();
+  payments.forEach(item => {
+    if (getPositiveInteger(item.policyId) <= 0) {
+      throw new Error('El identificador de la póliza es obligatorio y debe ser válido.');
+    }
+
+    if (item.amount <= 0) {
+      throw new Error(`El monto de la póliza ${item.policyId} debe ser mayor que cero.`);
+    }
+
+    if (policyIds.has(item.policyId)) {
+      throw new Error(`La póliza ${item.policyId} fue enviada más de una vez.`);
+    }
+
+    policyIds.add(item.policyId);
+  });
+
+  const supplementaryIds = new Set();
+  supplementaryPayments.forEach(item => {
+    if (getPositiveInteger(item.policyId) <= 0 || item.amount <= 0) {
+      throw new Error('La prima complementaria debe tener una póliza válida y un monto mayor que cero.');
+    }
+
+    if (supplementaryIds.has(item.policyId)) {
+      throw new Error(`La póliza ${item.policyId} fue enviada mÃ¡s de una vez en primas complementarias.`);
+    }
+
+    supplementaryIds.add(item.policyId);
+  });
+}
+
+function getPaymentRows(input) {
+  const source = Array.isArray(input.payments)
+    ? input.payments
+    : Array.isArray(input.policies)
+      ? input.policies
+      : Array.isArray(input.rows)
+        ? input.rows
+        : [];
+
+  return source.map(item => ({
+    policyId: getPositiveInteger(item && (item.policyId || item.lifePolicyId)),
+    amount: roundMoney(getMoney(item && item.amount))
+  }));
+}
+
+function getSupplementaryPaymentRows(input) {
+  const source = Array.isArray(input && input.supplementaryPayments)
+    ? input.supplementaryPayments
+    : Array.isArray(input && input.complementaryPayments)
+      ? input.complementaryPayments
+      : [];
+
+  return source.map(item => ({
+    policyId: getPositiveInteger(item && (item.policyId || item.lifePolicyId)),
+    amount: roundMoney(getMoney(item && item.amount))
+  }));
+}
+
+function loadPolicy(policyId) {
+  doCmd({
+    cmd: 'RepoLifePolicy',
+    data: {
+      operation: 'GET',
+      filter: `[id]=${policyId}`,
+      include: ['Accounts', 'Holder', 'ComContract'],
+      noTracking: true
+    }
+  });
+
+  const rows = getRows(RepoLifePolicy && RepoLifePolicy.outData);
+  const policy = rows[0];
+  if (!policy) {
+    throw new Error(`No se encontró la póliza con id ${policyId}.`);
+  }
+
+  return policy;
+}
+
+function loadPayPlan(policyId) {
+  doCmd({
+    cmd: 'LoadEntities',
+    data: {
+      entity: 'PayPlan',
+      fields: '*',
+      filter: `lifePolicyId = ${policyId} AND cancellationDate IS NULL`,
+      noTracking: true
+    }
+  });
+
+  const rows = getRows(LoadEntities && LoadEntities.outData);
+  return rows;
+}
+
+function loadTransitAccountBalance(accountId) {
+  doCmd({
+    cmd: 'LoadEntities',
+    data: {
+      entity: 'AccountMov',
+      fields: 'amount,transactionCode',
+      filter: `accountId = ${accountId}`,
+      noTracking: true
+    }
+  });
+
+  const rows = getRows(LoadEntities && LoadEntities.outData);
+  return roundMoney(rows.reduce((total, item) => {
+    const transactionCode = getTrimmedString(item && item.transactionCode).toUpperCase();
+    if (transactionCode === 'PREMIUMPAY' || transactionCode === 'MONEYOUT') return total;
+
+    const amount = Number(item && item.amount);
+    return total + (Number.isFinite(amount) ? amount : 0);
+  }, 0));
+}
+
+function getTransitIncomeType(input) {
+  const requestedCode = getTrimmedString(input && input.transitIncomeType);
+  if (requestedCode) return requestedCode;
+
+  doCmd({
+    cmd: 'RepoIncomeTypeCatalog',
+    data: {
+      operation: 'GET',
+      filter: "internalType = 'DEPOPAYMENT'",
+      entity: null,
+      bulkJson: null,
+      include: null,
+      size: 0,
+      page: 0,
+      showColumnsIfEmpty: false
+    }
+  });
+
+  const options = getRows(RepoIncomeTypeCatalog && RepoIncomeTypeCatalog.outData);
+  const option = options.find(item =>
+    getTrimmedString(item && item.internalType).toUpperCase() === 'DEPOPAYMENT'
+  );
+  const code = getTrimmedString(option && (option.code || option.value));
+  if (!code) {
+    throw new Error('El tipo de ingreso DEPOPAYMENT no está configurado.');
+  }
+
+  return code;
+}
+
+function getOtherPaymentMethodName() {
+  doCmd({
+    cmd: 'RepoPaymentMethodCatalog',
+    data: {
+      operation: 'GET',
+      filter: "code = 'OT'",
+      entity: null,
+      bulkJson: null,
+      include: null,
+      size: 0,
+      page: 0,
+      showColumnsIfEmpty: false
+    }
+  });
+
+  const options = getRows(RepoPaymentMethodCatalog && RepoPaymentMethodCatalog.outData);
+  const option = options.find(item => getTrimmedString(item && item.code).toUpperCase() === 'OT');
+  return getTrimmedString(option && option.name) || 'OT';
+}
+
+function distributePayment(payPlan, amount) {
+  const availableAmount = roundMoney(amount);
+  let remainingAmount = availableAmount;
+  const installments = [];
+
+  const pendingRows = payPlan
+    .filter(item => getMoney(item && item.minimum) - getMoney(item && item.payed) > 0)
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+  for (const item of pendingRows) {
+    if (remainingAmount <= 0) break;
+
+    const minimum = roundMoney(getMoney(item.minimum));
+    const payed = roundMoney(getMoney(item.payed));
+    const pending = roundMoney(minimum - payed);
+    const dueAmount = roundMoney(Math.min(remainingAmount, pending));
+
+    if (dueAmount <= 0) continue;
+
+    installments.push({
+      ...item,
+      dueAmount: dueAmount,
+      previousPayed: payed,
+      newPayed: roundMoney(payed + dueAmount),
+      remaining: roundMoney(pending - dueAmount),
+      isPartial: dueAmount < pending
+    });
+
+    remainingAmount = roundMoney(remainingAmount - dueAmount);
+  }
+
+  return {
+    installments: installments,
+    appliedAmount: roundMoney(availableAmount - remainingAmount),
+    transitAmount: remainingAmount
+  };
+}
+
+function ensureTransitAccount(policy) {
+  const accounts = Array.isArray(policy.Accounts) ? policy.Accounts : [];
+  const existing = accounts.find(item =>
+    item && String(item.type || '').toUpperCase() === 'TRANSIT'
+  );
+
+  if (existing) return existing;
+
+  doCmd({
+    cmd: 'RepoAccount',
+    data: {
+      operation: 'ADD',
+      entity: {
+        currency: policy.currency || 'USD',
+        holderId: policy.holderId,
+        type: 'TRANSIT',
+        accNo: `TRA${policy.id}`,
+        name: 'Cuenta Depósito',
+        lifePolicyId: policy.id
+      }
+    }
+  });
+
+  if (!RepoAccount || RepoAccount.ok === false) {
+    throw new Error(RepoAccount && RepoAccount.msg
+      ? RepoAccount.msg
+      : `No se pudo crear la cuenta en tránsito de la póliza ${policy.code || policy.id}.`);
+  }
+
+  return RepoAccount.outData;
+}
+
+function calculateTotals(details) {
+  const appliedAmount = roundMoney(details.reduce((total, item) =>
+    total + item.allocation.appliedAmount, 0));
+  const transitAmount = roundMoney(details.reduce((total, item) =>
+    total + item.allocation.transitAmount, 0));
+
+  return {
+    appliedAmount: appliedAmount,
+    transitAmount: transitAmount,
+    difference: roundMoney(appliedAmount + transitAmount - details.reduce((total, item) => total + item.amount, 0))
+  };
+}
+
+function validateTotals(totalAmount, totals) {
+  if (Math.abs(totals.difference) > 0.01) {
+    throw new Error('La distribución del pago no coincide con el monto enviado a tránsito.');
+  }
+
+  if (Math.abs(roundMoney(totals.appliedAmount + totals.transitAmount) - totalAmount) > 0.01) {
+    throw new Error('El monto aplicado y el monto enviado a tránsito no coinciden con el total del pago.');
+  }
+}
+
+function createTransfer(input, workspaceId, amount) {
+  const currency = getTrimmedString(input.currency) || 'USD';
+  const paymentMethod = getTrimmedString(input.paymentMethod) || 'ACH';
+  const sourceEntity = input && input.transferEntity && typeof input.transferEntity === 'object'
+    && !Array.isArray(input.transferEntity)
+    ? input.transferEntity
+    : null;
+  const entity = sourceEntity
+    ? {
+        ...sourceEntity,
+        currency: sourceEntity.currency || currency,
+        amount: amount,
+        // Keep the accounting concept expected by UnDoPaymentAllocation.
+        concept: 'IW',
+        transferWorkspaceId: workspaceId
+      }
+    : {
+        currency: currency,
+        amount: amount,
+        SplitPayments: [{
+          amount: amount,
+          paymentMethod: paymentMethod,
+          paymentMethodName: getTrimmedString(input.paymentMethodName) || paymentMethod
+        }],
+        incomeType: getTrimmedString(input.incomeType) || 'IT7',
+        sourceExternal: getTrimmedString(input.sourceExternal) || 'CajaAhUSD',
+        destinationAccountId: getPositiveInteger(input.destinationAccountId) || 208,
+        isExternal: true,
+        // UnDoPaymentAllocation espera la transferencia principal con este concepto.
+        concept: 'IW',
+        transferWorkspaceId: workspaceId
+      };
+
+  doCmd({
+    cmd: 'RepoTransfer',
+    data: {
+      operation: 'ADD',
+      entity: entity,
+      otherReceivables: []
+    }
+  });
+
+  if (!RepoTransfer || RepoTransfer.ok === false) {
+    throw new Error(RepoTransfer && RepoTransfer.msg
+      ? RepoTransfer.msg
+      : 'No se pudo registrar la transferencia.');
+  }
+
+  const transfer = getRows(RepoTransfer.outData)[0];
+  if (!transfer || getPositiveInteger(transfer.id) <= 0) {
+    throw new Error('La transferencia no devolvió un identificador válido.');
+  }
+
+  doCmd({
+    cmd: 'DoTransfer',
+    data: { transferId: transfer.id, transfer: null }
+  });
+
+  if (!DoTransfer || DoTransfer.ok === false) {
+    throw new Error(DoTransfer && DoTransfer.msg
+      ? DoTransfer.msg
+      : 'No se pudo ejecutar la transferencia.');
+  }
+
+  return getRows(DoTransfer.outData)[0] || transfer;
+}
+
+function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId, details) {
+  const currency = getTrimmedString(input && input.currency) || 'USD';
+  const paymentMethodName = getOtherPaymentMethodName();
+  const sourceEntity = input && input.transferEntity && typeof input.transferEntity === 'object'
+    && !Array.isArray(input.transferEntity)
+    ? input.transferEntity
+    : {};
+  const policyCodes = Array.from(new Set(details
+    .map(item => getTrimmedString(item && item.policy && (item.policy.code || item.policy.id)))
+    .filter(code => code.length > 0)));
+  const concept = `Pago de póliza ${policyCodes.join(', ')} (de TRÁNSITO)`;
+  const transferAmount = roundMoney(amount);
+
+  const entity = {
+    currency: currency,
+    amount: -transferAmount,
+    sourceAccountId: null,
+    destinationAccountId: transitAccountId,
+    concept: concept,
+    paymentMethod: 'OT',
+    paymentMethodName: paymentMethodName,
+    SplitPayments: [{
+      paymentMethod: 'OT',
+      paymentMethodName: paymentMethodName,
+      amount: -transferAmount,
+      currency: currency,
+      id: 0,
+      transferId: 0
+    }],
+    sourceName: null,
+    destinationName: getTrimmedString(sourceEntity.destinationName) || null,
+    source: null,
+    destination: null,
+    AllocationMovements: null,
+    id: 0,
+    transactionCode: null,
+    producer: null,
+    lifePolicyId: null,
+    date: new Date().toISOString(),
+    status: 0,
+    executed: false,
+    isExternal: true,
+    sourceExternal: null,
+    allocationId: null,
+    Allocation: null,
+    operatingAccountId: 0,
+    claimPaymentId: null,
+    ClaimPayment: null,
+    SourceAccount: null,
+    DestinationAccount: null,
+    Movements: null,
+    reversalDate: null,
+    incomeType: getTransitIncomeType(input),
+    IncomeType: null,
+    jIncomeTypeForm: null,
+    transferWorkspaceId: workspaceId,
+    user: getTrimmedString(sourceEntity.user) || null
+  };
+
+  doCmd({
+    cmd: 'RepoTransfer',
+    data: {
+      operation: 'ADD',
+      entity: entity,
+      otherReceivables: []
+    }
+  });
+
+  if (!RepoTransfer || RepoTransfer.ok === false) {
+    throw new Error(RepoTransfer && RepoTransfer.msg
+      ? RepoTransfer.msg
+      : 'No se pudo registrar la salida de la cuenta en tránsito.');
+  }
+
+  const transfer = getRows(RepoTransfer.outData)[0];
+  if (!transfer || getPositiveInteger(transfer.id) <= 0) {
+    throw new Error('La salida de la cuenta en tránsito no devolvió un identificador válido.');
+  }
+
+  doCmd({
+    cmd: 'DoTransfer',
+    data: { transferId: transfer.id, transfer: null }
+  });
+
+  if (!DoTransfer || DoTransfer.ok === false) {
+    throw new Error(DoTransfer && DoTransfer.msg
+      ? DoTransfer.msg
+      : 'No se pudo ejecutar la salida de la cuenta en tránsito.');
+  }
+
+  return getRows(DoTransfer.outData)[0] || transfer;
+}
+
+function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, details, totals) {
+  const installmentPremiums = [];
+  const premiums = [];
+  const supplementaryPremiums = [];
+
+  details.forEach(item => {
+    const policy = item.policy;
+    const allocation = item.allocation;
+    const currency = policy.currency || input.currency || 'USD';
+
+    allocation.installments.forEach(installment => {
+      installmentPremiums.push({
+        lifePolicyId: policy.id,
+        payPlanId: installment.id,
+        dueAmount: installment.dueAmount,
+        moneyInAmount: installment.dueAmount,
+        currency: installment.currency || currency,
+        compensationAmount: 0,
+        transitAmount: 0
+      });
+
+      premiums.push({
+        Installment: installment,
+        comContractId: policy.comContractId,
+        comContractName: policy.ComContract && policy.ComContract.name || '',
+        concept: 'Premium',
+        contractYear: policy.contractYear,
+        coveredUntil: policy.end,
+        created: policy.dateIncome,
+        currency: installment.currency || currency,
+        custom: false,
+        ...installment,
+        payerId: policy.holderId,
+        policyCode: policy.code,
+        policyHolderName: policy.Holder && policy.Holder.FullName || '',
+        sellerName: ''
+      });
+    });
+
+    if (allocation.transitAmount > 0) {
+      supplementaryPremiums.push({
+        compensationAmount: 0,
+        currency: currency,
+        destination: 'TRANSIT',
+        transaction: `Depósito REF: ${transfer.id}`,
+        lifePolicyId: policy.id,
+        moneyInAmount: allocation.transitAmount,
+        transitAmount: 0
+      });
+    }
+  });
+
+  return {
+    currency: input.currency || 'USD',
+    InstallmentPremiums: installmentPremiums,
+    SupplementaryPremiums: supplementaryPremiums.length > 0 ? supplementaryPremiums : null,
+    differenceAmount: totals.difference,
+    transactionDate: new Date().toISOString(),
+    transferAmount: amount,
+    fromTransitAmount: 0,
+    compensationAmount: 0,
+    premiumAmount: totals.appliedAmount,
+    supplementaryAmount: totals.transitAmount,
+    premiumDifferenceAmount: 0,
+    transferWorkspaceId: workspaceId,
+    Transfers: [transfer],
+    Premiums: premiums
+  };
+}
+
+function getRows(value) {
+  if (Array.isArray(value)) return value;
+  if (value) return [value];
+  return [];
+}
+
+function getPositiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : 0;
+}
+
+function getMoney(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function getTrimmedString(value) {
+  return String(value === undefined || value === null ? '' : value).trim();
+}
+
+function getErrorMessage(error) {
+  if (error && error.message) return error.message;
+  return String(error || 'Error no especificado');
+}
