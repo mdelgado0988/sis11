@@ -3,7 +3,8 @@
 /*
  * cmdApplyReaChangeCoverage
  *
- * Versiona el reaseguro completo antes o despues de ejecutar un ChangeCoverage:
+ * Versiona el reaseguro completo antes o despues de ejecutar un endoso de
+ * cobertura o suma asegurada:
  * - lee las cesiones vigentes de la poliza (overwritten = 0);
  * - marca esas cesiones como historicas (overwritten = 1);
  * - crea una nueva fotografia completa con overwritten = 0 y changeId.
@@ -194,10 +195,6 @@ if (!preserveActiveReinsurance) {
     if (ceded !== 0 && parts.length) {
       const split = parts.reduce(function (sum, part) { return sum + num(part.split); }, 0);
       if (Math.abs(split - 100) > 0.011) errors.push('linea ' + keyOf(row) + ': los aceptantes suman ' + split + '%');
-    }
-    if (num(row.sumInsuredMovement) !== 0 &&
-        Math.abs(money(row.sumInsuredCedant) + money(row.sumInsuredRe)) > Math.abs(money(row.sumInsuredMovement)) + 0.011) {
-      errors.push('cobertura ' + txt(row.coverageCode) + ': la suma retenida mas cedida supera el movimiento');
     }
   });
 }

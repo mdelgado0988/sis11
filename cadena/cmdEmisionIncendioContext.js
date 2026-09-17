@@ -77,7 +77,7 @@ try {
   } = amounts;
   const isRenewal = isPolicyVersionRenewal || renovacion;
 
-  const cessions = getReinsuranceCessions(policy.id, tipo, id);
+  const cessions = getReinsuranceCessions(policy.id, tipo, id, change);
   const reaseguroCedido = toDecimal(
     cessions.reduce((total, item) => total + toNumber(item.premiumRe), 0)
   );
@@ -353,16 +353,18 @@ function loadPolicy(filter) {
  * Cancellation reports use a similar combination, but only with overwritten
  * records whose premium type is CANCELLATION.
  */
-function getReinsuranceCessions(policyId, tipo, changeId) {
+function getReinsuranceCessions(policyId, tipo, changeId, change) {
   const isCancellation = tipo === 1;
   const isVariation = tipo === 3 || tipo === 5;
   const isCoverageChange = tipo === 6;
+  const additional = safeJson(change && change.jAdditional, {});
+  const isPreparedCapitalChange = tipo === 3 && additional.endorsementType === 'CHANGE_INSURED_SUM_SURETY';
 
   // Coverage changes in ProceedOrderEndorsement version the complete
   // distribution with a negative cancellation and an identical positive
   // replacement. Accounting must read both sides of this change so the net
   // reinsurance movement is zero.
-  if (isCoverageChange) {
+  if (isCoverageChange || isPreparedCapitalChange) {
     return getCessions(`changeId=${changeId}`);
   }
 

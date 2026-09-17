@@ -2,9 +2,9 @@
 //noreplace
 /*
  * cmdSimReaChangeCoverage (AXX-299 / GLOB-1201)
- * Pestania 2: simula el reaseguro DEL MOVIMIENTO del endoso de vigencia, sin ejecutar
- * el endoso y sin escribir en Cession. Distribuye solo la diferencia de prima de cada
- * cobertura sobre los contratos vigentes de la poliza, agrupando por contrato y linea.
+ * Simula el reaseguro DEL MOVIMIENTO de un endoso de cobertura o suma asegurada,
+ * sin ejecutar el endoso ni escribir en Cession. Distribuye las diferencias de prima
+ * y suma de cada cobertura sobre los contratos vigentes, agrupando por contrato y linea.
  * Incluye todas las coberturas activas de cada contrato y linea afectados para que los
  * porcentajes editados se apliquen a la distribucion completa, aunque una cobertura no
  * tenga movimiento de prima en el endoso, respetando si la cobertura suma o no para
@@ -15,7 +15,7 @@
  * (incluye recargos y descuentos). El importe prorateado se conserva como dato
  * informativo, pero no puede ser la base porque omite esos ajustes manuales.
  *
- * context: {policyId, rows:[{code, variation, prorated}], participants:[{cessionId, contactId, split}]}
+ * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement}], participants:[{cessionId, contactId, split}]}
  */
 const money = function (v) { return Number(Number(v).toFixed(2)); };
 const txt = function (v) { return String(v == null ? '' : v).trim(); };
@@ -28,16 +28,21 @@ if (!rows.length) throw 'No hay resultado de calculo que distribuir: ejecute pri
 
 const delta = {};
 const prorated = {};
+const sumDelta = {};
 let movement = 0;
 let proratedMovement = 0;
+let sumMovement = 0;
 for (let i = 0; i < rows.length; i++) {
   const c = txt(rows[i].code);
   const v = money(rows[i].variation || 0);
   const pr = rows[i].prorated === undefined || rows[i].prorated === null ? v : money(rows[i].prorated);
+  const sv = money(rows[i].sumInsuredMovement || 0);
   delta[c] = v;
   prorated[c] = pr;
+  sumDelta[c] = sv;
   movement = money(movement + v);
   proratedMovement = money(proratedMovement + pr);
+  sumMovement = money(sumMovement + sv);
 }
 
 doCmd({ cmd: 'RepoLifePolicy', data: { operation: 'GET', filter: 'id=' + policyId, include: ['Coverages'], size: 1 } });
@@ -121,13 +126,14 @@ for (let i = 0; i < base.length; i++) {
       facultative: lineUp === 'FAC' || lineUp === 'FRO',
       currency: txt(c.currency) || txt(policy.currency),
       rows: [], participants: [],
-      totals: { movement: 0, prorated: 0, cedant: 0, re: 0, commission: 0, nonTechnical: 0, sumInsuredCounted: 0, coveragesCounted: 0, participantSplit: 0 }
+      totals: { movement: 0, prorated: 0, sumMovement: 0, cedant: 0, re: 0, commission: 0, nonTechnical: 0, sumInsuredCounted: 0, coveragesCounted: 0, participantSplit: 0 }
     };
     order.push(key);
   }
   const grp = byContract[key];
   const dv = delta[code] === undefined ? 0 : money(delta[code]);
   const pv = prorated[code] === undefined ? 0 : money(prorated[code]);
+  const sv = sumDelta[code] === undefined ? 0 : money(sumDelta[code]);
   const pCed = Number(c.proportionCed || 0);
   const pRe = Number(c.proportionRe || 0);
   const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
@@ -140,7 +146,7 @@ for (let i = 0; i < base.length; i++) {
   const nonTechnical = money(dv - cedant - re);
   grp.rows.push({
     coverageCode: code, cover: txt(c.cover), counts: counts,
-    premiumMovement: dv, proratedMovement: pv,
+    premiumMovement: dv, proratedMovement: pv, sumInsuredMovement: sv,
     proportionCed: pCed, proportionRe: pRe,
     premiumCedant: cedant, premiumRe: re, nonTechnicalPremium: nonTechnical,
     sumInsured: Number(c.sumInsured || 0), sumInsuredCounted: counts ? Number(c.sumInsured || 0) : 0,
@@ -149,6 +155,7 @@ for (let i = 0; i < base.length; i++) {
   });
   grp.totals.movement = money(grp.totals.movement + dv);
   grp.totals.prorated = money(grp.totals.prorated + pv);
+  grp.totals.sumMovement = money(grp.totals.sumMovement + sv);
   grp.totals.cedant = money(grp.totals.cedant + cedant);
   grp.totals.re = money(grp.totals.re + re);
   grp.totals.commission = money(grp.totals.commission + commission);
@@ -227,6 +234,7 @@ return {
   currency: policy.currency,
   movement: movement,
   proratedMovement: proratedMovement,
+  sumMovement: sumMovement,
   distributed: distributed,
   balanced: money(movement - distributed) === 0,
   warnings: warnings,

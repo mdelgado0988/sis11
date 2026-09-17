@@ -39,12 +39,14 @@ try {
   const insuredObjectCodes = [
     "1_9_DT_INCENDIO",
     "DT_INCENDIO_V3",
-    "DTINCENDIO_SUMA"
+    "DTINCENDIO_SUMA",
+    "OA_FIANZASV3"
   ];
   const insuredObjectsToUpdate = insuredObjects.filter(item =>
     item &&
     item.ObjectDefinition &&
-    insuredObjectCodes.indexOf(item.ObjectDefinition.code) >= 0 &&
+    (insuredObjectCodes.indexOf(item.ObjectDefinition.code) >= 0 ||
+      insuredObjectCodes.indexOf(item.ObjectDefinition.name) >= 0) &&
     getPositiveInteger(item.id) > 0
   );
 
@@ -61,6 +63,7 @@ try {
 
     inputValues.txtSA = insuredSum;
     inputValues.txtSADisplay = insuredSum;
+    inputValues.suma_afianzada = insuredSum;
 
     customForm.forEach(input => {
       if (!input || !input.name) {

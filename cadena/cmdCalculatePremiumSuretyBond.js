@@ -23,6 +23,12 @@ try {
   const endorsementAction = String(action || poliza.action || "").toLowerCase();
   const isProceedOrder = (endorsementAction === "changeterm" || endorsementAction === "changecoverage")
     && endorsementType === "PROCEEDORDER";
+  const changeData = getChangeData();
+  const newCapital = n(changeData.newCapital);
+  const oldCapital = n(changeData.oldCapital !== undefined ? changeData.oldCapital : poliza.insuredSum);
+  const isCapitalChange = endorsementAction === "changepolicycapital"
+    || endorsementAction === "capitalchange"
+    || (newCapital > 0 && oldCapital > 0 && Math.abs(newCapital - oldCapital) > 0.009);
 
   setResultCoverages();
 
@@ -46,6 +52,16 @@ try {
   log("Calculando objeto asegurado");
   setInsuredObject();
 
+  if (isCapitalChange) {
+    if (newCapital <= 0) {
+      throw new Error("La nueva suma asegurada debe ser mayor que cero.");
+    }
+
+    // Las formulas de tarifa deben evaluar la suma final solicitada por el
+    // endoso, no el valor que todavia permanece guardado en el objeto asegurado.
+    oaUserData.suma_afianzada = newCapital;
+  }
+
   log("Estableciendo coberturas");
   resultCoverages = [];
   setResultCoverages();
@@ -55,7 +71,10 @@ try {
   for (let cov of poliza.Coverages) {
 
     const resultCoverage = resultCoverages.find(x => x.code == cov.code);
-    const obj = getQuotationObject(cov.code);
+    const obj = getQuotationObject(
+      cov.code,
+      isCapitalChange ? newCapital : null
+    );
 
     //log(`obj: $${JSON.stringify(obj)}`);
 
@@ -107,7 +126,7 @@ try {
       }
       
     }
-    
+
   }
 
   return resultCoverages
@@ -117,7 +136,7 @@ catch(error){
   throw `@${error.toString()}`;
 }
 
-function getQuotationObject(coverageCode) {
+function getQuotationObject(coverageCode, insuredSumOverride) {
 
   log(`Calculando objeto cov: ${coverageCode}`);
   
@@ -155,7 +174,10 @@ function getQuotationObject(coverageCode) {
   });
 
   //Convertimos a números valores sencibles:
-  obj.suma_afianzada = n(obj.suma_afianzada);
+  obj.suma_afianzada = insuredSumOverride !== null
+    && insuredSumOverride !== undefined
+    ? n(insuredSumOverride)
+    : n(obj.suma_afianzada);
 
   //Calculo de factor de vigencia, ojo
   //* calculamos la duración de la cobertura
@@ -303,12 +325,30 @@ function setChangeCoveragePremiums() {
 }
 
 function getChangeData() {
-  if (extra && extra.data && typeof extra.data === "object") return extra.data;
-  if (extra && typeof extra === "object") return extra;
-  if (poliza?.jChangeDto?.data && typeof poliza.jChangeDto.data === "object") {
-    return poliza.jChangeDto.data;
-  }
+  const parsedExtra = parseChangeObject(extra);
+  const extraData = parseChangeObject(parsedExtra.data);
+  if (Object.keys(extraData).length) return extraData;
+  if (Object.keys(parsedExtra).length) return parsedExtra;
+
+  const parsedDto = parseChangeObject(poliza && poliza.jChangeDto);
+  const dtoData = parseChangeObject(parsedDto.data);
+  if (Object.keys(dtoData).length) return dtoData;
+  if (Object.keys(parsedDto).length) return parsedDto;
+
   return {};
+}
+
+function parseChangeObject(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
 }
 
 function getChangeCoverageRows() {
