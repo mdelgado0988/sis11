@@ -11723,6 +11723,7 @@ Observation: Observation
 Uncollectible Premium Endorsement: Uncollectible Premium Endorsement
 This policy has no positive pending premium balance, so there is nothing to write off.: This policy has no positive pending premium balance, so there is nothing to write off.
 Current balance: Saldo actual
+Cancelled values: Valores cancelados
 Pending premium balance: Pending premium balance
 Cancellation reason: Motivo de cancelación
 Please select cause: Please select cause
@@ -11970,6 +11971,7 @@ awaiting effective date: esperando fecha efectiva
 Proceed Order endorsement: Endoso de orden de proceder
 Preview the resulting dates, then execute. Execution generates a ChangeTerm endorsement, executes it and synchronises the insured-object data. Nothing is written until you press Execute.: Previsualice las fechas resultantes y luego ejecute. La ejecución genera un endoso de Cambio de Vigencia, lo ejecuta y sincroniza la información del objeto asegurado. No se guarda ninguna información hasta presionar Ejecutar.
 Current system date: Fecha actual
+Policy start date: Fecha inicial de la póliza
 Endorsement data: Información del endoso
 Coverage comparison: Comparación de coberturas
 Bond validity summary: Resumen de vigencia de la fianza

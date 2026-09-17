@@ -62,7 +62,7 @@ const sqlValue = function (value) {
 const changeId = Number(context && context.changeId || 0);
 if (!changeId) throw 'Falta el identificador del endoso';
 const mode = txt(context && context.mode).toUpperCase() || 'FINALIZE';
-if (['PREPARE', 'PREPARE_EXECUTION', 'FINALIZE', 'ROLLBACK'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
+if (['PREPARE', 'PREPARE_EXECUTION', 'FINALIZE', 'ROLLBACK', 'CANCEL_ONLY'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
 let requestedRows = Array.isArray(context && context.distribution) ? context.distribution : [];
 let requestedParts = Array.isArray(context && context.participants) ? context.participants : [];
 let requestedCoinsurance = [];
@@ -121,7 +121,7 @@ if (snapshot && Array.isArray(snapshot.distribution)) {
   requestedParts = Array.isArray(snapshot.participants) ? snapshot.participants : [];
   requestedCoinsurance = Array.isArray(snapshot.coinsurance) ? snapshot.coinsurance : [];
 }
-if (!requestedRows.length) throw 'El endoso no tiene distribucion de reaseguro guardada';
+if (!requestedRows.length && mode !== 'CANCEL_ONLY') throw 'El endoso no tiene distribucion de reaseguro guardada';
 
 let finalCoverages = [];
 try { finalCoverages = JSON.parse(change.jNewCoverages || '[]'); }
@@ -216,6 +216,125 @@ const insertSql = function (table, columns, entity, overrides) {
   return 'INSERT INTO [' + table + '] (' + columns.map(function (column) { return '[' + column + ']'; }).join(', ') +
     ') VALUES (' + values.join(', ') + ');';
 };
+
+// La prima incobrable no cambia la distribucion: solo registra los saldos
+// vigentes como movimientos negativos. No se crea una fotografia positiva
+// porque el endoso queda en cero y las filas anteriores permanecen intactas.
+if (mode === 'CANCEL_ONLY') {
+  const sourceIds = currentCessions.map(function (cession) { return Number(cession.id || 0); }).filter(Boolean);
+  const partsByCession = {};
+  if (sourceIds.length) {
+    doCmd({ cmd: 'LoadEntities', data: {
+      entity: 'CessionPart',
+      filter: 'cessionId IN (' + sourceIds.join(',') + ')', noTracking: true
+    } });
+    const currentParts = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
+    currentParts.forEach(function (part) {
+      const cessionId = Number(part.cessionId || 0);
+      if (!partsByCession[cessionId]) partsByCession[cessionId] = [];
+      partsByCession[cessionId].push(part);
+    });
+  }
+
+  const aggregateFields = [
+    'sumInsured', 'premium', 'sumInsuredCedant', 'premiumCedant', 'sumInsuredRe', 'premiumRe',
+    'comissionCedant', 'participantCommission', 'tax', 'nonTechnicalPremium', 'loading',
+    'loadingCedant', 'loadingRe', 'fee', 'coPremium'
+  ];
+  const groupedSources = {};
+  currentCessions.forEach(function (source) {
+    const key = keyOf(source);
+    if (!groupedSources[key]) {
+      groupedSources[key] = { latest: clone(source), latestId: Number(source.id || 0), sourceIds: [], totals: {} };
+    }
+    const group = groupedSources[key];
+    const sourceId = Number(source.id || 0);
+    group.sourceIds.push(sourceId);
+    if (sourceId >= group.latestId) {
+      group.latest = clone(source);
+      group.latestId = sourceId;
+    }
+    aggregateFields.forEach(function (field) {
+      group.totals[field] = money(num(group.totals[field]) + num(source[field]));
+    });
+  });
+  const cancellationSources = Object.keys(groupedSources).map(function (key) {
+    const group = groupedSources[key];
+    const result = group.latest;
+    aggregateFields.forEach(function (field) { result[field] = group.totals[field]; });
+    result._sourceIds = group.sourceIds;
+    return result;
+  });
+
+  // Nunca se genera un positivo: un saldo positivo se anula con negativo y
+  // un saldo negativo se conserva negativo para no reactivar importes.
+  const cancellationValue = function (value) {
+    const amount = money(num(value));
+    return amount > 0 ? money(-amount) : amount;
+  };
+  const statements = ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'];
+  cancellationSources.forEach(function (source, index) {
+    const cancellation = clone(source);
+    cancellation.id = 0;
+    cancellation.premiumType = 'CANCELLATION';
+    cancellation.overwritten = 0;
+    cancellation.changeId = changeId;
+    ['sumInsured', 'premium', 'sumInsuredCedant', 'premiumCedant', 'sumInsuredRe', 'premiumRe',
+      'comissionCedant', 'participantCommission', 'tax', 'nonTechnicalPremium', 'loading',
+      'loadingCedant', 'loadingRe', 'fee', 'coPremium'].forEach(function (field) {
+      cancellation[field] = cancellationValue(source[field]);
+    });
+
+    const variable = '@CancellationCession_' + (index + 1);
+    statements.push('DECLARE ' + variable + ' INT;');
+    statements.push(insertSql('Cession', CESSION_COLUMNS, cancellation, {
+      overwritten: 0,
+      changeId: changeId
+    }));
+    statements.push('SET ' + variable + ' = SCOPE_IDENTITY();');
+
+    const groupedParts = {};
+    (source._sourceIds || []).forEach(function (sourceId) {
+      (partsByCession[sourceId] || []).forEach(function (part) {
+        const partKey = String(part.contactId || 0) + '|' + String(part.brokerId || 0) + '|' + String(part.lineId || source.lineId || '');
+        if (!groupedParts[partKey]) {
+          groupedParts[partKey] = { latest: clone(part), latestId: Number(part.id || 0), totals: { sumInsured: 0, premium: 0, commission: 0, tax: 0 } };
+        }
+        const group = groupedParts[partKey];
+        if (Number(part.id || 0) >= group.latestId) {
+          group.latest = clone(part);
+          group.latestId = Number(part.id || 0);
+        }
+        group.totals.sumInsured = money(group.totals.sumInsured + num(part.sumInsured));
+        group.totals.premium = money(group.totals.premium + num(part.premium));
+        group.totals.commission = money(group.totals.commission + num(part.commission));
+        group.totals.tax = money(group.totals.tax + num(part.tax));
+      });
+    });
+    Object.keys(groupedParts).forEach(function (partKey) {
+      const partGroup = groupedParts[partKey];
+      const child = partGroup.latest;
+      child.id = 0;
+      child.cessionId = variable;
+      ['sumInsured', 'premium', 'commission', 'tax'].forEach(function (field) {
+        child[field] = cancellationValue(partGroup.totals[field]);
+      });
+      statements.push(insertSql('CessionPart', CESSION_PART_COLUMNS, child, {
+        cessionId: variable,
+        reserve: child.reserve == null ? 0 : child.reserve,
+        fee: child.fee == null ? 0 : child.fee
+      }));
+    });
+  });
+  statements.push('COMMIT TRANSACTION;');
+  doCmd({ cmd: 'DoQuery', data: { sql: statements.join('\n') } });
+  if (!DoQuery || DoQuery.ok === false) return { ok: false, stage: 'CANCEL_ONLY', changeId: changeId, policyId: policyId,
+    msg: 'No fue posible anular el reaseguro del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
+
+  return { ok: true, exact: true, stage: 'CANCEL_ONLY', changeId: changeId, policyId: policyId,
+    overwritten: 0, cancellationsCreated: cancellationSources.length,
+    participantsCreated: 0, msg: 'El reaseguro fue anulado sin generar una distribucion positiva.' };
+}
 
 if (mode === 'PREPARE') {
   const requestedByKey = {};

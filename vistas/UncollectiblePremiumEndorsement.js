@@ -9,29 +9,7 @@
  */
 
 () => {
-  const { Card, Row, Col, Form, DatePicker, Input, Select, Button, Descriptions, Alert, Tag, Skeleton, Space, Popconfirm, Table, Tabs, message } = A;
-
-  // AXX-253 / GLOB-1209 - Endoso de Prima Incobrable.
-  // Accion de poliza (Configuracion avanzada > Policy > customActions). Cotiza con
-  // ChangeCancellation y ejecuta con ExeChangeCancellation. El importe es el saldo de prima
-  // pendiente: sin fechas, vigencias ni prorratas.
-  //
-  // AXX-272 / GLOB-1209:
-  //  - CA-05: se retira la restriccion por ramo. La vista abre para CUALQUIER ramo. La
-  //    elegibilidad por estado de poliza (solo canceladas, CA-09 de AXX-253) SIGUE VIGENTE.
-  //  - CA-07/08/09: la vista sobrescribe el jDetail de ESTE endoso dejando cada rubro nuevo en
-  //    cero y conservando el anterior. Change.jDetail no lo lee la ejecucion, asi que el ajuste
-  //    es representacion y auditoria de este endoso y no altera ningun otro (CA-10).
-  //  - CA-11/12: validacion de saldo cero sobre jDetail y sobre Bill. Cualquier diferencia
-  //    residual se informa con su rubro y su importe y BLOQUEA Ejecutar. Nunca se redondea una
-  //    diferencia a cero para ocultarla.
-  //  - CA-13/14/15: Guardar persiste el endoso sin ejecutarlo; Ejecutar revalida contra el
-  //    estado actual antes de aplicar y rechaza un calculo obsoleto.
-  //
-  // Ojo: en una LiveView el motor es buble, asi que todo await va dentro de "async function",
-  // nunca de una arrow async. Y ninguna clave de t() puede llevar dos puntos: i18next los trata
-  // como separador de namespace y se come la frase.
-
+  const { Card, Row, Col, Form, DatePicker, Input, Select, Button, Descriptions, Alert, Tag, Skeleton, Space, Popconfirm, Table, Tabs, Spin, message } = A;
   const ENDORSEMENT_TYPE = 'UNCOLLECTIBLEPREMIUM';
   const REASON_CATALOG = 'CancellationChange';
   const DEFAULT_REASON_CODE = 'CANCELACION POR FALTA DE PAGO';
@@ -80,7 +58,9 @@
     '.uncollectible-tabs .ant-tabs-content-holder { min-height: 0; overflow: auto; border: 1px solid #cbd1d8; padding: 8px; }',
     '.uncollectible-tabs .ant-tabs-content { height: 100%; }',
     '.uncollectible-tabs .ant-tabs-tabpane { min-height: 0; }',
-    '.uncollectible-view .ant-alert { font-size: 13px; }'
+    '.uncollectible-view .ant-alert { font-size: 13px; }',
+    '.uncollectible-execution-mask { position: fixed; inset: 0; z-index: 1000000; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.58); cursor: wait; }',
+    '.uncollectible-execution-mask > div { display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: #fff; border: 1px solid #91caff; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.16); color: #1677ff; font-weight: 600; }'
   ].join('\n');
 
   const [loading, setLoading] = useState(true);
@@ -98,7 +78,6 @@
   const [touched, setTouched] = useState(false);
 
   const [quoting, setQuoting] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [quote, setQuote] = useState(null);
   const [detail, setDetail] = useState(null);       // jDetail de este endoso, ya en cero
@@ -263,13 +242,18 @@
   const formValid = missing.length === 0;
 
   const fmtDate = (d) => (d && d.format ? d.format('YYYY-MM-DD') : '');
+  let reinsuranceSnapshot = null;
 
-  const buildAdditional = () => JSON.stringify({
+  const buildAdditional = () => {
+    const additional = {
     endorsementType: ENDORSEMENT_TYPE,
     causa: txt(causa),
     observacion: txt(observation),
     effectiveDate: fmtDate(effectiveDate),
-  });
+    };
+    if (reinsuranceSnapshot) additional.reinsuranceSnapshot = reinsuranceSnapshot;
+    return JSON.stringify(additional);
+  };
 
   const buildData = (operation) => {
     const data = {
@@ -417,7 +401,7 @@
     setQuoting(false);
   };
 
-  // Persiste el endoso con su detalle en cero, SIN ejecutarlo (CA-13).
+  // Persiste el endoso con su detalle en cero para que la misma accion pueda ejecutarlo.
   const saveEndorsement = async function () {
     const saved = await exe('ChangeCancellation', buildData('ADD'));
     if (!saved || !saved.ok || !saved.outData || !saved.outData.id) {
@@ -449,22 +433,6 @@
     return { changeId: changeId, processId: Number(saved.outData.processId || 0) };
   };
 
-  const onSave = async function () {
-    setTouched(true);
-    setActionError('');
-    if (!formValid || !quote || !detail) return;
-    setSaving(true);
-    try {
-      const s = await saveEndorsement();
-      setSavedChange(s);
-      message.success(t('Endorsement saved without executing.') + ' ' + t('Change number') + ' - ' + s.changeId);
-    } catch (e) {
-      setActionError(String((e && e.message) || e));
-      message.error(t('The endorsement could not be saved.'));
-    }
-    setSaving(false);
-  };
-
   const generateEndorsementDocument = async function (changeId) {
     const response = await exe('ExeChain', {
       chain: 'cmdGenertFormatoEmdoso',
@@ -476,15 +444,56 @@
     }
   };
 
+  const runReinsuranceMode = async function (changeId, mode) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdApplyReaChangeCoverage',
+      context: JSON.stringify({ changeId: Number(changeId), mode: mode })
+    });
+    let data = response && response.outData;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (e) { data = null; }
+    }
+    if (Array.isArray(data) && data.length === 1) data = data[0];
+    if (!response || response.ok === false || (data && data.ok === false)) {
+      throw new Error((data && data.msg) || (response && response.msg) || t('The reinsurance could not be processed.'));
+    }
+    return data || response;
+  };
+
   const onExecute = async function () {
+    setTouched(true);
     setActionError('');
-    if (!formValid || !quote || !detail || !savedChange) return;
+    if (!formValid || !quote || !detail) return;
     if (residuals.length) {
       setActionError(t('Execution is blocked while a rubro is different from zero.'));
       return;
     }
     setExecuting(true);
+    let reinsurancePrepared = false;
+    let reinsuranceExecuted = false;
+    let preparedChangeId = Number(savedChange && savedChange.changeId || 0);
     try {
+      // Persiste y ejecuta con el mismo changeId dentro de la unica accion del usuario.
+      let target = savedChange;
+      if (!target) {
+        const activeCessions = await exe('RepoCession', {
+          operation: 'GET',
+          filter: 'lifePolicyId=' + policyId + ' AND overwritten=0',
+          size: 0
+        });
+        if (!activeCessions || !activeCessions.ok) {
+          throw new Error(t('The active reinsurance could not be read, so the endorsement was not executed.'));
+        }
+        reinsuranceSnapshot = {
+          sourceCessionIds: (activeCessions.outData || []).map(function (cession) {
+            return Number(cession.id || 0);
+          }).filter(function (id) { return id > 0; })
+        };
+        target = await saveEndorsement();
+        preparedChangeId = Number(target.changeId || 0);
+        setSavedChange(target);
+      }
+
       // CA-15: revalidar contra el estado ACTUAL antes de aplicar. Si el saldo cambio desde el
       // calculo, se rechaza y se pide recalcular en vez de ejecutar con datos obsoletos.
       const fresh = await exe('GetPendingPremiums', { policyId: policyId });
@@ -497,9 +506,10 @@
           ' ' + t('Calculated balance') + ' - ' + money(quotedBalance) + '. ' + t('Current balance') + ' - ' + money(freshBalance) + '.');
       }
 
-      // La ejecucion solo puede utilizar el endoso previamente guardado.
-      // No se vuelve a crear ni modificar el endoso desde este flujo.
-      const target = savedChange;
+      // La anulacion del reaseguro se prepara antes de ejecutar el endoso. Este
+      // modo solo crea movimientos negativos y no genera una fotografia positiva.
+      await runReinsuranceMode(target.changeId, 'CANCEL_ONLY');
+      reinsurancePrepared = true;
 
       // La cancelacion pasa por su propio flujo de aprobacion: ExeChangeCancellation rechaza un
       // cambio cuyo proceso no fue aprobado.
@@ -520,6 +530,7 @@
       if (!exeRes || !exeRes.ok) {
         throw new Error(t('The endorsement was saved as number ') + target.changeId + t(' but it could NOT be executed, so it was not applied. Review it from the policy change list.'));
       }
+      reinsuranceExecuted = true;
       try {
         await generateEndorsementDocument(target.changeId);
       } catch (documentError) {
@@ -530,6 +541,16 @@
       message.success(t('Uncollectible premium endorsement applied.') + ' ' + t('Change number') + ' - ' + target.changeId);
       window.location.href = '/#/lifePolicy/' + policyId;
     } catch (e) {
+      if (reinsurancePrepared && !reinsuranceExecuted && preparedChangeId) {
+        try {
+          await runReinsuranceMode(preparedChangeId, 'ROLLBACK');
+        } catch (rollbackError) {
+          setActionError(String((e && e.message) || e) + ' ' + t('The previous reinsurance could not be restored.') + ' ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));
+          message.error(t('The endorsement could not be executed.'));
+          setExecuting(false);
+          return;
+        }
+      }
       setActionError(String((e && e.message) || e));
       message.error(t('The endorsement could not be executed.'));
     }
@@ -621,12 +642,15 @@
       old: coverageAmount,
       neu: 0,
     };
+  })).map((row) => Object.assign({}, row, {
+    cancelled: round2(Number(row.old || 0) - Number(row.neu || 0))
   })) : [];
 
   const detailColumns = [
     { title: t('Item'), dataIndex: 'rubro', key: 'rubro' },
     { title: t('Current balance'), dataIndex: 'old', key: 'old', align: 'right', render: (v) => amountCell(v) },
     { title: t('New value'), dataIndex: 'neu', key: 'neu', align: 'right', render: (v) => amountCell(v) },
+    { title: t('Cancelled values'), dataIndex: 'cancelled', key: 'cancelled', align: 'right', render: (v) => amountCell(v) },
   ];
 
   return (
@@ -635,6 +659,11 @@
       title={t('Uncollectible Premium Endorsement')}
       bodyStyle={{ padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
       <style>{VIEW_CSS}</style>
+      {executing ? (
+        <div className="uncollectible-execution-mask" role="alert" aria-busy="true">
+          <div><Spin size="small" /> {t('Procesando endoso, espere por favor...')}</div>
+        </div>
+      ) : null}
       <Descriptions className="uncollectible-summary" size="small" column={3} bordered style={{ marginBottom: 12 }}>
         <Descriptions.Item label={t('Policy')}>{policy.code}</Descriptions.Item>
         <Descriptions.Item label={t('Line of business')}>{lobName || policy.lob}</Descriptions.Item>
@@ -700,11 +729,10 @@
           <div className="uncollectible-toolbar">
             <Space size={8}>
             <Button id="btnQuote" type="primary" disabled={!!savedChange} loading={quoting} onClick={onQuote}>{t('Calculate')}</Button>
-            <Button id="btnSave" type="primary" loading={saving} disabled={!quote || !!savedChange} onClick={onSave}>{t('Save endorsement')}</Button>
             <Popconfirm
               title={t('The pending premium balance will be written off and the policy will accept no further endorsements. Continue?')}
-              okText={t('Yes')} cancelText={t('No')} disabled={!savedChange || !zeroOk} onConfirm={onExecute}>
-              <Button id="btnExecute" type="primary" disabled={!savedChange || !zeroOk} loading={executing}>{t('Execute endorsement')}</Button>
+              okText={t('Yes')} cancelText={t('No')} disabled={!quote || !zeroOk || !!executing} onConfirm={onExecute}>
+              <Button id="btnExecute" type="primary" disabled={!quote || !zeroOk || !!executing} loading={executing}>{t('Execute endorsement')}</Button>
             </Popconfirm>
             {!formValid && touched ? <span style={{ color: '#cf1322' }}>{t('Required') + ' - ' + missing.join(', ')}</span> : null}
             </Space>
