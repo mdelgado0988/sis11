@@ -1589,8 +1589,8 @@ async function obtenerContactos(pagina, cantidad, search) {
         //reemplazamos cualquier caracter especial para evitar inyección de código o errores en la consulta
         search = search.replace(/[%_]/g, '\\$&');
 
-        // filtro por nombre (puedes ampliar luego)
-        let filters = `isPerson = 0`;
+        // Permite buscar contactos naturales y juridicos.
+        let filters = `1 = 1`;
 
         //si search es numérico, también busco por identificación y nationalId (noCobis)
         const isNumeric = /^\d+$/.test(search);

@@ -23,6 +23,10 @@ try {
   if (!policy) {
     throw new Error(`No se encontró la póliza relacionada con el identificador ${id}`);
   }
+  const nombreRamo = getNombreRamo(policy);
+  if (!nombreRamo) {
+    throw new Error('No se pudo obtener el nombre del ramo de la póliza');
+  }
 
   const isPolicyVersionRenewal = tipo === 0 && toPositiveInteger(policy.policyVersion) > 0;
 
@@ -91,7 +95,9 @@ try {
   const descriptionTitle = isLoadingChange
     ? (isLoadingDiscount ? 'Endoso de Descuento' : 'Endoso de Recargo')
     : title;
-  const effectiveCode = isLoadingChange
+  const effectiveCode = effectiveTipo === 0
+    ? getEmissionCode(policy.lob)
+    : isLoadingChange
     ? (isLoadingDiscount ? 'EndosoDescuento' : 'EndosoRecargo')
     : codes[effectiveTipo];
   const productName = policy.Product && policy.Product.name
@@ -113,10 +119,11 @@ try {
     reaseguroComision: toDecimal(reaseguroComision),
     reaseguroPorPagar: toDecimal(reaseguroPorPagar),
     anioMes: getAnioMes(policy),
-    reference: `${referenceTitle} Incendio # ${id}`,
+    reference: `${referenceTitle} ${nombreRamo} # ${id}`,
     description: `${title} ${productName} Póliza # ${policyCode}`,
     unique: `TX${cancelacion ? '-R' : ''}# ${id}`,
     code: effectiveCode,
+    ramo: nombreRamo,
     cancelacion: cancelacion,
     renovacion: isRenewal,
     Policy: policy
@@ -247,6 +254,43 @@ function buildPolicyFilter(id, tipo) {
   }
 
   return `id IN (SELECT lifePolicyId FROM [Anniversary] WHERE id=${id})`;
+}
+
+function getNombreRamo(policy) {
+  const lobCode = String(policy && policy.lob || '').trim().replace(/'/g, "''");
+  if (!lobCode) {
+    return '';
+  }
+
+  doCmd({
+    cmd: 'RepoLob',
+    data: {
+      operation: 'GET',
+      filter: `code = '${lobCode}'`,
+      noTracking: true
+    }
+  });
+
+  const ramo = typeof RepoLob !== 'undefined' && Array.isArray(RepoLob.outData)
+    ? RepoLob.outData[0]
+    : null;
+  const nombre = String(ramo && ramo.name || '').trim();
+
+  return nombre.replace(/^\s*[^-]+\s*-\s*/, '').trim();
+}
+
+function getEmissionCode(lob) {
+  const ramo = String(lob || '').trim();
+
+  if (ramo === '1') {
+    return 'EmisionIncendio';
+  }
+
+  if (['81', '82', '83', '84'].includes(ramo)) {
+    return 'EmisionFianza';
+  }
+
+  return 'Emision';
 }
 
 function loadPolicy(filter) {

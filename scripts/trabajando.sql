@@ -15,8 +15,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 81
---and t.cplan = 'BPVC' 
+where t.cramo = 84
+and t.cplan = '84_2' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -24,6 +24,8 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
+declare @ramoXY int = 84
+declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
 select c.cramo, rtrim(c.cplan) cplan, rtrim(pl.xplan) xplan, rtrim(mc.ccobertura) ccobertura
@@ -38,16 +40,16 @@ from macoberturas mc
 inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
 inner join maplanes pl on pl.cramo = c.cramo and pl.cplan = c.cplan
 LEFT JOIN ccerti_preguntas pr ON pr.cramo = mc.cramo and pr.cpregunta = c.SA
-where c.cramo = 81
+where c.cramo = @ramoXY
 --AND pl.istatplan = 'V'
---and C.cplan = 'FIAGCCOG' 
+and C.cplan = CASE WHEN @plan <> '' THEN @plan ELSE c.cplan END
 
 SELECT * FROM #Coberturas
 order by 1,2,4
 
 select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo 
 from ccerti_preguntas 
-where cramo = 81 
+where cramo = @ramoXY
 AND (cpregunta IN (select SA FROM #Coberturas)
 	OR cpregunta IN (select CGRUPO FROM #Coberturas)
 	OR cpregunta IN (select CGRUPO1 FROM #Coberturas)
@@ -57,7 +59,7 @@ order by cpregunta
 
 --select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
---SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'Limite_Les06'
+--SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'PORCENTAJE_PAGO'
 --select * from tarifasvar where variable = 'porcDeduAutoChino'
 
 return;
@@ -151,6 +153,9 @@ and r.xdpto = 'EMISION'
 --and r.xdescripcion like '%contrato%'
 AND r.xnombrep NOT LIKE '%endoso%'
 order by r.cramo, r.cplan
+
+--select * from cobtar where cproces in (
+--select top 10 cproces from adpoliza where cramo = 81 order by cproces desc)
 
 SELECT pl.xplan, rtrim(rep.xdescripcion) Reporte, CONCAT('Reporte: ', RTRIM(rep.xnombrep) ,', Condición: Plan: ', rtrim(rep.cplan), ' - Cob: ', rtrim(rep.xformula1) )
 FROM  dbo.maplancob mapla 

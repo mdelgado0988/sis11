@@ -55,6 +55,7 @@ resultado.NumeroFianza = policy?.code ?? ""; //AXX-304 R2: poliza sin numero emi
 resultado.Tenedor = getNombreCompleto(holder);
 resultado.AFavor = oaUserData?.nombre ?? "No Definido";
 resultado.Descripcion = oaUserData?.desc_objeto_afianzado ?? "";
+resultado.Secuestrante = oaUserData?.secuestrante ?? "";
 resultado.FechaActoPublico = toFecha(oaUserData?.f_acto_publico);
 resultado.ActoPublico = oaUserData?.n_acto_publico ?? "";
 resultado.Moneda = "B/.";

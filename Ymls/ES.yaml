@@ -1476,6 +1476,9 @@ Reserve Interests: Intereses reserva
 Tax Interests: Intereses fiscales
 Acc No: Nº de cuenta
 Balance: Saldo
+Cancellations: Cancelaciones
+Show cancelled installments: Mostrar cuotas canceladas
+Cancelled: Cancelado
 Treaty: Contrato
 Cession Search: Buscar cesión
 Issuance Date: Fecha de emisión
@@ -3409,7 +3412,7 @@ Please select reversal cause: Por favor seleccione la causa de reversión
 Please select reversal subcause: Por favor seleccione la subcausa de reversión
 Payable: A pagar
 Please check reversal form validation errors: Please check reversal form validation errors
-Contact Id: Contact Id
+Contact Id: ID de contacto
 Empty:  Vacío
 Not Proportional Line: Línea no proporcional
 Remove Selection: Eliminar selección
@@ -3707,7 +3710,7 @@ Please select cost center: Por favor seleccionar un centro de costo
 Cost Centers: Centro de costo
 Are you sure you want to : Are you sure you want to
 block: block
-this user?:  this user?
+this user?:  ¿este usuario?
 Exceeded 100%: Excedido 100%
 Duplicate: Duplicar
 Coverage Premium: Prima de cobertura
@@ -4291,7 +4294,7 @@ Cobrado: Cobrado
 #New keys found at #/config - 9/25/2023 9:14:13 PM
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/lifePolicy/0?&section=life/tab2 - 9/25/2023 9:25:45 PM
-Value must be greater or equal to : Value must be greater or equal to 
+Value must be greater or equal to : El valor debe ser mayor o igual a
 #New keys found at #/lifePolicy/5793/tab21 - 9/25/2023 9:29:15 PM
 #%: %
 #% Ceded: % Ceded
@@ -4299,7 +4302,7 @@ Value must be greater or equal to : Value must be greater or equal to
 #New keys found at backend - 9/26/2023 1:44:48 PM
 OK: OK
 #New keys found at #/comcontract/12 - 9/26/2023 1:50:19 PM
-Ad-hoc Commission: Ad-hoc Commission
+Ad-hoc Commission: Comisión Ad-Hoc
 #New keys found at #/lifePolicy/5770/tab12 - 9/26/2023 2:01:47 PM
 CANCELADO POR ACTIVACION DE COBERTURA  : CANCELADO POR ACTIVACION DE COBERTURA  
 NO ASEGURABLE : NO ASEGURABLE 
@@ -4314,7 +4317,7 @@ A SOLICITUD CONTRATANTE: A SOLICITUD CONTRATANTE
 RECOMENDACIÓN DEPTO. SINIESTROS: RECOMENDACIÓN DEPTO. SINIESTROS
 RECOMENDACIÓN DEPTO LEGAL: RECOMENDACIÓN DEPTO LEGAL
 #New keys found at #/lifePolicy/5770/tab12 - 9/26/2023 2:03:03 PM
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/lifePolicy/5731/tab12 - 9/26/2023 2:33:01 PM
 # in Year: # in Year
 #New keys found at #/policies - 9/26/2023 2:43:52 PM
@@ -4994,7 +4997,7 @@ Claim Annuity Purchase: Claim Annuity Purchase
 (RCB) - INDEMNIZACIÓN A TERCEROS POR LESIONES CAUSADA POR ANIMAL DOMÉSTICO ( PERRO, GATO ). : (RCB) - INDEMNIZACIÓN A TERCEROS POR LESIONES CAUSADA POR ANIMAL DOMÉSTICO ( PERRO, GATO ). 
 (RCB) - INDEMNIZACIÓN POR DAÑOS Y PERJUICIO POR INCUMPLIMIENTO EN  CONTRATO : (RCB) - INDEMNIZACIÓN POR DAÑOS Y PERJUICIO POR INCUMPLIMIENTO EN  CONTRATO 
 #New keys found at #/cashier - 9/27/2023 11:43:57 AM
-External source: External source
+External source: Fuente externa
 Banco Popular Inversiones US$: Banco Popular Inversiones US$
 Reintegro de Fondos Asignados: Reintegro de Fondos Asignados
 Remesa de Coaseguro Minoritario: Remesa de Coaseguro Minoritario
@@ -5002,7 +5005,7 @@ Venta Divisas: Venta Divisas
 #New keys found at #/cashier/45/tabpremiums - 9/27/2023 11:44:19 AM
 # In Year: # In Year
 #New keys found at #/import/15 - 9/27/2023 4:17:20 PM
-Batch name: Batch name
+Batch name: Nombre del lote
 #New keys found at backend - 9/27/2023 4:43:56 PM
 "Column {0} not found in specified table. Please check GetTable configuration in product.": "Column {0} not found in specified table. Please check GetTable configuration in product."
 #New keys found at backend - 9/27/2023 5:33:21 PM
@@ -5364,7 +5367,7 @@ Scheme List: Scheme List
 #New keys found at #/lifePolicy/5920/tab13 - 10/3/2023 3:43:53 PM
 # in Period: # in Period
 #New keys found at #/lifePolicy/0?&section=life/tab2 - 10/3/2023 7:29:19 PM
-Value must be lower or equal to : Value must be lower or equal to 
+Value must be lower or equal to : El valor debe ser menor o igual a
 #New keys found at #/lifePolicy/5967/tab3 - 10/3/2023 8:11:56 PM
 Comercial: Comercial
 Pymes Industriales: Pymes Industriales
@@ -5569,7 +5572,7 @@ Use Record Creation Dates: Use Record Creation Dates
 #New keys found at #/portfolioTransfers - 6/13/2024 1:41:56 AM
 created: created
 createdBy: createdBy
-status: status
+status: Estado
 executed: executed
 Destination Contract: Destination Contract
 Cession Selection: Cession Selection
@@ -5582,7 +5585,7 @@ User Name: User Name
 #New keys found at #/lifePolicy/0?&section=life - 6/24/2024 7:16:13 AM
 Insured  Sum: Insured  Sum
 #New keys found at #/lifePolicy/0?&section=life - 6/24/2024 7:16:59 AM
-Date of Birth: Date of Birth
+Date of Birth: Fecha de nacimiento
 #New keys found at #/cashier/45/taballocation - 6/24/2024 7:26:23 AM
 Complete with available commission: Completar con comisión disponible
 #New keys found at #/commissions - 6/24/2024 7:28:08 AM
@@ -5666,9 +5669,9 @@ Acc: Acc
 #New keys found at #/ProfitCommission/0 - 8/25/2024 1:32:38 AM
 Compute with participant iterator: Compute with participant iterator
 #New keys found at #/contract/1082 - 8/26/2024 2:14:52 PM
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at backend - 9/9/2024 6:15:38 AM
-Reinsurance Current Account - : Reinsurance Current Account - 
+Reinsurance Current Account - : Cuenta corriente de reaseguro -
 #New keys found at #/reportlist - 9/9/2024 6:30:59 AM
 Report Restrictions: Report Restrictions
 #New keys found at #/config - 9/9/2024 7:12:52 AM
@@ -6257,7 +6260,7 @@ Contacts with the selected tag will be automatically added to the first stage of
 Funnel Settings: Funnel Settings
 Please enter a name for the funnel: Please enter a name for the funnel
 e.g., Sales Pipeline: e.g., Sales Pipeline
-Optional description: Optional description
+Optional description: Descripción opcional
 Contact Tag: Contact Tag
 e.g., lead, prospect: e.g., lead, prospect
 Stages: Stages
@@ -6382,10 +6385,10 @@ Cession Editor: Cession Editor
 #New keys found at #/annuities - 10/04/2025 05:31:48
 Claim Stage: Estado del reclamo
 Stage: Stage
-External ID: External ID
+External ID: ID externo
 Claim Form: Claim Form
-Procedure code: Procedure code
-Procedure name: Procedure name
+Procedure code: Código del procedimiento
+Procedure name: Nombre del procedimiento
 #New keys found at #/contractlist - 10/04/2025 05:33:06
 Load Template: Load Template
 Type to search configuration...: Type to search configuration...
@@ -6492,7 +6495,7 @@ Add New Asset: Add New Asset
 Search assets...: Search assets...
 All Categories: All Categories
 All Locations: All Locations
-All Statuses: All Statuses
+All Statuses: Todos los estados
 All Currencies: All Currencies
 No assets found matching your criteria: No assets found matching your criteria
 Total Assets: Total Assets
@@ -6507,7 +6510,7 @@ Last Updated: Last Updated
 Search budgets: Search budgets
 #New keys found at #/credit - 10/04/2025 10:02:55
 Credit Filter: Credit Filter
-Debt Status: Debt Status
+Debt Status: Situación de la deuda
 #New keys found at #/config - 10/04/2025 10:13:56
 New Task: New Task
 Today: Today
@@ -6516,7 +6519,7 @@ New Column: New Column
 #New keys found at #/calculationSchemes - 10/04/2025 10:15:44
 Instances: Instances
 Click graph to filter: Click graph to filter
-In Status: In Status
+In Status: En estado
 Ended: Ended
 Open process: Open process
 #New keys found at #/htmltemplates - 10/04/2025 10:16:04
@@ -6735,10 +6738,10 @@ Ficha-Rollo-Imagen                                                              
 Sin Identificación Persona Jur                                                                                                                                                                          : Sin Identificación Persona Jur                                                                                                                                                                          
 Sociedad Extranjera                                                                                                                                                                                     : Sociedad Extranjera                                                                                                                                                                                     
 #New keys found at #/lifePolicy/61/tab20 - 11/12/2025 23:41:28
-Add item: Add item
+Add item: Añadir ítem
 Object Type Detail: Object Type Detail
 Code is required: Code is required
-Name is required: Name is required
+Name is required: nombre es requerido
 Value is required: Value is required
 #New keys found at #/lifePolicy/0?&section=life - 11/13/2025 13:20:55
 1 - Incendio: 1 - Incendio
@@ -7322,7 +7325,7 @@ Ficha-Rollo-Imagen                                                              
 Sin Identificación Persona Jur                                                                                                                                                                          : Sin Identificación Persona Jur                                                                                                                                                                          
 Sociedad Extranjera                                                                                                                                                                                     : Sociedad Extranjera                                                                                                                                                                                     
 #New keys found at #/contract/16 - 11/26/2025 16:03:25
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at backend - 11/26/2025 18:31:18
 "Revert of cession {0}": "Revert of cession {0}"
 #New keys found at backend - 11/26/2025 18:31:18
@@ -7339,7 +7342,7 @@ Reinstatement Premium: Reinstatement Premium
 (RCB) - INDEMNIZACIÓN POR DAÑOS Y PERJUICIO POR INCUMPLIMIENTO EN  CONTRATO : (RCB) - INDEMNIZACIÓN POR DAÑOS Y PERJUICIO POR INCUMPLIMIENTO EN  CONTRATO 
 Co-insured: Co-insured
 #New keys found at #/contract/16 - 11/26/2025 20:19:25
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/lifePolicy/96/tab12 - 11/26/2025 20:24:46
 CANCELADO POR ACTIVACION DE COBERTURA  : CANCELADO POR ACTIVACION DE COBERTURA  
 NO ASEGURABLE : NO ASEGURABLE 
@@ -7565,7 +7568,7 @@ Policy Surcharge(s) or Discount(s) Changed: Policy Surcharge(s) or Discount(s) C
 Submit Amendment: Submit Amendment
 Additional Amendment Options: Additional Amendment Options
 #New keys found at #/lifePolicy/111/tab12 - 12/17/2025 19:56:33
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/allocation?id=3 - 12/18/2025 15:29:10
 Cobro duplicado de domiciliación : Cobro duplicado de domiciliación 
 Corregir instrumento de pago : Corregir instrumento de pago 
@@ -7657,7 +7660,7 @@ INACTIVE: INACTIVA
 #New keys found at #/views - 12/23/2025 17:25:36
 Fire: Búsqueda de cúmulo
 #New keys found at #/lifePolicy/195/tab12 - 12/26/2025 15:04:03
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at backend - 12/26/2025 15:08:44
 Cancellation change not found: Cancellation change not found
 #New keys found at #/accounting/coa - 12/26/2025 16:04:56
@@ -7806,7 +7809,7 @@ Ignición accidental : Ignición accidental
 (RCB) - INDEMNIZACIÓN A TERCEROS POR LESIONES CAUSADA POR ANIMAL DOMÉSTICO ( PERRO, GATO ). : (RCB) - INDEMNIZACIÓN A TERCEROS POR LESIONES CAUSADA POR ANIMAL DOMÉSTICO ( PERRO, GATO ). 
 (RCB) - INDEMNIZACIÓN POR DAÑOS Y PERJUICIO POR INCUMPLIMIENTO EN  CONTRATO : (RCB) - INDEMNIZACIÓN POR DAÑOS Y PERJUICIO POR INCUMPLIMIENTO EN  CONTRATO 
 #New keys found at #/healthclaim/34 - 12/27/2025 15:56:51
-There are : There are 
+There are : Existen
 #New keys found at backend - 12/28/2025 17:12:08
 "Error executing query: {0}": "Error executing query: {0}"
 #New keys found at #/accounting/coa - 12/28/2025 18:47:25
@@ -7836,7 +7839,7 @@ Nacido en el Extrajero                                                          
 Población Indígena                                                                                                                                                                                      : Población Indígena                                                                                                                                                                                      
 Sin Identificación Persona Nat                                                                                                                                                                          : Sin Identificación Persona Nat                                                                                                                                                                          
 #New keys found at #/comcontract/1 - 12/29/2025 20:44:04
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/contact/3/tabother - 12/29/2025 20:51:05
 Antes de la Vigencia                                                                                                                                                                                    : Antes de la Vigencia                                                                                                                                                                                    
 Cédula Natural                                                                                                                                                                                          : Cédula Natural                                                                                                                                                                                          
@@ -7915,7 +7918,7 @@ Caja Ahorro. Aseguradora Global: Caja Ahorro. Aseguradora Global
 #New keys found at #/LifePolicy/315/tab12?40 - 01/02/2026 15:43:21
 Submit Changes: Submit Changes
 #New keys found at #/LifePolicy/315/tab12 - 01/02/2026 15:44:44
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at backend - 01/02/2026 15:50:24
 "Policy insured's data has changed and needs re-quoting. {0}": "Policy insured's data has changed and needs re-quoting. {0}"
 #New keys found at #/cashier/21 - 01/02/2026 17:43:36
@@ -8009,7 +8012,7 @@ Sin Identificación Persona Nat                                                 
 #New keys found at #/config - 01/05/2026 22:20:29
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/contract/16 - 01/05/2026 23:04:50
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/contract/16 - 01/06/2026 02:37:19
 Current Exclusions: Current Exclusions
 Loss cessions excluded: Loss cessions excluded
@@ -8167,7 +8170,7 @@ FAMILY MEDICINE: FAMILY MEDICINE
 INTERNAL MEDICINE: INTERNAL MEDICINE
 MEDICAL GENETICS: MEDICAL GENETICS
 #New keys found at #/lifePolicy/436/tab12 - 01/14/2026 13:25:59
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at backend - 01/14/2026 14:53:18
 Payment already executed: Payment already executed
 #New keys found at #/payments - 01/15/2026 00:32:23
@@ -8376,7 +8379,7 @@ Are you sure you want to : Are you sure you want to
 "Digite # Garantia": "Digite # Garantia"
 "Digite # Prestamo": "Digite # Prestamo"
 #New keys found at #/view/29 - 01/19/2026 20:27:43
-New : New 
+New : Nuevo
 #New keys found at #/healthclaim/48 - 01/19/2026 20:30:38
 Ignición accidental : Ignición accidental 
 (RCB) - SINIESTRO A CAUSA DE DAÑOS PROVOCADOS POR UN  EQUIPOS MÓVILES EN LOS PREDIOS.  : (RCB) - SINIESTRO A CAUSA DE DAÑOS PROVOCADOS POR UN  EQUIPOS MÓVILES EN LOS PREDIOS.  
@@ -8410,7 +8413,7 @@ Ignición accidental : Ignición accidental
 #New keys found at #/cashier/28/tabpremiums - 01/19/2026 20:40:18
 # In Year: # In Year
 #New keys found at #/lifePolicy/466/tab12 - 01/19/2026 20:57:17
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/config - 01/19/2026 21:01:05
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/config - 01/19/2026 21:10:28
@@ -8545,7 +8548,7 @@ Ignición accidental : Ignición accidental
 #New keys found at backend - 01/23/2026 17:49:30
 "the sum of the detail lines ({0}) does not match the amount of the installment ({1}). Please check the installment scheme configuration": "the sum of the detail lines ({0}) does not match the amount of the installment ({1}). Please check the installment scheme configuration"
 #New keys found at #/lifePolicy/512/tab12 - 01/23/2026 18:33:48
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at backend - 01/27/2026 16:43:45
 "Paid amount does not cover the minimum partial installment allowed {0}": "Paid amount does not cover the minimum partial installment allowed {0}"
 #New keys found at #/cashier/31/taballocation - 01/27/2026 17:01:01
@@ -8737,7 +8740,7 @@ Sociedad Extranjera                                                             
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/import - 02/03/2026 17:35:05
 Batch Filter: Batch Filter
-Batch ID: Batch ID
+Batch ID: ID del lote
 Enter batch ID: Enter batch ID
 Search by name: Search by name
 Select category: Select category
@@ -8840,9 +8843,9 @@ Raise Clauses Now: Raise Clauses Now
 #New keys found at #/lifePolicy/0?&section=life - 02/24/2026 13:58:04
 Raise Clauses Now: Raise Clauses Now
 #New keys found at #/contract/16 - 02/24/2026 15:24:30
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/healthclaim/64 - 02/24/2026 17:06:16
-New : New 
+New : Nuevo
 #New keys found at #/accounting/tx - 02/24/2026 17:45:16
 Aux Value Name: Aux Value Name
 #New keys found at #/accounting/tx - 02/24/2026 18:15:14
@@ -8950,7 +8953,7 @@ The sum of retained and ceded sum insured does not match the total sum insured: 
 #New keys found at backend - 02/26/2026 14:32:50
 The sum of retained and ceded sum insured does not match the total sum insured: The sum of retained and ceded sum insured does not match the total sum insured
 #New keys found at #/lifePolicy/466/tab12 - 02/26/2026 19:09:40
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/proc - 02/26/2026 19:31:48
 Export (with Forms): Export (with Forms)
 Import (with Forms): Import (with Forms)
@@ -9002,11 +9005,11 @@ Ficha-Rollo-Imagen                                                              
 Sin Identificación Persona Jur                                                                                                                                                                          : Sin Identificación Persona Jur                                                                                                                                                                          
 Sociedad Extranjera                                                                                                                                                                                     : Sociedad Extranjera                                                                                                                                                                                     
 #New keys found at #/contract/16 - 03/18/2026 15:34:36
-New : New 
+New : Nuevo
 #New keys found at #/contact/159 - 03/18/2026 16:19:54
 is required in custom tab : is required in custom tab 
 #New keys found at #/lifePolicy/592/tab12 - 03/19/2026 15:30:37
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/healthclaim/0 - 03/19/2026 16:01:13
 Ignición accidental : Ignición accidental 
 (RCB) - SINIESTRO A CAUSA DE DAÑOS PROVOCADOS POR UN  EQUIPOS MÓVILES EN LOS PREDIOS.  : (RCB) - SINIESTRO A CAUSA DE DAÑOS PROVOCADOS POR UN  EQUIPOS MÓVILES EN LOS PREDIOS.  
@@ -9063,7 +9066,7 @@ Salvages: Salvages
 (TRC) - EFECTO DIRECTO TERREMOTO/MAREMOTO/ERUP VOLC.  AFECTANDO LA OBRA : (TRC) - EFECTO DIRECTO TERREMOTO/MAREMOTO/ERUP VOLC.  AFECTANDO LA OBRA 
 (IRN) - ROBO (INCENDIO) : (IRN) - ROBO (INCENDIO) 
 #New keys found at #/contract/16 - 03/19/2026 22:00:36
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/contract/16 - 03/19/2026 22:00:42
 Salvage Ceded: Salvage Ceded
 Salvage ID: Salvage ID
@@ -9075,7 +9078,7 @@ Salvage ID: Salvage ID
 Retained: Retained
 Part Amount: Part Amount
 #New keys found at #/contract/16 - 03/19/2026 22:15:33
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/accounting/tx - 03/20/2026 10:25:51
 Automatically fetch exchange rate and calculate debit/credit from foreign amounts: Automatically fetch exchange rate and calculate debit/credit from foreign amounts
 Auto FX: Auto FX
@@ -9116,7 +9119,7 @@ Select form for phases: Select form for phases
 Task Form: Task Form
 Select form for tasks: Select form for tasks
 Please select a project: Please select a project
-End Date: End Date
+End Date: Fecha fin
 Payment Amount: Payment Amount
 Phase: Phase
 Please select a phase: Please select a phase
@@ -9129,7 +9132,7 @@ Filter Tasks: Filter Tasks
 #New keys found at #/cashier/36/tabpremiums - 03/20/2026 18:10:32
 # In Year: # In Year
 #New keys found at #/import - 03/21/2026 02:22:17
-Import Type: Import Type
+Import Type: Tipo de importación
 Select import type: Select import type
 #New keys found at #/contract/17 - 03/21/2026 12:06:02
 Per Insured Distribution: Per Insured Distribution
@@ -9189,7 +9192,7 @@ Are you sure you want to : Are you sure you want to
 #New keys found at #/cashier/42/tabpremiums - 04/21/2026 13:39:28
 # In Year: # In Year
 #New keys found at #/lifePolicy/685/tab12 - 04/25/2026 14:45:38
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/lifePolicy/0?&section=life - 04/28/2026 23:17:49
 84- Fianza de Miscelaneas: 84- Fianza de Miscelaneas
 #New keys found at #/contract/16 - 04/28/2026 23:35:50
@@ -9221,7 +9224,7 @@ Package imported with ${count} form(s): Package imported with ${count} form(s)
 Recargos y descuentos: Recargos y descuentos
 Endoso: Endoso
 #New keys found at #/config - 05/13/2026 16:29:48
-selected: selected
+selected: Seleccionado
 Block selected users?: Block selected users?
 Block: Block
 Unblock selected users?: Unblock selected users?
@@ -9351,7 +9354,7 @@ Fondos Fijos: Fondos Fijos
 #New keys found at #/cashier/61/tabincome - 05/19/2026 17:30:18
 # In Year: # In Year
 #New keys found at backend - 05/19/2026 20:23:18
-User : User 
+User : Usuario
 #New keys found at backend - 05/20/2026 14:15:18
 Loading(s) Changed: Loading(s) Changed
 #New keys found at backend - 05/20/2026 14:44:27
@@ -9382,7 +9385,7 @@ Public link copied to clipboard: Public link copied to clipboard
 #New keys found at backend - 05/22/2026 17:53:56
 "Taxes could not be computed -> {0}": "Taxes could not be computed -> {0}"
 #New keys found at #/contract/16 - 05/22/2026 21:20:39
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/contract/16 - 05/22/2026 21:22:55
 Code copied to clipboard: Code copied to clipboard
 #New keys found at #/triggers - 05/26/2026 00:34:13
@@ -9397,11 +9400,11 @@ Equals: Equals
 20 - Colectivo de Vida: 20 - Colectivo de Vida
 #New keys found at #/view/32 - 05/28/2026 20:05:58
 Bordero Reaseguro: Bordero Reaseguro
-Please select Product: Please select Product
+Please select Product: Por favor, seleccione el producto
 Standar: Standar
 #New keys found at #/view/32 - 05/28/2026 20:30:13
-NEW: NEW
-CHANGE: CHANGE
+NEW: Nuevo
+CHANGE: Cambiar
 ANNIVERSARY: ANNIVERSARY
 #New keys found at #/views - 05/28/2026 20:33:00
 Bordero Reaseguro: Bordero Reaseguro
@@ -9410,8 +9413,8 @@ Bordero Reaseguro: Bordero Reaseguro
 #New keys found at backend - 05/31/2026 22:16:09
 "Deleted {0}": "Deleted {0}"
 #New keys found at #/lifePolicy/3360/tab2 - 06/01/2026 00:54:16
-Value must be lower or equal to : Value must be lower or equal to 
-Value must be greater or equal to : Value must be greater or equal to 
+Value must be lower or equal to : El valor debe ser menor o igual a
+Value must be greater or equal to : El valor debe ser mayor o igual a
 #New keys found at #/products/52-CREDITO - 06/01/2026 02:12:30
 52 - Riesgos Varios: 52 - Riesgos Varios
 #New keys found at #/lifePolicy/0?&section=life - 06/01/2026 02:13:11
@@ -9850,7 +9853,7 @@ Please check income type form validation errors: Please check income type form v
 #New keys found at #/lifePolicy/3439/tab3 - 07/13/2026 16:33:56
 Line of Business: Line of Business
 #New keys found at #/lifePolicy/3440/tab12 - 07/13/2026 20:47:04
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/cessions?policyId=3447 - 07/14/2026 15:17:09
 Cash Basis Eligibility: Cash Basis Eligibility
 No cash basis eligibility for this cession: No cash basis eligibility for this cession
@@ -10048,7 +10051,7 @@ Aniversario: Aniversario
 #New keys found at backend - 07/22/2026 20:27:15
 "Transit account with currency {0} not found in policy {1}": "Transit account with currency {0} not found in policy {1}"
 #New keys found at #/lifePolicy/3575/tab12 - 07/22/2026 20:39:35
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at backend - 07/22/2026 21:11:07
 "No transit account found in policy {0}": "No transit account found in policy {0}"
 #New keys found at #/healthclaim/0 - 07/22/2026 21:39:24
@@ -10075,7 +10078,7 @@ Coverage : Coverage
 #New keys found at #/config - 07/23/2026 14:50:13
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/lifePolicy/3861/tab13 - 07/24/2026 23:06:01
-New : New 
+New : Nuevo
 See all: See all
 #New keys found at #/lifePolicy/3861/tab13 - 07/25/2026 15:10:39
 Executive: Executive
@@ -10323,13 +10326,13 @@ Enter a deposited amount greater than zero.: Ingreso un monto de depósito mayor
 #New keys found at #/view/35?policyId=3915 - 08/10/2026 16:00:31
 PayPlanChange: PayPlanChange
 #New keys found at #/lifePolicy/3916/tab12 - 08/10/2026 17:10:05
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/proc/388 - 08/10/2026 22:08:26
 Are you sure you want to : Are you sure you want to 
 #New keys found at #/lifePolicy/0?&section=life/tab2 - 08/12/2026 00:25:16
-Value must be greater or equal to : Value must be greater or equal to 
+Value must be greater or equal to : El valor debe ser mayor o igual a
 #New keys found at #/comcontract/1 - 08/12/2026 05:30:45
-Participation must sum 100% for each line. Please check participants for line : Participation must sum 100% for each line. Please check participants for line 
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
 #New keys found at #/view/37 - 08/12/2026 16:43:09
 Transit premiums: Montos en tránsito
 Transit premium filters: Filtrar montos en tránsito
@@ -10360,7 +10363,7 @@ Copy and store this token securely. It will not be shown again.: Copy and store 
 Copy Token: Copy Token
 Token copied to clipboard: Token copied to clipboard
 #New keys found at #/ruletable - 08/13/2026 16:30:15
-New : New 
+New : Nuevo
 #New keys found at backend - 08/13/2026 19:43:03
 API Token revoked: API Token revoked
 #New keys found at backend - 08/13/2026 19:43:16
@@ -10897,7 +10900,7 @@ CLABE: CLABE
 Intermediary Bank: Banco Intermediario
 Account Currency: Moneda Cuenta
 #New keys found at #/view/38 - 08/21/2026 16:58:31
-New : New 
+New : Nuevo
 #New keys found at backend - 08/21/2026 18:07:16
 Batch stopped: Lote detenido
 #New keys found at #/view/38 - 08/21/2026 18:07:19
@@ -10961,7 +10964,7 @@ Nacido en el Extrajero                                                          
 Población Indígena                                                                                                                                                                                      : Población Indígena                                                                                                                                                                                      
 Sin Identificación Persona Nat                                                                                                                                                                          : Sin Identificación Persona Nat                                                                                                                                                                          
 #New keys found at #/ - 08/24/2026 18:21:13
-New : New 
+New : Nuevo
 #New keys found at #/cashier/88/tabpremiums - 08/24/2026 19:08:08
 # In Year: # In Year
 #New keys found at backend - 08/24/2026 19:48:29
@@ -11010,7 +11013,7 @@ Ignición accidental : Ignición accidental
 (TRC) - EFECTO DIRECTO TERREMOTO/MAREMOTO/ERUP VOLC.  AFECTANDO LA OBRA : (TRC) - EFECTO DIRECTO TERREMOTO/MAREMOTO/ERUP VOLC.  AFECTANDO LA OBRA 
 (IRN) - ROBO (INCENDIO) : (IRN) - ROBO (INCENDIO) 
 #New keys found at #/lifePolicy/3938/tab12 - 08/25/2026 00:55:34
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/view/37 - 08/25/2026 01:49:18
 The refund request was created, but its identifier could not be identified.: The refund request was created, but its identifier could not be identified.
 #New keys found at #/view/37 - 08/25/2026 01:51:34
@@ -11018,7 +11021,7 @@ Refund request: Refund request
 #New keys found at #/view/36 - 08/25/2026 02:08:57
 Supervisor de Caja: Supervisor de Caja
 #New keys found at #/view/36 - 08/25/2026 02:11:01
-New : New 
+New : Nuevo
 #New keys found at #/view/36 - 08/25/2026 02:26:15
 Cash Closing Report: Informe de cierre de caja
 #New keys found at #/allocation - 08/25/2026 02:31:25
@@ -11242,7 +11245,7 @@ Customer account statement: Estado de cuenta del cliente
 Cutoff date: Fecha de corte
 Please select a date: Por favor seleccione una fecha
 #New keys found at #/reportlist - 08/31/2026 01:00:33
-New : New 
+New : Nuevo
 #New keys found at #/view/39 - 08/31/2026 15:30:49
 Antes de la Vigencia                                                                                                                                                                                    : Antes de la Vigencia                                                                                                                                                                                    
 Cédula Natural                                                                                                                                                                                          : Cédula Natural                                                                                                                                                                                          
@@ -11610,15 +11613,15 @@ Ficha-Rollo-Imagen                                                              
 Sin Identificación Persona Jur                                                                                                                                                                          : Sin Identificación Persona Jur                                                                                                                                                                          
 Sociedad Extranjera                                                                                                                                                                                     : Sociedad Extranjera                                                                                                                                                                                     
 #New keys found at #/lifePolicy/3944/tab2 - 09/04/2026 00:16:15
-Value must be lower or equal to : Value must be lower or equal to 
+Value must be lower or equal to : El valor debe ser menor o igual a
 #New keys found at #/view/38 - 09/04/2026 01:31:11
 Search by ID, name or identification: Search by ID, name or identification
 No payers found.: No payers found.
 #New keys found at #/view/36 - 09/04/2026 04:52:03
-Invoiced: Invoiced
-Current Amount: Current Amount
-Due soon: Due soon
-Delinquency: Delinquency
+Invoiced: Facturado
+Current Amount: Corriente
+Due soon: A Vencer
+Delinquency: Morosidad
 Select a policy from the search results to view its delinquency.: Select a policy from the search results to view its delinquency.
 #New keys found at #/executiveGrowth - 09/04/2026 04:52:12
 Where the premium came from: Where the premium came from
@@ -11757,7 +11760,7 @@ What do you want AIDEN to configure?: What do you want AIDEN to configure?
 A sentence or two is enough. For example, new individual Personal Accident product for launch on 1 October, priced per the technical note, treaty per the contract, 15% broker commission.: A sentence or two is enough. For example, new individual Personal Accident product for launch on 1 October, priced per the technical note, treaty per the contract, 15% broker commission.
 Continue to documents: Continue to documents
 #New keys found at #/lifePolicy/3941/tab12 - 09/04/2026 21:07:27
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at #/view/44 - 09/04/2026 21:32:21
 No policy was supplied. Open this view from the policy actions menu.: No policy was supplied. Open this view from the policy actions menu.
 The endorsement cannot be opened: The endorsement cannot be opened
@@ -12392,7 +12395,7 @@ AIDEN recommends: AIDEN recommends
 Use recommendation: Use recommendation
 Reply to AIDEN…: Reply to AIDEN…
 #New keys found at #/lifePolicy/3964 - 09/09/2026 03:14:00
-New : New 
+New : Nuevo
 #New keys found at backend - 09/09/2026 03:24:09
 "Confirmed: {0} — {1}": "Confirmed: {0} — {1}"
 #New keys found at backend - 09/09/2026 03:24:10
@@ -12446,7 +12449,7 @@ Editar ocupación: Editar ocupación
 #New keys found at #/view/55 - 09/09/2026 20:13:23
 Ocupación guardada correctamente.: Ocupación guardada correctamente.
 #New keys found at #/lifePolicy/3965/tab12 - 09/09/2026 20:15:55
-Coverage : Coverage 
+Coverage : Cobertura
 #New keys found at backend - 09/09/2026 20:26:28
 AIDEN is working; it will see this at its next step: AIDEN is working; it will see this at its next step
 #New keys found at backend - 09/09/2026 20:26:28
@@ -12657,3 +12660,90 @@ Requests: Solicitudes
 Out of office: Fuera de la oficina
 #New keys found at #/config - 09/13/2026 23:37:55
 Out of office: Fuera de la oficina
+
+#New keys found at #/lifePolicy/3400 - 09/14/2026 00:26:11
+endorsement : endorsement 
+Endorsement : Endorsement 
+applied and insured-object data synchronised.:  applied and insured-object data synchronised.
+Sin Asignar: Sin Asignar
+#New keys found at #/agents/0 - 09/14/2026 00:30:33
+Agent List: Agent List
+Contact is required: Contact is required
+Agent Type: Agent Type
+Agent Type is required: Agent Type is required
+Optional notes about the agent: Optional notes about the agent
+License Number: License Number
+License Authorization Date: License Authorization Date
+Enter tags: Enter tags
+#New keys found at #/comcontract/1 - 09/14/2026 00:30:49
+Participation must sum 100% for each line. Please check participants for line : La participación debe sumar el 100% para cada línea. Por favor, compruebe los participantes de la línea
+#New keys found at #/lifePolicy/3401/tab9 - 09/14/2026 00:36:57
+Endorsement : Endorsement 
+applied and insured-object data synchronised.:  applied and insured-object data synchronised.
+#New keys found at #/apitokens/0 - 09/14/2026 15:22:34
+New : Nuevo
+#New keys found at #/contact/99/tab4 - 09/14/2026 15:23:26
+Antes de la Vigencia                                                                                                                                                                                    : Antes de la Vigencia                                                                                                                                                                                    
+Cédula Natural                                                                                                                                                                                          : Cédula Natural                                                                                                                                                                                          
+Cliente Cifrado                                                                                                                                                                                         : Cliente Cifrado                                                                                                                                                                                         
+Extranjero                                                                                                                                                                                              : Extranjero                                                                                                                                                                                              
+Naturalizado                                                                                                                                                                                            : Naturalizado                                                                                                                                                                                            
+Pasaporte                                                                                                                                                                                               : Pasaporte                                                                                                                                                                                               
+Nacido en el Extrajero                                                                                                                                                                                  : Nacido en el Extrajero                                                                                                                                                                                  
+Población Indígena                                                                                                                                                                                      : Población Indígena                                                                                                                                                                                      
+Sin Identificación Persona Nat                                                                                                                                                                          : Sin Identificación Persona Nat                                                                                                                                                                          
+#New keys found at #/chains - 09/14/2026 15:26:28
+No recent items: No recent items
+#New keys found at #/policies?&section=life - 09/14/2026 15:29:05
+Custom Certificate Group: Custom Certificate Group
+#New keys found at #/config - 09/14/2026 16:01:39
+Are you sure you want to : Are you sure you want to 
+#New keys found at #/view/37 - 09/15/2026 16:33:24
+The selected transit account does not have a valid policy.: The selected transit account does not have a valid policy.
+#New keys found at #/view/37 - 09/15/2026 18:03:24
+Show all: Show all
+#New keys found at #/config - 09/15/2026 20:21:13
+Are you sure you want to : Are you sure you want to 
+#New keys found at #/contact/163/tab2 - 09/16/2026 14:34:50
+Antes de la Vigencia                                                                                                                                                                                    : Antes de la Vigencia                                                                                                                                                                                    
+Cédula Natural                                                                                                                                                                                          : Cédula Natural                                                                                                                                                                                          
+Cliente Cifrado                                                                                                                                                                                         : Cliente Cifrado                                                                                                                                                                                         
+Extranjero                                                                                                                                                                                              : Extranjero                                                                                                                                                                                              
+Naturalizado                                                                                                                                                                                            : Naturalizado                                                                                                                                                                                            
+Pasaporte                                                                                                                                                                                               : Pasaporte                                                                                                                                                                                               
+Nacido en el Extrajero                                                                                                                                                                                  : Nacido en el Extrajero                                                                                                                                                                                  
+Población Indígena                                                                                                                                                                                      : Población Indígena                                                                                                                                                                                      
+Sin Identificación Persona Nat                                                                                                                                                                          : Sin Identificación Persona Nat                                                                                                                                                                          
+Certificado: Certificado
+Producto: Producto
+Fin: Fin
+Rol del contacto: Rol del contacto
+Guarde el contacto para buscar sus pólizas.: Guarde el contacto para buscar sus pólizas.
+Número de póliza o Id: Número de póliza o Id
+Todas: Todas
+Tomador: Tomador
+Este contacto no tiene pólizas: Este contacto no tiene pólizas
+sin número: sin número
+Abrir: Abrir
+#New keys found at #/config - 09/16/2026 18:00:26
+Business calendar: Calendario laboral
+Transfer SLA (h): SLA de transferencia (h)
+Keep the step SLA: Mantener el SLA del paso
+#New keys found at #/view/56?policyId=3416 - 09/16/2026 18:08:17
+Policy change code handler: Gestor del código de cambio de póliza
+#New keys found at #/view/56?policyId=3416 - 09/16/2026 18:08:29
+Policy information: Información de la póliza
+Executed changes: Cambios ejecutados
+No executed changes found.: No se encontraron cambios ejecutados.
+Endorsement summary: Resumen del endoso
+#New keys found at #/view/56?policyId=3401 - 09/16/2026 18:10:36
+View summary: Ver resumen
+Generate endorsement document: Generar documento del endoso
+#New keys found at #/view/56?policyId=3401 - 09/16/2026 18:10:42
+Change code updated successfully.: Código del cambio actualizado correctamente.
+The endorsement document will be generated again using the current change data.: El documento del endoso se generará nuevamente usando los datos actuales del cambio.
+#New keys found at #/lifePolicy/3401 - 09/16/2026 18:10:52
+Document generated.: Documento generado.
+Go to the policy to view the document.: Ir a la póliza para visualizar el documento.
+Go to policy: Ir a la póliza
+Stay here: Quedarme aquí

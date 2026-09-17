@@ -858,6 +858,61 @@
       .catch(function (e) { setLoading(false); setError(String(e)); });
   }
 
+  async function loadPayPlanSnapshot(id) {
+    const response = await exe('RepoPayPlan', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + Number(id) + ' AND cancellationDate IS NULL',
+      include: ['PayPlanDetail'],
+      size: 0
+    });
+    if (!response || !response.ok) {
+      throw new Error((response && response.msg) || t('No se pudo consultar el plan de pagos actual'));
+    }
+    return Array.isArray(response.outData) ? response.outData : [];
+  }
+
+  function buildNativePayPlan(oldPayPlan, difference, effectiveDate, lifePolicyId) {
+    const rows = Array.isArray(oldPayPlan)
+      ? oldPayPlan.map(function (item) { return Object.assign({}, item); })
+      : [];
+    const amount = money(difference);
+    if (Math.abs(amount) < 0.01) return rows;
+
+    const last = rows[rows.length - 1] || {};
+    const lastNumber = rows.reduce(function (max, item) {
+      return Math.max(max, Number(item && item.numberInYear || 0));
+    }, 0);
+    const contractYear = rows.reduce(function (max, item) {
+      return Math.max(max, Number(item && item.contractYear || 0));
+    }, 0) || 1;
+
+    rows.push(Object.assign({}, last, {
+      id: 0,
+      lifePolicyId: Number(lifePolicyId),
+      concept: 'Prima',
+      expected: amount,
+      minimum: amount,
+      payed: 0,
+      payedDate: null,
+      transferId: null,
+      dueDate: effectiveDate,
+      coveredUntil: effectiveDate,
+      allocationDate: null,
+      contractYear: contractYear,
+      final: false,
+      finalDate: null,
+      numberInYear: lastNumber + 1,
+      allocationId: null,
+      cancellationDate: null,
+      compensationDate: null,
+      created: null,
+      normalDueDate: effectiveDate,
+      changeId: null,
+      PayPlanDetail: null
+    }));
+    return rows;
+  }
+
   // Abierta desde el menu no llega ?policyId=: se busca por numero o por codigo de poliza.
   function buscar() {
     const v = txt(buscarPoliza);
@@ -1556,6 +1611,8 @@
       policyId: policyId,
       jOldCoverages: JSON.stringify(oldCoverages),
       jNewCoverages: JSON.stringify(newCoverages),
+      jOldPayPlan: null,
+      jNewPayPlan: null,
       newStart: dateAtNoon(calc.rows[0] && calc.rows[0].newStart),
       newEnd: dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
       effectiveDate: dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
@@ -1588,6 +1645,20 @@
     let reinsurancePrepared = false;
     let reinsuranceExecuted = false;
     try {
+      const oldPayPlan = await loadPayPlanSnapshot(policyId);
+      payload.jOldPayPlan = JSON.stringify(oldPayPlan);
+      const oldTotal = oldPayPlan.reduce(function (total, item) {
+        return total + Number(item && (item.minimum !== undefined ? item.minimum : item.expected) || 0);
+      }, 0);
+      const newTotal = calc && calc.billing && calc.billing.total
+        ? Number(calc.billing.total.after || 0)
+        : oldTotal;
+      payload.jNewPayPlan = JSON.stringify(buildNativePayPlan(
+        oldPayPlan,
+        newTotal - oldTotal,
+        dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
+        policyId
+      ));
       const createdResponse = await exe('ChangeCoverage', payload);
       if (!createdResponse || !createdResponse.ok || !createdResponse.outData || !createdResponse.outData.id) {
         throw new Error(t('El endoso no pudo ser creado') + ': ' + cleanMessage(createdResponse));

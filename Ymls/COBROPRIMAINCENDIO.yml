@@ -1,0 +1,52 @@
+scanCommand:  
+  cmd: ExeChain
+  data:
+    chain: cmdGetPremiumContext
+    context: "{id:_id}"
+unique: _reference
+reference: _reference
+status: 1
+code: "'CobroPrima'"
+description: _reference
+entity: "ALLOCATION"
+entityId: _id
+Lines:
+# COBRO DE PRIMA - Asiento N°1
+  -	account: exe(GetTable,table:'CuentasCobroPrimasxLob',column:'Cuenta',row:'FondosFijos',getColumn:_poliza.lob)
+    debit: _prima
+    credit: 0
+    currency: _currency
+    comments: "'Registra cobro de prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
+  -	account: exe(GetTable,table:'CuentasCobroPrimasxLob',column:'Cuenta',row:'Prima',getColumn:_poliza.lob)
+    debit: 0
+    credit: _prima
+    currency: _currency
+    comments: "'Registra cobro de prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
+### COBRO DE PRIMA - Asiento N°2 - IMPUESTO POR RECAUDACION DE PRIMAS DE INCENDIO 5%
+  -	account: exe(GetTable,table:'CuentasCobroPrimasxLob',column:'Cuenta',row:'ImpuestoPrimas',getColumn:_poliza.lob)
+    debit: _impuesto
+    credit: 0
+    currency: _currency
+    comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
+  -	account: exe(GetTable,table:'CuentasCobroPrimasxLob',column:'Cuenta',row:'ImpuestoPrimasCredito',getColumn:_poliza.lob)
+    debit: 0
+    credit: _impuesto
+    currency: _currency
+    comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
+### COBRO DE PRIMA - Asiento N°3 - IMPUESTO POR RECAUDACION DE PRIMAS DE DAÑOS 2%
+  -	account: exe(GetTable,table:'CuentasCobroPrimasxLob',column:'Cuenta',row:'DaniosxPagar',getColumn:_poliza.lob)
+    debit: _primaxpagar
+    credit: 0
+    currency: _currency
+    comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
+  -	account: exe(GetTable,table:'CuentasCobroPrimasxLob',column:'Cuenta',row:'DaniosxPagarCredito',getColumn:_poliza.lob)
+    debit: 0
+    credit: _primaxpagar
+    currency: _currency
+    comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
