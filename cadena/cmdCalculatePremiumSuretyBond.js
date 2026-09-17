@@ -24,8 +24,11 @@ try {
   const isProceedOrder = (endorsementAction === "changeterm" || endorsementAction === "changecoverage")
     && endorsementType === "PROCEEDORDER";
   const changeData = getChangeData();
+  const additionalData = parseChangeObject(changeData.jAdditional || poliza.jAdditional);
   const newCapital = n(changeData.newCapital);
   const oldCapital = n(changeData.oldCapital !== undefined ? changeData.oldCapital : poliza.insuredSum);
+  const capitalAdjustment = n(changeData.surcharge !== undefined ? changeData.surcharge : additionalData.surcharge)
+    - n(changeData.discount !== undefined ? changeData.discount : additionalData.discount);
   const isCapitalChange = endorsementAction === "changepolicycapital"
     || endorsementAction === "capitalchange"
     || (newCapital > 0 && oldCapital > 0 && Math.abs(newCapital - oldCapital) > 0.009);
@@ -127,6 +130,10 @@ try {
       
     }
 
+  }
+
+  if (isCapitalChange && Math.abs(capitalAdjustment) > 0.009) {
+    applyCapitalAdjustment(resultCoverages, poliza.Coverages || [], capitalAdjustment);
   }
 
   return resultCoverages
@@ -336,6 +343,47 @@ function getChangeData() {
   if (Object.keys(parsedDto).length) return parsedDto;
 
   return {};
+}
+
+function applyCapitalAdjustment(calculatedCoverages, currentCoverages, adjustment) {
+  let affected = calculatedCoverages.filter(result => {
+    const current = currentCoverages.find(coverage => String(coverage.code) === String(result.code));
+    return current && Math.abs(n(result.limit) - n(current.limit)) > 0.009;
+  });
+
+  if (!affected.length) affected = calculatedCoverages.slice();
+
+  let weightTotal = affected.reduce((sum, result) => {
+    const current = currentCoverages.find(coverage => String(coverage.code) === String(result.code));
+    return sum + Math.abs(n(result.premium) - n(current && current.premium));
+  }, 0);
+  const useFinalPremium = weightTotal <= 0.009;
+
+  if (useFinalPremium) {
+    weightTotal = affected.reduce((sum, result) => sum + Math.abs(n(result.premium)), 0);
+  }
+  if (weightTotal <= 0.009) {
+    throw new Error("No hay una prima válida para distribuir el recargo o descuento.");
+  }
+
+  let allocated = 0;
+  affected.forEach((result, index) => {
+    const current = currentCoverages.find(coverage => String(coverage.code) === String(result.code));
+    const weight = useFinalPremium
+      ? Math.abs(n(result.premium))
+      : Math.abs(n(result.premium) - n(current && current.premium));
+    const share = index === affected.length - 1
+      ? n(adjustment - allocated)
+      : n(adjustment * weight / weightTotal);
+    const adjustedPremium = n(result.premium + share);
+
+    if (adjustedPremium < 0) {
+      throw new Error("El descuento no puede dejar una cobertura con prima negativa.");
+    }
+
+    result.premium = adjustedPremium;
+    allocated = n(allocated + share);
+  });
 }
 
 function parseChangeObject(value) {

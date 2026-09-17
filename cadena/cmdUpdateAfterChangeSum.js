@@ -40,15 +40,21 @@ try {
     "1_9_DT_INCENDIO",
     "DT_INCENDIO_V3",
     "DTINCENDIO_SUMA",
+    "OBJFIANZA",
     "OA_FIANZASV3"
   ];
-  const insuredObjectsToUpdate = insuredObjects.filter(item =>
-    item &&
-    item.ObjectDefinition &&
-    (insuredObjectCodes.indexOf(item.ObjectDefinition.code) >= 0 ||
-      insuredObjectCodes.indexOf(item.ObjectDefinition.name) >= 0) &&
-    getPositiveInteger(item.id) > 0
-  );
+  const insuredObjectsToUpdate = insuredObjects.filter(item => {
+    if (!item || !item.ObjectDefinition || getPositiveInteger(item.id) <= 0) {
+      return false;
+    }
+
+    const definition = item.ObjectDefinition;
+    const form = definition.Form || {};
+    return insuredObjectCodes.indexOf(definition.code) >= 0 ||
+      insuredObjectCodes.indexOf(definition.name) >= 0 ||
+      insuredObjectCodes.indexOf(form.code) >= 0 ||
+      insuredObjectCodes.indexOf(form.name) >= 0;
+  });
 
   let sql =
     "UPDATE LifeCoverage SET [limit] = " + insuredSum +

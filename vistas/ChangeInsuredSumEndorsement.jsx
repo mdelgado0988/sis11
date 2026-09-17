@@ -49,6 +49,8 @@
   const [policy, setPolicy] = useState(null);
   const [newInsuredSum, setNewInsuredSum] = useState(null);
   const [effectiveDate, setEffectiveDate] = useState(null);
+  const [surcharge, setSurcharge] = useState(0);
+  const [discount, setDiscount] = useState(0);
   const [calc, setCalc] = useState(null);
   const [sim, setSim] = useState(null);
   const [tab, setTab] = useState('calc');
@@ -850,6 +852,8 @@
           setPolicy(Object.assign({}, p, { Currency: currency || p.Currency }));
           setNewInsuredSum(Number(p.insuredSum || 0));
           setEffectiveDate(moment());
+          setSurcharge(0);
+          setDiscount(0);
           setLoading(false);
           return null;
         });
@@ -1295,6 +1299,67 @@
   }
 
   // ------------------------------------------------------------- pestania 1
+  function quoteWithCapitalAdjustment(initialQuote) {
+    const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
+    const initialBill = initialQuote.Bill || {};
+    const adjustedPremium = Number(initialBill.coverages === undefined
+      ? initialBill.anualPremium || initialBill.annualPremium || 0
+      : initialBill.coverages) || 0;
+    return Promise.resolve({
+      quote: initialQuote,
+      calculatedPremium: money(adjustedPremium - adjustment)
+    });
+  }
+
+  function includeAdjustmentInMovementRows(rows, expectedMovement) {
+    const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
+    if (!adjustment || !rows.length) return;
+
+    const distributedMovement = money(rows.reduce(function (sum, row) {
+      return sum + Number(row.variation || 0);
+    }, 0));
+    const pendingAdjustment = money(expectedMovement - distributedMovement);
+    if (closeEnough(pendingAdjustment, 0)) return;
+
+    let targets = rows.filter(function (row) {
+      return Math.abs(Number(row.variation || 0)) > 0.009;
+    });
+    let weightTotal = targets.reduce(function (sum, row) {
+      return sum + Math.abs(Number(row.variation || 0));
+    }, 0);
+    const useFinalPremium = !targets.length || weightTotal <= 0.009;
+    if (useFinalPremium) {
+      targets = rows.filter(function (row) {
+        return Math.abs(Number(row.newPremium || 0)) > 0.009;
+      });
+      weightTotal = targets.reduce(function (sum, row) {
+        return sum + Math.abs(Number(row.newPremium || 0));
+      }, 0);
+    }
+    if (weightTotal <= 0.009) {
+      throw new Error(t('No hay una prima válida para distribuir el recargo o descuento'));
+    }
+
+    let allocated = 0;
+    targets.forEach(function (row, index) {
+      const weight = useFinalPremium
+        ? Math.abs(Number(row.newPremium || 0))
+        : Math.abs(Number(row.variation || 0));
+      const share = index === targets.length - 1
+        ? money(pendingAdjustment - allocated)
+        : money(pendingAdjustment * weight / weightTotal);
+      row.variation = money(Number(row.variation || 0) + share);
+      row.adjustment = share;
+      allocated = money(allocated + share);
+    });
+  }
+
+  function onAjuste(kind, value) {
+    const amount = value === null || value === undefined ? 0 : Number(value);
+    if (kind === 'surcharge') setSurcharge(amount); else setDiscount(amount);
+    invalidate();
+  }
+
   function calcular() {
     setError(null); setResult(null);
     setReinsuranceConfirmed(false);
@@ -1320,7 +1385,9 @@
       anniversary: 0,
       processId: null,
       note: null,
-      operation: null
+      operation: null,
+      surcharge: Number(surcharge || 0),
+      discount: Number(discount || 0)
     };
     exe('ChangePolicyCapital', quotePayload)
       .then(function (r) {
@@ -1330,7 +1397,12 @@
           setError(String((r && r.msg) || t('Error de calculo')).replace(/formula ->[\s\S]*/, '').trim());
           return null;
         }
-        const quote = Array.isArray(r.outData) ? r.outData[0] : r.outData;
+        const initialQuote = Array.isArray(r.outData) ? r.outData[0] : r.outData;
+        return quoteWithCapitalAdjustment(initialQuote);
+      })
+      .then(function (adjustedResult) {
+        if (!adjustedResult || calculationVersion !== requestVersion.calculation) return null;
+        const quote = adjustedResult.quote;
         const detail = typeof quote.jDetail === 'string' ? JSON.parse(quote.jDetail || '{}') : (quote.jDetail || {});
         const detailRows = Array.isArray(detail.Coverages) ? detail.Coverages : [];
         let nativeCoverages = typeof quote.jNewCoverages === 'string'
@@ -1381,6 +1453,7 @@
         const diff = quote.BillDiff || {};
         const beforePremium = Number(detail.oldCoverages === undefined ? policy.coverages : detail.oldCoverages) || 0;
         const afterPremium = Number(bill.coverages === undefined ? detail.newCoverages : bill.coverages) || 0;
+        includeAdjustmentInMovementRows(rows, money(afterPremium - beforePremium));
         const beforeTax = Number(detail.oldTax === undefined ? policy.tax : detail.oldTax) || 0;
         const afterTax = Number(bill.tax === undefined ? beforeTax + Number(diff.tax || 0) : bill.tax) || 0;
         const beforeTotal = Number(detail.oldAnnualPremium === undefined ? policy.annualTotal || policy.anualTotal : detail.oldAnnualPremium) || 0;
@@ -1396,8 +1469,11 @@
           direction: finalSum > Number(policy.insuredSum || 0) ? 'INCREASE' : 'DECREASE',
           billing: {
             currency: policy.currency,
-            premium: { before: beforePremium, calculated: afterPremium, after: afterPremium },
-            adjustments: { before: Number(policy.surcharges || 0) - Number(policy.discounts || 0), after: Number(bill.surcharges || 0) - Number(bill.discounts || 0) },
+            premium: { before: beforePremium, calculated: adjustedResult.calculatedPremium, after: afterPremium },
+            adjustments: {
+              before: Number(policy.surcharges || 0) - Number(policy.discounts || 0),
+              after: money(Number(policy.surcharges || 0) - Number(policy.discounts || 0) + Number(surcharge || 0) - Number(discount || 0))
+            },
             fee: { before: Number(policy.fee || 0), after: Number(bill.fee || 0) },
             tax: { before: beforeTax, after: afterTax },
             total: { before: beforeTotal, after: afterTotal },
@@ -1604,6 +1680,8 @@
       policyId: policyId,
       oldCapital: Number(policy.insuredSum || 0),
       newCapital: Number(newInsuredSum || 0),
+      surcharge: Number(surcharge || 0),
+      discount: Number(discount || 0),
       jOldCoverages: JSON.stringify(oldCoverages),
       jNewCoverages: JSON.stringify(newCoverages),
       effectiveDate: moment(effectiveDate).format('YYYY-MM-DD') + 'T12:00:00',
@@ -1614,6 +1692,8 @@
         endorsementType: 'CHANGE_INSURED_SUM_SURETY',
         oldInsuredSum: Number(policy.insuredSum || 0),
         newInsuredSum: Number(newInsuredSum || 0),
+        surcharge: Number(surcharge || 0),
+        discount: Number(discount || 0),
         premium: calc.billing && calc.billing.premium ? calc.billing.premium.after : 0,
         tax: calc.billing && calc.billing.tax ? calc.billing.tax.after : 0,
         total: calc.billing && calc.billing.total ? calc.billing.total.after : 0,
@@ -2446,6 +2526,16 @@
                         <label>{t('Fecha efectiva')}</label>
                         <DatePicker id="dtpFechaEfectiva" style={{ width: 150 }} value={effectiveDate}
                           onChange={function (v) { setEffectiveDate(v); invalidate(); }} />
+                      </div>
+                      <div className="axx-campo">
+                        <label>{t('Recargo')}</label>
+                        <InputNumber id="numRecargo" min={0} step={1} style={{ width: 120 }} value={surcharge}
+                          onChange={function (v) { onAjuste('surcharge', v); }} />
+                      </div>
+                      <div className="axx-campo">
+                        <label>{t('Descuento')}</label>
+                        <InputNumber id="numDescuento" min={0} step={1} style={{ width: 120 }} value={discount}
+                          onChange={function (v) { onAjuste('discount', v); }} />
                       </div>
                       <Button id="btnCalcular" type="primary" loading={loading}
                         disabled={!policy || !newInsuredSum || !effectiveDate} onClick={calcular}>{t('Calcular endoso')}</Button>
