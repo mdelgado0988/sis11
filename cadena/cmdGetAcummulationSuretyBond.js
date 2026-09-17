@@ -18,6 +18,7 @@ let policy;
 let accumulationByPolicy;
 let accumulationByClient;
 let accumulationByEconomicGroup;
+let currentPolicyIsValidSurety;
 const ramos = ["81", "82", "83", "84"]
 let resultado = [];
 
@@ -64,7 +65,7 @@ try {
 }
 
 function setAccumulationByPolicy() {
-  accumulationByPolicy = policy.insuredSum;
+  accumulationByPolicy = getCurrentPolicySuretyAmount();
 }
 
 function setAccumulationByClient() {
@@ -89,12 +90,13 @@ function setAccumulationByClient() {
   FROM LifePolicy p
   WHERE p.holderId = ${clientId} AND p.lob in (${filterRamos})
     AND CAST(GETDATE() AS date) BETWEEN CAST(p.[start] AS DATE) AND CAST(p.[end] AS DATE)
-    AND p.activeDate IS NOT NULL AND p.active = 1;`
+    AND p.activeDate IS NOT NULL AND p.active = 1
+    AND ${getValidSuretySql('p')};`
   
   doCmd({cmd: "DoQuery", data: { sql: query }});
     
   accumulationByClient = DoQuery.outData?.[0]?.suma ?? 0;
-  accumulationByClient += policy.insuredSum; //sumamos la oferta para que forme parte del cúmulo
+  accumulationByClient += getCurrentPolicySuretyAmount(); //sumamos la oferta vigente para que forme parte del cúmulo
 }
 
 function setAccumulationByEconomicGroup() {
@@ -137,12 +139,13 @@ function setAccumulationByEconomicGroup() {
   FROM LifePolicy p
   WHERE p.holderId in  (${integrantes.join(',')}) AND p.lob in (${filterRamos})
     AND CAST(GETDATE() AS date) BETWEEN CAST(p.[start] AS DATE) AND CAST(p.[end] AS DATE)
-    AND p.activeDate IS NOT NULL AND p.active = 1;`
+    AND p.activeDate IS NOT NULL AND p.active = 1
+    AND ${getValidSuretySql('p')};`
   
   doCmd({cmd: "DoQuery", data: { sql: query }});
 
   accumulationByEconomicGroup = DoQuery.outData?.[0]?.suma ?? 0;
-  accumulationByEconomicGroup += policy.insuredSum; //sumamos la oferta para que forme parte del cúmulo
+  accumulationByEconomicGroup += getCurrentPolicySuretyAmount(); //sumamos la oferta vigente para que forme parte del cúmulo
   
 }
 
@@ -165,6 +168,29 @@ function obtenerGrupoEconomico(jCustomForms) {
 function setDefaultaccumulationByEconomicGroup() {
   //if(!accumulationByClient) setAccumulationByClient();
   accumulationByEconomicGroup = 0//accumulationByClient;
+}
+
+function getValidSuretySql(policyAlias) {
+  return `NOT EXISTS (
+    SELECT 1
+    FROM InsuredObject io
+    CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE N'[]' END) field
+    WHERE io.lifePolicyId = ${policyAlias}.id
+      AND JSON_VALUE(field.value, '$.name') = 'cmbEstadoFianza'
+      AND LTRIM(RTRIM(COALESCE(JSON_VALUE(field.value, '$.userData[0]'), ''))) = '0'
+  )`;
+}
+
+function getCurrentPolicySuretyAmount() {
+  if (currentPolicyIsValidSurety === undefined) {
+    const query = `SELECT CASE WHEN ${getValidSuretySql('p')} THEN 1 ELSE 0 END vigente
+    FROM LifePolicy p
+    WHERE p.id = ${policyId};`;
+    doCmd({cmd: "DoQuery", data: { sql: query }});
+    currentPolicyIsValidSurety = Number(DoQuery.outData?.[0]?.vigente ?? 1) === 1;
+  }
+
+  return currentPolicyIsValidSurety ? d(policy.insuredSum) : 0;
 }
 
 function setPolicy() {
