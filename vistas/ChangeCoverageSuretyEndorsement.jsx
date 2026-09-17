@@ -2255,8 +2255,10 @@
       const base = aggregate(sourceBaseRows);
       const totals = g && g.totals ? g.totals : {};
       const premium = base.premium + numberFrom(totals, ['movement']);
-      const commission = base.commission + numberFrom(totals, ['commission']);
-      const tax = base.tax + numberFrom(totals, ['tax']);
+      // hydrateFinalDistribution recalculates these values over the final
+      // ceded premium. Do not add the historical base again.
+      const commission = g ? numberFrom(totals, ['commission']) : base.commission;
+      const tax = g ? numberFrom(totals, ['tax']) : base.tax;
       // La distribucion debe cerrar contra el total del movimiento del grupo.
       // Los campos cedente/cedido de la base pueden incluir ya la variacion,
       // por lo que no se vuelven a sumar para obtener el total.

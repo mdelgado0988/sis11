@@ -70,6 +70,10 @@
   };
   const DAY = 86400000;
   const daysBetween = (a, b) => (!a || !b ? null : Math.round((b.getTime() - a.getTime()) / DAY));
+  const inclusiveDaysBetween = (a, b) => {
+    const days = daysBetween(a, b);
+    return days == null ? null : days + 1;
+  };
   const addDays = (date, n) => (!date || n == null ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate() + n));
   const txt = (v) => String(v == null ? '' : v).trim();
   const translatedMessage = (value, fallback) => value ? t(String(value)) : t(fallback);
@@ -189,12 +193,6 @@
   const [calculation, setCalculation] = useState(null);
   const [premiumValidationError, setPremiumValidationError] = useState('');
   const [proceedOrderEnabled, setProceedOrderEnabled] = useState(false);
-
-  // The current system date, generated in the BROWSER local time zone (§2.1).
-  const [systemDate] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  });
 
   const getPolicyId = () => {
     try {
@@ -402,16 +400,17 @@
       return { error: t('The main coverage has no usable start/end dates.') };
     }
 
-    const mainDuration = hasRelationship ? daysBetween(curMainStart, curMainEnd) : null;
+    const mainDateOffset = hasRelationship ? daysBetween(curMainStart, curMainEnd) : null;
     const newMainStart = toLocalDate(effectiveDate);
-    const newMainEnd = newMainStart ? addDays(newMainStart, mainDuration) : null;
+    const newMainEnd = newMainStart ? addDays(newMainStart, mainDateOffset) : null;
 
     const rows = coverages.map((c) => {
       const code = txt(c.code);
       const cfg = cfgByCov[code];
       const curStart = toPolicyLocalDate(c.start);
       const curEnd = toPolicyLocalDate(c.end);
-      const duration = daysBetween(curStart, curEnd);
+      const dateOffset = daysBetween(curStart, curEnd);
+      const duration = inclusiveDaysBetween(curStart, curEnd);
       const isMain = hasRelationship && code === mainCode;
       // Configured as taking part in the relationship, and not the main one.
       const isDependent = hasRelationship && !!cfg && cfg.coverageCodeDep !== '' && !isMain;
@@ -423,7 +422,7 @@
         // Without a configured relationship, each coverage is its own main
         // coverage and keeps its current duration.
         newStart = newMainStart;
-        newEnd = duration == null ? null : addDays(newStart, duration);
+        newEnd = dateOffset == null ? null : addDays(newStart, dateOffset);
       } else if (isMain) {
         newStart = newMainStart;
         newEnd = newMainEnd;
@@ -432,7 +431,7 @@
         // CURRENT main end, read from the policy. No contiguity rule is invented.
         const offset = daysBetween(curMainEnd, curStart);
         newStart = addDays(newMainEnd, offset);
-        newEnd = duration == null ? null : addDays(newStart, duration);
+        newEnd = dateOffset == null ? null : addDays(newStart, dateOffset);
       } else {
         newStart = curStart;
         newEnd = curEnd;
@@ -447,7 +446,7 @@
         premium: c.basePremium,
         curStart: curStart, curEnd: curEnd, duration: duration,
         newStart: newStart, newEnd: newEnd,
-        newDuration: daysBetween(newStart, newEnd),
+        newDuration: inclusiveDaysBetween(newStart, newEnd),
         isMain: isMain, isDependent: isDependent, note: note,
       };
     });
@@ -1096,7 +1095,7 @@
         }}
       >
         <Descriptions size="small" column={3} bordered style={{ marginBottom: 12 }}>
-          <Descriptions.Item label={t('Current system date')}><span id="sysDate">{fmt(systemDate)}</span></Descriptions.Item>
+          <Descriptions.Item label={t('Policy start date')}><span id="policyStartDate">{fmt(policyStartDate)}</span></Descriptions.Item>
           <Descriptions.Item label={t('Policy')}>{policy ? (policy.code || policy.id) : ''}</Descriptions.Item>
           <Descriptions.Item label={t('Product')}>
             {policy
