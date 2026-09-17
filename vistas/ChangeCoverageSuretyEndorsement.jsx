@@ -75,6 +75,9 @@
   // lote de React, asi que tres clics seguidos disparaban tres ejecuciones. El objeto que
   // devuelve useState conserva su identidad entre renders y se muta de forma sincrona.
   const [lock] = useState({ busy: false });
+  // Las cotizaciones y simulaciones son asincronas. Esta version evita que una
+  // respuesta anterior reemplace el resultado calculado con los ajustes actuales.
+  const [requestVersion] = useState({ calculation: 0, simulation: 0 });
   const [buscarPoliza, setBuscarPoliza] = useState('');
   const [splits, setSplits] = useState([]);
   const [baseCessions, setBaseCessions] = useState([]);
@@ -474,23 +477,44 @@
       });
       Object.keys(byCoverage).forEach(function (code) {
         const item = byCoverage[code];
-        const premium = item.rows.reduce(function (total, pair) {
-          return total + Number(pair.row.premiumCedant || 0) + Number(pair.row.premiumRe || 0);
-        }, 0);
-        const sum = item.rows.reduce(function (total, pair) {
-          return total + Number(pair.row.sumInsuredCedant || 0) + Number(pair.row.sumInsuredRe || 0);
-        }, 0);
+        let assignedPremium = 0;
+        let assignedSum = 0;
+        item.rows.forEach(function (pair) {
+          const totals = pair.group.totals || {};
+          const retentionPercentage = totals.distributionPercentageCed !== undefined
+            ? Math.max(0, Math.min(100, Number(totals.distributionPercentageCed) || 0))
+            : Math.max(0, numberFrom(pair.row, ['proportionCed']) * 100);
+          const cededPercentage = totals.distributionPercentageRe !== undefined
+            ? Math.max(0, Math.min(100, Number(totals.distributionPercentageRe) || 0))
+            : Math.max(0, numberFrom(pair.row, ['proportionRe']) * 100);
+          const previousCededPremium = numberFrom(pair.row, ['premiumRe']);
+          const commissionRate = previousCededPremium
+            ? numberFrom(pair.row, ['commission', 'comissionCedant']) / previousCededPremium
+            : 0;
+          const taxRate = previousCededPremium ? numberFrom(pair.row, ['tax']) / previousCededPremium : 0;
+
+          pair.row.proportionCed = retentionPercentage / 100;
+          pair.row.proportionRe = cededPercentage / 100;
+          pair.row.premiumCedant = money(item.expectedPremium * retentionPercentage / 100);
+          pair.row.premiumRe = money(item.expectedPremium * cededPercentage / 100);
+          pair.row.sumInsuredCedant = money(item.expectedSum * retentionPercentage / 100);
+          pair.row.sumInsuredRe = money(item.expectedSum * cededPercentage / 100);
+          pair.row.commission = money(pair.row.premiumRe * commissionRate);
+          pair.row.tax = money(pair.row.premiumRe * taxRate);
+          assignedPremium = money(assignedPremium + pair.row.premiumCedant + pair.row.premiumRe);
+          assignedSum = money(assignedSum + pair.row.sumInsuredCedant + pair.row.sumInsuredRe);
+        });
+
+        // El redondeo se aplica solo como diferencia residual sobre una linea
+        // participante. Nunca se traslada el total del contrato a una cobertura.
         const last = item.rows.slice().reverse().find(function (pair) {
-          return Math.abs(Number(pair.row.premiumCedant || 0)) > 0.01
-            || Math.abs(Number(pair.row.premiumRe || 0)) > 0.01
-            || Math.abs(Number(pair.row.sumInsuredCedant || 0)) > 0.01
-            || Math.abs(Number(pair.row.sumInsuredRe || 0)) > 0.01;
+          return numberFrom(pair.row, ['proportionRe']) > 0 || numberFrom(pair.row, ['proportionCed']) > 0;
         });
         if (!last) return;
-        const premiumField = Number(last.row.premiumRe || 0) > 0.01 ? 'premiumRe' : 'premiumCedant';
-        const sumFieldName = Number(last.row.sumInsuredRe || 0) > 0.01 ? 'sumInsuredRe' : 'sumInsuredCedant';
-        last.row[premiumField] = money(Number(last.row[premiumField] || 0) + item.expectedPremium - premium);
-        last.row[sumFieldName] = money(Number(last.row[sumFieldName] || 0) + item.expectedSum - sum);
+        const premiumField = numberFrom(last.row, ['proportionRe']) > 0 ? 'premiumRe' : 'premiumCedant';
+        const sumFieldName = numberFrom(last.row, ['proportionRe']) > 0 ? 'sumInsuredRe' : 'sumInsuredCedant';
+        last.row[premiumField] = money(Number(last.row[premiumField] || 0) + item.expectedPremium - assignedPremium);
+        last.row[sumFieldName] = money(Number(last.row[sumFieldName] || 0) + item.expectedSum - assignedSum);
       });
       (next.contracts || []).forEach(function (group) {
         recalculateReinsuranceTotals(group);
@@ -670,6 +694,15 @@
 
       placementRows.forEach(function (row) {
         const code = String(row.coverageCode);
+        const negativeFields = [
+          numberFrom(row, ['premiumCedant']),
+          numberFrom(row, ['premiumRe']),
+          numberFrom(row, ['sumInsuredCedant']),
+          numberFrom(row, ['sumInsuredRe'])
+        ];
+        if (negativeFields.some(function (value) { return value < -0.01; })) {
+          errors.push(groupName + ': ' + t('la cobertura') + ' ' + code + ' ' + t('tiene importes negativos en su distribución.'));
+        }
         if (!coverageDistribution[code]) {
           coverageDistribution[code] = {
             premium: 0,
@@ -1418,8 +1451,13 @@
     setReinsuranceConfirmed(false);
     if (!covCode) { setError(t('Seleccione la cobertura a endosar')); return; }
     if (!newEnd) { setError(t('Indique la nueva fecha final')); return; }
+    const calculationVersion = ++requestVersion.calculation;
+    // Invalida tambien cualquier simulacion iniciada con el calculo anterior.
+    ++requestVersion.simulation;
     setLoading(true);
+    setCalc(null);
     setSim(null);
+    setSimLoading(false);
     const ctx = {
       policyId: policyId, coverageCode: covCode,
       newEnd: moment(newEnd).format('YYYY-MM-DD'),
@@ -1427,6 +1465,7 @@
     };
     exe('ExeChain', { chain: 'cmdCalcChangeCoverageSurety', context: JSON.stringify(ctx) })
       .then(function (r) {
+        if (calculationVersion !== requestVersion.calculation) return null;
         if (!r || !r.ok) {
           setLoading(false);
           setError(String((r && r.msg) || t('Error de calculo')).replace(/formula ->[\s\S]*/, '').trim());
@@ -1441,35 +1480,52 @@
         setLoading(false);
         return null;
       })
-      .catch(function (e) { setLoading(false); setError(String(e)); });
+      .catch(function (e) {
+        if (calculationVersion !== requestVersion.calculation) return;
+        setLoading(false);
+        setError(String(e));
+      });
   }
 
-  // recargo y descuento recalculan sin borrar lo capturado
+  // Recargo y descuento invalidan el calculo, pero conservan los aceptantes capturados.
   function onAjuste(kind, value) {
     const v = value === null || value === undefined ? 0 : Number(value);
     if (kind === 'surcharge') setSurcharge(v); else setDiscount(v);
+    // El resultado vigente fue calculado con otro ajuste. Limpiarlo impide que
+    // el efecto de reaseguro simule nuevamente con esa prima anterior.
+    ++requestVersion.calculation;
+    ++requestVersion.simulation;
+    setCalc(null);
     setSim(null);
+    setLoading(false);
+    setSimLoading(false);
+    setReinsurersReady(false);
+    setSelectedReinsuranceLineKey(null);
+    setReinsuranceConfirmed(false);
   }
 
   // ------------------------------------------------------------- pestania 2
   function simular() {
     if (!calc) { setError(t('Calcule el endoso antes de simular el reaseguro')); return; }
+    const simulationVersion = ++requestVersion.simulation;
+    const calculationSnapshot = calc;
     setReinsuranceConfirmed(false);
     setReinsurersReady(false);
     setSelectedReinsuranceLineKey(null);
     setReaDetailTab('distribution');
     setSimLoading(true); setError(null);
     const rows = [];
-    for (let i = 0; i < calc.rows.length; i++) {
+    for (let i = 0; i < calculationSnapshot.rows.length; i++) {
       // variation contiene la prima final del movimiento, incluyendo recargos
       // o descuentos. El prorrateado se conserva solo como referencia.
-      rows.push({ code: calc.rows[i].code, variation: calc.rows[i].variation, prorated: calc.rows[i].prorated });
+      rows.push({ code: calculationSnapshot.rows[i].code, variation: calculationSnapshot.rows[i].variation, prorated: calculationSnapshot.rows[i].prorated });
     }
     exe('ExeChain', {
       chain: 'cmdSimReaChangeCoverage',
       context: JSON.stringify({ policyId: policyId, rows: rows, participants: splits })
     })
       .then(function (r) {
+        if (simulationVersion !== requestVersion.simulation) return;
         setSimLoading(false);
         if (!r || !r.ok) { setError(String((r && r.msg) || '').replace(/formula ->[\s\S]*/, '').trim()); return; }
         let o = r.outData;
@@ -1494,6 +1550,7 @@
           }).catch(function () { return { outData: [] }; })
           : Promise.resolve({ outData: [] });
         loadNames.then(function (contacts) {
+          if (simulationVersion !== requestVersion.simulation) return;
           const directory = {};
           ((contacts && contacts.outData) || []).forEach(function (contact) {
             const name = contact.isPerson
@@ -1506,7 +1563,11 @@
           setSelectedReinsuranceKey(o && o.contracts && o.contracts.length ? String(o.contracts[0].contractId) : null);
         });
       })
-      .catch(function (e) { setSimLoading(false); setError(String(e)); });
+      .catch(function (e) {
+        if (simulationVersion !== requestVersion.simulation) return;
+        setSimLoading(false);
+        setError(String(e));
+      });
   }
 
   // Tambien cuando una edicion invalida la distribucion: sin `sim` en las dependencias, editar

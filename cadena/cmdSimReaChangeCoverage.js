@@ -4,8 +4,11 @@
  * cmdSimReaChangeCoverage (AXX-299 / GLOB-1201)
  * Pestania 2: simula el reaseguro DEL MOVIMIENTO del endoso de vigencia, sin ejecutar
  * el endoso y sin escribir en Cession. Distribuye solo la diferencia de prima de cada
- * cobertura sobre los contratos vigentes de la poliza, agrupando por contrato y linea,
- * respetando si la cobertura suma o no para el contrato (cfgCoberturaProductoReaFianza),
+ * cobertura sobre los contratos vigentes de la poliza, agrupando por contrato y linea.
+ * Incluye todas las coberturas activas de cada contrato y linea afectados para que los
+ * porcentajes editados se apliquen a la distribucion completa, aunque una cobertura no
+ * tenga movimiento de prima en el endoso, respetando si la cobertura suma o no para
+ * el contrato (cfgCoberturaProductoReaFianza),
  * y proyectando los aceptantes de cada linea por su participacion.
  *
  * La prima de reaseguro se reparte sobre la variacion FINAL de la cobertura
@@ -95,13 +98,23 @@ for (let i = 0; i < edited.length; i++) {
 const byContract = {};
 const order = [];
 const warnings = [];
+
+// El calculo del endoso puede traer solo la cobertura seleccionada. Identificamos sus
+// contratos y lineas para proyectar tambien las demas coberturas activas relacionadas.
+const affectedContractLines = {};
+for (let i = 0; i < base.length; i++) {
+  const c = base[i];
+  if (delta[txt(c.coverageCode)] === undefined) continue;
+  affectedContractLines[txt(c.contractId) + '|' + txt(c.lineId)] = true;
+}
+
 for (let i = 0; i < base.length; i++) {
   const c = base[i];
   const code = txt(c.coverageCode);
-  if (delta[code] === undefined) continue;
   const line = txt(c.lineId);
   const lineUp = up(line);
   const key = txt(c.contractId) + '|' + line;
+  if (!affectedContractLines[key]) continue;
   if (!byContract[key]) {
     byContract[key] = {
       contractId: Number(c.contractId), lineId: line,
@@ -113,8 +126,8 @@ for (let i = 0; i < base.length; i++) {
     order.push(key);
   }
   const grp = byContract[key];
-  const dv = money(delta[code]);
-  const pv = money(prorated[code]);
+  const dv = delta[code] === undefined ? 0 : money(delta[code]);
+  const pv = prorated[code] === undefined ? 0 : money(prorated[code]);
   const pCed = Number(c.proportionCed || 0);
   const pRe = Number(c.proportionRe || 0);
   const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
@@ -207,7 +220,7 @@ for (let i = 0; i < order.length; i++) {
 return {
   ok: true,
   persisted: false,
-  scope: 'MOVEMENT_ONLY',
+  scope: 'AFFECTED_CONTRACT_LINES',
   basis: 'FINAL_COVERAGE_MOVEMENT',
   policyId: policyId,
   policyCode: policy.code,

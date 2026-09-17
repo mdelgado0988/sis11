@@ -183,6 +183,14 @@ if (!preserveActiveReinsurance) {
   requestedRows.forEach(function (row) {
     const ceded = money(row.premiumRe);
     const parts = partsByKey[keyOf(row)] || [];
+    if (num(row.sumInsuredCedant) < -0.01
+        || num(row.sumInsuredRe) < -0.01
+        || num(row.premiumCedant) < -0.01
+        || num(row.premiumRe) < -0.01
+        || num(row.proportionCed) < -0.0001
+        || num(row.proportionRe) < -0.0001) {
+      errors.push('cobertura ' + txt(row.coverageCode) + ': la retencion y la cesion no pueden ser negativas');
+    }
     if (ceded !== 0 && parts.length) {
       const split = parts.reduce(function (sum, part) { return sum + num(part.split); }, 0);
       if (Math.abs(split - 100) > 0.011) errors.push('linea ' + keyOf(row) + ': los aceptantes suman ' + split + '%');
@@ -480,6 +488,32 @@ const finalCessions = baseCessions.map(function (source) {
   result.changeId = changeId;
   return result;
 });
+
+// Una fotografia final nunca puede contener retencion o cesion negativas.
+// Esos valores indican que un total de contrato fue aplicado por error sobre
+// una sola cobertura y no deben llegar a Cession.
+if (!preserveActiveReinsurance) {
+  const invalidFinalCessions = finalCessions.filter(function (cession) {
+    return num(cession.sumInsuredCedant) < -0.01
+      || num(cession.sumInsuredRe) < -0.01
+      || num(cession.premiumCedant) < -0.01
+      || num(cession.premiumRe) < -0.01
+      || num(cession.proportionCed) < -0.0001
+      || num(cession.proportionRe) < -0.0001;
+  });
+  if (invalidFinalCessions.length) {
+    return {
+      ok: false,
+      stage: 'VALIDATION',
+      changeId: changeId,
+      policyId: policyId,
+      errors: invalidFinalCessions.map(function (cession) {
+        return 'cobertura ' + txt(cession.coverageCode) + ' linea ' + txt(cession.lineId);
+      }),
+      msg: 'La distribucion final contiene importes negativos de retencion o cesion.'
+    };
+  }
+}
 
 // La anulacion se registra como una nueva fila historica con signo inverso.
 // Las filas originales permanecen intactas para auditoria y tambien se marcan
