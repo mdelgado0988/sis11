@@ -358,7 +358,15 @@ function getReinsuranceCessions(policyId, tipo, changeId, change) {
   const isVariation = tipo === 3 || tipo === 5;
   const isCoverageChange = tipo === 6;
   const additional = safeJson(change && change.jAdditional, {});
+  const isUncollectiblePremium = additional.endorsementType === 'UNCOLLECTIBLEPREMIUM';
   const isPreparedCapitalChange = tipo === 3 && additional.endorsementType === 'CHANGE_INSURED_SUM_SURETY';
+
+  // El endoso de prima incobrable solo registra la anulacion negativa que se
+  // preparo para este cambio. No debe mezclar anulaciones de otros endosos,
+  // aunque sigan activas y tengan el mismo premiumType.
+  if (isUncollectiblePremium) {
+    return getCessions(`lifePolicyId=${policyId} AND changeId=${changeId} AND overwritten=0 AND premiumType='CANCELLATION'`);
+  }
 
   // Coverage changes in ProceedOrderEndorsement version the complete
   // distribution with a negative cancellation and an identical positive
