@@ -1311,9 +1311,8 @@
     });
   }
 
-  function includeAdjustmentInMovementRows(rows, expectedMovement) {
-    const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
-    if (!adjustment || !rows.length) return;
+  function reconcileMovementRows(rows, expectedMovement) {
+    if (!rows.length) return;
 
     const distributedMovement = money(rows.reduce(function (sum, row) {
       return sum + Number(row.variation || 0);
@@ -1337,7 +1336,7 @@
       }, 0);
     }
     if (weightTotal <= 0.009) {
-      throw new Error(t('No hay una prima válida para distribuir el recargo o descuento'));
+      throw new Error(t('No hay una prima válida para distribuir el movimiento del endoso'));
     }
 
     let allocated = 0;
@@ -1453,7 +1452,7 @@
         const diff = quote.BillDiff || {};
         const beforePremium = Number(detail.oldCoverages === undefined ? policy.coverages : detail.oldCoverages) || 0;
         const afterPremium = Number(bill.coverages === undefined ? detail.newCoverages : bill.coverages) || 0;
-        includeAdjustmentInMovementRows(rows, money(afterPremium - beforePremium));
+        reconcileMovementRows(rows, money(afterPremium - beforePremium));
         const beforeTax = Number(detail.oldTax === undefined ? policy.tax : detail.oldTax) || 0;
         const afterTax = Number(bill.tax === undefined ? beforeTax + Number(diff.tax || 0) : bill.tax) || 0;
         const beforeTotal = Number(detail.oldAnnualPremium === undefined ? policy.annualTotal || policy.anualTotal : detail.oldAnnualPremium) || 0;
