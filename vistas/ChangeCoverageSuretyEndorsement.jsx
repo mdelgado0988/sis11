@@ -812,7 +812,7 @@
         return Promise.all([
           exe('GetFullTable', { table: 'cfgCoberturaProductoReaFianza' }),
           exe('RepoCurrency', { operation: 'GET', filter: "code='" + txt(p.currency).replace(/'/g, "''") + "'", size: 1 }),
-          exe('RepoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND overwritten=0' }),
+          exe('RepoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND overwritten=0', size: 0 }),
           exe('RepoCoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND parentCoCession IS NULL AND overwritten=0', include: ['Contact'], size: 0 })
             .catch(function () { return { outData: [] }; }),
           exe('LoadEntities', {
@@ -1628,7 +1628,17 @@
       if (next.end) next.end = dateAtNoon(next.end);
       return next;
     });
-    const reinsuranceSnapshot = { distribution: [], participants: [], coinsurance: [] };
+    const reinsuranceSnapshot = {
+      distribution: [],
+      participants: [],
+      coinsurance: [],
+      sourceCessionIds: (baseCessions || []).map(function (cession) {
+        return Number(cession.id || 0);
+      }).filter(function (id) { return id > 0; }),
+      sourceCoinsuranceIds: (coinsuranceCessions || []).map(function (cession) {
+        return Number(cession.id || 0);
+      }).filter(function (id) { return id > 0; })
+    };
     const coinsuranceBase = finalCoinsuranceBase();
     (coinsuranceCessions || []).forEach(function (cession) {
       const percentage = coinsuranceNumber(cession.percentage);
@@ -1702,6 +1712,22 @@
       }
     };
 
+    const runReinsuranceMode = async function (endorsementChangeId, mode) {
+      const response = await exe('ExeChain', {
+        chain: 'cmdApplyReaChangeCoverage',
+        context: JSON.stringify({ changeId: Number(endorsementChangeId), mode: mode })
+      });
+      let data = response && response.outData;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch (parseError) { data = null; }
+      }
+      if (Array.isArray(data) && data.length === 1) data = data[0];
+      if (!response || response.ok === false || (data && data.ok === false)) {
+        throw new Error((data && data.msg) || (response && response.msg) || t('No se pudo procesar el reaseguro del endoso'));
+      }
+      return data || response;
+    };
+
     let changeId = 0;
     let reinsurancePrepared = false;
     let reinsuranceExecuted = false;
@@ -1740,13 +1766,7 @@
 
       if (reinsuranceSnapshot.distribution.length) {
         reinsurancePrepared = true;
-        const prepared = await exe('ExeChain', {
-          chain: 'cmdApplyReaChangeCoverage',
-          context: JSON.stringify({ changeId: changeId, mode: 'PREPARE' })
-        });
-        if (!prepared || !prepared.ok) {
-          throw new Error(t('No se pudo preparar el reaseguro del endoso') + ': ' + cleanMessage(prepared));
-        }
+        await runReinsuranceMode(changeId, 'PREPARE_EXECUTION');
       }
 
       const executed = await exe('ExeChangeCoverage', { changeId: changeId, exeNow: true, operation: 'EXECUTE', noTracking: true });
@@ -1814,18 +1834,6 @@
         failures.push(t('actualización de vigencia y duración') + ': ' + String(validityError && validityError.message ? validityError.message : validityError));
       }
 
-      if (reinsuranceSnapshot.distribution.length) {
-        try {
-          const reinsurance = await exe('ExeChain', {
-            chain: 'cmdApplyReaChangeCoverage',
-            context: JSON.stringify({ changeId: changeId, mode: 'FINALIZE' })
-          });
-          if (!reinsurance || !reinsurance.ok) failures.push(t('actualización del reaseguro') + ': ' + cleanMessage(reinsurance));
-        } catch (reinsuranceError) {
-          failures.push(t('actualización del reaseguro') + ': ' + String(reinsuranceError && reinsuranceError.message ? reinsuranceError.message : reinsuranceError));
-        }
-      }
-
       try {
         await generateEndorsementDocument(changeId);
       } catch (documentError) {
@@ -1844,12 +1852,9 @@
     } catch (e) {
       if (reinsurancePrepared && !reinsuranceExecuted && changeId) {
         try {
-          await exe('ExeChain', {
-            chain: 'cmdApplyReaChangeCoverage',
-            context: JSON.stringify({ changeId: changeId, mode: 'ROLLBACK' })
-          });
+          await runReinsuranceMode(changeId, 'ROLLBACK');
         } catch (rollbackError) {
-          failures.push(t('limpieza del reaseguro temporal') + ': ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));
+          failures.push(t('restauración del reaseguro anterior') + ': ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));
         }
       }
       const message = String(e && e.message ? e.message : e);
