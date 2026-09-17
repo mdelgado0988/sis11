@@ -22,7 +22,7 @@ const PrimaCoaseguro = toNumber(context.PrimaCoaseguro || 0);
 const PolizaId = context.PolizaId || "n/d";
 const CoberturaId = context.CoberturaId || "n/d";
 
-doCmd({cmd: "GetPing", data: { Suma, Prima, SumaCoaseguro, PrimaCoaseguro, PolizaId, CoberturaId }});
+//doCmd({cmd: "GetPing", data: { Suma, Prima, SumaCoaseguro, PrimaCoaseguro, PolizaId, CoberturaId }});
 
 //AXX-302: si la base llega negativa, el coaseguro supera lo emitido. Se detiene con error trazable.
 if (Suma < 0)
