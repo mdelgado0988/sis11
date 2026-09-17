@@ -8,7 +8,7 @@
  * executing the ChangeCoverage endorsement, and synchronizing insured-object data.
  */
 () => {
-  const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, message } = A;
+  const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, Spin, message } = A;
 
   // ---------------------------------------------------------------- utilities
   // Date rule (§2.3): every date is handled as a CALENDAR date in the browser
@@ -73,6 +73,29 @@
   const addDays = (date, n) => (!date || n == null ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate() + n));
   const txt = (v) => String(v == null ? '' : v).trim();
   const translatedMessage = (value, fallback) => value ? t(String(value)) : t(fallback);
+  const parseJson = (value, fallback) => {
+    if (typeof value !== 'string') return value == null ? fallback : value;
+    try { return JSON.parse(value); } catch (error) { return fallback; }
+  };
+  const getInsuredObjectValue = (insuredObject, fieldName) => {
+    if (!insuredObject) return null;
+    let values = parseJson(insuredObject.userData, insuredObject.userData);
+    if (!values || (typeof values === 'object' && !Array.isArray(values) && !Object.keys(values).length)) {
+      values = parseJson(insuredObject.jValues, insuredObject.jValues);
+    }
+    if (Array.isArray(values)) {
+      const field = values.find((item) => item && txt(item.name) === fieldName);
+      return field ? field.userData : null;
+    }
+    return values && typeof values === 'object' ? values[fieldName] : null;
+  };
+  const isCheckedValue = (value) => {
+    const values = Array.isArray(value) ? value : [value];
+    return values.some((item) => {
+      const normalized = txt(item).toLowerCase();
+      return normalized === '1' || normalized === 'true' || normalized === 'si' || normalized === 'sí';
+    });
+  };
   const billingFields = [
     { label: 'Coverages', keys: ['coverages'] },
     { label: 'Surcharges', keys: ['surcharges'] },
@@ -159,11 +182,13 @@
   const [observation, setObservation] = useState('');
   const [touched, setTouched] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [processingEndorsement, setProcessingEndorsement] = useState(false);
   const [steps, setSteps] = useState([]);
   const [result, setResult] = useState(null);
   const [changeId, setChangeId] = useState(null);
   const [calculation, setCalculation] = useState(null);
   const [premiumValidationError, setPremiumValidationError] = useState('');
+  const [proceedOrderEnabled, setProceedOrderEnabled] = useState(false);
 
   // The current system date, generated in the BROWSER local time zone (§2.1).
   const [systemDate] = useState(() => {
@@ -182,6 +207,31 @@
   };
   const policyId = getPolicyId();
 
+  const loadProceedOrderFlag = async function () {
+    const definitionResponse = await exe('RepoObjectDefinition', {
+      operation: 'GET',
+      filter: "code = 'OBJFIANZA'"
+    });
+    if (!definitionResponse || !definitionResponse.ok) {
+      throw new Error(translatedMessage(definitionResponse && definitionResponse.msg, 'The insured-object definition could not be loaded.'));
+    }
+    const definition = (definitionResponse.outData || [])[0];
+    if (!definition || !definition.id) {
+      throw new Error(t('The OBJFIANZA insured-object definition was not found.'));
+    }
+
+    const insuredResponse = await exe('RepoInsuredObject', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + policyId + ' AND objectDefinitionId=' + Number(definition.id),
+      include: ['ObjectDefinition']
+    });
+    if (!insuredResponse || !insuredResponse.ok) {
+      throw new Error(translatedMessage(insuredResponse && insuredResponse.msg, 'The insured-object data could not be loaded.'));
+    }
+    const insuredObject = (insuredResponse.outData || [])[0];
+    return isCheckedValue(getInsuredObjectValue(insuredObject, 'orden_de_proceder'));
+  };
+
   // ---------------------------------------------------------------- data load
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +248,8 @@
         }
         const pol = (polRes.outData || [])[0];
         if (!pol) throw new Error(t('Policy not found: ') + policyId);
+
+        const hasProceedOrder = await loadProceedOrderFlag();
 
         const cfgRes = await exe('GetFullTable', { table: 'cfgCoberturaProductoReaFianza' });
         if (!cfgRes || !cfgRes.ok) {
@@ -222,6 +274,7 @@
           setPolicy(pol);
           setCoverages(Array.isArray(pol.Coverages) ? pol.Coverages : []);
           setCfgRows(rows);
+          setProceedOrderEnabled(hasProceedOrder);
         }
       } catch (err) {
         if (!cancelled) setLoadError(translatedMessage(err && err.message ? err.message : String(err), 'The view could not be loaded.'));
@@ -283,6 +336,30 @@
         color: #262626;
         font-weight: 600;
       }
+
+      .proceed-order-execution-mask {
+        position: fixed;
+        inset: 0;
+        z-index: 1000000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.62);
+        cursor: wait;
+      }
+
+      .proceed-order-execution-mask > div {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 18px;
+        background: #fff;
+        border: 1px solid #91caff;
+        border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+        color: #1677ff;
+        font-weight: 600;
+      }
     `;
     document.head.appendChild(style);
 
@@ -293,31 +370,39 @@
   }, []);
 
   // ------------------------------------------------- coverage date calculation
-  // §2.3 + assumption 14: the main coverage is the configured row whose
-  // coverageCodeDep equals its own coverageCode. An EMPTY coverageCodeDep means
-  // "does not take part in the relationship" — it is NOT a main coverage.
+  // §2.3: when a main/dependent relationship exists, the main coverage is the
+  // configured row whose coverageCodeDep equals its own coverageCode. Products
+  // without that relationship treat every coverage independently.
   const model = (() => {
-    if (!policy || !coverages.length || !cfgRows.length) return null;
+    if (!policy || !coverages.length) return null;
 
     const cfgByCov = {};
     cfgRows.forEach((r) => { cfgByCov[r.coverageCode] = r; });
 
     const mainCfg = cfgRows.filter((r) => r.coverageCodeDep !== '' && r.coverageCodeDep === r.coverageCode);
-    if (mainCfg.length !== 1) {
-      return { error: mainCfg.length === 0
-        ? t('No main coverage is configured for this product in cfgCoberturaProductoReaFianza.')
-        : t('More than one main coverage is configured for this product: ') + mainCfg.map((r) => r.coverageCode).join(', ') };
+    const dependentCfg = cfgRows.filter((r) => r.coverageCodeDep !== '' && r.coverageCodeDep !== r.coverageCode);
+    // Several self-referencing rows mean that the product lists independent
+    // coverages. It is only ambiguous when those rows coexist with dependents.
+    if (mainCfg.length > 1 && dependentCfg.length > 0) {
+      return { error: t('More than one main coverage is configured for this product: ') + mainCfg.map((r) => r.coverageCode).join(', ') };
     }
-    const mainCode = mainCfg[0].coverageCode;
+    const hasRelationship = mainCfg.length === 1 && dependentCfg.length > 0;
+    const mainCode = hasRelationship ? mainCfg[0].coverageCode : '';
 
-    const mainCov = coverages.find((c) => txt(c.code) === mainCode);
-    if (!mainCov) return { error: t('The configured main coverage (') + mainCode + t(') is not present on this policy.') };
+    const mainCov = hasRelationship
+      ? coverages.find((c) => txt(c.code) === mainCode)
+      : null;
+    if (hasRelationship && !mainCov) {
+      return { error: t('The configured main coverage (') + mainCode + t(') is not present on this policy.') };
+    }
 
-    const curMainStart = toPolicyLocalDate(mainCov.start);
-    const curMainEnd = toPolicyLocalDate(mainCov.end);
-    if (!curMainStart || !curMainEnd) return { error: t('The main coverage has no usable start/end dates.') };
+    const curMainStart = mainCov ? toPolicyLocalDate(mainCov.start) : null;
+    const curMainEnd = mainCov ? toPolicyLocalDate(mainCov.end) : null;
+    if (hasRelationship && (!curMainStart || !curMainEnd)) {
+      return { error: t('The main coverage has no usable start/end dates.') };
+    }
 
-    const mainDuration = daysBetween(curMainStart, curMainEnd);
+    const mainDuration = hasRelationship ? daysBetween(curMainStart, curMainEnd) : null;
     const newMainStart = toLocalDate(effectiveDate);
     const newMainEnd = newMainStart ? addDays(newMainStart, mainDuration) : null;
 
@@ -327,13 +412,18 @@
       const curStart = toPolicyLocalDate(c.start);
       const curEnd = toPolicyLocalDate(c.end);
       const duration = daysBetween(curStart, curEnd);
-      const isMain = code === mainCode;
+      const isMain = hasRelationship && code === mainCode;
       // Configured as taking part in the relationship, and not the main one.
-      const isDependent = !!cfg && cfg.coverageCodeDep !== '' && !isMain;
+      const isDependent = hasRelationship && !!cfg && cfg.coverageCodeDep !== '' && !isMain;
 
       let newStart = null, newEnd = null, note = '';
       if (!newMainStart) {
         note = t('awaiting effective date');
+      } else if (!hasRelationship) {
+        // Without a configured relationship, each coverage is its own main
+        // coverage and keeps its current duration.
+        newStart = newMainStart;
+        newEnd = duration == null ? null : addDays(newStart, duration);
       } else if (isMain) {
         newStart = newMainStart;
         newEnd = newMainEnd;
@@ -386,7 +476,8 @@
     : '';
   if (effectiveDateError) missing.push(effectiveDateError);
   if (!txt(observation)) missing.push(t('Endorsement observation'));
-  const isValid = missing.length === 0 && !!model && !model.error;
+  const endorsementDataIsValid = missing.length === 0 && !!model && !model.error;
+  const isValid = endorsementDataIsValid;
   const calculationKey = fmt(effectiveDateValue) + '|' + txt(observation);
   const calculationIsCurrent = !!calculation
     && calculation.key === calculationKey
@@ -426,6 +517,102 @@
       newEnd: model.mainRow && model.mainRow.newEnd ? fmtAtNoon(model.mainRow.newEnd) : '',
       effectiveDate: fmtAtNoon(effectiveDateValue),
       jAdditional: JSON.stringify({ endorsementType: 'PROCEEDORDER' })
+    };
+  };
+
+  // This endorsement does not change premium, sum insured or reinsurance
+  // percentages. We still version the current reinsurance so the new
+  // ChangeCoverage has its own active snapshot, just like the surety view.
+  const loadCurrentReinsuranceSnapshot = async function () {
+    const cessionResponse = await exe('RepoCession', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + policyId + ' AND overwritten=0'
+    });
+    if (!cessionResponse || !cessionResponse.ok) {
+      throw new Error(translatedMessage(cessionResponse && cessionResponse.msg, 'The current reinsurance could not be loaded.'));
+    }
+
+    const cessions = Array.isArray(cessionResponse.outData) ? cessionResponse.outData : [];
+    if (!cessions.length) {
+      throw new Error(t('The policy has no active reinsurance to version.'));
+    }
+
+    const cessionIds = cessions.map((cession) => Number(cession.id || 0)).filter((id) => id > 0);
+    const partsResponse = cessionIds.length
+      ? await exe('LoadEntities', {
+        entity: 'CessionPart',
+        filter: 'cessionId IN (' + cessionIds.join(',') + ')',
+        noTracking: true
+      })
+      : { ok: true, outData: [] };
+    if (!partsResponse || partsResponse.ok === false) {
+      throw new Error(translatedMessage(partsResponse && partsResponse.msg, 'The current reinsurance acceptants could not be loaded.'));
+    }
+
+    const parts = Array.isArray(partsResponse.outData) ? partsResponse.outData : [];
+    const cessionsById = {};
+    cessions.forEach((cession) => { cessionsById[String(cession.id)] = cession; });
+    const distribution = cessions.map((cession) => ({
+      contractId: cession.contractId,
+      lineId: cession.lineId,
+      coverageId: cession.coverageId,
+      coverageCode: cession.coverageCode,
+      premiumMovement: 0,
+      sumInsuredMovement: 0,
+      premiumCedant: cession.premiumCedant,
+      sumInsuredCedant: cession.sumInsuredCedant,
+      premiumRe: cession.premiumRe,
+      sumInsuredRe: cession.sumInsuredRe,
+      commission: cession.comissionCedant,
+      tax: cession.tax,
+      proportionCed: cession.proportionCed,
+      proportionRe: cession.proportionRe
+    }));
+    const participants = parts.map((part) => {
+      const source = cessionsById[String(part.cessionId)] || {};
+      return {
+        contractId: source.contractId,
+        lineId: part.lineId || source.lineId,
+        coverageId: source.coverageId,
+        coverageCode: source.coverageCode,
+        cessionId: part.cessionId,
+        contactId: part.contactId,
+        brokerId: part.brokerId,
+        split: part.split,
+        sumInsured: part.sumInsured,
+        premium: part.premium,
+        commission: part.commission,
+        tax: part.tax
+      };
+    });
+
+    let coinsurance = [];
+    const coinsuranceResponse = await exe('RepoCoCession', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + policyId + ' AND parentCoCession IS NULL AND overwritten=0',
+      size: 0
+    });
+    if (coinsuranceResponse && coinsuranceResponse.ok) {
+      const rows = Array.isArray(coinsuranceResponse.outData) ? coinsuranceResponse.outData : [];
+      coinsurance = rows.map((cession) => ({
+        id: Number(cession.id || 0),
+        contactId: Number(cession.contactId || 0),
+        percentage: cession.percentage,
+        sumInsured: cession.sumInsured,
+        premium: cession.premium,
+        sumInsuredCeded: cession.sumInsuredCeded,
+        premiumCeded: cession.premiumCeded,
+        commission: cession.commission,
+        tax: cession.tax
+      }));
+    }
+
+    return {
+      distribution: distribution,
+      participants: participants,
+      coinsurance: coinsurance,
+      sourceCessionIds: cessionIds,
+      sourceCoinsuranceIds: coinsurance.map((cession) => Number(cession.id || 0)).filter((id) => id > 0)
     };
   };
 
@@ -530,22 +717,63 @@
     }
   };
 
+  const runReinsuranceMode = async function (endorsementChangeId, mode) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdApplyReaChangeCoverage',
+      context: JSON.stringify({ changeId: Number(endorsementChangeId), mode: mode })
+    });
+    let result = response && response.outData;
+    if (typeof result === 'string') {
+      try { result = JSON.parse(result); } catch (error) { result = null; }
+    }
+    if (Array.isArray(result) && result.length === 1) result = result[0];
+    if (!response || response.ok === false || !result || result.ok === false) {
+      throw new Error((result && result.msg) || (response && response.msg) || t('The reinsurance operation failed.'));
+    }
+    return result;
+  };
+
   const onExecute = async function () {
     setTouched(true);
-    if (!isValid) { message.error(t('Required: ') + missing.join(', ')); return; }
+    let currentProceedOrderEnabled = false;
+    try {
+      currentProceedOrderEnabled = await loadProceedOrderFlag();
+    } catch (validationError) {
+      message.error(translatedMessage(validationError && validationError.message, 'The insured-object data could not be validated.'));
+      return;
+    }
+    setProceedOrderEnabled(currentProceedOrderEnabled);
+    if (!currentProceedOrderEnabled) {
+      setCalculation(null);
+      message.error(t('The policy does not have the Proceed Order option selected. To execute this endorsement, select it on the policy first.'));
+      return;
+    }
+    if (!endorsementDataIsValid) { message.error(t('Required: ') + missing.join(', ')); return; }
     if (!calculationIsCurrent) {
       message.warning(t('The endorsement data changed or has not been calculated. Calculate again before executing.'));
       return;
     }
     setExecuting(true);
+    setProcessingEndorsement(true);
     setSteps([]);
     setResult(null);
     setChangeId(null);
+    let keepProcessingMask = false;
+    let reinsurancePrepared = false;
+    let reinsuranceExecuted = false;
+    let reinsuranceFinalized = false;
+    let executionChangeId = 0;
     try {
       const eff = fmt(toLocalDate(effectiveDate));
 
       // --- generate the endorsement
       const addPayload = getCoverageChangePayload(eff);
+      const reinsuranceSnapshot = await loadCurrentReinsuranceSnapshot();
+      addPayload.jAdditional = JSON.stringify({
+        endorsementType: 'PROCEEDORDER',
+        preserveActiveReinsurance: true,
+        reinsuranceSnapshot: reinsuranceSnapshot
+      });
       Object.keys(calculation.quote).forEach((k) => { if (addPayload[k] === undefined) addPayload[k] = calculation.quote[k]; });
       addPayload.operation = 'ADD';
       addPayload.note = txt(observation);
@@ -559,15 +787,26 @@
         return;
       }
       const cid = created.outData.id;
+      executionChangeId = Number(cid || 0);
       setChangeId(cid);
       pushStep(t('Generate the endorsement'), true, t('endorsement ') + cid);
 
       await approveEndorsementWorkflow(created.outData.processId);
       pushStep(t('Approve endorsement workflow'), true, '');
 
+      // Fully version reinsurance before execution so accounting hooks read
+      // the cancellation and the replacement distribution during execution.
+      reinsurancePrepared = true;
+      const prepared = await runReinsuranceMode(cid, 'PREPARE_EXECUTION');
+      pushStep(t('Prepare reinsurance'), true, translatedMessage(prepared.msg, ''));
+
       // --- execute
       const executed = await exe('ExeChangeCoverage', { changeId: cid, exeNow: true, operation: 'EXECUTE', noTracking: true });
       if (!executed || !executed.ok) {
+        if (reinsurancePrepared) {
+          await runReinsuranceMode(cid, 'ROLLBACK');
+          reinsurancePrepared = false;
+        }
         pushStep(t('Execute the endorsement'), false, translatedMessage(executed && executed.msg, 'no response'));
         const executeError = t('The endorsement was generated but NOT executed. ') + translatedMessage(executed && executed.msg, '');
         setResult({ kind: 'error', msg: executeError });
@@ -579,13 +818,42 @@
       // dates have not moved, so saying "applied" would be false.
       const execStatus = Number(executed.outData && executed.outData.status);
       if (execStatus === 2) {
+        if (reinsurancePrepared && !reinsuranceExecuted) {
+          await runReinsuranceMode(cid, 'ROLLBACK');
+          reinsurancePrepared = false;
+        }
         pushStep(t('Execute the endorsement'), true, t('scheduled for ') + eff + t(' — not applied yet'));
         await reloadPolicy();
         setResult({ kind: 'partial', msg: t('Endorsement ') + cid + t(' was generated and SCHEDULED for ') + eff + t('. The coverage dates have not changed yet, so the insured-object data was not synchronised.') });
         message.warning(t('The endorsement was scheduled, not applied.'));
         return;
       }
+      reinsuranceExecuted = true;
       pushStep(t('Execute the endorsement'), true, translatedMessage(executed.msg, ''));
+
+      // Finalize immediately after execution. No document, validity or insured
+      // object operation should be able to leave the PREPARE rows active.
+      let reinsurance;
+      try {
+        reinsurance = await runReinsuranceMode(cid, 'FINALIZE');
+      } catch (reinsuranceException) {
+        reinsurance = { ok: false, msg: String(reinsuranceException && reinsuranceException.message ? reinsuranceException.message : reinsuranceException) };
+      }
+      if (!reinsurance || !reinsurance.ok) {
+        try {
+          await runReinsuranceMode(cid, 'ROLLBACK');
+          reinsurancePrepared = false;
+        } catch (rollbackError) {
+          // The final error below remains the primary execution result.
+        }
+        const reinsuranceError = t('The endorsement was applied, but the reinsurance could not be versioned. ') + translatedMessage(reinsurance && reinsurance.msg, 'no response');
+        pushStep(t('Version reinsurance'), false, reinsuranceError);
+        setResult({ kind: 'partial', msg: reinsuranceError });
+        message.error(reinsuranceError);
+        return;
+      }
+      reinsuranceFinalized = true;
+      pushStep(t('Version reinsurance'), true, translatedMessage(reinsurance.msg, ''));
 
       try {
         await generateEndorsementDocument(cid);
@@ -673,6 +941,7 @@
       if (syncOk) {
         setResult({ kind: 'success', msg: t('Endorsement ') + cid + t(' applied and insured-object data synchronised.') });
         message.success(t('The endorsement was applied successfully.'));
+        keepProcessingMask = true;
         setTimeout(() => { window.location.href = policyHref; }, 500);
       } else {
         // §3.4: never hide a partial failure behind a generic success message.
@@ -680,6 +949,13 @@
         message.warning(t('Partial failure: the endorsement was applied but the insured-object data was not synchronised.'));
       }
     } catch (err) {
+      if (reinsurancePrepared && !reinsuranceFinalized && executionChangeId) {
+        try {
+          await runReinsuranceMode(executionChangeId, 'ROLLBACK');
+        } catch (rollbackError) {
+          // Keep the original error visible; the temporary cleanup is best effort.
+        }
+      }
       const errorMessage = err && err.message ? err.message : String(err);
       pushStep(t('Unexpected error'), false, translatedMessage(errorMessage, 'Unexpected error'));
       const executionError = translatedMessage(errorMessage, 'Unexpected error');
@@ -687,6 +963,7 @@
       message.error(executionError);
     } finally {
       setExecuting(false);
+      if (!keepProcessingMask) setProcessingEndorsement(false);
     }
   };
 
@@ -719,9 +996,24 @@
 
   return (
     <Card className="proceed-order-endorsement-view" title={<span>{t('Proceed Order endorsement')} {policy ? <Tag color="blue">{policy.code || ('#' + policy.id)}</Tag> : null}</span>}>
+      {processingEndorsement ? (
+        <div className="proceed-order-execution-mask" role="alert" aria-busy="true">
+          <div><Spin size="small" /> {t('Processing endorsement, please wait...')}</div>
+        </div>
+      ) : null}
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message={t('Proceed Order endorsement')}
         description={t('Preview the resulting dates, then execute. Execution generates a ChangeCoverage endorsement, executes it and synchronises the insured-object data. Nothing is written until you press Execute.')} />
+
+      {!proceedOrderEnabled ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t('Proceed Order endorsement cannot be executed')}
+          description={t('The policy does not have the Proceed Order option selected. To execute this endorsement, select it on the policy first.')}
+        />
+      ) : null}
 
       {premiumValidationError ? (
         <Alert
@@ -758,18 +1050,20 @@
           okText={t('Yes')}
           cancelText={t('Cancel')}
           onConfirm={onExecute}
-          disabled={!isValid || !calculationIsCurrent || executing}
+          disabled={!proceedOrderEnabled || !isValid || !calculationIsCurrent || executing}
         >
           <Button
             type="primary"
             id="btnExecute"
             loading={executing}
-            disabled={!isValid || !calculationIsCurrent || executing}
+            disabled={!proceedOrderEnabled || !isValid || !calculationIsCurrent || executing}
           >
             {t('Execute endorsement')}
           </Button>
         </Popconfirm>
-        {!isValid ? (
+        {!proceedOrderEnabled ? (
+          <span style={{ color: '#cf1322' }}>{t('Select the Proceed Order option on the policy before continuing.')}</span>
+        ) : (!isValid ? (
           <span style={{ color: '#cf1322' }}>{t('Required: ') + missing.join(', ')}</span>
         ) : (!calculationIsCurrent ? (
           <span style={{ color: '#d48806' }}>
@@ -777,7 +1071,7 @@
               ? t('The endorsement data changed. Calculate again before executing.')
               : t('Calculate before executing the endorsement.')}
           </span>
-        ) : null)}
+        ) : null))}
         <span style={{ flex: 1 }} />
         <Button type="default" href={policyHref}>
           {t('Back to policy')}

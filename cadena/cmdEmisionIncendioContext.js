@@ -9,7 +9,7 @@
  * @purpose Builds accounting context data for fire issuance and endorsements.
  * @param context.id Policy, change or anniversary identifier.
  * @param context.tipo 0: issuance, 1: cancellation, 2: renewal, 3: insured sum change,
- *                     4: insured object change, 5: loading change.
+ *                     4: insured object change, 5: loading change, 6: coverage change.
  */
 
 try {
@@ -36,7 +36,8 @@ try {
     2: 'Renovación',
     3: 'Endoso Suma Asegurada',
     4: 'Endoso Objeto Asegurado',
-    5: 'Endoso de Recargo'
+    5: 'Endoso de Recargo',
+    6: 'Cambio de Cobertura'
   };
 
   const codes = {
@@ -45,7 +46,8 @@ try {
     2: 'RenovacionIncendio',
     3: 'EndosoSA',
     4: 'EndosoObjetoAsegurado',
-    5: 'EndosoRecargo'
+    5: 'EndosoRecargo',
+    6: 'CambioCobertura'
   };
 
   const isCancellation = tipo === 1;
@@ -60,7 +62,7 @@ try {
   } else if (isNewOrAnniversary) {
     amounts = getIssuanceOrRenewalAmounts(policy, tipo);
   } else {
-    amounts = getEndorsementAmounts(policy, change, id);
+    amounts = getEndorsementAmounts(policy, change, id, tipo);
   }
 
   const {
@@ -83,6 +85,18 @@ try {
     cessions.reduce((total, item) => total + toNumber(item.comissionCedant), 0)
   );
   const reaseguroPorPagar = toDecimal(reaseguroCedido - reaseguroComision);
+  const hasPremiumMovement = [primaPorCobrar, prima, impuestoPrimasIncendio, gastoPrimaIncendio]
+    .some((value) => toDecimal(value) !== 0);
+  const hasReinsuranceMovement = [reaseguroCedido, reaseguroComision, reaseguroPorPagar]
+    .some((value) => toDecimal(value) !== 0);
+
+  // Do not create an accounting context when the endorsement has no premium
+  // or net reinsurance movement. Returning an empty set prevents the template
+  // engine from generating a zero-value journal entry.
+  if (!hasPremiumMovement && !hasReinsuranceMovement) {
+    return [];
+  }
+
   const effectiveTipo = isPolicyVersionRenewal ? 2 : tipo;
   const isLoadingChange = tipo === 5;
   const isLoadingDiscount = isLoadingChange && toNumber(prima) < 0;
@@ -197,13 +211,25 @@ function getLatestQuoteTax(rows) {
  * Calculates endorsement amounts from BillDiff, including negative movements.
  * The fire expense is always calculated as 2% of the endorsement premium.
  */
-function getEndorsementAmounts(policy, change, id) {
+function getEndorsementAmounts(policy, change, id, tipo) {
   if (!change) {
     throw new Error(`No se encontró el endoso ${id}`);
   }
 
   const billDiff = change.BillDiff || null;
   if (!billDiff) {
+    if (tipo === 6) {
+      return {
+        prima: 0,
+        impuestoPrimasIncendio: 0,
+        gastoPrimaIncendio: 0,
+        primaPorCobrar: 0,
+        cancelacion: false,
+        renovacion: false,
+        cancellationTax: 0,
+        nonCancellationTax: 0
+      };
+    }
     const prima = toNumber(policy.coverages);
     const impuestoPrimasIncendio = sumTaxRows(asArray(policy.TaxGenerated), null);
 
@@ -239,7 +265,7 @@ function validateInput(id, tipo) {
     throw new Error('El identificador recibido no es válido');
   }
 
-  if (![0, 1, 2, 3, 4, 5].includes(tipo)) {
+  if (![0, 1, 2, 3, 4, 5, 6].includes(tipo)) {
     throw new Error('El tipo de contexto no es válido');
   }
 }
@@ -249,7 +275,7 @@ function buildPolicyFilter(id, tipo) {
     return `id=${id}`;
   }
 
-  if ([1, 3, 4, 5].includes(tipo)) {
+  if ([1, 3, 4, 5, 6].includes(tipo)) {
     return `id IN (SELECT lifePolicyId FROM [Change] WHERE id=${id})`;
   }
 
@@ -330,6 +356,15 @@ function loadPolicy(filter) {
 function getReinsuranceCessions(policyId, tipo, changeId) {
   const isCancellation = tipo === 1;
   const isVariation = tipo === 3 || tipo === 5;
+  const isCoverageChange = tipo === 6;
+
+  // Coverage changes in ProceedOrderEndorsement version the complete
+  // distribution with a negative cancellation and an identical positive
+  // replacement. Accounting must read both sides of this change so the net
+  // reinsurance movement is zero.
+  if (isCoverageChange) {
+    return getCessions(`changeId=${changeId}`);
+  }
 
   if (isVariation) {
     const changeCessions = getCessions(`changeId=${changeId}`);

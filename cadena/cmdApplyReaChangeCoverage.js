@@ -3,7 +3,7 @@
 /*
  * cmdApplyReaChangeCoverage
  *
- * Versiona el reaseguro completo despues de ejecutar un ChangeCoverage:
+ * Versiona el reaseguro completo antes o despues de ejecutar un ChangeCoverage:
  * - lee las cesiones vigentes de la poliza (overwritten = 0);
  * - marca esas cesiones como historicas (overwritten = 1);
  * - crea una nueva fotografia completa con overwritten = 0 y changeId.
@@ -46,7 +46,8 @@ const num = function (value) {
 const txt = function (value) { return String(value == null ? '' : value).trim(); };
 const clone = function (value) { return JSON.parse(JSON.stringify(value || {})); };
 const keyOf = function (item) {
-  return Number(item.contractId || 0) + '|' + txt(item.lineId) + '|' + txt(item.coverageCode);
+  const coverageKey = txt(item.coverageCode) || txt(item.coverageId);
+  return Number(item.contractId || 0) + '|' + txt(item.lineId) + '|' + coverageKey;
 };
 const sqlValue = function (value) {
   if (value === null || value === undefined) return 'NULL';
@@ -60,7 +61,7 @@ const sqlValue = function (value) {
 const changeId = Number(context && context.changeId || 0);
 if (!changeId) throw 'Falta el identificador del endoso';
 const mode = txt(context && context.mode).toUpperCase() || 'FINALIZE';
-if (['PREPARE', 'FINALIZE', 'ROLLBACK'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
+if (['PREPARE', 'PREPARE_EXECUTION', 'FINALIZE', 'ROLLBACK'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
 let requestedRows = Array.isArray(context && context.distribution) ? context.distribution : [];
 let requestedParts = Array.isArray(context && context.participants) ? context.participants : [];
 let requestedCoinsurance = [];
@@ -75,21 +76,9 @@ if (mode === 'FINALIZE' && Number(change.status) !== 1) throw 'El endoso ' + cha
 const policyId = Number(change.lifePolicyId || 0);
 if (!policyId) throw 'El endoso no tiene poliza asociada';
 
-if (mode === 'ROLLBACK') {
-  const rollbackSql = 'SET XACT_ABORT ON; BEGIN TRANSACTION; '
-    + 'DELETE FROM CessionPart WHERE cessionId IN (SELECT id FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ' AND overwritten = 0); '
-    + 'DELETE FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ' AND overwritten = 0; '
-    + 'COMMIT TRANSACTION;';
-  doCmd({ cmd: 'DoQuery', data: { sql: rollbackSql } });
-  if (!DoQuery || DoQuery.ok === false) return { ok: false, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
-    msg: 'No fue posible limpiar las cesiones temporales del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
-  return { ok: true, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
-    msg: 'Las cesiones temporales del endoso fueron limpiadas correctamente.' };
-}
-
 // La configuracion confirmada se guarda en el propio endoso antes de
-// ejecutarlo. Se usa como fuente principal para permitir reintentos sin
-// depender del payload temporal de la vista.
+// ejecutarlo. Tambien conserva los identificadores necesarios para restaurar
+// exactamente la version anterior si la ejecucion falla.
 let additional = {};
 try {
   const rawAdditional = change.jAdditional || '{}';
@@ -99,7 +88,33 @@ try {
 } catch (error) {
   additional = {};
 }
-const snapshot = additional.reinsuranceSnapshot;
+const snapshot = additional.reinsuranceSnapshot || {};
+const preserveActiveReinsurance = additional.preserveActiveReinsurance === true;
+
+if (mode === 'ROLLBACK') {
+  const sourceCessionIds = (Array.isArray(snapshot.sourceCessionIds) ? snapshot.sourceCessionIds : [])
+    .map(function (id) { return Number(id || 0); }).filter(Boolean);
+  const sourceCoinsuranceIds = (Array.isArray(snapshot.sourceCoinsuranceIds) ? snapshot.sourceCoinsuranceIds : [])
+    .map(function (id) { return Number(id || 0); }).filter(Boolean);
+  const rollbackStatements = ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'];
+  rollbackStatements.push('DELETE FROM CessionPart WHERE cessionId IN (SELECT id FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ');');
+  rollbackStatements.push('DELETE FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ';');
+  if (sourceCessionIds.length) {
+    rollbackStatements.push('UPDATE Cession SET overwritten = 0 WHERE lifePolicyId = ' + policyId + ' AND id IN (' + sourceCessionIds.join(',') + ');');
+  }
+  rollbackStatements.push('DELETE FROM CoCession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ';');
+  if (sourceCoinsuranceIds.length) {
+    rollbackStatements.push('UPDATE CoCession SET overwritten = 0 WHERE lifePolicyId = ' + policyId + ' AND id IN (' + sourceCoinsuranceIds.join(',') + ');');
+  }
+  rollbackStatements.push('COMMIT TRANSACTION;');
+  const rollbackSql = rollbackStatements.join('\n');
+  doCmd({ cmd: 'DoQuery', data: { sql: rollbackSql } });
+  if (!DoQuery || DoQuery.ok === false) return { ok: false, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
+    msg: 'No fue posible restaurar el reaseguro anterior del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
+  return { ok: true, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
+    msg: 'El reaseguro anterior fue restaurado correctamente.' };
+}
+
 if (snapshot && Array.isArray(snapshot.distribution)) {
   requestedRows = snapshot.distribution;
   requestedParts = Array.isArray(snapshot.participants) ? snapshot.participants : [];
@@ -111,7 +126,11 @@ let finalCoverages = [];
 try { finalCoverages = JSON.parse(change.jNewCoverages || '[]'); }
 catch (error) { throw 'El endoso no contiene coberturas finales validas'; }
 const coverageByCode = {};
-finalCoverages.forEach(function (coverage) { coverageByCode[txt(coverage.code)] = coverage; });
+const coverageById = {};
+finalCoverages.forEach(function (coverage) {
+  coverageByCode[txt(coverage.code)] = coverage;
+  coverageById[Number(coverage.id || 0)] = coverage;
+});
 
 const rowsByKey = {};
 requestedRows.forEach(function (row) { rowsByKey[keyOf(row)] = row; });
@@ -160,18 +179,20 @@ if (requestedCoinsurance.length) {
 
 // Validacion previa: no se escribe nada si el reparto confirmado es invalido.
 const errors = [];
-requestedRows.forEach(function (row) {
-  const ceded = money(row.premiumRe);
-  const parts = partsByKey[keyOf(row)] || [];
-  if (ceded !== 0 && parts.length) {
-    const split = parts.reduce(function (sum, part) { return sum + num(part.split); }, 0);
-    if (Math.abs(split - 100) > 0.011) errors.push('linea ' + keyOf(row) + ': los aceptantes suman ' + split + '%');
-  }
-  if (num(row.sumInsuredMovement) !== 0 &&
-      Math.abs(money(row.sumInsuredCedant) + money(row.sumInsuredRe)) > Math.abs(money(row.sumInsuredMovement)) + 0.011) {
-    errors.push('cobertura ' + txt(row.coverageCode) + ': la suma retenida mas cedida supera el movimiento');
-  }
-});
+if (!preserveActiveReinsurance) {
+  requestedRows.forEach(function (row) {
+    const ceded = money(row.premiumRe);
+    const parts = partsByKey[keyOf(row)] || [];
+    if (ceded !== 0 && parts.length) {
+      const split = parts.reduce(function (sum, part) { return sum + num(part.split); }, 0);
+      if (Math.abs(split - 100) > 0.011) errors.push('linea ' + keyOf(row) + ': los aceptantes suman ' + split + '%');
+    }
+    if (num(row.sumInsuredMovement) !== 0 &&
+        Math.abs(money(row.sumInsuredCedant) + money(row.sumInsuredRe)) > Math.abs(money(row.sumInsuredMovement)) + 0.011) {
+      errors.push('cobertura ' + txt(row.coverageCode) + ': la suma retenida mas cedida supera el movimiento');
+    }
+  });
+}
 if (errors.length) return { ok: false, stage: 'VALIDATION', changeId: changeId, policyId: policyId,
   errors: errors, msg: 'La distribucion confirmada no es valida: ' + errors.join('; ') };
 
@@ -286,15 +307,22 @@ if (mode === 'PREPARE') {
 // se debe volver a sumar el movimiento ni generar otra anulacion.
 const activeKeys = {};
 let alreadyApplied = true;
-for (let i = 0; i < currentCessions.length; i++) {
-  const active = currentCessions[i];
-  const key = keyOf(active);
-  if (Number(active.changeId || 0) !== changeId ||
-      txt(active.premiumType).toUpperCase() === 'CANCELLATION' || activeKeys[key]) {
-    alreadyApplied = false;
-    break;
+if (preserveActiveReinsurance) {
+  alreadyApplied = currentCessions.length > 0 && currentCessions.every(function (active) {
+    return Number(active.changeId || 0) === changeId
+      && txt(active.premiumType).toUpperCase() !== 'CANCELLATION';
+  });
+} else {
+  for (let i = 0; i < currentCessions.length; i++) {
+    const active = currentCessions[i];
+    const key = keyOf(active);
+    if (Number(active.changeId || 0) !== changeId ||
+        txt(active.premiumType).toUpperCase() === 'CANCELLATION' || activeKeys[key]) {
+      alreadyApplied = false;
+      break;
+    }
+    activeKeys[key] = true;
   }
-  activeKeys[key] = true;
 }
 if (alreadyApplied) {
   return {
@@ -326,6 +354,80 @@ currentParts.forEach(function (part) {
   if (!partsByCession[id]) partsByCession[id] = [];
   partsByCession[id].push(part);
 });
+
+const aggregateMovementFields = [
+  'premium', 'premiumCedant', 'premiumRe', 'comissionCedant',
+  'participantCommission', 'tax', 'nonTechnicalPremium', 'loading',
+  'loadingCedant', 'loadingRe', 'fee', 'coPremium'
+];
+const aggregateActiveCessions = function (rows) {
+  const grouped = {};
+  rows.forEach(function (source) {
+    const key = keyOf(source);
+    if (!grouped[key]) {
+      grouped[key] = {
+        latest: clone(source),
+        latestId: Number(source.id || 0),
+        sourceIds: [],
+        totals: {}
+      };
+    }
+    const group = grouped[key];
+    const sourceId = Number(source.id || 0);
+    group.sourceIds.push(sourceId);
+    if (sourceId >= group.latestId) {
+      group.latest = clone(source);
+      group.latestId = sourceId;
+    }
+    aggregateMovementFields.forEach(function (field) {
+      group.totals[field] = money(num(group.totals[field]) + num(source[field]));
+    });
+  });
+  return Object.keys(grouped).map(function (key) {
+    const group = grouped[key];
+    const result = group.latest;
+    aggregateMovementFields.forEach(function (field) {
+      result[field] = group.totals[field];
+    });
+    result._sourceIds = group.sourceIds;
+    return result;
+  });
+};
+const getGroupedParts = function (cession) {
+  const sourceIds = cession._sourceIds || [Number(cession.id || 0)];
+  const grouped = {};
+  sourceIds.forEach(function (sourceId) {
+    (partsByCession[sourceId] || []).forEach(function (part) {
+      const key = String(part.contactId || 0) + '|' + String(part.brokerId || 0) + '|' + txt(part.lineId || cession.lineId);
+      if (!grouped[key]) {
+        grouped[key] = {
+          latest: clone(part),
+          latestId: Number(part.id || 0),
+          premium: 0,
+          commission: 0,
+          tax: 0
+        };
+      }
+      const group = grouped[key];
+      const partId = Number(part.id || 0);
+      if (partId >= group.latestId) {
+        group.latest = clone(part);
+        group.latestId = partId;
+      }
+      group.premium = money(group.premium + num(part.premium));
+      group.commission = money(group.commission + num(part.commission));
+      group.tax = money(group.tax + num(part.tax));
+    });
+  });
+  return Object.keys(grouped).map(function (key) {
+    const group = grouped[key];
+    const result = group.latest;
+    result.premium = group.premium;
+    result.commission = group.commission;
+    result.tax = group.tax;
+    return result;
+  });
+};
 const currentByKey = {};
 const sourceRank = function (cession) {
   const isCancellation = txt(cession.premiumType).toUpperCase() === 'CANCELLATION';
@@ -340,7 +442,12 @@ sourceCessions.forEach(function (cession) {
     currentByKey[key] = cession;
   }
 });
-const baseCessions = Object.keys(currentByKey).map(function (key) { return currentByKey[key]; });
+// Normalmente se consolida una sola version por contrato/linea/cobertura.
+// ProceedOrderEndorsement tambien consolida todas las versiones activas del
+// grupo, pero conserva la suma de sus importes antes de versionarlas.
+const baseCessions = preserveActiveReinsurance
+  ? aggregateActiveCessions(sourceCessions)
+  : Object.keys(currentByKey).map(function (key) { return currentByKey[key]; });
 
 // Construye el estado final completo. Para una fila afectada, premium es el
 // total vigente mas el movimiento del endoso; los importes cedente/cedido,
@@ -348,8 +455,8 @@ const baseCessions = Object.keys(currentByKey).map(function (key) { return curre
 const finalCessions = baseCessions.map(function (source) {
   const result = clone(source);
   result._sourceId = Number(source.id || 0);
-  const requested = rowsByKey[keyOf(source)];
-  const coverage = coverageByCode[txt(source.coverageCode)];
+  const requested = preserveActiveReinsurance ? null : rowsByKey[keyOf(source)];
+  const coverage = coverageByCode[txt(source.coverageCode)] || coverageById[Number(source.coverageId || 0)];
   if (requested) {
     result.premium = money(num(source.premium) + num(requested.premiumMovement));
     result.sumInsured = money(num(source.sumInsured) + num(requested.sumInsuredMovement));
@@ -362,11 +469,11 @@ const finalCessions = baseCessions.map(function (source) {
     result.tax = money(requested.tax);
     if (requested.proportionCed !== undefined) result.proportionCed = requested.proportionCed;
     if (requested.proportionRe !== undefined) result.proportionRe = requested.proportionRe;
-    if (coverage) {
-      result.start = coverage.start || result.start;
-      result.end = coverage.end || result.end;
-      result.cover = coverage.name || result.cover;
-    }
+  }
+  if (coverage) {
+    result.start = coverage.start || result.start;
+    result.end = coverage.end || result.end;
+    result.cover = coverage.name || result.cover;
   }
   result.id = 0;
   result.overwritten = 0;
@@ -399,6 +506,7 @@ const cancellationCessions = baseCessions.map(function (source) {
 
 // Soporta nuevas combinaciones de contrato/linea/cobertura.
 requestedRows.forEach(function (requested) {
+  if (preserveActiveReinsurance) return;
   const key = keyOf(requested);
   if (currentByKey[key]) return;
   let template = sourceCessions.find(function (cession) {
@@ -432,7 +540,8 @@ const finalParts = [];
 const cancellationParts = [];
 cancellationCessions.forEach(function (cession, index) {
   const source = baseCessions[index];
-  (partsByCession[Number(source.id)] || []).forEach(function (part) {
+  const sourceParts = preserveActiveReinsurance ? getGroupedParts(source) : (partsByCession[Number(source.id)] || []);
+  sourceParts.forEach(function (part) {
     const child = clone(part);
     const negative = function (value) { return money(-num(value)); };
     child.id = 0;
@@ -446,8 +555,8 @@ cancellationCessions.forEach(function (cession, index) {
 });
 finalCessions.forEach(function (cession) {
   const key = keyOf(cession);
-  const requested = rowsByKey[key];
-  const configuredParts = partsByKey[key] || [];
+  const requested = preserveActiveReinsurance ? null : rowsByKey[key];
+  const configuredParts = preserveActiveReinsurance ? [] : (partsByKey[key] || []);
   if (requested || configuredParts.length) {
     // El snapshot confirmado es la fuente principal. Si por compatibilidad
     // una vista anterior no guardo las partes, se usa la configuracion base.
@@ -461,7 +570,11 @@ finalCessions.forEach(function (cession) {
       finalParts.push({ cession: cession, part: child });
     });
   } else {
-    (partsByCession[Number(cession._sourceId || cession.id)] || []).forEach(function (part) {
+    const source = preserveActiveReinsurance ? cession : null;
+    const sourceParts = preserveActiveReinsurance
+      ? getGroupedParts(source)
+      : (partsByCession[Number(cession._sourceId || cession.id)] || []);
+    sourceParts.forEach(function (part) {
       const child = clone(part);
       child.id = 0;
       child.cessionId = 0;
@@ -472,7 +585,7 @@ finalCessions.forEach(function (cession) {
 
 // Versionado atomico: primero se anulan las versiones vigentes y luego se
 // inserta una nueva fotografia con nuevos identificadores.
-const statements = ['BEGIN TRANSACTION;'];
+const statements = ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'];
 if (requestedCoinsurance.length) {
   statements.push('UPDATE CoCession SET overwritten = 1 WHERE lifePolicyId = ' + policyId
     + ' AND parentCoCession IS NULL AND overwritten = 0;');
@@ -552,13 +665,17 @@ if (!activeAfter.length || invalidActive.length) {
 }
 
 return {
-  ok: true, exact: true, stage: 'APPLIED', changeId: changeId, policyId: policyId,
+  ok: true, exact: true,
+  stage: mode === 'PREPARE_EXECUTION' ? 'PREPARED_EXECUTION' : 'APPLIED',
+  changeId: changeId, policyId: policyId,
   overwritten: currentCessions.length, created: finalCessions.length,
   cancellationsCreated: cancellationCessions.length,
   participantsCreated: finalParts.length,
   coinsuranceUpdated: requestedCoinsurance.length,
   coinsuranceVersioned: requestedCoinsurance.length,
-  msg: 'El reaseguro final fue versionado correctamente: ' + cancellationCessions.length +
+  msg: (mode === 'PREPARE_EXECUTION'
+    ? 'El reaseguro quedo preparado antes de ejecutar el endoso: '
+    : 'El reaseguro final fue versionado correctamente: ') + cancellationCessions.length +
     ' anulaciones historicas, ' + finalCessions.length + ' nuevas cesiones vigentes y ' +
     requestedCoinsurance.length + ' coaseguradores versionados.'
 };

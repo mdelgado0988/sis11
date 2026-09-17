@@ -12747,3 +12747,10 @@ Document generated.: Documento generado.
 Go to the policy to view the document.: Ir a la póliza para visualizar el documento.
 Go to policy: Ir a la póliza
 Stay here: Quedarme aquí
+Proceed Order endorsement cannot be executed: No se puede ejecutar el endoso de orden de proceder
+The policy does not have the Proceed Order option selected. To execute this endorsement, select it on the policy first.: La póliza no tiene marcada la opción de orden de proceder. Para ejecutar este endoso, primero deberá marcarla en la póliza.
+Select the Proceed Order option on the policy before continuing.: Marque la opción de orden de proceder en la póliza antes de continuar.
+The insured-object definition could not be loaded.: No se pudo cargar la definición del objeto asegurado.
+The OBJFIANZA insured-object definition was not found.: No se encontró la definición de objeto asegurado OBJFIANZA.
+The insured-object data could not be loaded.: No se pudieron cargar los datos del objeto asegurado.
+The insured-object data could not be validated.: No se pudieron validar los datos del objeto asegurado.
