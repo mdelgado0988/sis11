@@ -285,6 +285,8 @@ function buildMovement({ movementType, movementName, source, start, end, cancell
   const movementEnd = toDateOnly(end);
   const cancelDate = toDateOnly(cancellationDate);
 
+  // La vigencia de medio dia a medio dia conserva su duracion real y los dias
+  // devengados se calculan con la diferencia directa entre fechas.
   const totalDays = Math.max(daysBetween(movementStart, movementEnd), 0);
   const pastDays = clamp(daysBetween(movementStart, cancelDate), 0, totalDays);
   const daysNotEarned = Math.max(totalDays - pastDays, 0);
@@ -445,7 +447,7 @@ function parseDateOnly(value) {
     return null;
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw) || /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.\d+)?Z$/i.test(raw)) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return {
       year: Number(raw.substring(0, 4)),
       month: Number(raw.substring(5, 7)),
@@ -538,6 +540,8 @@ function toPanamaDate(value) {
     return date;
   }
 
+  // La fecha de negocio se presenta en la zona horaria de Panama (UTC-5).
+  // El payload llega en UTC y debe conservar el dia local seleccionado.
   return new Date(date.getTime() - (5 * 60 * 60 * 1000));
 }
 
