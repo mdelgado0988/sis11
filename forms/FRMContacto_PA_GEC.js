@@ -61,7 +61,32 @@
   
       // Botón agregar empresa
       const btnAgregarEmpresa = $('<button class="ant-btn ant-btn-primary" style="margin-bottom:10px">Agregar empresa</button>');
-      $contenedor.prepend(btnAgregarEmpresa);
+      const $grupoEconomicoBarra = $('<div class="gec-barra-acciones" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;"></div>');
+      const $nombreGrupoEconomico = $('<span class="gec-nombre-grupo" style="font-weight:600; color:#595959;"></span>')
+        .text('Grupo económico: Cargando...');
+      btnAgregarEmpresa.css('margin-bottom', '0');
+      $grupoEconomicoBarra.append(btnAgregarEmpresa, $nombreGrupoEconomico);
+      $contenedor.prepend($grupoEconomicoBarra);
+
+      async function actualizarNombreGrupoEconomico(grupoPendiente) {
+        try {
+          const contexto = await gecContextoActual();
+          const codigoFuente = grupoPendiente !== undefined
+            ? grupoPendiente
+            : (window.__gecGrupoEconomicoPendiente || (contexto && contexto.grupo));
+          const codigo = String(codigoFuente || '').trim();
+          if (!codigo) {
+            $nombreGrupoEconomico.text('Grupo económico: Sin grupo económico');
+            return;
+          }
+          const nombre = await obtenerDescripcionGrupoEconomico(codigo);
+          $nombreGrupoEconomico.text('Grupo económico: ' + nombre);
+        } catch (error) {
+          console.error('GEC nombre:', error);
+          $nombreGrupoEconomico.text('Grupo económico: Sin grupo económico');
+        }
+      }
+      setTimeout(actualizarNombreGrupoEconomico, 0);
   
       // Máscara común
       const $mask = $('<div id="modalMask"></div>').css({
@@ -627,6 +652,7 @@
       gecCargarIntegrantes();
 
       $(document).off('gec:grupoEconomicoChanged').on('gec:grupoEconomicoChanged', function (event, grupo) {
+        actualizarNombreGrupoEconomico(grupo);
         gecCargarIntegrantes(grupo);
       });
 

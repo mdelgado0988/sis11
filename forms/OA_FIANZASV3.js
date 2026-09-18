@@ -560,6 +560,7 @@ function prepareContainer(){
         //Creo un div y lo agregamos luego del campo hiddenValida para trabajar con dicho div como contenedor
         const $hidden = $('#hiddenCobtar');
         const $form = $hidden.closest('form');
+        $form.addClass('oa-fianzasv3-form');
 
         // Contenedor único
         let $contenedor = $form.find("#contenedorCobtar");
@@ -745,8 +746,26 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
             columnas.forEach(col => {
             const campo = g.mapa[col];
             const $td = $("<td>");
+            const esColumnaSuma = esColumnaSumaAseguradaFianza(col);
+            const tieneConfiguracionValida = campo
+                && String(campo.type || '').toLowerCase() !== 'none'
+                && String(campo.description || '').toLowerCase() !== 'none'
+                && String(campo.description || '').trim() !== '';
 
-            if (campo) {
+            if (esColumnaSuma && !tieneConfiguracionValida) {
+                const $input = $('<input>', {
+                    type: 'text',
+                    value: formatMoneyFianza(policy?.insuredSum)
+                })
+                    .addClass('ant-input-custom')
+                    .attr({
+                        'data-coverage': g.coverageCode,
+                        'data-field': col,
+                        'data-policy-default-sum': 'true'
+                    })
+                    .prop('disabled', true);
+                $td.append($input);
+            } else if (campo) {
                 const type = (campo.type || "").toLowerCase();
                 const name = campo.name || "";
                 const desc = campo.description && campo.description !== "none"
@@ -1001,6 +1020,7 @@ function cargarCobtarDesdeHidden(
       }
 
       if (!$input.length) return;
+      if ($input.attr('data-policy-default-sum') === 'true') return;
 
       // ===== SET VALUE SEGÚN TIPO =====
       if ($input.is("select")) {
@@ -1092,6 +1112,23 @@ function formatMoneyFianza(value) {
     });
 }
 
+function primaNetaCoberturaFianza(cobertura) {
+    if (!cobertura) return 0;
+    if (cobertura.premium !== undefined && cobertura.premium !== null) {
+        return Number(cobertura.premium) || 0;
+    }
+    return (Number(cobertura.basePremium) || 0) + (Number(cobertura.extraPremium) || 0);
+}
+
+function esColumnaSumaAseguradaFianza(nombre) {
+    const normalizado = String(nombre || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[.]/g, '')
+        .replace(/\s+/g, ' ');
+    return ['sa', 'suma', 'suma asegurada'].includes(normalizado);
+}
+
 async function setProductCoveragesFianza() {
     try {
         const productFilter = policy?.lob
@@ -1132,7 +1169,7 @@ async function setProductCoveragesFianza() {
                 // Display the values stored on the policy coverage, not the
                 // product configuration or a tariff fallback.
                 limit: policyCoverage?.limit ?? 0,
-                premium: policyCoverage?.premium ?? 0,
+                premium: primaNetaCoberturaFianza(policyCoverage),
                 deductible: policyCoverage?.deductible ?? 0,
                 periodicity: policyCoverage?.periodicity ?? 0,
                 basePremium: policyCoverage?.basePremium ?? 0,
@@ -1407,8 +1444,17 @@ function renderFooterCoberturasFianza() {
 
 function actualizarResumenCoberturasFianza() {
     const currentCoverages = policy?.Coverages ?? [];
-    const suma = currentCoverages.reduce((total, coverage) => total + Number(coverage.limit || 0), 0);
-    const prima = currentCoverages.reduce((total, coverage) => total + Number(coverage.premium || 0), 0);
+    const coberturasQueSuman = currentCoverages.filter(coverage => {
+        const configuracion = productCoveragesFianza.find(item =>
+            String(item.code ?? '').trim().toUpperCase() ===
+            String(coverage.code ?? '').trim().toUpperCase()
+        );
+        return configuracion?.suma === 'Sí';
+    });
+    const suma = coberturasQueSuman.reduce((total, coverage) => total + Number(coverage.limit || 0), 0);
+    const prima = productCoveragesFianza
+        .filter(coverage => coverage.incluido)
+        .reduce((total, coverage) => total + primaNetaCoberturaFianza(coverage), 0);
     $('#lblCantidadCoberturasFianza').text(currentCoverages.length);
     $('#lblSumaCoberturasFianza').text(formatMoneyFianza(suma));
     $('#lblPrimaCoberturasFianza').text(formatMoneyFianza(prima));
@@ -1509,12 +1555,17 @@ function inyectarEstilosAntdCobtar() {
     height: 32px;
     padding: 4px 11px;
     font-size: 14px;
-    border: 1px solid #d9d9d9;
+    border: 1px solid #b8c4d1;
     border-radius: 6px;
     transition: all 0.2s;
     outline: none;
     box-sizing: border-box;
     background: #fff;
+  }
+
+  #contenedorCobtar .ant-input-custom:hover,
+  #contenedorCobtar .ant-select-custom:hover {
+    border-color: #8da9c2;
   }
 
   #contenedorCobtar .ant-input-custom:focus,
@@ -1523,12 +1574,42 @@ function inyectarEstilosAntdCobtar() {
     box-shadow: 0 0 0 2px rgba(22,119,255,0.2);
   }
 
-    #contenedorCobtar .ant-input-custom:disabled,
-    #contenedorCobtar .ant-select-custom:disabled {
+  #contenedorCobtar .ant-input-custom:disabled,
+  #contenedorCobtar .ant-select-custom:disabled {
         background: #f5f5f5;
         color: rgba(0,0,0,0.4);
+        border-color: #b8c4d1;
         cursor: not-allowed;
     }
+
+  .oa-fianzasv3-form input:not([type="checkbox"]):not([type="radio"]),
+  .oa-fianzasv3-form select,
+  .oa-fianzasv3-form textarea {
+    border: 1px solid #b8c4d1 !important;
+    border-radius: 6px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .oa-fianzasv3-form input:not([type="checkbox"]):not([type="radio"]):hover,
+  .oa-fianzasv3-form select:hover,
+  .oa-fianzasv3-form textarea:hover {
+    border-color: #8da9c2 !important;
+  }
+
+  .oa-fianzasv3-form input:not([type="checkbox"]):not([type="radio"]):focus,
+  .oa-fianzasv3-form select:focus,
+  .oa-fianzasv3-form textarea:focus {
+    border-color: #1677ff !important;
+    box-shadow: 0 0 0 2px rgba(22,119,255,0.2);
+    outline: none;
+  }
+
+  .oa-fianzasv3-form input:not([type="checkbox"]):not([type="radio"]):disabled,
+  .oa-fianzasv3-form select:disabled,
+  .oa-fianzasv3-form textarea:disabled {
+    border-color: #b8c4d1 !important;
+    background: #f5f5f5;
+  }
 
     #contenedorCobtar .tabs-header {
         display: flex;
@@ -1952,7 +2033,7 @@ const onDocumentReady = async () => {
     await Promise.all([
         loadDataTable({reference:'#clase_riesgo',tableName:'actividadfianza',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#actividad',tableName:'tbMaActivi',indexCode:1,indexDisplay:3}),
-        loadDataTable({reference:'#tipo_calendario',tableName:'tipovigencia',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#tipo_vigencia',tableName:'tipovigencia',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#vigencia_fianza',tableName:'vigenciafianza',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#tipo_licitacion',tableName:'tipolicitacion',indexCode:0,indexDisplay:1})
     ]);

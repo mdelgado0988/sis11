@@ -28,6 +28,17 @@
 - Las filas deben conservar únicamente separadores horizontales de `1px solid #cbd1d8`, sin bordes verticales.
 - Para grillas compactas, usar como referencia padding de `5px 8px`, fuente de `12px` y line-height de `18px`, salvo que el diseño requiera otra densidad.
 
+## Inputs y controles de formulario
+
+- Los inputs, selects y textareas deben conservar un borde visible aun cuando no estén enfocados, especialmente en monitores con alto brillo.
+- Usar como referencia un borde de `1px solid #b8c4d1`, con esquinas redondeadas de `6px`, sin cambiar las dimensiones ni el espaciado existentes del control.
+- En `hover`, usar `#8da9c2` para reforzar sutilmente la identificación del campo.
+- En `focus`, conservar el color principal azul `#1677ff` y usar una sombra discreta: `0 0 0 2px rgba(22,119,255,0.2)`.
+- Los controles deshabilitados deben conservar un borde visible `#b8c4d1`, fondo `#f5f5f5` y cursor `not-allowed`, manteniendo el contraste suficiente.
+- Aplicar este patrón a inputs de texto, número y fecha, selects y textareas.
+- No aplicar automáticamente este estilo a checkboxes ni radios, salvo que la vista tenga una especificación visual propia para esos controles.
+- Cuando existan estilos del framework o del formulario que oculten el borde, priorizar este tratamiento visual sin alterar la lógica, los valores, las validaciones ni el comportamiento del control.
+
 ## Barras de botones
 
 - Aplicar el mismo tratamiento visual a las barras de botones de todas las pestañas de una vista.
