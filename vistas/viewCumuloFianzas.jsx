@@ -144,7 +144,7 @@
   function num2(v) {
     const n = Number(v);
     if (v === null || v === undefined || isNaN(n)) return '';
-    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   // Estilo por signo: SOLO color, sin tocar el formateo ni el valor.
   function monto(v) {

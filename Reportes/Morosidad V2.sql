@@ -9,7 +9,7 @@ DECLARE  @Fecha DATE = '20260916'
 
 SELECT 
 
-    ROW_NUMBER() OVER (ORDER BY p.code) AS Id,
+    p.id AS Id,
 	CASE WHEN ISNULL(an.contractYear,0) = 1 THEN ISNULL(fr.fiscalNumber,'0') ELSE ISNULL(an.fiscalNumber,ISNULL(p.fiscalNumber,'0')) END AS Recibo,
     p.code AS [Póliza],
     0 AS Ref_Banco,

@@ -16,7 +16,7 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 84
-and t.cplan = '84_2' 
+and t.cplan = 'FIAMIS1' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -177,14 +177,17 @@ inner join macoberturas mc on mc.cramo = c.cramo and mc.ccobertura = c.ccobertur
 WHERE c.cramo IN (81,82,83,84)
 
 --reportes endosos de fianzas
-select rtrim(xnombrep) xnombrep, MAX(rtrim(xdescripcion)) xdescripcion
+select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
+	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode
 from marepteccia
 where cramo in (81,82,83,84)
-and xnombrep like '%endoso%'
+and xnombrep not like '%endoso%'
+AND xformula1 <> '0'
+order by 1,2
 /*AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
 'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_descrp',
 'endoso_poliza_fianza_OP','endoso_poliza_fianza_orden_pro','endoso_poliza_fianza_valor_garantia','endoso_poliza_fianza_Vig')*/
-group by xnombrep
+
 
 
 --endoso_orden_cambio, endoso_generico_fianzas, endoso_poliza_fianza_acreedor, endoso_poliza_fianza_descrp
