@@ -2747,6 +2747,10 @@ function eventosGrid() {
         const requiereRecotizar = Array.isArray(coCessions) && coCessions.length > 0;
         if (requiereRecotizar) {
           mostrarNotificacion("Existe al menos un coasegurador; es necesario recotizar la póliza. Se ejecutará QuotePolicy.", "warning");
+          const guardadoCoaseguro = await guardarCoaseguradores(false);
+          if (!guardadoCoaseguro?.ok) {
+            throw new Error(guardadoCoaseguro?.msg || "No se pudo guardar la distribución de coaseguro antes de recotizar");
+          }
         }
         showLoading(requiereRecotizar ? "Recotizando póliza..." : "Recalculando distribución...");
         const resultado = requiereRecotizar
@@ -2756,7 +2760,9 @@ function eventosGrid() {
           mostrarNotificacion(`${requiereRecotizar ? "Error recotizando la póliza" : "Error aplicando contrato del reaseguro"}, contacte a sistemas : ${resultado.msg}` , "warning");
         else{
           mostrarNotificacion(requiereRecotizar ? "La póliza fue recotizada y el reaseguro fue actualizado satisfactoriamente" : "Contrato aplicado satisfactoriamente" , "success");
-          await loadCessions();
+          // QuotePolicy actualiza varias entidades relacionadas. Recargamos todo
+          // desde BD para no mezclar la respuesta persistida con el estado anterior.
+          await loadDataEntities();
           cargarDataGrid();
           preserveDistribution();
           $(`#gridDistribucionBody tr[data-index="${gridSelectedIndex}"]`).trigger("click");
@@ -4003,6 +4009,10 @@ function coaseguroMonto(valor) {
   return redondear(coaseguroNumero(valor), 2);
 }
 
+function coaseguroPorcentaje(valor) {
+  return redondear(coaseguroNumero(valor), 8, true);
+}
+
 function coaseguroFormato(valor) {
   return formatearNumero(coaseguroMonto(valor));
 }
@@ -4014,8 +4024,9 @@ function getPorcentajeCoaseguro() {
 
 function getBaseNetaDistribucion() {
   const factorRetenido = 1 - (getPorcentajeCoaseguro() / 100);
-  const sumaBase = coaseguroNumero(gridDataSelected?.Suma);
-  const primaBase = coaseguroNumero(gridDataSelected?.Prima) -
+  const baseCoberturas = getCoaseguroGlobalBase();
+  const sumaBase = baseCoberturas.sumInsured || coaseguroNumero(gridDataSelected?.Suma);
+  const primaBase = (baseCoberturas.premium || coaseguroNumero(gridDataSelected?.Prima)) -
     coaseguroNumero(gridDataSelected?.PrimaNoTecnica);
 
   return {
@@ -4337,7 +4348,7 @@ function abrirModalAgregarCoasegurador(index = null) {
             <input id="modalCoaseguradorLider" type="checkbox" ${rowEdit?.leader ? "checked" : ""} /> Líder
           </label>
           <label for="modalCoaseguradorPorcentaje">% Ced:</label>
-          <input id="modalCoaseguradorPorcentaje" class="ant-input percent" type="text" value="${formatearRedondeado(rowEdit?.percentage ?? 0, 2)}" style="width:100%; margin:8px 0 14px;" />
+          <input id="modalCoaseguradorPorcentaje" class="ant-input percent" type="text" value="${formatearRedondeado(rowEdit?.percentage ?? 0, 8)}" style="width:100%; margin:8px 0 14px;" />
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
             <div><label>Suma asegurada:</label><input id="modalCoaseguradorSumaBase" class="ant-input" type="text" value="${coaseguroFormato(base.sumInsured)}" readonly /></div>
             <div><label>Prima:</label><input id="modalCoaseguradorPrimaBase" class="ant-input" type="text" value="${coaseguroFormato(base.premium)}" readonly /></div>
@@ -4440,7 +4451,7 @@ async function actualizarCoinsuranceLifePolicy(valor) {
 
 async function guardarCoaseguradores() {
   try {
-    const inserts = coCessions.map(row => `INSERT INTO CoCession (lifePolicyId, contactId, sumInsured, premium, sumInsuredCeded, premiumCeded, commission, percentage, created, leader, currency, liquidationId, paidOnCollection, parentCoCession, brokerCommission, tax, changeId, overwritten, allocationId, lifeCoverageId, brokerId) VALUES (${parseInt(policyId, 10)}, ${parseInt(row.contactId, 10)}, ${coaseguroMonto(row.sumInsured)}, ${coaseguroMonto(row.premium)}, ${coaseguroMonto(row.sumInsuredCeded)}, ${coaseguroMonto(row.premiumCeded)}, ${coaseguroMonto(row.commission)}, ${coaseguroMonto(row.percentage)}, GETDATE(), ${row.leader ? 1 : 0}, '${String(row.currency || "USD").replace(/'/g, "''")}', NULL, 0, NULL, 0, ${coaseguroMonto(row.tax)}, NULL, 0, NULL, NULL, NULL);`).join("\n");
+    const inserts = coCessions.map(row => `INSERT INTO CoCession (lifePolicyId, contactId, sumInsured, premium, sumInsuredCeded, premiumCeded, commission, percentage, created, leader, currency, liquidationId, paidOnCollection, parentCoCession, brokerCommission, tax, changeId, overwritten, allocationId, lifeCoverageId, brokerId) VALUES (${parseInt(policyId, 10)}, ${parseInt(row.contactId, 10)}, ${coaseguroMonto(row.sumInsured)}, ${coaseguroMonto(row.premium)}, ${coaseguroMonto(row.sumInsuredCeded)}, ${coaseguroMonto(row.premiumCeded)}, ${coaseguroMonto(row.commission)}, ${coaseguroPorcentaje(row.percentage)}, GETDATE(), ${row.leader ? 1 : 0}, '${String(row.currency || "USD").replace(/'/g, "''")}', NULL, 0, NULL, 0, ${coaseguroMonto(row.tax)}, NULL, 0, NULL, NULL, NULL);`).join("\n");
     return await me.exe("DoQuery", { sql: `SET XACT_ABORT ON; BEGIN TRANSACTION; DELETE FROM CoCession WHERE lifePolicyId = ${parseInt(policyId, 10)}; ${inserts} COMMIT TRANSACTION;` });
   } catch (error) {
     return { ok: false, msg: error?.msg || String(error) };
