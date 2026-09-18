@@ -40,8 +40,8 @@ try {
     `changeId = ${change.id}`
   ) ?? {};
 
-  const cuotasCambio = safeJsonArray(change?.jNewPayPlan);
-  const cuotasPoliza = getPolicyInstallments(change.lifePolicyId);
+  const cuotasCambio = ordenarCuotas(safeJsonArray(change?.jNewPayPlan));
+  const cuotasPoliza = ordenarCuotas(getPolicyInstallments(change.lifePolicyId));
   const cuotasBase = cuotasPoliza.length ? cuotasPoliza : cuotasCambio;
 
   if (!cuotasBase.length) {
@@ -53,7 +53,9 @@ try {
   const taxBill = n2(bill?.tax ?? 0);
 
   const cuotasPagadas = cuotasBase.filter(q => Number(q.payed || 0) > 0);
-  const cuotasPendientes = cuotasBase.filter(q => Number(q.payed || 0) <= 0);
+  const cuotasPendientes = cuotasBase.filter(q =>
+    Number(q.minimum || 0) > Number(q.payed || 0)
+  );
 
   const totalPagado = n2(
     cuotasPagadas.reduce((sum, x) => sum + (Number(x.payed) || 0), 0)
@@ -79,7 +81,10 @@ try {
     }
   }
 
-  cuotasDistribuye = normalizeDistributionTotals(cuotasDistribuye, totalBill);
+  // El pago parcial se conserva en payed, pero sigue formando parte del
+  // total facturado. La cuota parcialmente pagada no se ajusta nuevamente.
+  const distributionTotal = totalBill;
+  cuotasDistribuye = normalizeDistributionTotals(cuotasDistribuye, distributionTotal);
 
   const nuevoTotal = n2(
     cuotasDistribuye.reduce((sum, x) => sum + (Number(x.minimum) || 0), 0)
@@ -92,9 +97,9 @@ try {
 
   return {
     ok: true,
-    msg: Math.abs(nuevoTotal - totalBill) <= 0.01
+    msg: Math.abs(nuevoTotal - distributionTotal) <= 0.01
       ? "Distribuido correctamente"
-      : `Distribuido con diferencia de ${n2(nuevoTotal - totalBill).toFixed(2)}`
+      : `Distribuido con diferencia de ${n2(nuevoTotal - distributionTotal).toFixed(2)}`
   };
 
 } catch (error) {
@@ -110,10 +115,30 @@ function distribuirMontoEnCuotas(cuotas, montoPrima, montoImpuesto) {
             acc + Number(q.payed || 0), 0)
     );
 
-    // Cuotas con saldo pendiente
-    const pendientes = cuotas.filter(q =>
-        Number(q.minimum || 0) !== Number(q.payed || 0)
+    const totalPagadoCompleto = n2(
+        cuotas.reduce((acc, q) => {
+            const minimum = n2(q.minimum);
+            const payed = n2(q.payed);
+            return acc + (minimum > 0 && payed >= minimum ? payed : 0);
+        }, 0)
     );
+
+    // Incluye cuotas pendientes y pagadas parcialmente. Las cuotas cuyo pago
+    // ya cubre o supera el monto original no reciben una nueva proporcion.
+    const pendientes = cuotas.filter(q =>
+        Number(q.minimum || 0) > Number(q.payed || 0)
+    );
+
+    cuotas.forEach(q => {
+        const minimum = n2(q.minimum);
+        const payed = n2(q.payed);
+        if (payed > 0 && minimum <= payed) {
+            q.minimum = payed;
+            q.expected = payed;
+            q.dueAmount = payed;
+            q.pendingAmount = 0;
+        }
+    });
 
     if (!pendientes.length) {
         return cuotas;
@@ -141,6 +166,37 @@ function distribuirMontoEnCuotas(cuotas, montoPrima, montoImpuesto) {
     const saldoImpuesto = n2(montoImpuesto - impuestoPagado);
 
     const cantidad = pendientes.length;
+
+    // Distribuye el saldo entre las cuotas elegibles. Si la proporcion
+    // resultara menor o igual al pago parcial de una cuota, esa cuota queda
+    // limitada al pago realizado y el excedente se reparte nuevamente.
+    let cuotasPorDistribuir = pendientes.slice();
+    // Una cuota parcialmente pagada participa en la misma proporcion que las
+    // demas cuotas pendientes. Solo se excluyen del reparto las cuotas ya
+    // pagadas completamente.
+    let saldoPorDistribuir = nuevoTotal - totalPagadoCompleto;
+    while (cuotasPorDistribuir.length > 0) {
+        const proporcion = n2(saldoPorDistribuir / cuotasPorDistribuir.length);
+        const limitada = cuotasPorDistribuir.filter(q =>
+            Number(q.payed || 0) > 0 && proporcion <= Number(q.payed || 0)
+        );
+        if (!limitada.length) {
+            let acumuladoObjetivo = 0;
+            cuotasPorDistribuir.forEach((q, index) => {
+                const esUltima = index === cuotasPorDistribuir.length - 1;
+                q._targetMinimum = esUltima
+                    ? n2(saldoPorDistribuir - acumuladoObjetivo)
+                    : proporcion;
+                acumuladoObjetivo = n2(acumuladoObjetivo + q._targetMinimum);
+            });
+            break;
+        }
+        limitada.forEach(q => {
+            q._targetMinimum = n2(q.payed || 0);
+            saldoPorDistribuir = n2(saldoPorDistribuir - q._targetMinimum);
+        });
+        cuotasPorDistribuir = cuotasPorDistribuir.filter(q => limitada.indexOf(q) < 0);
+    }
 
     const primaBase = n2(saldoPrima / cantidad);
     const impuestoBase = n2(saldoImpuesto / cantidad);
@@ -171,12 +227,20 @@ function distribuirMontoEnCuotas(cuotas, montoPrima, montoImpuesto) {
         impuesto = n2(impuesto);
 
         const saldoCuota = n2(prima + impuesto);
-        q.minimum = n2(
-          Number(q.payed || 0) + saldoCuota
-        );
+        const targetMinimum = q._targetMinimum === undefined
+            ? saldoCuota
+            : n2(q._targetMinimum);
+        const pendingForDetails = n2(Math.max(0, targetMinimum - Number(q.payed || 0)));
+        const premiumRatio = saldoCuota !== 0 ? prima / saldoCuota : 1;
+        prima = n2(pendingForDetails * premiumRatio);
+        impuesto = n2(pendingForDetails - prima);
+        // El pago parcial se conserva en payed y no se agrega nuevamente al
+        // monto proporcional de la cuota.
+        q.minimum = targetMinimum;
         q.expected = n2(q.minimum);
         q.dueAmount = n2(q.minimum);
         q.pendingAmount = n2(q.minimum);
+        delete q._targetMinimum;
 
         q.PayPlanDetail = [
             {
@@ -228,15 +292,44 @@ function normalizeDistributionTotals(cuotas, totalBill) {
     }
   });
 
-  const diff = n2(totalBill - totalActual);
-  if (Math.abs(diff) > 0.01 && adjustableIndexes.length > 0) {
-    const index = adjustableIndexes[adjustableIndexes.length - 1];
-    const target = normalized[index];
-    target.minimum = n2(target.minimum + diff);
-    target.expected = n2(target.minimum);
-    target.dueAmount = n2(target.minimum);
-    target.pendingAmount = n2(target.minimum);
-    target.PayPlanDetail = normalizePayPlanDetails(target, target.PayPlanDetail);
+  if (adjustableIndexes.length > 0) {
+    // Primero todas las cuotas elegibles reciben el mismo importe
+    // proporcional redondeado. La diferencia acumulada se aplica una sola
+    // vez, exclusivamente en la ultima cuota elegible.
+    const totalAjustableActual = n2(
+      adjustableIndexes.reduce(
+        (sum, index) => sum + Number(normalized[index]?.minimum || 0),
+        0
+      )
+    );
+    const totalFijo = n2(totalActual - totalAjustableActual);
+    const proporcion = n2(
+      (Number(totalBill || 0) - totalFijo) / adjustableIndexes.length
+    );
+
+    adjustableIndexes.forEach(index => {
+      const target = normalized[index];
+      target.minimum = proporcion;
+      target.expected = n2(target.minimum);
+      target.dueAmount = n2(target.minimum);
+      target.pendingAmount = n2(target.minimum);
+      target.PayPlanDetail = normalizePayPlanDetails(target, target.PayPlanDetail);
+    });
+
+    const totalProporcional = n2(
+      totalFijo + proporcion * adjustableIndexes.length
+    );
+    const diff = n2(totalBill - totalProporcional);
+    const lastIndex = adjustableIndexes[adjustableIndexes.length - 1];
+    const lastTarget = normalized[lastIndex];
+    lastTarget.minimum = n2(lastTarget.minimum + diff);
+    lastTarget.expected = n2(lastTarget.minimum);
+    lastTarget.dueAmount = n2(lastTarget.minimum);
+    lastTarget.pendingAmount = n2(lastTarget.minimum);
+    lastTarget.PayPlanDetail = normalizePayPlanDetails(
+      lastTarget,
+      lastTarget.PayPlanDetail
+    );
   }
 
   return normalized;
@@ -283,6 +376,12 @@ function getPolicyInstallments(policyId) {
   }
 
   return (LoadEntities.outData ?? []).map(cloneCuota);
+}
+
+function ordenarCuotas(cuotas) {
+  return (cuotas ?? []).slice().sort((a, b) =>
+    Number(a?.numberInYear || 0) - Number(b?.numberInYear || 0)
+  );
 }
 
 function loadOneEntity(entity, fields, filter) {
@@ -431,13 +530,10 @@ function syncPayPlanDetailsKeepingHistory(sqlParts, payPlanId, target, currentDe
 function shouldTouchPayPlan(current, target) {
   const currentPayed = n2(current?.payed ?? 0);
   const currentMinimum = n2(current?.minimum ?? 0);
-  const hasPayment = currentPayed > 0.01;
-  const hasPartialPayment = hasPayment && Math.abs(currentPayed - currentMinimum) > 0.01;
-  const changedAmounts =
-    Math.abs(n2(current?.expected ?? 0) - n2(target?.expected ?? 0)) > 0.01 ||
-    Math.abs(n2(current?.minimum ?? 0) - n2(target?.minimum ?? 0)) > 0.01;
 
-  return changedAmounts && (!hasPayment || hasPartialPayment);
+  // La distribucion se reconstruye para todas las cuotas sin pago o con
+  // pago parcial. Las cuotas totalmente pagadas no se modifican.
+  return currentPayed <= 0.01 || currentPayed < currentMinimum - 0.01;
 }
 
 function buildUpdatePayPlanSql(payPlanId, changeId, target) {
