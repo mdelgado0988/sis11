@@ -412,8 +412,13 @@ try {
   const dataFrecuenciaPago = [
     { code: 'm', name: 'Mensual' },
     { code: 'q', name: 'Trimestral' },
+    { code: 't', name: 'Trimestral' },
     { code: 's', name: 'Semestral' },
-    { code: 'y', name: 'Anual' }
+    { code: 'b', name: 'Bimensual' },
+    { code: 'm2', name: 'Bimensual' },
+    { code: 'y', name: 'Anual' },
+    { code: 'm12', name: 'Contado' },
+    { code: 'c', name: 'Contado' }
   ];
   
   dataMetodosPago.forEach(row => {
