@@ -1,3 +1,10 @@
+/**
+ * @author Michael Delgado
+ * @created 2026/09/09
+ * @name CashierSupervisor
+ * @version 1.0
+ * @purpose: Manage cashier workspaces, movements, payments and premium reversals.
+ */
 () => {
   const {
     Button,
@@ -13,6 +20,7 @@
     Modal,
     Row,
     Select,
+    Switch,
     Space,
     Spin,
     Table,
@@ -178,10 +186,14 @@
   const [bankDepositPagination, setBankDepositPagination] = React.useState({ current: 1, pageSize: 25 });
   const [bankDepositTotal, setBankDepositTotal] = React.useState(0);
   const [customerStatementVisible, setCustomerStatementVisible] = React.useState(false);
+  const [customerStatementDateMode, setCustomerStatementDateMode] = React.useState('cutoff');
+  const [supervisorPolicyOptions, setSupervisorPolicyOptions] = React.useState([]);
+  const [supervisorPolicyLoading, setSupervisorPolicyLoading] = React.useState(false);
   const [customerStatementForm] = Form.useForm();
   const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
   const quickSearchPayerSearchTimeoutRef = React.useRef(null);
+  const supervisorPolicySearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
   const loadedSupervisorTabsRef = React.useRef({});
@@ -2047,6 +2059,59 @@
     }, 350);
   }
 
+  function searchSupervisorStatementPolicies(value) {
+    const text = getTrimmedString(value);
+
+    if (supervisorPolicySearchTimeoutRef.current) {
+      clearTimeout(supervisorPolicySearchTimeoutRef.current);
+      supervisorPolicySearchTimeoutRef.current = null;
+    }
+
+    if (!text) {
+      setSupervisorPolicyOptions([]);
+      setSupervisorPolicyLoading(false);
+      return;
+    }
+
+    supervisorPolicySearchTimeoutRef.current = setTimeout(() => {
+      const escaped = escapeSqlString(text);
+      const isNumeric = /^\d+$/.test(text);
+      const filter = isNumeric
+        ? `[activeDate] IS NOT NULL AND ([id] = ${Number(text)} OR [code] LIKE N'%${escaped}%')`
+        : `[activeDate] IS NOT NULL AND [code] LIKE N'%${escaped}%'`;
+
+      setSupervisorPolicyLoading(true);
+      exe('RepoLifePolicy', {
+        operation: 'GET',
+        filter,
+        fields: 'id,code,start,end',
+        size: 15
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Policies could not be loaded.'));
+          }
+
+          const options = getRows(response).map(policy => {
+            const id = Number(policy && policy.id);
+            const code = getTrimmedString(policy && policy.code);
+            return {
+              value: id,
+              policyCode: code || String(id),
+              validity: `${formatDate(policy && policy.start)} - ${formatDate(policy && policy.end)}`
+            };
+          }).filter(item => Number.isFinite(item.value) && item.value > 0);
+
+          setSupervisorPolicyOptions(options);
+        })
+        .catch(error => {
+          setSupervisorPolicyOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setSupervisorPolicyLoading(false));
+    }, 350);
+  }
+
   function buildQuickSearchFilter(filters) {
     const conditions = ['transferWorkspaceId IS NOT NULL'];
     const transferId = Number(filters && filters.transferId);
@@ -2689,24 +2754,52 @@
   }
 
   function openSupervisorCustomerStatement() {
+    setCustomerStatementDateMode('cutoff');
     setCustomerStatementVisible(true);
     customerStatementForm.setFieldsValue({
       holderId: undefined,
-      fcorte: getDatePickerValue(new Date())
+      policyId: undefined,
+      FechaCorte: getDatePickerValue(new Date()),
+      FechaDesde: undefined,
+      FechaHasta: undefined
     });
   }
 
   function generateSupervisorCustomerStatement(values) {
     const holderId = Number(values && values.holderId);
-    const fcorte = values && values.fcorte && typeof values.fcorte.format === 'function'
-      ? values.fcorte.format('YYYY-MM-DD')
+    const policyId = Number(values && values.policyId);
+    const formatReportDate = value => values && value && typeof value.format === 'function'
+      ? value.format('YYYY-MM-DD')
       : '';
+    const fechaCorte = formatReportDate(values && values.FechaCorte);
+    const fechaDesde = formatReportDate(values && values.FechaDesde);
+    const fechaHasta = formatReportDate(values && values.FechaHasta);
 
-    if (!Number.isInteger(holderId) || holderId <= 0 || !fcorte) {
+    if ((!Number.isInteger(holderId) || holderId <= 0)
+      && (!Number.isInteger(policyId) || policyId <= 0)) {
+      message.error(t('Select a contact or a policy.'));
       return;
     }
 
-    const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/holderId=${holderId}&fcorte=${encodeURIComponent(fcorte)}`;
+    if (customerStatementDateMode === 'cutoff' && !fechaCorte) {
+      message.error(t('Please select a cutoff date.'));
+      return;
+    }
+
+    if (customerStatementDateMode === 'range' && (!fechaDesde || !fechaHasta)) {
+      message.error(t('Please select both range dates.'));
+      return;
+    }
+
+    const params = [
+      `holderId=${Number.isInteger(holderId) && holderId > 0 ? holderId : ''}`,
+      `policyId=${Number.isInteger(policyId) && policyId > 0 ? policyId : ''}`,
+      `FechaCorte=${customerStatementDateMode === 'cutoff' ? encodeURIComponent(fechaCorte) : ''}`,
+      `FechaDesde=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaDesde) : ''}`,
+      `FechaHasta=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaHasta) : ''}`
+    ];
+
+    const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/${params.join('&')}`;
     window.open(url, '_blank', 'noopener,noreferrer');
     setCustomerStatementVisible(false);
   }
@@ -3960,7 +4053,6 @@
               <Form.Item
                 label={t('Contact')}
                 name="holderId"
-                rules={[{ required: true, message: t('Please select a contact') }]}
               >
                 <Select
                   allowClear
@@ -3986,12 +4078,84 @@
               </Form.Item>
 
               <Form.Item
-                label={t('Cutoff date')}
-                name="fcorte"
-                rules={[{ required: true, message: t('Please select a date') }]}
+                label={t('Policy')}
+                name="policyId"
               >
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <Select
+                  showSearch
+                  allowClear
+                  filterOption={false}
+                  loading={supervisorPolicyLoading}
+                  onSearch={searchSupervisorStatementPolicies}
+                  optionLabelProp="label"
+                  placeholder={t('Search by policy id or code')}
+                  notFoundContent={t('No policies found')}
+                >
+                  {supervisorPolicyOptions.map(item => (
+                    <Option key={item.value} value={item.value} label={item.policyCode} policyCode={item.policyCode}>
+                      <div style={{ lineHeight: 1.25 }}>
+                        <div>{item.policyCode}</div>
+                        <div style={{ color: '#8c8c8c', fontSize: 11 }}>{item.validity} | #{item.value}</div>
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
               </Form.Item>
+
+              <Form.Item label={t('Date filter')}>
+                <Switch
+                  checked={customerStatementDateMode === 'cutoff'}
+                  checkedChildren={t('Cutoff')}
+                  unCheckedChildren={t('Range')}
+                  onChange={checked => {
+                    const nextMode = checked ? 'cutoff' : 'range';
+                    setCustomerStatementDateMode(nextMode);
+                    customerStatementForm.setFieldsValue({
+                      FechaCorte: nextMode === 'cutoff' ? getDatePickerValue(new Date()) : undefined,
+                      FechaDesde: undefined,
+                      FechaHasta: undefined
+                    });
+                  }}
+                />
+              </Form.Item>
+
+              {customerStatementDateMode === 'cutoff' ? (
+                <Form.Item
+                  label={t('Cutoff date')}
+                  name="FechaCorte"
+                  rules={[{ required: true, message: t('Please select a cutoff date') }]}
+                >
+                  <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                </Form.Item>
+              ) : (
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <Form.Item
+                      label={t('From')}
+                      name="FechaDesde"
+                      rules={[{ required: true, message: t('Please select the start date') }]}
+                    >
+                      <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      label={t('To')}
+                      name="FechaHasta"
+                      dependencies={['FechaDesde']}
+                      rules={[{ required: true, message: t('Please select the end date') }, ({ getFieldValue }) => ({
+                        validator(_, value) {
+                          const from = getFieldValue('FechaDesde');
+                          if (!value || !from || value.isSame(from) || value.isAfter(from)) return Promise.resolve();
+                          return Promise.reject(new Error(t('The end date must be on or after the start date')));
+                        }
+                      })]}
+                    >
+                      <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <Button onClick={() => setCustomerStatementVisible(false)}>

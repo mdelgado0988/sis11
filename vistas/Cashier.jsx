@@ -1,5 +1,5 @@
 /**
- * @author Global Development Team
+ * @author Michael Delgado
  * @created 2026/09/09
  * @name Cashier
  * @version 1.0
@@ -23,6 +23,7 @@
     Row,
     Col,
     Select,
+    Switch,
     Slider,
     Space,
     Spin,
@@ -328,6 +329,7 @@
   const [collectionFilterVisible, setCollectionFilterVisible] = React.useState(false);
   const [collectionSelectedRowKeys, setCollectionSelectedRowKeys] = React.useState([]);
   const [customerStatementVisible, setCustomerStatementVisible] = React.useState(false);
+  const [customerStatementDateMode, setCustomerStatementDateMode] = React.useState('cutoff');
   const [collectionChargeVisible, setCollectionChargeVisible] = React.useState(false);
   const [transitCollectionMode, setTransitCollectionMode] = React.useState(false);
   const [transitCollectionAccount, setTransitCollectionAccount] = React.useState(null);
@@ -4127,7 +4129,7 @@
       const escaped = escapeSqlString(text);
       const isNumeric = /^\d+$/.test(text);
       const filter = isNumeric
-        ? `[activeDate] IS NOT NULL AND [id] = ${Number(text)}`
+        ? `[activeDate] IS NOT NULL AND ([id] = ${Number(text)} OR [code] LIKE N'%${escaped}%')`
         : `[activeDate] IS NOT NULL AND [code] LIKE N'%${escaped}%'`;
 
       setPolicyLoading(true);
@@ -5089,24 +5091,52 @@
   }
 
   function openCustomerStatement() {
+    setCustomerStatementDateMode('cutoff');
     setCustomerStatementVisible(true);
     customerStatementForm.setFieldsValue({
       holderId: undefined,
-      fcorte: getDatePickerValue(new Date())
+      policyId: undefined,
+      fechaCorte: getDatePickerValue(new Date()),
+      fechaDesde: undefined,
+      fechaHasta: undefined
     });
   }
 
   function generateCustomerStatement(values) {
     const holderId = Number(values && values.holderId);
-    const fcorte = values && values.fcorte && typeof values.fcorte.format === 'function'
-      ? values.fcorte.format('YYYY-MM-DD')
+    const policyId = Number(values && values.policyId);
+    const formatReportDate = value => values && value && typeof value.format === 'function'
+      ? value.format('YYYY-MM-DD')
       : '';
+    const fechaCorte = formatReportDate(values && values.fechaCorte);
+    const fechaDesde = formatReportDate(values && values.fechaDesde);
+    const fechaHasta = formatReportDate(values && values.fechaHasta);
 
-    if (!Number.isInteger(holderId) || holderId <= 0 || !fcorte) {
+    if ((!Number.isInteger(holderId) || holderId <= 0)
+      && (!Number.isInteger(policyId) || policyId <= 0)) {
+      message.error(t('Select a contact or a policy.'));
       return;
     }
 
-    const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/holderId=${holderId}&fcorte=${encodeURIComponent(fcorte)}`;
+    if (customerStatementDateMode === 'cutoff' && !fechaCorte) {
+      message.error(t('Please select a cutoff date.'));
+      return;
+    }
+
+    if (customerStatementDateMode === 'range' && (!fechaDesde || !fechaHasta)) {
+      message.error(t('Please select both range dates.'));
+      return;
+    }
+
+    const params = [
+      `holderId=${Number.isInteger(holderId) && holderId > 0 ? holderId : ''}`,
+      `policyId=${Number.isInteger(policyId) && policyId > 0 ? policyId : ''}`,
+      `FechaCorte=${customerStatementDateMode === 'cutoff' ? encodeURIComponent(fechaCorte) : ''}`,
+      `FechaDesde=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaDesde) : ''}`,
+      `FechaHasta=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaHasta) : ''}`
+    ];
+
+    const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/${params.join('&')}`;
     window.open(url, '_blank', 'noopener,noreferrer');
     setCustomerStatementVisible(false);
   }
@@ -9550,7 +9580,6 @@
             <Form.Item
               label={t('Contact')}
               name="holderId"
-              rules={[{ required: true, message: t('Please select a contact') }]}
             >
               <Select
                 showSearch
@@ -9566,15 +9595,76 @@
             </Form.Item>
 
             <Form.Item
-              label={t('Cutoff date')}
-              name="fcorte"
-              rules={[{ required: true, message: t('Please select a date') }]}
+              label={t('Policy')}
+              name="policyId"
             >
-              <DatePicker
-                style={{ width: '100%' }}
-                format="DD/MM/YYYY"
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                options={policyOptions}
+                loading={policyLoading}
+                onSearch={searchPolicies}
+                optionLabelProp="policyCode"
+                placeholder={t('Search by policy id or code')}
+                notFoundContent={t('No policies found')}
               />
             </Form.Item>
+
+            <Form.Item label={t('Date filter')}>
+              <Switch
+                checked={customerStatementDateMode === 'cutoff'}
+                checkedChildren={t('Cutoff')}
+                unCheckedChildren={t('Range')}
+                onChange={checked => {
+                  const nextMode = checked ? 'cutoff' : 'range';
+                  setCustomerStatementDateMode(nextMode);
+                  customerStatementForm.setFieldsValue({
+                    fechaCorte: nextMode === 'cutoff' ? getDatePickerValue(new Date()) : undefined,
+                    fechaDesde: undefined,
+                    fechaHasta: undefined
+                  });
+                }}
+              />
+            </Form.Item>
+
+            {customerStatementDateMode === 'cutoff' ? (
+              <Form.Item
+                label={t('Cutoff date')}
+                name="fechaCorte"
+                rules={[{ required: true, message: t('Please select a cutoff date') }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              </Form.Item>
+            ) : (
+              <Row gutter={8}>
+                <Col span={12}>
+                  <Form.Item
+                    label={t('From')}
+                    name="fechaDesde"
+                    rules={[{ required: true, message: t('Please select the start date') }]}
+                  >
+                    <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    label={t('To')}
+                    name="fechaHasta"
+                    dependencies={['fechaDesde']}
+                    rules={[{ required: true, message: t('Please select the end date') }, ({ getFieldValue }) => ({
+                      validator(_, value) {
+                        const from = getFieldValue('fechaDesde');
+                        if (!value || !from || value.isSame(from) || value.isAfter(from)) return Promise.resolve();
+                        return Promise.reject(new Error(t('The end date must be on or after the start date')));
+                      }
+                    })]}
+                  >
+                    <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <Button onClick={() => setCustomerStatementVisible(false)}>
