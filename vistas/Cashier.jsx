@@ -4793,15 +4793,11 @@
     const transfers = [];
 
     selectedGroups.forEach(group => {
-      const children = getMovementChildren(group);
-      const items = children.length > 0 ? children : [group];
-      items.forEach(item => {
-        const transferId = Number(item && item.id);
-        if (!Number.isFinite(transferId) || transferId <= 0) return;
-        transfers.push({
-          transferId: transferId,
-          allocationId: getMovementAllocationId(item) || getMovementAllocationId(group)
-        });
+      const transferId = Number(group && group.id);
+      if (!Number.isFinite(transferId) || transferId <= 0) return;
+      transfers.push({
+        transferId: transferId,
+        allocationId: getMovementAllocationId(group)
       });
     });
 
@@ -4818,7 +4814,7 @@
       .filter(value => Number.isFinite(value) && value > 0);
 
     if (!isCashReceiptReport(report)) {
-      const transferId = transferIds.length > 0 ? `[${transferIds.join(',')}]` : '0';
+      const transferId = transferIds.length > 0 ? transferIds[0] : '0';
       window.open(
         `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`,
         '_blank',
@@ -4834,9 +4830,9 @@
     const unallocatedTransfers = selectedTransfers.filter(item => item.allocationId <= 0);
 
     if (allocatedTransfers.length > 0) {
-      const allocatedIds = allocatedTransfers.map(item => item.transferId);
+      const transferId = allocatedTransfers[0].transferId;
       window.open(
-        `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=[${allocatedIds.join(',')}]`,
+        `#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`,
         '_blank',
         'noopener,noreferrer'
       );
@@ -7981,10 +7977,17 @@
         bordered
         className="cashier-supervisor-movement-table cashier-supervisor-table"
         loading={movementLoading}
-        rowSelection={{
-          selectedRowKeys: movementSelectedRowKeys,
-          onChange: keys => setMovementSelectedRowKeys(keys)
-        }}
+        rowClassName={record => movementSelectedRowKeys.some(key => String(key) === String(record && record.id))
+          ? 'cashier-supervisor-selected-row'
+          : ''}
+        onRow={record => ({
+          onClick: event => {
+            if (event.target.closest('button, a, input, .ant-dropdown, .ant-pagination')) return;
+            setMovementSelectedRowKeys(record && record.id !== undefined && record.id !== null
+              ? [String(record.id)]
+              : []);
+          }
+        })}
         pagination={{
           current: movementPagination.current,
           pageSize: movementPagination.pageSize,
