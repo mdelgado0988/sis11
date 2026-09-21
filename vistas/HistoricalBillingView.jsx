@@ -1323,14 +1323,30 @@
   // Cancelled installments remain available for display, while collectible rows are used by aging.
   const isCancellationInstallment = installment => text(installment && installment.concept).toUpperCase() === 'CANCELLATION';
   const getInstallmentRawAmount = installment => firstNumber(installment, ['minimum', 'expected'], 0);
-  const getInstallmentIssuedAmount = installment => isCancellationInstallment(installment)
+  const cancellationInstallmentRows = installmentRows.filter(installment => isCancellationInstallment(installment));
+  const getCancellationSortValue = installment => {
+    const dateValue = installment && (installment.cancellationDate || installment.created || installment.payedDate || installment.dueDate);
+    const timestamp = dateValue ? new Date(dateValue).getTime() : 0;
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Number(installment && installment.id) || 0;
+  };
+  const latestCancellation = cancellationInstallmentRows
+    .sort((left, right) => getCancellationSortValue(right) - getCancellationSortValue(left)
+      || (Number(right && right.id) || 0) - (Number(left && left.id) || 0))[0] || null;
+  const latestPositiveCancellation = latestCancellation && getInstallmentRawAmount(latestCancellation) > 0
+    ? latestCancellation
+    : null;
+  const isLatestPositiveCancellation = installment => installment === latestPositiveCancellation
+    || Boolean(installment && latestPositiveCancellation && installment.id === latestPositiveCancellation.id);
+  const isTechnicalCancellation = installment => isCancellationInstallment(installment)
+    && !isLatestPositiveCancellation(installment);
+  const getInstallmentIssuedAmount = installment => isTechnicalCancellation(installment)
     ? 0
     : getInstallmentRawAmount(installment);
-  const getInstallmentPaidAmount = installment => isCancellationInstallment(installment)
+  const getInstallmentPaidAmount = installment => isTechnicalCancellation(installment)
     ? 0
     : firstNumber(installment, ['payed', 'paid'], 0);
   const getInstallmentCancelledAmount = installment => {
-    if (isCancellationInstallment(installment)) return 0;
+    if (isTechnicalCancellation(installment) || isLatestPositiveCancellation(installment)) return 0;
     const issued = getInstallmentIssuedAmount(installment);
     const paid = getInstallmentPaidAmount(installment);
     return installment && installment.cancellationDate ? Math.max(issued - paid, 0) : 0;
@@ -1343,11 +1359,13 @@
   );
   const isCancelledInstallment = installment => !!(installment && installment.cancellationDate)
     || isCancellationInstallment(installment);
-  const isNonCollectibleInstallment = installment => isCancellationInstallment(installment);
+  const isNonCollectibleInstallment = installment => isTechnicalCancellation(installment);
   const collectibleInstallmentRows = installmentRows.filter(installment => !isNonCollectibleInstallment(installment));
-  const delinquencyInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
-  const activeInstallmentRows = collectibleInstallmentRows.filter(installment => !(installment && installment.cancellationDate));
-  const cancelledInstallmentRows = collectibleInstallmentRows.filter(installment => !!(installment && installment.cancellationDate));
+  const delinquencyInstallmentRows = installmentRows.filter(installment => !isTechnicalCancellation(installment));
+  const activeInstallmentRows = collectibleInstallmentRows.filter(installment => isLatestPositiveCancellation(installment)
+    || !(installment && installment.cancellationDate));
+  const cancelledInstallmentRows = collectibleInstallmentRows.filter(installment => !isLatestPositiveCancellation(installment)
+    && !!(installment && installment.cancellationDate));
   const refundInstallmentRows = installmentRows.filter(installment => isCancellationInstallment(installment) && getInstallmentRawAmount(installment) < 0);
   const totalRefundAmount = Math.abs(refundInstallmentRows.reduce((total, installment) => total + getInstallmentRawAmount(installment), 0));
   const displayedInstallmentRows = showCancelledInstallments
@@ -1365,19 +1383,20 @@
   const getDelinquencyAmounts = installment => {
     const invoiced = firstNumber(installment, ['minimum', 'expected'], 0);
     const paid = firstNumber(installment, ['payed', 'paid'], 0);
-    const isCancellation = isCancellationInstallment(installment);
-    const cancelled = isCancellation
+    const isTechnicalCancellationRow = isTechnicalCancellation(installment);
+    const cancelled = isTechnicalCancellationRow
       ? invoiced
-      : installment && installment.cancellationDate
+      : installment && installment.cancellationDate && !isLatestPositiveCancellation(installment)
         ? Math.max(invoiced - paid, 0)
         : 0;
     const pending = Math.max(0, invoiced - paid - cancelled);
-    if (isCancellation) {
+    if (isTechnicalCancellationRow) {
       return {
         invoiced: 0,
         paid: 0,
         pending: 0,
         cancelled: invoiced,
+        balance: 0,
         current: 0,
         overdue: 0,
         m30a60: 0,
@@ -1392,6 +1411,7 @@
       paid,
       pending,
       cancelled,
+      balance: pending,
       current: 0,
       overdue: 0,
       m30a60: 0,
@@ -1401,7 +1421,7 @@
       dueSoon: 0
     };
     if (!pending) return amounts;
-    if (installment && installment.cancellationDate) return amounts;
+    if (installment && installment.cancellationDate && !isLatestPositiveCancellation(installment)) return amounts;
 
     const dueDate = getLocalDateOnly(installment && (installment.dueDate || installment.normalDueDate || installment.coveredUntil));
     if (!dueDate) return amounts;
@@ -1436,6 +1456,8 @@
   };
   const delinquencyRows = delinquencyInstallmentRows.map((installment, index) => ({
     key: String(installment && installment.id || index),
+    installment,
+    isLatestPositiveCancellation: isLatestPositiveCancellation(installment),
     policy: detailPolicy.code || generalData.policy || '-',
     currency: getPolicyCurrency(detailPolicy),
     installmentNumber: installment && installment.numberInYear,
@@ -1445,18 +1467,24 @@
     ...getDelinquencyAmounts(installment)
   }));
   const groupedDelinquencyRows = Object.values(delinquencyRows.reduce((groups, row) => {
-    const groupKey = `${row.policy}|${row.currency}`;
+    const groupKey = row.isLatestPositiveCancellation
+      ? `${row.policy}|${row.currency}|latest-cancellation-${row.key}`
+      : `${row.policy}|${row.currency}`;
     if (!groups[groupKey]) {
       groups[groupKey] = { ...row, key: groupKey };
       return groups;
     }
     groups[groupKey].installmentCount += row.installmentCount;
-    ['invoiced', 'paid', 'pending', 'cancelled', 'current', 'overdue', 'm30a60', 'm60a90', 'm90a120', 'mmas120', 'dueSoon']
+    ['invoiced', 'paid', 'pending', 'cancelled', 'balance', 'current', 'overdue', 'm30a60', 'm60a90', 'm90a120', 'mmas120', 'dueSoon']
       .forEach(field => { groups[groupKey][field] += number(row[field]); });
     return groups;
   }, {}));
   const delinquencyDisplayRows = delinquencyGrouped ? groupedDelinquencyRows : delinquencyRows;
-  const delinquencyTotals = delinquencyRows.reduce((totals, row) => {
+  const delinquencyTotalRows = delinquencyRows.filter(row => !isLatestPositiveCancellation(row.installment));
+  const latestCancellationPending = latestPositiveCancellation
+    ? getInstallmentBalance(latestPositiveCancellation)
+    : 0;
+  const delinquencyTotals = delinquencyTotalRows.reduce((totals, row) => {
     Object.keys(totals).forEach(field => { totals[field] += number(row[field]); });
     return totals;
   }, {
@@ -1464,6 +1492,7 @@
     paid: 0,
     pending: 0,
     cancelled: 0,
+    balance: 0,
     current: 0,
     overdue: 0,
     m30a60: 0,
@@ -1472,14 +1501,22 @@
     mmas120: 0,
     dueSoon: 0
   });
+  delinquencyTotals.pending += latestCancellationPending;
+  delinquencyTotals.balance += latestCancellationPending;
   const delinquencyColumns = [
-    { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150, render: value => renderPolicyLink(value, detailPolicy.id || generalData.policyId) },
+    { title: t('Policy'), dataIndex: 'policy', key: 'policy', width: 150, render: (value, row) => (
+      <span>
+        {renderPolicyLink(value, detailPolicy.id || generalData.policyId)}
+        {row && row.isLatestPositiveCancellation && <span style={{ marginLeft: 6, color: '#cf1322' }}>({t('Cancellation')})</span>}
+      </span>
+    ) },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 80, align: 'center' },
     { title: delinquencyGrouped ? t('Total installments') : t('Installment number'), key: 'installmentNumber', width: 125, align: 'center', render: (_, row) => delinquencyGrouped ? row.installmentCount : (row.installmentNumber || '-') },
     { title: t('Invoiced'), dataIndex: 'invoiced', key: 'invoiced', width: 100, align: 'right', render: value => renderMoney(value) },
     { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Cancelled'), dataIndex: 'cancelled', key: 'cancelled', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Balance'), dataIndex: 'balance', key: 'balance', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Current Amount'), dataIndex: 'current', key: 'current', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: '30-60', dataIndex: 'm30a60', key: 'm30a60', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '61-90', dataIndex: 'm60a90', key: 'm60a90', width: 105, align: 'right', render: value => renderMoney(value) },
@@ -1491,10 +1528,15 @@
   ];
   const coverageRows = Array.isArray(detailPolicy.Coverages) ? detailPolicy.Coverages : [];
   const sumCoverageField = fields => coverageRows.reduce((total, coverage) => total + firstNumber(coverage, fields, 0), 0);
-  const totalInstallmentDue = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentIssuedAmount(installment), 0);
-  const totalInstallmentPaid = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentPaidAmount(installment), 0);
-  const totalInstallmentCancelled = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentCancelledAmount(installment), 0);
-  const totalInstallmentPending = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentBalance(installment), 0);
+  const includeLatestCancellationInInstallmentTotals = !showCancelledInstallments;
+  const installmentTotalRows = includeLatestCancellationInInstallmentTotals
+    ? displayedInstallmentRows
+    : displayedInstallmentRows.filter(installment => !isLatestPositiveCancellation(installment));
+  const totalInstallmentDue = installmentTotalRows.reduce((total, installment) => total + getInstallmentIssuedAmount(installment), 0);
+  const totalInstallmentPaid = installmentTotalRows.reduce((total, installment) => total + getInstallmentPaidAmount(installment), 0);
+  const totalInstallmentCancelled = installmentTotalRows.reduce((total, installment) => total + getInstallmentCancelledAmount(installment), 0);
+  const totalInstallmentPending = installmentTotalRows.reduce((total, installment) => total + getInstallmentBalance(installment), 0)
+    + (includeLatestCancellationInInstallmentTotals ? 0 : latestCancellationPending);
   const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
   const collectionPaymentInsuredObjects = (Array.isArray(detailPolicy.InsuredObjects)
     ? detailPolicy.InsuredObjects
@@ -2825,7 +2867,7 @@
                           <Table.Summary.Cell index={3} align="right">{renderMoney(totalInstallmentPaid)}</Table.Summary.Cell>
                           <Table.Summary.Cell index={4} align="right">{renderMoney(totalInstallmentCancelled)}</Table.Summary.Cell>
                           <Table.Summary.Cell index={5} align="right">{renderMoney(totalInstallmentPending)}</Table.Summary.Cell>
-                          <Table.Summary.Cell index={6} colSpan={2}>{t('Total installments')}: {collectibleInstallmentRows.length}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} colSpan={2}>{t('Total installments')}: {installmentTotalRows.length}</Table.Summary.Cell>
                           <Table.Summary.Cell index={8}></Table.Summary.Cell>
                           <Table.Summary.Cell index={9}></Table.Summary.Cell>
                         </Table.Summary.Row>
@@ -2867,19 +2909,20 @@
                       <Table.Summary>
                         <Table.Summary.Row>
                           <Table.Summary.Cell index={0} colSpan={2}><strong>{t('Totals')}</strong></Table.Summary.Cell>
-                        <Table.Summary.Cell index={2} align="center">{delinquencyGrouped ? `${delinquencyRows.length} ${t('Total installments')}` : ''}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={2} align="center">{delinquencyGrouped ? `${delinquencyTotalRows.length} ${t('Total installments')}` : ''}</Table.Summary.Cell>
                         <Table.Summary.Cell index={3} align="right">{renderMoney(delinquencyTotals.invoiced)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={4} align="right">{renderMoney(delinquencyTotals.paid)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={5} align="right">{renderMoney(delinquencyTotals.pending)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={6} align="right">{renderMoney(delinquencyTotals.cancelled)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.current)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={10} align="right">{renderMoney(delinquencyTotals.m90a120)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={11} align="right">{renderMoney(delinquencyTotals.mmas120)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={13} align="right">{renderMoney(delinquencyTotals.overdue)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={14}></Table.Summary.Cell>
+                        <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.balance)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.current)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={11} align="right">{renderMoney(delinquencyTotals.m90a120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={12} align="right">{renderMoney(delinquencyTotals.mmas120)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={13} align="right">{renderMoney(delinquencyTotals.dueSoon)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={14} align="right">{renderMoney(delinquencyTotals.overdue)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={15}></Table.Summary.Cell>
                         </Table.Summary.Row>
                       </Table.Summary>
                     )}
@@ -3230,7 +3273,12 @@
               <Input.TextArea rows={4} />
             </Form.Item>
             <div className="historical-billing-toolbar" style={{ justifyContent: 'flex-end' }}>
-              <Button type="primary" htmlType="submit" loading={restructureLoading}>{t('Execute endorsement')}</Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={restructureLoading}
+                children={t('Execute endorsement')}
+              />
             </div>
           </Form>
         </Modal>
