@@ -306,6 +306,13 @@
         font-size: 13px;
       }
 
+      .historical-billing-view .historical-billing-refund-summary {
+        margin-left: 12px;
+        color: #cf1322;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
       .historical-billing-modal .historical-billing-toolbar {
         display: flex;
         align-items: center;
@@ -1264,9 +1271,10 @@
   const installmentColumns = [
     { title: t('Installment Id'), dataIndex: 'id', key: 'id', width: 90, align: 'center' },
     { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: 180 },
-    { title: t('Amount'), key: 'amount', width: 130, align: 'right', render: (_, installment) => renderMoney(isCancellationInstallment(installment) ? 0 : firstNumber(installment, ['minimum', 'expected'], 0)) },
-    { title: t('Paid'), key: 'paid', width: 110, align: 'right', render: (_, installment) => renderMoney(isCancellationInstallment(installment) ? 0 : firstNumber(installment, ['payed', 'paid'], 0)) },
-    { title: t('Cancelled'), key: 'cancelled', width: 120, align: 'right', render: (_, installment) => renderMoney(isCancellationInstallment(installment) ? firstNumber(installment, ['minimum', 'expected'], 0) : 0) },
+    { title: t('Issued'), key: 'amount', width: 130, align: 'right', render: (_, installment) => renderMoney(getInstallmentIssuedAmount(installment)) },
+    { title: t('Paid'), key: 'paid', width: 110, align: 'right', render: (_, installment) => renderMoney(getInstallmentPaidAmount(installment)) },
+    { title: t('Cancelled'), key: 'cancelled', width: 120, align: 'right', render: (_, installment) => renderMoney(getInstallmentCancelledAmount(installment)) },
+    { title: t('Balance'), key: 'balance', width: 110, align: 'right', render: (_, installment) => renderMoney(getInstallmentBalance(installment)) },
     { title: t('Payment date'), key: 'paymentDate', width: 125, align: 'center', render: (_, installment) => formatDate(installment && (installment.payedDate || installment.paymentDate)) },
     { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 125, align: 'center', render: formatCalendarDate },
     { title: t('Installment Number'), dataIndex: 'numberInYear', key: 'numberInYear', width: 100, align: 'center' },
@@ -1314,14 +1322,38 @@
     : [];
   // Cancelled installments remain available for display, while collectible rows are used by aging.
   const isCancellationInstallment = installment => text(installment && installment.concept).toUpperCase() === 'CANCELLATION';
-  const isCancelledInstallment = installment => isCancellationInstallment(installment);
+  const getInstallmentRawAmount = installment => firstNumber(installment, ['minimum', 'expected'], 0);
+  const getInstallmentIssuedAmount = installment => isCancellationInstallment(installment)
+    ? 0
+    : getInstallmentRawAmount(installment);
+  const getInstallmentPaidAmount = installment => isCancellationInstallment(installment)
+    ? 0
+    : firstNumber(installment, ['payed', 'paid'], 0);
+  const getInstallmentCancelledAmount = installment => {
+    if (isCancellationInstallment(installment)) return 0;
+    const issued = getInstallmentIssuedAmount(installment);
+    const paid = getInstallmentPaidAmount(installment);
+    return installment && installment.cancellationDate ? Math.max(issued - paid, 0) : 0;
+  };
+  const getInstallmentBalance = installment => Math.max(
+    getInstallmentIssuedAmount(installment)
+      - getInstallmentPaidAmount(installment)
+      - getInstallmentCancelledAmount(installment),
+    0
+  );
+  const isCancelledInstallment = installment => !!(installment && installment.cancellationDate)
+    || isCancellationInstallment(installment);
   const isNonCollectibleInstallment = installment => isCancellationInstallment(installment);
   const collectibleInstallmentRows = installmentRows.filter(installment => !isNonCollectibleInstallment(installment));
   const delinquencyInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
+  const activeInstallmentRows = collectibleInstallmentRows.filter(installment => !(installment && installment.cancellationDate));
+  const cancelledInstallmentRows = collectibleInstallmentRows.filter(installment => !!(installment && installment.cancellationDate));
+  const refundInstallmentRows = installmentRows.filter(installment => isCancellationInstallment(installment) && getInstallmentRawAmount(installment) < 0);
+  const totalRefundAmount = Math.abs(refundInstallmentRows.reduce((total, installment) => total + getInstallmentRawAmount(installment), 0));
   const displayedInstallmentRows = showCancelledInstallments
-    ? installmentRows
-    : installmentRows.filter(installment => isCancellationInstallment(installment));
-  const hasCancelledInstallments = collectibleInstallmentRows.length !== installmentRows.length
+    ? activeInstallmentRows.concat(cancelledInstallmentRows)
+    : activeInstallmentRows;
+  const hasCancelledInstallments = cancelledInstallmentRows.length > 0
     || (policyInfo && policyInfo.active === false);
   const getLocalDateOnly = value => {
     const raw = text(value);
@@ -1334,9 +1366,11 @@
     const invoiced = firstNumber(installment, ['minimum', 'expected'], 0);
     const paid = firstNumber(installment, ['payed', 'paid'], 0);
     const isCancellation = isCancellationInstallment(installment);
-    const cancelled = isCancellation || (installment && installment.cancellationDate && paid === 0)
+    const cancelled = isCancellation
       ? invoiced
-      : 0;
+      : installment && installment.cancellationDate
+        ? Math.max(invoiced - paid, 0)
+        : 0;
     const pending = Math.max(0, invoiced - paid - cancelled);
     if (isCancellation) {
       return {
@@ -1444,8 +1478,8 @@
     { title: delinquencyGrouped ? t('Total installments') : t('Installment number'), key: 'installmentNumber', width: 125, align: 'center', render: (_, row) => delinquencyGrouped ? row.installmentCount : (row.installmentNumber || '-') },
     { title: t('Invoiced'), dataIndex: 'invoiced', key: 'invoiced', width: 100, align: 'right', render: value => renderMoney(value) },
     { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 115, align: 'right', render: value => renderMoney(value) },
-    { title: t('Cancelled'), dataIndex: 'cancelled', key: 'cancelled', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Pending'), dataIndex: 'pending', key: 'pending', width: 115, align: 'right', render: value => renderMoney(value) },
+    { title: t('Cancelled'), dataIndex: 'cancelled', key: 'cancelled', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: t('Current Amount'), dataIndex: 'current', key: 'current', width: 115, align: 'right', render: value => renderMoney(value) },
     { title: '30-60', dataIndex: 'm30a60', key: 'm30a60', width: 105, align: 'right', render: value => renderMoney(value) },
     { title: '61-90', dataIndex: 'm60a90', key: 'm60a90', width: 105, align: 'right', render: value => renderMoney(value) },
@@ -1457,10 +1491,10 @@
   ];
   const coverageRows = Array.isArray(detailPolicy.Coverages) ? detailPolicy.Coverages : [];
   const sumCoverageField = fields => coverageRows.reduce((total, coverage) => total + firstNumber(coverage, fields, 0), 0);
-  const totalInstallmentDue = displayedInstallmentRows.reduce((total, installment) => total + (isCancellationInstallment(installment) ? 0 : firstNumber(installment, ['minimum', 'expected'], 0)), 0);
-  const totalInstallmentPaid = displayedInstallmentRows.reduce((total, installment) => total + (isCancellationInstallment(installment) ? 0 : firstNumber(installment, ['payed', 'paid'], 0)), 0);
-  const totalInstallmentCancelled = displayedInstallmentRows.reduce((total, installment) => total + (isCancellationInstallment(installment) ? firstNumber(installment, ['minimum', 'expected'], 0) : 0), 0);
-  const totalInstallmentPending = displayedInstallmentRows.reduce((total, installment) => total + (isCancellationInstallment(installment) ? 0 : Math.max(0, firstNumber(installment, ['minimum', 'expected'], 0) - firstNumber(installment, ['payed', 'paid'], 0))), 0);
+  const totalInstallmentDue = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentIssuedAmount(installment), 0);
+  const totalInstallmentPaid = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentPaidAmount(installment), 0);
+  const totalInstallmentCancelled = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentCancelledAmount(installment), 0);
+  const totalInstallmentPending = displayedInstallmentRows.reduce((total, installment) => total + getInstallmentBalance(installment), 0);
   const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
   const collectionPaymentInsuredObjects = (Array.isArray(detailPolicy.InsuredObjects)
     ? detailPolicy.InsuredObjects
@@ -2770,6 +2804,11 @@
                       <span>{t('Show cancelled installments')}</span>
                       <Switch checked={showCancelledInstallments} onChange={setShowCancelledInstallments} />
                     </Space>
+                    {totalRefundAmount > 0 && (
+                      <span className="historical-billing-refund-summary">
+                        {t('Balance to refund')}: {renderMoney(totalRefundAmount)}
+                      </span>
+                    )}
                   </div>
                   <Table
                     className="historical-billing-table"
@@ -2785,14 +2824,15 @@
                           <Table.Summary.Cell index={2} align="right">{renderMoney(totalInstallmentDue)}</Table.Summary.Cell>
                           <Table.Summary.Cell index={3} align="right">{renderMoney(totalInstallmentPaid)}</Table.Summary.Cell>
                           <Table.Summary.Cell index={4} align="right">{renderMoney(totalInstallmentCancelled)}</Table.Summary.Cell>
-                          <Table.Summary.Cell index={5} colSpan={2}>{t('Total installments')}: {displayedInstallmentRows.length}</Table.Summary.Cell>
-                          <Table.Summary.Cell index={7}></Table.Summary.Cell>
+                          <Table.Summary.Cell index={5} align="right">{renderMoney(totalInstallmentPending)}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={6} colSpan={2}>{t('Total installments')}: {collectibleInstallmentRows.length}</Table.Summary.Cell>
                           <Table.Summary.Cell index={8}></Table.Summary.Cell>
+                          <Table.Summary.Cell index={9}></Table.Summary.Cell>
                         </Table.Summary.Row>
                       </Table.Summary>
                     )}
                     pagination={false}
-                    scroll={{ x: 980, y: 'calc(100dvh - 310px)' }}
+                    scroll={{ x: 1090, y: 'calc(100dvh - 310px)' }}
                     locale={{ emptyText: t('No installments found.') }}
                   />
                 </>
@@ -2830,8 +2870,8 @@
                         <Table.Summary.Cell index={2} align="center">{delinquencyGrouped ? `${delinquencyRows.length} ${t('Total installments')}` : ''}</Table.Summary.Cell>
                         <Table.Summary.Cell index={3} align="right">{renderMoney(delinquencyTotals.invoiced)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={4} align="right">{renderMoney(delinquencyTotals.paid)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={5} align="right">{renderMoney(delinquencyTotals.cancelled)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={6} align="right">{renderMoney(delinquencyTotals.pending)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={5} align="right">{renderMoney(delinquencyTotals.pending)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={6} align="right">{renderMoney(delinquencyTotals.cancelled)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={7} align="right">{renderMoney(delinquencyTotals.current)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={8} align="right">{renderMoney(delinquencyTotals.m30a60)}</Table.Summary.Cell>
                         <Table.Summary.Cell index={9} align="right">{renderMoney(delinquencyTotals.m60a90)}</Table.Summary.Cell>
