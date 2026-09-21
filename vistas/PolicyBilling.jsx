@@ -95,6 +95,20 @@
       .policy-billing-table .policy-billing-row-endorsement > td {
         background: #f6ffed !important;
       }
+
+      .policy-billing-cancellation-amount {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 1px;
+      }
+
+      .policy-billing-cancellation-paid {
+        color: #1677ff;
+        font-size: 10px;
+        line-height: 14px;
+        white-space: nowrap;
+      }
     `;
     document.head.appendChild(style);
 
@@ -207,7 +221,8 @@
           ? premium + discounts + surcharges
           : Number(currentBill.anualPremium || currentBill.annualPremium || 0) || 0,
         tax: Number(currentBill.tax || 0) || 0,
-        expenses: Number(currentBill.fee || 0) || 0
+        expenses: Number(currentBill.fee || 0) || 0,
+        paidAmount: Number(currentBill.amountPaid || 0) || 0
       };
     }
 
@@ -339,7 +354,12 @@
       const billValues = getBillValues(config.bill, config.fallback);
       const paymentGroup = config.paymentGroup || {};
       const receiptAmount = billValues.receiptAmount || paymentGroup.receiptAmount || 0;
-      const paid = paymentGroup.paid || 0;
+      const paid = config.paidOverride !== undefined
+        ? Number(config.paidOverride) || 0
+        : (Math.abs(Number(paymentGroup.paid) || 0) > 0
+          ? Number(paymentGroup.paid) || 0
+          : billValues.paidAmount || 0);
+      const isCancellation = !!config.isCancellation;
       const installments = config.keepInstallmentAmounts
         ? keepInstallmentAmounts(config.installments)
         : distributeReceiptAmount(config.installments, receiptAmount);
@@ -365,7 +385,11 @@
         changeId: config.changeId,
         status: config.status,
         source: config.source,
-        installments
+        installments,
+        isCancellation,
+        cancellationBreakdown: isCancellation
+          ? buildCancellationBreakdown(billValues, paid)
+          : null
       };
     }
 
@@ -387,8 +411,72 @@
         tax: annualPremiumDif - coveragesDif,
         discounts: 0,
         surcharges: 0,
-        fee: 0
+        fee: 0,
+        amountPaid: Number(changeDetail && changeDetail.amountPaid) || 0
       };
+    }
+
+    function buildCancellationBreakdown(billValues, paidValue) {
+      const fields = ['receiptAmount', 'premium', 'discounts', 'surcharges', 'grossPremium', 'tax', 'expenses'];
+      const totalValue = Number(billValues && billValues.receiptAmount) || 0;
+      const totalBasis = Math.abs(totalValue);
+      const paidTotal = Math.min(Math.abs(Number(paidValue) || 0), totalBasis);
+      const componentFields = ['premium', 'discounts', 'surcharges', 'tax', 'expenses'];
+      const componentBasis = componentFields.reduce((total, field) => (
+        total + Math.abs(Number(billValues && billValues[field]) || 0)
+      ), 0);
+      const result = {};
+      let distributedPaid = 0;
+      const activeComponents = componentFields.filter(field => (
+        Math.abs(Number(billValues && billValues[field]) || 0) > 0
+      ));
+      const lastComponent = activeComponents[activeComponents.length - 1] || null;
+
+      componentFields.forEach(field => {
+        const value = Number(billValues && billValues[field]) || 0;
+        const absoluteValue = Math.abs(value);
+        const rawPaidPart = componentBasis > 0
+          ? paidTotal * absoluteValue / componentBasis
+          : 0;
+        const paidPart = field === lastComponent
+          ? 0
+          : Math.floor((rawPaidPart + 0.0000001) * 100) / 100;
+        result[field] = { value, paid: paidPart };
+        distributedPaid += paidPart;
+      });
+
+      if (lastComponent) {
+        result[lastComponent].paid = Number((paidTotal - distributedPaid).toFixed(2));
+      }
+
+      fields.forEach(field => {
+        const value = Number(billValues && billValues[field]) || 0;
+        let paidPart = result[field] ? result[field].paid : 0;
+        if (field === 'receiptAmount') paidPart = paidTotal;
+        if (field === 'grossPremium') {
+          paidPart = componentFields.slice(0, 3).reduce((total, component) => (
+            total + (result[component] ? result[component].paid : 0)
+          ), 0);
+        }
+        const signedPaidPart = value < 0 ? -paidPart : paidPart;
+        result[field] = {
+          net: Number((value - signedPaidPart).toFixed(2)),
+          paid: paidPart
+        };
+      });
+
+      return result;
+    }
+
+    function getChangePaidAmount(change, changeDetail) {
+      const changePayPlan = parseJsonArray(change && change.jNewPayPlan);
+      const paidOutsideCancellation = changePayPlan
+        .filter(installment => String(installment && installment.concept || '').toUpperCase() !== 'CANCELLATION')
+        .reduce((total, installment) => (
+          total + (Number(installment && installment.payed) || 0)
+        ), 0);
+      if (Math.abs(paidOutsideCancellation) > 0) return paidOutsideCancellation;
+      return Number(changeDetail && changeDetail.amountPaid) || 0;
     }
 
     const basePaymentGroup = paymentGroups.policy || {};
@@ -439,6 +527,10 @@
         changeId: change && change.id,
         status: change && change.status,
         installments: parseJsonArray(change && change.jNewPayPlan),
+        isCancellation: cancellationChange,
+        paidOverride: cancellationChange
+          ? getChangePaidAmount(change, changeDetail)
+          : undefined,
         keepInstallmentAmounts: cancellationChange,
         source: change
       });
@@ -504,6 +596,26 @@
         : 'inherit';
 
     return <span style={{ color }}>{formatMoney(value)}</span>;
+  }
+
+  function renderBillingAmount(value, record, fieldName) {
+    if (!record || !record.isCancellation || !record.cancellationBreakdown) {
+      return renderColoredMoney(value);
+    }
+
+    const breakdown = record.cancellationBreakdown[fieldName] || {
+      net: Number(value) || 0,
+      paid: 0
+    };
+
+    return (
+      <div className="policy-billing-cancellation-amount">
+        <div>{renderColoredMoney(breakdown.net)}</div>
+        <div className="policy-billing-cancellation-paid">
+          {t('Paid')}: {formatMoney(breakdown.paid)}
+        </div>
+      </div>
+    );
   }
 
   function renderTotals(rows) {
@@ -627,7 +739,7 @@
       key: 'receiptAmount',
       width: 130,
       align: 'right',
-      render: value => renderColoredMoney(value)
+      render: (value, record) => renderBillingAmount(value, record, 'receiptAmount')
     },
     {
       title: t('Start date'),
@@ -650,12 +762,12 @@
       width: 160,
       render: value => value ? t(String(value)) : '-'
     },
-    { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 110, align: 'right', render: value => renderColoredMoney(value) },
-    { title: t('Discounts'), dataIndex: 'discounts', key: 'discounts', width: 110, align: 'right', render: value => renderColoredMoney(value) },
-    { title: t('Surcharges'), dataIndex: 'surcharges', key: 'surcharges', width: 110, align: 'right', render: value => renderColoredMoney(value) },
-    { title: t('Gross premium'), dataIndex: 'grossPremium', key: 'grossPremium', width: 120, align: 'right', render: value => renderColoredMoney(value) },
-    { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 100, align: 'right', render: value => renderColoredMoney(value) },
-    { title: t('Expenses'), dataIndex: 'expenses', key: 'expenses', width: 100, align: 'right', render: value => renderColoredMoney(value) },
+    { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 110, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'premium') },
+    { title: t('Discounts'), dataIndex: 'discounts', key: 'discounts', width: 110, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'discounts') },
+    { title: t('Surcharges'), dataIndex: 'surcharges', key: 'surcharges', width: 110, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'surcharges') },
+    { title: t('Gross premium'), dataIndex: 'grossPremium', key: 'grossPremium', width: 120, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'grossPremium') },
+    { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 100, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'tax') },
+    { title: t('Expenses'), dataIndex: 'expenses', key: 'expenses', width: 100, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'expenses') },
     { title: t('Income date'), dataIndex: 'incomeDate', key: 'incomeDate', width: 160, render: value => formatDate(value, true) }
   ];
 
