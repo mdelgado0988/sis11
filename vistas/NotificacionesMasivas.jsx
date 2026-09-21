@@ -68,6 +68,12 @@
     </ActionIcon>
   );
 
+  const TrashIcon = () => (
+    <ActionIcon label="delete">
+      <path d="M360 184v-8c0-4.4 3.6-8 8-8h288c4.4 0 8 3.6 8 8v8h72v-40c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v40h72zM792 256H232c-17.7 0-32 14.3-32 32v32h64v472c0 39.8 32.2 72 72 72h352c39.8 0 72-32.2 72-72V320h64v-32c0-17.7-14.3-32-32-32zM440 752h-72V416h72v336zm216 0h-72V416h72v336z" />
+    </ActionIcon>
+  );
+
   const Table      = A.Table;
   const Form       = A.Form;
   const Select     = A.Select;
@@ -114,6 +120,7 @@
   const [selectedLoadType, setSelectedLoadType] = React.useState(undefined);
   const [processingFile, setProcessingFile] = React.useState(false);
   const [processingBatchId, setProcessingBatchId] = React.useState(null);
+  const [deletingBatchId, setDeletingBatchId] = React.useState(null);
   const [pagination, setPagination] = React.useState({
     current: 1,
     pageSize: PAGE_SIZE,
@@ -328,16 +335,12 @@
         }
 
         const batch = result.outData || null;
-        let storedData = null;
-        try {
-          storedData = batch && batch.jData ? JSON.parse(batch.jData) : null;
-        } catch (error) {
+        const storedData = parseStoredData(batch && batch.jData);
+        if (batch && batch.jData && !storedData) {
           throw new Error('El lote contiene un detalle de inconsistencias inválido.');
         }
 
-        const invalidRows = storedData && !Array.isArray(storedData) && Array.isArray(storedData.invalidRows)
-          ? storedData.invalidRows
-          : [];
+        const invalidRows = splitStoredData(storedData).invalidRows;
         if (!invalidRows.length) {
           throw new Error('Este lote no conserva el detalle de sus inconsistencias. Realice una nueva carga.');
         }
@@ -384,9 +387,8 @@
     if (Number(record.importConfigId) !== Number(importConfigIdRef.current)) {
       return 'El lote seleccionado no pertenece a Notificaciones MASIVAS.';
     }
-    if (Number(record.error || 0) > 0) {
-      return 'El lote tiene inconsistencias y no puede ejecutarse.';
-    }
+    // AXX-1085: la carga y el envio ya no se restringen por inconsistencias.
+    // Las filas no validas quedan registradas en el detalle y no se procesan.
 
     const state = batchExecutionState(record);
     if (state === 'pending') return 'El lote ya tiene un proceso pendiente.';
@@ -436,42 +438,87 @@
     };
   };
 
-  const prevalidationCountsFromJData = (jData) => {
+  // AXX-1085: el detalle del lote se guarda SIEMPRE como una sola matriz de filas.
+  // Primero el encabezado y las filas que se cargan (incluidas las que no tienen correo),
+  // y a continuacion el bloque de inconsistencias, cuyas filas empiezan con la primera
+  // celda vacia: asi el procesador de lotes las ignora y el lote sigue siendo ejecutable.
+  const INCONSISTENCY_MARKER = 'INCONSISTENCIAS';
+
+  const parseStoredData = (jData) => {
     let storedData = jData;
     try {
       if (typeof storedData === 'string') storedData = JSON.parse(storedData);
     } catch (error) {
       return null;
     }
+    return storedData || null;
+  };
 
-    if (Array.isArray(storedData)) {
+  const splitStoredData = (storedData) => {
+    if (!storedData) return { validRows: [], invalidRows: [] };
+
+    // Formato anterior: { validRows, invalidRows }
+    if (!Array.isArray(storedData)) {
       return {
-        valid: Math.max(0, storedData.length - 1),
-        invalid: 0
+        validRows: Array.isArray(storedData.validRows) ? storedData.validRows : [],
+        invalidRows: Array.isArray(storedData.invalidRows) ? storedData.invalidRows : []
       };
     }
 
-    if (storedData && Array.isArray(storedData.validRows) && Array.isArray(storedData.invalidRows)) {
-      return {
-        valid: Math.max(0, storedData.validRows.length - 1),
-        invalid: storedData.invalidRows.length
-      };
-    }
+    const markerIndex = storedData.findIndex((row) => Array.isArray(row)
+      && String(row[0] || '').trim() === ''
+      && String(row[1] || '').trim().toUpperCase() === INCONSISTENCY_MARKER);
 
-    return null;
+    if (markerIndex < 0) return { validRows: storedData, invalidRows: [] };
+
+    return {
+      validRows: storedData.slice(0, markerIndex),
+      invalidRows: storedData.slice(markerIndex + 2)
+        .filter((row) => Array.isArray(row))
+        .map((row) => ({ fila: row[1], poliza: row[2], errores: row[3] }))
+    };
+  };
+
+  const buildStoredData = (validRows, invalidRows) => {
+    const rows = (Array.isArray(validRows) ? validRows : []).slice();
+    if (!invalidRows || !invalidRows.length) return rows;
+
+    const width = Array.isArray(rows[0]) ? rows[0].length : 4;
+    const padRow = (cells) => {
+      const padded = cells.slice();
+      while (padded.length < width) padded.push('');
+      return padded;
+    };
+
+    rows.push(padRow(['', INCONSISTENCY_MARKER, '', '']));
+    rows.push(padRow(['', 'Fila', 'Poliza', 'Motivo']));
+    invalidRows.forEach((row) => {
+      rows.push(padRow([
+        '',
+        row && row.fila,
+        row && row.poliza,
+        Array.isArray(row && row.errores) ? row.errores.join(' ') : String(row && row.errores || '')
+      ]));
+    });
+    return rows;
+  };
+
+  const prevalidationCountsFromJData = (jData) => {
+    const storedData = parseStoredData(jData);
+    if (!storedData) return null;
+
+    const detail = splitStoredData(storedData);
+    return {
+      valid: Math.max(0, detail.validRows.length - 1),
+      invalid: detail.invalidRows.length
+    };
   };
 
   const loadTypeNameFromJData = (jData) => {
-    let storedData = jData;
-    try {
-      if (typeof storedData === 'string') storedData = JSON.parse(storedData);
-    } catch (error) {
-      return '';
-    }
+    const storedData = parseStoredData(jData);
+    if (!storedData) return '';
 
-    const validRows = Array.isArray(storedData)
-      ? storedData
-      : (storedData && Array.isArray(storedData.validRows) ? storedData.validRows : []);
+    const validRows = splitStoredData(storedData).validRows;
     if (validRows.length < 2 || !Array.isArray(validRows[0]) || !Array.isArray(validRows[1])) return '';
 
     const typeIndex = validRows[0].findIndex((header) => String(header || '').trim().toLowerCase() === 'tipoplantilla');
@@ -758,6 +805,140 @@
     }
   });
 
+  // AXX-1084: el detalle exportado debe traer la informacion completa del lote,
+  // con el encabezado del archivo de referencia y el bloque de cabecera del reporte.
+  const DETAIL_SHEET_HEADER = [
+    'IDLote',
+    'Poliza',
+    'FechaRechazo',
+    'CodigoSIS',
+    'Nombres',
+    'Apellidos',
+    'TipoTelefono',
+    'Telefono',
+    'Mensaje',
+    'Valido',
+    'Observaciones'
+  ];
+
+  const loadBatchStoredDetail = (batchId) => exe('LoadEntity', {
+    entity: 'Batch',
+    fields: 'id,jData,dataCols',
+    filter: 'id = ' + Number(batchId),
+    noTracking: true
+  }).then((result) => {
+    if (!result || result.ok === false || !result.outData) {
+      throw new Error(result && result.msg ? result.msg : 'No se pudo validar el contenido del lote.');
+    }
+
+    return {
+      content: parseStoredData(result.outData.jData),
+      dataCols: Number(result.outData.dataCols || 0)
+    };
+  });
+
+  const loadExportIdentity = () => Promise.all([
+    exe('GetConfig', { path: '$.Main.company' }).catch(() => null),
+    exe('GetCurrentUser').catch(() => null)
+  ]).then((resolved) => {
+    const configResult = resolved[0];
+    const userResult = resolved[1];
+    const user = userResult ? responseRows(userResult)[0] || null : null;
+    const userName = String(user && (user.name || user.Name || user.fullName || user.userName) || '').trim();
+    return {
+      company: String(configResult && configResult.outData || '').trim(),
+      exportedBy: userName || currentUserEmail || ''
+    };
+  });
+
+  const detailColumnIndex = (headerRow) => {
+    const index = {};
+    (Array.isArray(headerRow) ? headerRow : []).forEach((value, position) => {
+      const key = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+      if (key && index[key] === undefined) index[key] = position;
+    });
+    return index;
+  };
+
+  const detailCell = (row, columnIndex, columnName) => {
+    const position = columnIndex[columnName];
+    if (position === undefined) return '';
+    const value = Array.isArray(row) ? row[position] : undefined;
+    return value === null || value === undefined ? '' : value;
+  };
+
+  const exportStamp = () => {
+    const now = new Date();
+    const pad = (value) => (value < 10 ? '0' : '') + value;
+    return pad(now.getDate()) + '/' + pad(now.getMonth() + 1) + '/' + now.getFullYear();
+  };
+
+  const buildValidDetailRows = (batchId, storedRows, dataCols) => {
+    if (!Array.isArray(storedRows) || storedRows.length < 2) return [];
+
+    const headerRow = Array.isArray(storedRows[0]) ? storedRows[0] : [];
+    const columnIndex = detailColumnIndex(headerRow);
+    const resultOffset = Number(dataCols) > 0 ? Number(dataCols) : headerRow.length;
+
+    return storedRows.slice(1).map((row) => {
+      const hasResult = Array.isArray(row) && row.length > resultOffset;
+      const resultOk = hasResult ? row[resultOffset] : null;
+      const resultMessage = hasResult ? row[resultOffset + 1] : '';
+      const sent = resultOk === true || String(resultOk).trim().toLowerCase() === 'true';
+      // AXX-1085: una fila sin correo entra al lote pero no se le envia nada.
+      const sendStatus = String(detailCell(row, columnIndex, 'estadoenvio') || '').trim();
+      const deliverable = sendStatus === '' || sendStatus.toLowerCase().indexOf('sin correo') < 0;
+
+      return [
+        batchId,
+        detailCell(row, columnIndex, 'poliza'),
+        '',
+        detailCell(row, columnIndex, 'clienteid'),
+        detailCell(row, columnIndex, 'cliente'),
+        detailCell(row, columnIndex, 'apellidos'),
+        detailCell(row, columnIndex, 'tipotelefono'),
+        detailCell(row, columnIndex, 'correo'),
+        detailCell(row, columnIndex, 'mensaje'),
+        // AXX-1085: la marca de «sin correo» gana sobre el resultado del procesador.
+        // Esa fila entra al lote pero nunca se despacha, asi que el ok/OK que deja la
+        // ejecucion no puede borrarla: el detalle exportado dice lo mismo antes y despues
+        // del envio.
+        !deliverable ? 'No' : (hasResult ? (sent ? 'Si' : 'No') : 'Si'),
+        !deliverable
+          ? sendStatus
+          : (hasResult
+            ? String(resultMessage === null || resultMessage === undefined ? '' : resultMessage)
+            : sendStatus)
+      ];
+    });
+  };
+
+  const buildInvalidDetailRows = (batchId, invalidRows) => (Array.isArray(invalidRows) ? invalidRows : [])
+    .map((row) => [
+      batchId,
+      String(row && row.poliza || ''),
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'No',
+      Array.isArray(row && row.errores)
+        ? row.errores.join(' ')
+        : String(row && row.errores || '')
+    ]);
+
+  const buildDetailSheetRows = (batchId, identity, detailRows) => [
+    ['Detalle de los Mensajes Enviados - Lote No.: ' + batchId],
+    ['Compañia: ' + String(identity && identity.company || '')],
+    ['Fecha de Exportación: ' + exportStamp()],
+    ['Exportado Por: ' + String(identity && identity.exportedBy || '')],
+    [],
+    DETAIL_SHEET_HEADER.slice()
+  ].concat(detailRows);
+
   const isUsableXlsxExportLibrary = (xlsxLibrary) => Boolean(xlsxLibrary
     && typeof xlsxLibrary.writeFile === 'function'
     && xlsxLibrary.utils
@@ -773,29 +954,32 @@
     }
 
     setExporting(true);
-    Promise.all([loadBatchStoredData(batchId), ensureXlsxLibrary()])
-      .then(([storedData, xlsxLibrary]) => {
+    Promise.all([loadBatchStoredDetail(batchId), ensureXlsxLibrary(), loadExportIdentity()])
+      .then(([stored, xlsxLibrary, identity]) => {
         if (!isUsableXlsxExportLibrary(xlsxLibrary)) {
           throw new Error('El componente de Excel no permite generar archivos de salida.');
         }
 
-        const validRows = Array.isArray(storedData)
-          ? storedData
-          : (storedData && Array.isArray(storedData.validRows) ? storedData.validRows : []);
-        const invalidRows = storedData && !Array.isArray(storedData)
-          && Array.isArray(storedData.invalidRows)
-          ? storedData.invalidRows
-          : [];
+        const detail = splitStoredData(stored && stored.content);
+        const validRows = detail.validRows;
+        const invalidRows = detail.invalidRows;
 
         if (!validRows.length && !invalidRows.length) {
           throw new Error('El lote seleccionado no contiene detalle para exportar.');
         }
 
-        const workbook = xlsxLibrary.utils.book_new();
-        if (validRows.length) {
-          const detailSheet = xlsxLibrary.utils.aoa_to_sheet(validRows);
-          xlsxLibrary.utils.book_append_sheet(workbook, detailSheet, 'Detalle del lote');
+        const detailRows = buildValidDetailRows(batchId, validRows, stored && stored.dataCols)
+          .concat(buildInvalidDetailRows(batchId, invalidRows));
+
+        if (!detailRows.length) {
+          throw new Error('El lote seleccionado no contiene detalle para exportar.');
         }
+
+        const workbook = xlsxLibrary.utils.book_new();
+        const detailSheet = xlsxLibrary.utils.aoa_to_sheet(
+          buildDetailSheetRows(batchId, identity, detailRows)
+        );
+        xlsxLibrary.utils.book_append_sheet(workbook, detailSheet, 'Detalle del lote');
 
         if (invalidRows.length) {
           const inconsistencyRows = [
@@ -893,11 +1077,8 @@
 
             const freshBlockedMessage = executionBlockedMessage(freshBatch);
             if (freshBlockedMessage) throw new Error(freshBlockedMessage);
-            if (!Array.isArray(storedData)) {
-              throw new Error('El lote conserva inconsistencias y no puede ejecutarse.');
-            }
 
-            const validCount = Math.max(0, storedData.length - 1);
+            const validCount = Math.max(0, splitStoredData(storedData).validRows.length - 1);
             if (validCount <= 0 || validCount !== Number(freshBatch.records || 0)) {
               throw new Error('La cantidad de registros válidos del lote no coincide con los mensajes a procesar.');
             }
@@ -921,6 +1102,63 @@
             delete batchExecutionRef.current[batchId];
             setProcessingBatchId((currentId) => Number(currentId) === batchId ? null : currentId);
           });
+      }
+    });
+  };
+
+  // AXX-1085: eliminar un lote ya cargado que no se quiere enviar.
+  const deletionBlockedMessage = (record) => {
+    if (!record) return 'Seleccione un lote para eliminarlo.';
+    if (Number(record.importConfigId) !== Number(importConfigIdRef.current)) {
+      return 'El lote seleccionado no pertenece a Notificaciones MASIVAS.';
+    }
+    const state = batchExecutionState(record);
+    if (state !== 'available') {
+      return 'Solo se pueden eliminar lotes cargados que todavía no fueron enviados.';
+    }
+    return '';
+  };
+
+  const deleteSelectedBatch = () => {
+    const batch = selectedBatch;
+    const batchId = Number(batch && batch.id || 0);
+    const blockedMessage = deletionBlockedMessage(batch);
+    if (batchId <= 0 || blockedMessage) {
+      message.warning(blockedMessage || 'Seleccione un lote para eliminarlo.');
+      return;
+    }
+
+    Modal.confirm({
+      title: 'Eliminar lote ' + batchId,
+      content: 'Se eliminará el lote ' + batchId + ' (' + displayValue(batch.name)
+        + ') y su detalle de carga. Esta acción no se puede deshacer. ¿Desea continuar?',
+      okText: 'Eliminar',
+      okButtonProps: { danger: true },
+      cancelText: 'Cancelar',
+      onOk: () => {
+        setDeletingBatchId(batchId);
+        return loadFreshBatch(batchId)
+          .then((freshBatch) => {
+            const freshBlockedMessage = deletionBlockedMessage(freshBatch);
+            if (freshBlockedMessage) throw new Error(freshBlockedMessage);
+
+            return exe('RepoBatch', {
+              operation: 'DELETE',
+              entity: { id: batchId, name: freshBatch.name }
+            });
+          })
+          .then((result) => {
+            if (!result || result.ok === false) {
+              throw new Error(result && result.msg ? result.msg : 'No se pudo eliminar el lote.');
+            }
+            message.success('El lote ' + batchId + ' fue eliminado.');
+            resetSelection();
+            return loadBatches(1, pagination.pageSize || PAGE_SIZE, filters);
+          })
+          .catch((error) => {
+            message.error(error && error.message ? error.message : 'No se pudo eliminar el lote.');
+          })
+          .then(() => setDeletingBatchId(null));
       }
     });
   };
@@ -1231,9 +1469,7 @@
         operation: 'ADD',
         entity: {
           importConfigId: configId,
-          jData: JSON.stringify(invalidUploadRows.length
-            ? { validRows: prevalidatedUploadRows, invalidRows: invalidUploadRows }
-            : prevalidatedUploadRows),
+          jData: JSON.stringify(buildStoredData(prevalidatedUploadRows, invalidUploadRows)),
           name: selectedFile.name,
           processingType: 0,
           records: validCount,
@@ -1249,7 +1485,8 @@
         }
 
         if (invalidUploadRows.length) {
-          message.warning('Lote creado únicamente con las ' + validCount + ' pólizas válidas.');
+          message.warning('Lote creado con ' + validCount + ' pólizas; '
+            + invalidUploadRows.length + ' quedaron registradas como inconsistencias y no se procesarán.');
         } else {
           message.success('Lote creado correctamente con ' + validCount + ' pólizas.');
         }
@@ -1713,6 +1950,23 @@
               >
                 <PlayIcon />
                 Ejecutar lote
+              </Button>
+            </span>
+          </Tooltip>
+          <Tooltip title={selectedBatch ? deletionBlockedMessage(selectedBatch) : 'Seleccione un lote para eliminarlo.'}>
+            <span>
+              <Button
+                className="notificaciones-masivas-outline-button"
+                danger
+                loading={deletingBatchId !== null
+                  && selectedBatch !== null
+                  && Number(deletingBatchId) === Number(selectedBatch.id)}
+                disabled={!selectedBatch || loading || deletingBatchId !== null
+                  || Boolean(deletionBlockedMessage(selectedBatch))}
+                onClick={deleteSelectedBatch}
+              >
+                <TrashIcon />
+                Eliminar lote
               </Button>
             </span>
           </Tooltip>
