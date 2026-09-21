@@ -315,6 +315,12 @@
   const [reversalAccountOptions, setReversalAccountOptions] = React.useState([]);
   const [reversalAccountLoading, setReversalAccountLoading] = React.useState(false);
   const [reversalFormConfig, setReversalFormConfig] = React.useState(null);
+  const [restructurePromptVisible, setRestructurePromptVisible] = React.useState(false);
+  const [restructurePromptLoading, setRestructurePromptLoading] = React.useState(false);
+  const [cashierRestructureVisible, setCashierRestructureVisible] = React.useState(false);
+  const [cashierRestructureLoading, setCashierRestructureLoading] = React.useState(false);
+  const [cashierRestructurePolicy, setCashierRestructurePolicy] = React.useState(null);
+  const [cashierRestructureRows, setCashierRestructureRows] = React.useState([]);
   const [cashierReports, setCashierReports] = React.useState([]);
   const [cashDeskAuditVisible, setCashDeskAuditVisible] = React.useState(false);
   const [cashDeskAuditLoading, setCashDeskAuditLoading] = React.useState(false);
@@ -1347,6 +1353,58 @@
 
       .cashier-supervisor-collection-payment-modal .cashier-supervisor-table .ant-table-tbody > tr:hover > td {
         background: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-restructure-modal .ant-modal-content {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-restructure-modal .ant-modal-header {
+        border-bottom: 1px solid #cbd1d8;
+        margin-bottom: 12px;
+      }
+
+      .cashier-supervisor-restructure-modal .cashier-supervisor-restructure-summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 8px 10px;
+        background: #e6f4ff;
+        border: 1px solid #91caff;
+        border-radius: 6px;
+        color: #1f1f1f;
+      }
+
+      .cashier-supervisor-restructure-modal .cashier-supervisor-restructure-table {
+        border: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-restructure-modal .cashier-supervisor-restructure-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-restructure-modal .cashier-supervisor-restructure-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-restructure-modal .cashier-supervisor-restructure-table .ant-table-tbody > tr:hover > td {
+        background: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-restructure-modal .cashier-supervisor-restructure-table .cashier-supervisor-restructure-proposed {
+        color: #237804;
+        font-weight: 600;
       }
 
       .cashier-supervisor-collection-allocation-actions {
@@ -6906,6 +6964,205 @@
     });
   }
 
+  function getCashierMovementPolicyId(group) {
+    const policyId = getPolicyValues(group).map(value => Number(value)).find(value => Number.isFinite(value) && value > 0);
+    return policyId || Number(group && (group.policyId || group.lifePolicyId)) || 0;
+  }
+
+  function getCashierPayPlanAmount(row) {
+    const value = row && (row.minimum !== undefined && row.minimum !== null
+      ? row.minimum
+      : row.expected);
+    return Number.isFinite(Number(value)) ? Number(value) : 0;
+  }
+
+  function getCashierPayPlanPaid(row) {
+    const value = row && (row.payed !== undefined && row.payed !== null ? row.payed : row.paid);
+    return Number.isFinite(Number(value)) ? Number(value) : 0;
+  }
+
+  function buildCashierRestructurePreview(policy) {
+    const payPlan = Array.isArray(policy && policy.PayPlan)
+      ? policy.PayPlan.slice().sort((left, right) => Number(left && (left.numberInYear || left.number || 0)) - Number(right && (right.numberInYear || right.number || 0)))
+      : [];
+    const collectibleRows = payPlan.filter(row => String(row && row.concept || '').toUpperCase() !== 'CANCELLATION');
+    const paidRows = collectibleRows.filter(row => {
+      const amount = getCashierPayPlanAmount(row);
+      return amount > 0 && getCashierPayPlanPaid(row) >= amount - 0.005;
+    });
+    const editableRows = collectibleRows.filter(row => paidRows.indexOf(row) < 0);
+    const totalPendingPlan = editableRows.reduce((total, row) => total + getCashierPayPlanAmount(row), 0);
+    const remainingSlots = editableRows.length;
+    if (!remainingSlots || totalPendingPlan <= 0) return [];
+
+    const baseCents = Math.round(totalPendingPlan * 100);
+    const regularCents = Math.floor(baseCents / remainingSlots);
+    const remainder = baseCents - regularCents * remainingSlots;
+    let editableIndex = 0;
+
+    return collectibleRows.map(row => {
+      const isPaid = paidRows.indexOf(row) >= 0;
+      const proposedAmount = isPaid
+        ? getCashierPayPlanAmount(row)
+        : (regularCents + (editableIndex++ === remainingSlots - 1 ? remainder : 0)) / 100;
+      return {
+        key: String(row && row.id || `${editableIndex}-${row && row.numberInYear || ''}`),
+        id: row && row.id,
+        number: row && (row.numberInYear || row.number || row.installmentNumber),
+        dueDate: row && (row.dueDate || row.normalDueDate || row.coveredUntil),
+        currentAmount: getCashierPayPlanAmount(row),
+        paid: getCashierPayPlanPaid(row),
+        proposedAmount: proposedAmount,
+        fullyPaid: isPaid,
+        source: row
+      };
+    });
+  }
+
+  function hasDifferentFullyPendingAmounts(rows) {
+    const amounts = rows
+      .filter(row => !row.fullyPaid && row.paid <= 0.005 && row.currentAmount > 0)
+      .map(row => Math.round(row.currentAmount * 100));
+    return new Set(amounts).size > 1;
+  }
+
+  async function inspectPolicyAfterReversal(group) {
+    const policyId = getCashierMovementPolicyId(group);
+    if (!policyId) return;
+
+    setRestructurePromptLoading(true);
+    try {
+      const response = await exe('RepoLifePolicy', {
+        operation: 'GET',
+        filter: `id=${policyId}`,
+        include: ['PayPlan', 'Product', 'Holder'],
+        noTracking: true
+      });
+      if (!response || response.ok === false) return;
+
+      const policy = getRows(response)[0] || null;
+      const previewRows = buildCashierRestructurePreview(policy);
+      if (!policy || !hasDifferentFullyPendingAmounts(previewRows)) return;
+
+      setCashierRestructurePolicy(policy);
+      setCashierRestructureRows(previewRows);
+      setRestructurePromptVisible(true);
+    } catch (error) {
+      message.warning(error && error.message ? error.message : t('The policy payment plan could not be validated.'));
+    } finally {
+      setRestructurePromptLoading(false);
+    }
+  }
+
+  function openCashierRestructure() {
+    setRestructurePromptVisible(false);
+    setCashierRestructureVisible(true);
+  }
+
+  function getCashierRestructureEffectiveDate(policy) {
+    const now = new Date();
+    const policyStart = policy && policy.start ? new Date(policy.start) : null;
+    if (policyStart && !Number.isNaN(policyStart.getTime()) && policyStart.getTime() > now.getTime()) {
+      return policyStart;
+    }
+    return now;
+  }
+
+  async function executeCashierRestructure() {
+    const policy = cashierRestructurePolicy;
+    const rows = cashierRestructureRows;
+    const policyId = Number(policy && policy.id);
+    if (!policyId || !rows.length) return;
+
+    setCashierRestructureLoading(true);
+    try {
+      const editedPayPlan = rows.map((row, index) => {
+        const paidAmount = row.paid || 0;
+        const pendingAmount = Math.max(0, row.proposedAmount - paidAmount);
+        return {
+          ...row.source,
+          minimum: row.proposedAmount,
+          expected: row.proposedAmount,
+          dueAmount: pendingAmount,
+          pendingAmount: pendingAmount,
+          pending: pendingAmount > 0,
+          edited: Math.abs(row.currentAmount - row.proposedAmount) > 0.005,
+          final: index === rows.length - 1,
+          PayPlanDetail: Array.isArray(row.source && row.source.PayPlanDetail)
+            ? row.source.PayPlanDetail.map(detail => ({ ...detail }))
+            : []
+        };
+      }).concat(
+        (Array.isArray(policy.PayPlan) ? policy.PayPlan : [])
+          .filter(row => String(row && row.concept || '').toUpperCase() === 'CANCELLATION')
+          .map(row => ({
+            ...row,
+            PayPlanDetail: Array.isArray(row && row.PayPlanDetail)
+              ? row.PayPlanDetail.map(detail => ({ ...detail }))
+              : []
+          }))
+      );
+      const effectiveDate = getCashierRestructureEffectiveDate(policy).toISOString();
+      const changeResponse = await exe('ChangePayPlan', {
+        policyId: policyId,
+        effectiveDate: effectiveDate,
+        operation: 'ADD',
+        code: null,
+        note: 'Reestructuración automática posterior a reversión de pago',
+        changeIdToBeAmended: null,
+        jEditedPayPlan: JSON.stringify(editedPayPlan),
+        Surcharges: []
+      });
+      if (!changeResponse || changeResponse.ok === false) {
+        throw new Error(changeResponse && changeResponse.msg ? changeResponse.msg : t('The installment restructuring could not be created.'));
+      }
+
+      const first = getRows(changeResponse)[0] || {};
+      const changeId = Number(changeResponse.changeId || changeResponse.id || first.changeId || first.id);
+      if (!(changeId > 0)) throw new Error(t('The restructuring endorsement could not be determined.'));
+
+      const previousFrequency = escapeSqlString(policy.periodicity);
+      const paymentMethod = escapeSqlString(policy.paymentMethodCode || policy.paymentMethod);
+      const changeFields = await exe('SetField', {
+        entity: 'Change',
+        entityId: changeId,
+        fieldValue: `newPaymentMethod='${paymentMethod}',oldPaymentMethod='${paymentMethod}',newFrequency='${previousFrequency}',oldFrequency='${previousFrequency}'`
+      });
+      if (!changeFields || changeFields.ok === false) {
+        throw new Error(changeFields && changeFields.msg ? changeFields.msg : t('The restructuring endorsement fields could not be updated.'));
+      }
+
+      const changeEntity = await exe('LoadEntity', {
+        entity: 'Change',
+        fields: 'id,processId',
+        filter: `id=${changeId}`,
+        noTracking: true
+      });
+      const changeRow = getRows(changeEntity)[0] || {};
+      const processId = Number(changeEntity && (changeEntity.processId || changeEntity.id) || changeRow.processId);
+      if (!(processId > 0)) throw new Error(t('The restructuring workflow could not be determined.'));
+
+      const approval = await exe('GotoStep', { procesoId: processId, estado: 'APROVED' });
+      if (!approval || approval.ok === false) {
+        throw new Error(approval && approval.msg ? approval.msg : t('The restructuring workflow could not be approved.'));
+      }
+      const executeResponse = await exe('ExeChangePayPlan', { changeId: changeId, operation: 'EXECUTE', exeNow: true });
+      if (!executeResponse || executeResponse.ok === false) {
+        throw new Error(executeResponse && executeResponse.msg ? executeResponse.msg : t('The installment restructuring could not be executed.'));
+      }
+
+      setCashierRestructureVisible(false);
+      setCashierRestructurePolicy(null);
+      setCashierRestructureRows([]);
+      message.success(t('The installment restructuring was applied. You can review the policy now.'));
+      loadMovements({ pagination: movementPagination });
+    } catch (error) {
+      message.error(error && error.message ? error.message : t('The installment restructuring could not be completed.'));
+    } finally {
+      setCashierRestructureLoading(false);
+    }
+  }
+
   function executeReversal() {
     const allocationIdValue = Number(reversalRecord && reversalRecord.allocationId);
     const allocationId = Number.isFinite(allocationIdValue) && allocationIdValue > 0
@@ -7009,6 +7266,7 @@
             pagination: premiumReversalPagination
           });
         }
+        inspectPolicyAfterReversal(reversalRecord && reversalRecord.group);
       })
       .catch(error => message.error(error && error.message ? error.message : String(error)))
       .finally(() => setReversalLoading(false));
@@ -8674,6 +8932,54 @@
               </Form.Item>
             )}
           </Form>
+        </Modal>
+
+        <Modal
+          title={t('Installment restructuring')}
+          className="cashier-supervisor-restructure-modal"
+          open={restructurePromptVisible}
+          onCancel={() => setRestructurePromptVisible(false)}
+          onOk={openCashierRestructure}
+          okText={t('Yes, restructure')}
+          cancelText={t('No')}
+          confirmLoading={restructurePromptLoading}
+          destroyOnClose
+        >
+          <p>{t('The policy has fully pending installments with different amounts.')}</p>
+          <p>{t('Would you like to apply a proportional installment restructuring?')}</p>
+        </Modal>
+
+        <Modal
+          title={t('Proposed installment restructuring')}
+          className="cashier-supervisor-restructure-modal"
+          open={cashierRestructureVisible}
+          onCancel={() => setCashierRestructureVisible(false)}
+          onOk={executeCashierRestructure}
+          okText={t('Confirm restructuring')}
+          cancelText={t('Cancel')}
+          confirmLoading={cashierRestructureLoading}
+          width={760}
+          destroyOnClose
+        >
+          <div className="cashier-supervisor-restructure-summary">
+            <strong>{t('Effective date')}:</strong>
+            <span>{formatDate(getCashierRestructureEffectiveDate(cashierRestructurePolicy))}</span>
+          </div>
+          <Table
+            size="small"
+            bordered
+            pagination={false}
+            rowKey="key"
+            className="cashier-supervisor-restructure-table"
+            dataSource={cashierRestructureRows}
+            columns={[
+              { title: t('Installment'), dataIndex: 'number', key: 'number', align: 'center', width: 110 },
+              { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', align: 'center', render: value => formatDate(value) },
+              { title: t('Current amount'), dataIndex: 'currentAmount', key: 'currentAmount', align: 'right', render: value => formatMoney(value) },
+              { title: t('Proposed amount'), dataIndex: 'proposedAmount', key: 'proposedAmount', align: 'right', render: value => <span className="cashier-supervisor-restructure-proposed">{formatMoney(value)}</span> }
+            ]}
+            locale={{ emptyText: t('No installments found.') }}
+          />
         </Modal>
 
         <Modal
