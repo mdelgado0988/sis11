@@ -7,8 +7,7 @@
  * @created 2026/08/14
  * @name cmdSearchTransitAccounts
  * @version 1.0
- * @purpose: Search available accounts for cashier income destinations.
- *           The search is not restricted by account type or movement history.
+ * @purpose: Search available transit accounts for cashier income destinations.
  * @context: {
  *   page?: number,
  *   size?: number,
@@ -104,12 +103,30 @@ function normalizeInput(source) {
     accountName: normalizeText(value.accountName || value.name),
     currency: normalizeText(value.currency).toUpperCase(),
     policy: normalizeText(value.policy),
-    holderId: toPositiveInteger(value.holderId)
+    holderId: toPositiveInteger(value.holderId),
+    onlyWithBalance: value.showAll !== true && value.onlyWithBalance !== false
   };
 }
 
 function buildFilter(input) {
-  const conditions = ["1 = 1"];
+  const conditions = ["a.[type] = 'TRANSIT'"];
+
+  if (input.onlyWithBalance) {
+    conditions.push(`ROUND((
+      ISNULL((SELECT SUM(ISNULL(ab.[amount], 0))
+        FROM [AccountMov] ab
+        WHERE ab.[accountId] = a.[id]
+          AND ISNULL(ab.[transactionCode], '') <> 'PREMIUMPAY'
+          AND ISNULL(ab.[transactionCode], '') <> 'MONEYOUT'), 0)
+      - ISNULL((SELECT SUM(ISNULL(cp.[total], 0))
+        FROM [ClaimPayment] cp
+        WHERE cp.[sourceAccountId] = a.[id]
+          AND cp.[claimId] IS NULL
+          AND cp.[producer] IS NULL
+          AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
+          AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')), 0)
+    ), 2) > 0`);
+  }
 
   if (input.accountName) {
     const accountName = escapeSql(input.accountName);

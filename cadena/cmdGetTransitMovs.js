@@ -122,7 +122,7 @@ function normalizeInput(source) {
     currency: normalizeText(value.currency).toUpperCase(),
     name: normalizeText(value.name),
     cancellations: value.cancellations === true,
-    onlyWithBalance: value.onlyWithBalance === true
+    onlyWithBalance: value.showAll !== true && value.onlyWithBalance !== false
   };
 }
 
@@ -130,13 +130,19 @@ function buildFilter(input) {
   const conditions = ["a.[type] = 'TRANSIT'"];
 
   if (input.onlyWithBalance) {
-    conditions.push(`EXISTS (SELECT 1 FROM [AccountMov] mx
-      WHERE mx.[accountId] = a.[id]
-        AND ${movementPredicate('mx', input)})`);
-    conditions.push(`ISNULL((SELECT SUM(ISNULL(ab.[amount], 0))
-      FROM [AccountMov] ab
-      WHERE ab.[accountId] = a.[id]
-        AND ${movementPredicate('ab', input)}), 0) <> 0`);
+    conditions.push(`ROUND((
+      ISNULL((SELECT SUM(ISNULL(ab.[amount], 0))
+        FROM [AccountMov] ab
+        WHERE ab.[accountId] = a.[id]
+          AND ${movementPredicate('ab', input)}), 0)
+      - ISNULL((SELECT SUM(ISNULL(cp.[total], 0))
+        FROM [ClaimPayment] cp
+        WHERE cp.[sourceAccountId] = a.[id]
+          AND cp.[claimId] IS NULL
+          AND cp.[producer] IS NULL
+          AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
+          AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')), 0)
+    ), 2) > 0`);
   }
 
   if (input.holderId > 0) {
