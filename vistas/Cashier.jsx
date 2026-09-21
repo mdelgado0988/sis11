@@ -282,8 +282,9 @@
   const [balanceRows, setBalanceRows] = React.useState([]);
   const [balanceLoading, setBalanceLoading] = React.useState(false);
   const [transitAccountRows, setTransitAccountRows] = React.useState([]);
-  const [selectedTransitAccountId, setSelectedTransitAccountId] = React.useState(null);
+  const [selectedTransitAccountId, setSelectedTransitAccountId] = React.useState([]);
   const [transitAccountLoading, setTransitAccountLoading] = React.useState(false);
+  const [transitExportLoading, setTransitExportLoading] = React.useState(false);
   const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 25 });
   const [transitAccountTotal, setTransitAccountTotal] = React.useState(0);
   const [transitAccountFilters, setTransitAccountFilters] = React.useState({ showAll: false });
@@ -302,6 +303,12 @@
   const [accountTransferAccountOptions, setAccountTransferAccountOptions] = React.useState([]);
   const [accountTransferAccountLoading, setAccountTransferAccountLoading] = React.useState(false);
   const accountTransferAccountSearchTimer = React.useRef(null);
+  const [ppxaApplyVisible, setPpxaApplyVisible] = React.useState(false);
+  const [ppxaApplyLoading, setPpxaApplyLoading] = React.useState(false);
+  const [ppxaApplyAccountOptions, setPpxaApplyAccountOptions] = React.useState([]);
+  const [ppxaApplyAccountLoading, setPpxaApplyAccountLoading] = React.useState(false);
+  const [ppxaApplyForm] = Form.useForm();
+  const ppxaApplyAccountSearchTimer = React.useRef(null);
   const [reversalVisible, setReversalVisible] = React.useState(false);
   const [reversalCatalogLoading, setReversalCatalogLoading] = React.useState(false);
   const [reversalLoading, setReversalLoading] = React.useState(false);
@@ -357,6 +364,9 @@
   const [payerOptions, setPayerOptions] = React.useState([]);
   const [payerLoading, setPayerLoading] = React.useState(false);
   const payerSearchTimer = React.useRef(null);
+  const [refundBeneficiaryOptions, setRefundBeneficiaryOptions] = React.useState([]);
+  const [refundBeneficiaryLoading, setRefundBeneficiaryLoading] = React.useState(false);
+  const refundBeneficiarySearchTimer = React.useRef(null);
   const [policyOptions, setPolicyOptions] = React.useState([]);
   const [policyLoading, setPolicyLoading] = React.useState(false);
   const policySearchTimer = React.useRef(null);
@@ -1921,16 +1931,16 @@
         setExpandedTransitAccountKeys(current => current.filter(key =>
           rows.some(row => String(row && row.id) === String(key))
         ));
-        setSelectedTransitAccountId(current => rows.some(row => Number(row && row.id) === Number(current))
-          ? current ? String(current) : null
-          : null);
+        setSelectedTransitAccountId(current => (Array.isArray(current) ? current : [current])
+          .map(value => String(value))
+          .filter(value => rows.some(row => String(row && row.id) === value)));
         setTransitAccountTotal(Number(payload.total) || 0);
         setTransitAccountPagination({ current: currentPage, pageSize });
       })
       .catch(error => {
         setTransitAccountRows([]);
         setExpandedTransitAccountKeys([]);
-        setSelectedTransitAccountId(null);
+        setSelectedTransitAccountId([]);
         setTransitAccountTotal(0);
         message.error(error && error.message ? error.message : String(error));
       })
@@ -2016,7 +2026,7 @@
     setTransitHasSearched(false);
     setTransitAccountRows([]);
     setExpandedTransitAccountKeys([]);
-    setSelectedTransitAccountId(null);
+    setSelectedTransitAccountId([]);
     setTransitAccountTotal(0);
     setTransitFilterVisible(false);
   }
@@ -2026,6 +2036,102 @@
       filters: transitAccountFilters,
       pagination: { current: pagination.current, pageSize: pagination.pageSize }
     });
+  }
+
+  async function exportTransitAccounts() {
+    if (!transitHasSearched) {
+      message.warning(t('Apply a transit amount filter before exporting.'));
+      return;
+    }
+
+    setTransitExportLoading(true);
+    try {
+      if (!await ensureCashierExcelLibrary()) {
+        throw new Error(t('Excel export is not available.'));
+      }
+
+      const pageSize = 100;
+      const allRows = [];
+      let currentPage = 1;
+      let total = 0;
+
+      while (currentPage === 1 || allRows.length < total) {
+        const filters = transitAccountFilters || {};
+        const response = await exe('ExeChain', {
+          chain: 'cmdGetTransitMovs',
+          context: JSON.stringify({
+            page: currentPage,
+            size: pageSize,
+            holderId: filters.holderId !== undefined && filters.holderId !== null ? filters.holderId : '',
+            policy: getTrimmedString(filters.policy),
+            accountName: getTrimmedString(filters.accountName),
+            accountCode: getTrimmedString(filters.accountCode),
+            currency: getTrimmedString(filters.currency),
+            name: getTrimmedString(filters.name),
+            cancellations: filters.cancellations === true,
+            onlyWithBalance: filters.showAll !== true
+          })
+        });
+
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Transit accounts could not be exported.'));
+        }
+
+        const payload = response.outData && typeof response.outData === 'object'
+          ? response.outData
+          : {};
+        const rows = Array.isArray(payload.data) ? payload.data : [];
+        total = Number(payload.total) || allRows.length + rows.length;
+        allRows.push(...rows);
+
+        if (rows.length === 0 || rows.length < pageSize) break;
+        currentPage += 1;
+      }
+
+      if (allRows.length === 0) {
+        message.info(t('There are no transit amounts to export.'));
+        return;
+      }
+
+      const masterRows = allRows.map(account => ({
+        [t('Account ID')]: account.id || '',
+        [t('Account')]: account.accNo || '',
+        [t('Name')]: account.name || '',
+        [t('Policy')]: getTransitAccountLabel(account).policy,
+        [t('Contact')]: getTransitAccountLabel(account).contact,
+        [t('Currency')]: account.currency || '',
+        [t('Balance')]: Number(getTransitAccountBalance(account).toFixed(2)),
+        [t('Movement balance')]: Number(account.movementBalance || 0),
+        [t('Pending refund')]: Number(account.pendingRefundAmount || 0),
+        [t('Movements')]: getTransitMovements(account).length
+      }));
+
+      const detailRows = allRows.flatMap(account => getTransitMovements(account).map(movement => ({
+        [t('Account ID')]: account.id || '',
+        [t('Account')]: account.accNo || '',
+        [t('Policy')]: getTransitAccountLabel(account).policy,
+        [t('Contact')]: getTransitAccountLabel(account).contact,
+        [t('Currency')]: account.currency || '',
+        [t('Movement ID')]: movement.id || '',
+        [t('Date')]: movement.date ? formatDate(movement.date) : '',
+        [t('Transaction')]: movement.transaction || '',
+        [t('Transaction code')]: movement.transactionCode || '',
+        [t('Amount')]: Number(movement.amount || 0),
+        [t('Amount balance')]: Number(movement.amountBalance || 0),
+        [t('Transfer ID')]: movement.transferId || '',
+        [t('Units')]: Number(movement.units || 0),
+        [t('Unit balance')]: Number(movement.unitBalance || 0)
+      })));
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(masterRows), 'Maestro');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(detailRows), 'Detalle');
+      XLSX.writeFile(workbook, `transit-amounts-${Date.now()}.xlsx`);
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setTransitExportLoading(false);
+    }
   }
 
   function getTransitDetailPage(account, total) {
@@ -2113,11 +2219,298 @@
       .filter(option => option);
   }
 
+  function getSelectedTransitAccountIds() {
+    return (Array.isArray(selectedTransitAccountId) ? selectedTransitAccountId : [selectedTransitAccountId])
+      .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
+      .map(value => String(value));
+  }
+
+  function getSingleSelectedTransitAccount(actionMessage) {
+    const selectedIds = getSelectedTransitAccountIds();
+    if (selectedIds.length !== 1) {
+      message.warning(actionMessage || t('Select exactly one transit account for this action.'));
+      return null;
+    }
+
+    return transitAccountRows.find(row => String(row && row.id) === selectedIds[0]) || null;
+  }
+
+  function getSelectedTransitAccounts() {
+    const selectedIds = getSelectedTransitAccountIds();
+    return selectedIds
+      .map(id => transitAccountRows.find(row => String(row && row.id) === id))
+      .filter(Boolean);
+  }
+
+  function getSelectedTransitAccountsSummary() {
+    const accounts = getSelectedTransitAccounts();
+    const currencies = Array.from(new Set(accounts
+      .map(account => getTrimmedString(account && account.currency).toUpperCase())
+      .filter(Boolean)));
+    const total = accounts.reduce((sum, account) => sum + Math.max(0, getAuditNumber(getTransitAccountBalance(account))), 0);
+    return { accounts, currencies, total };
+  }
+
+  function closePpxaApplyModal() {
+    if (ppxaApplyAccountSearchTimer.current) {
+      clearTimeout(ppxaApplyAccountSearchTimer.current);
+      ppxaApplyAccountSearchTimer.current = null;
+    }
+    setPpxaApplyVisible(false);
+    setPpxaApplyAccountOptions([]);
+    ppxaApplyForm.resetFields();
+  }
+
+  function searchPpxaApplyAccounts(value) {
+    const query = getTrimmedString(value);
+    const currency = getTrimmedString(ppxaApplyForm.getFieldValue('currency')).toUpperCase();
+
+    if (ppxaApplyAccountSearchTimer.current) {
+      clearTimeout(ppxaApplyAccountSearchTimer.current);
+      ppxaApplyAccountSearchTimer.current = null;
+    }
+    if (!query || !currency) {
+      setPpxaApplyAccountOptions([]);
+      return;
+    }
+
+    ppxaApplyAccountSearchTimer.current = setTimeout(() => {
+      setPpxaApplyAccountLoading(true);
+      exe('ExeChain', {
+        chain: 'cmdSearchTransitAccounts',
+        context: JSON.stringify({ page: 1, size: 10, accountName: query, currency: currency })
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
+          }
+          setPpxaApplyAccountOptions(mapTransitAccountOptions(getAccountSearchRows(response))
+            .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency));
+        })
+        .catch(error => {
+          setPpxaApplyAccountOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setPpxaApplyAccountLoading(false));
+    }, 250);
+  }
+
+  async function openPpxaApplyModal() {
+    const summary = getSelectedTransitAccountsSummary();
+    if (!summary.accounts.length) {
+      message.warning(t('Select at least one transit account.'));
+      return;
+    }
+    if (summary.currencies.length !== 1) {
+      message.error(t('All selected transit accounts must have the same currency.'));
+      return;
+    }
+    if (summary.total <= 0) {
+      message.warning(t('The selected transit accounts have no available balance.'));
+      return;
+    }
+
+    ppxaApplyForm.resetFields();
+    setPpxaApplyAccountOptions([]);
+    ppxaApplyForm.setFieldsValue({
+      currency: summary.currencies[0],
+      amount: Number(summary.total.toFixed(2)),
+      reference: ''
+    });
+    setPpxaApplyVisible(true);
+    setPpxaApplyAccountLoading(true);
+    try {
+      const response = await exe('RepoAccount', {
+        operation: 'GET',
+        filter: "accNo = 'PPXA'",
+        size: 25,
+        page: 0
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The PPXA account could not be loaded.'));
+      }
+      const ppxaAccounts = getRows(response).filter(account =>
+        getTrimmedString(account && account.accNo).toUpperCase() === 'PPXA'
+        && getTrimmedString(account && account.currency).toUpperCase() === summary.currencies[0]
+      );
+      setPpxaApplyAccountOptions(mapTransitAccountOptions(ppxaAccounts));
+      if (ppxaAccounts.length > 0) {
+        ppxaApplyForm.setFieldsValue({ destinationAccount: Number(ppxaAccounts[0].id) });
+      }
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setPpxaApplyAccountLoading(false);
+    }
+  }
+
+  async function submitPpxaApply(values) {
+    const summary = getSelectedTransitAccountsSummary();
+    const destinationAccountId = Number(values && values.destinationAccount);
+    const amount = Number(values && values.amount);
+    const currency = getTrimmedString(values && values.currency).toUpperCase();
+    const reference = getTrimmedString(values && values.reference);
+    const destination = ppxaApplyAccountOptions.find(option => Number(option && option.value) === destinationAccountId);
+    const destinationAccount = destination && destination.account;
+
+    if (!summary.accounts.length) {
+      message.error(t('Select at least one transit account.'));
+      return;
+    }
+    if (summary.currencies.length !== 1 || summary.currencies[0] !== currency) {
+      message.error(t('All selected transit accounts must have the same currency.'));
+      return;
+    }
+    if (!Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
+      message.error(t('Select a destination account.'));
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || Math.abs(amount - Number(summary.total.toFixed(2))) > 0.01) {
+      message.error(t('The amount must match the total selected balance.'));
+      return;
+    }
+    if (!reference) {
+      message.error(t('Enter a reference.'));
+      return;
+    }
+    if (summary.accounts.some(account => Number(account && account.id) === destinationAccountId)) {
+      message.error(t('The destination account cannot be one of the selected source accounts.'));
+      return;
+    }
+
+    const ppxaIncomeType = incomeTypeOptions.find(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'PPXA'
+    );
+    if (!ppxaIncomeType) {
+      message.error(t('The PPXA income type is not configured.'));
+      return;
+    }
+
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.error(t('Select an open cash desk first.'));
+      return;
+    }
+
+    setPpxaApplyLoading(true);
+    const date = getCurrentUtcDateTime();
+    const incomeType = getTrimmedString(ppxaIncomeType.value || ppxaIncomeType.code);
+    const destinationName = getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo)) || 'PPXA';
+    const buildTransferEntity = (transferAmount, destinationId, destinationLabel) => ({
+      currency: currency,
+      amount: transferAmount,
+      sourceAccountId: null,
+      destinationAccountId: destinationId,
+      concept: reference,
+      paymentMethod: 'OT',
+      paymentMethodName: 'OT',
+      SplitPayments: [{
+        paymentMethod: 'OT',
+        paymentMethodName: 'OT',
+        amount: transferAmount,
+        currency: currency,
+        id: 0,
+        transferId: 0
+      }],
+      sourceName: null,
+      destinationName: destinationLabel,
+      source: null,
+      destination: null,
+      AllocationMovements: null,
+      id: 0,
+      transactionCode: null,
+      producer: null,
+      lifePolicyId: null,
+      date: date,
+      status: 0,
+      executed: false,
+      isExternal: true,
+      sourceExternal: null,
+      allocationId: null,
+      Allocation: null,
+      operatingAccountId: 0,
+      claimPaymentId: null,
+      ClaimPayment: null,
+      SourceAccount: null,
+      DestinationAccount: null,
+      Movements: null,
+      reversalDate: null,
+      incomeType: incomeType,
+      IncomeType: null,
+      jIncomeTypeForm: null,
+      transferWorkspaceId: workspaceId,
+      user: currentUserEmail || null
+    });
+
+    try {
+      const createdTransfers = [];
+      for (const account of summary.accounts) {
+        const transferAmount = Number(Math.max(0, getAuditNumber(getTransitAccountBalance(account))).toFixed(2));
+        if (transferAmount <= 0) continue;
+
+        const sourceId = Number(account && account.id);
+        const sourceName = getTrimmedString(account && (account.name || account.accNo)) || String(sourceId);
+        const outgoing = await exe('RepoTransfer', {
+          operation: 'ADD',
+          entity: buildTransferEntity(-transferAmount, sourceId, sourceName),
+          otherReceivables: [],
+          execute: false
+        });
+        if (!outgoing || outgoing.ok === false) {
+          throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The PPXA source transfer could not be created.'));
+        }
+
+        const outgoingTransfer = getRows(outgoing)[0] || {};
+        const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
+        if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
+          throw new Error(t('The PPXA source transfer was created, but its movement identifier could not be identified.'));
+        }
+        createdTransfers.push({ id: outgoingId, amount: -transferAmount });
+      }
+
+      const response = await exe('RepoTransfer', {
+        operation: 'ADD',
+        entity: buildTransferEntity(amount, destinationAccountId, destinationName),
+        otherReceivables: [],
+        execute: false
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The PPXA transfer could not be created.'));
+      }
+
+      const createdTransfer = getRows(response)[0] || {};
+      const transferId = Number(createdTransfer.id || createdTransfer.transferId || 0);
+      if (!Number.isFinite(transferId) || transferId <= 0) {
+        throw new Error(t('The PPXA transfer was created, but its movement identifier could not be identified.'));
+      }
+
+      createdTransfers.push({ id: transferId, amount: amount });
+      for (const transfer of createdTransfers) {
+        const executeResponse = await exe('DoTransfer', {
+          transferId: transfer.id,
+          transfer: null
+        });
+        if (!executeResponse || executeResponse.ok === false) {
+          throw new Error(executeResponse && executeResponse.msg
+            ? executeResponse.msg
+            : t('The PPXA transfer movement could not be executed.'));
+        }
+      }
+
+      closePpxaApplyModal();
+      loadTransitAccounts({ filters: transitAccountFilters, pagination: transitAccountPagination });
+      message.success(t('The PPXA transfers were executed successfully.'));
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setPpxaApplyLoading(false);
+    }
+  }
+
   function openRefundMoneyModal() {
-    const selectedAccount = transitAccountRows.find(row => Number(row && row.id) === Number(selectedTransitAccountId));
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
 
     if (!selectedAccount) {
-      message.warning(t('Select a transit account first.'));
       return;
     }
 
@@ -2127,13 +2520,28 @@
       : currencyOptions[0] && currencyOptions[0].value;
 
     const beneficiary = getTrimmedString(selectedAccount.contactName || selectedAccount.holderName || selectedAccount.holder);
+    const beneficiaryId = Number(selectedAccount.holderId || selectedAccount.contactId);
+    const defaultBeneficiaryOption = Number.isFinite(beneficiaryId) && beneficiaryId > 0
+      ? {
+        value: beneficiaryId,
+        name: beneficiary || t('Policy holder'),
+        identifier: t('Policy holder'),
+        label: (
+          <div style={{ lineHeight: 1.25 }}>
+            <div>{beneficiary || t('Policy holder')}</div>
+            <div style={{ color: '#8c8c8c', fontSize: 11 }}>{t('Policy holder')} | #{beneficiaryId}</div>
+          </div>
+        )
+      }
+      : null;
+    setRefundBeneficiaryOptions(defaultBeneficiaryOption ? [defaultBeneficiaryOption] : []);
     refundMoneyForm.setFieldsValue({
       currency: currency,
       sourceAccount: Number(selectedAccount.id),
       sourcePercentage: 100,
       amount: Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount))),
       paymentMethod: undefined,
-      beneficiary: beneficiary,
+      beneficiary: defaultBeneficiaryOption ? beneficiaryId : undefined,
       reference: ''
     });
     setRefundMoneyVisible(true);
@@ -2141,9 +2549,8 @@
 
   function updateRefundPercentage(value) {
     const percentage = Number(value);
-    const selectedAccount = transitAccountRows.find(row =>
-      Number(row && row.id) === Number(selectedTransitAccountId)
-    );
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
+    if (!selectedAccount) return;
     const availableAmount = Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount)));
 
     if (!Number.isFinite(percentage)) return;
@@ -2158,7 +2565,9 @@
     const values = refundMoneyForm.getFieldsValue();
     const amount = getAuditNumber(values && values.amount);
     const currency = getTrimmedString(values && values.currency);
-    const beneficiary = getTrimmedString(values && values.beneficiary);
+    const beneficiaryId = Number(values && values.beneficiary);
+    const beneficiaryOption = refundBeneficiaryOptions.find(option => Number(option && option.value) === beneficiaryId);
+    const beneficiary = getTrimmedString(beneficiaryOption && beneficiaryOption.name) || String(values && values.beneficiary || '');
 
     refundMoneyForm.setFieldsValue({
       reference: `${t('Refund of')} ${amount.toFixed(2)} ${currency} ${t('to')} ${beneficiary}`.trim()
@@ -2166,7 +2575,12 @@
   }
 
   function closeRefundMoneyModal() {
+    if (refundBeneficiarySearchTimer.current) {
+      clearTimeout(refundBeneficiarySearchTimer.current);
+      refundBeneficiarySearchTimer.current = null;
+    }
     setRefundMoneyVisible(false);
+    setRefundBeneficiaryOptions([]);
     refundMoneyForm.resetFields();
   }
 
@@ -2201,21 +2615,14 @@
   async function findCreatedRefundRequestId(lifePolicyId, reference, currency, total) {
     const response = await exe('LoadEntities', {
       entity: 'PayoutRequest',
-      fields: 'id, lifePolicyId, total, currency, reference',
-      filter: `lifePolicyId = ${lifePolicyId} AND reference = '${escapeSqlString(reference)}'`,
+      fields: 'id, lifePolicyId',
+      filter: `lifePolicyId = ${lifePolicyId}`,
       noTracking: true
     });
 
     if (!response || response.ok === false) return 0;
 
-    const rows = getRows(response).filter(row => {
-      const rowCurrency = getTrimmedString(row && row.currency).toUpperCase();
-      const rowTotal = getAuditNumber(row && row.total);
-      return rowCurrency === getTrimmedString(currency).toUpperCase()
-        && Math.abs(rowTotal - total) < 0.01;
-    });
-
-    return rows.reduce((lastId, row) => {
+    return getRows(response).reduce((lastId, row) => {
       const rowId = Number(row && row.id);
       return Number.isFinite(rowId) && rowId > lastId ? rowId : lastId;
     }, 0);
@@ -2233,7 +2640,9 @@
     const paymentMethod = getTrimmedString(values && values.paymentMethod);
     const reference = getTrimmedString(values && values.reference);
     const transferReference = `Sol. ${requestId} ${reference}`.trim();
-    const beneficiary = getTrimmedString(values && values.beneficiary);
+    const beneficiaryId = Number(values && values.beneficiary);
+    const beneficiaryOption = refundBeneficiaryOptions.find(option => Number(option && option.value) === beneficiaryId);
+    const beneficiary = getTrimmedString(beneficiaryOption && beneficiaryOption.name);
     const incomeType = getTrimmedString(refundIncomeType.value || refundIncomeType.code);
     const refundDestination = await resolveRefundDestinationAccount();
     const paymentMethodOption = getRefundPaymentMethodOptions().find(item =>
@@ -2314,12 +2723,10 @@
   }
 
   async function submitRefundMoneyRequest(values) {
-    const selectedAccount = transitAccountRows.find(row =>
-      Number(row && row.id) === Number(selectedTransitAccountId)
-    );
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
     const lifePolicyId = Number(selectedAccount && (selectedAccount.lifePolicyId || selectedAccount.policyId));
     const sourceAccountId = Number(values && values.sourceAccount);
-    const contactId = Number(selectedAccount && (selectedAccount.holderId || selectedAccount.contactId));
+    const contactId = Number(values && values.beneficiary);
     const total = getAuditNumber(values && values.amount);
     const percentage = getAuditNumber(values && values.sourcePercentage);
 
@@ -2334,7 +2741,7 @@
     }
 
     if (!Number.isFinite(contactId) || contactId <= 0) {
-      message.error(t('The policy holder is invalid.'));
+      message.error(t('The beneficiary is invalid.'));
       return;
     }
 
@@ -2368,7 +2775,7 @@
       const request = requestRows[0]
         || (response.outData && !Array.isArray(response.outData) ? response.outData : null);
       const requestMessage = getTrimmedString(response && response.msg);
-      const requestMatch = requestMessage.match(/Solicitud\s+(\d+)\s+creada/i);
+      const requestMatch = requestMessage.match(/(?:Solicitud|Request)\s+(\d+)\s+(?:creada|created)/i);
       const requestIdFromMessage = requestMatch ? Number(requestMatch[1]) : 0;
       let requestId = Number(request && (request.id || request.requestId || response.id))
         || requestIdFromMessage;
@@ -2907,7 +3314,7 @@
   function isTransitIncomeType(incomeTypeCode) {
     const option = getIncomeTypeOption(incomeTypeCode);
     const internalType = getTrimmedString(option && option.internalType).toUpperCase();
-    return ['TRANSIT', 'DEPOPAYMENT'].includes(internalType);
+    return ['TRANSIT', 'DEPOPAYMENT', 'PPXA'].includes(internalType);
   }
 
   function isVisibleNewIncomeType(option) {
@@ -3035,10 +3442,53 @@
     });
   }
 
+  async function loadPpxaNewIncomeDestination(currencyValue) {
+    const currency = getTrimmedString(currencyValue).toUpperCase();
+    if (!currency) {
+      setNewIncomeDestinationAccountOptions([]);
+      newIncomeForm.setFieldsValue({ destination: undefined });
+      return;
+    }
+
+    setNewIncomeDestinationAccountLoading(true);
+    try {
+      const response = await exe('RepoAccount', {
+        operation: 'GET',
+        filter: "accNo = 'PPXA'",
+        size: 25,
+        page: 0
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The PPXA account could not be loaded.'));
+      }
+
+      const options = mapTransitAccountOptions(getRows(response).filter(account =>
+        getTrimmedString(account && account.accNo).toUpperCase() === 'PPXA'
+        && getTrimmedString(account && account.currency).toUpperCase() === currency
+      ));
+      setNewIncomeDestinationAccountOptions(options);
+      newIncomeForm.setFieldsValue({ destination: options.length > 0 ? options[0].value : undefined });
+    } catch (error) {
+      setNewIncomeDestinationAccountOptions([]);
+      newIncomeForm.setFieldsValue({ destination: undefined });
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setNewIncomeDestinationAccountLoading(false);
+    }
+  }
+
   function updateNewIncomeType(value) {
     setNewIncomeTypeCode(value);
     newIncomeForm.setFieldsValue({ destination: undefined });
     setNewIncomeDestinationAccountOptions([]);
+
+    const selectedIncomeType = getIncomeTypeOption(value);
+    const internalType = getTrimmedString(selectedIncomeType && selectedIncomeType.internalType).toUpperCase();
+    if (internalType === 'PPXA') {
+      const currency = newIncomeForm.getFieldValue('currency')
+        || (currencyOptions[0] && currencyOptions[0].value);
+      loadPpxaNewIncomeDestination(currency);
+    }
 
     if (!isTransitIncomeType(value) && externalSourceOptions.length === 1) {
       newIncomeForm.setFieldsValue({ destination: externalSourceOptions[0].value });
@@ -3904,8 +4354,8 @@
       ? transfers.filter(item => Number(item && item.id) > 0)
       : [];
 
-    if (validTransfers.length !== 2) {
-      message.error(t('Both account transfer movements are required.'));
+    if (validTransfers.length < 2) {
+      message.error(t('The account transfer movements are required.'));
       return;
     }
 
@@ -3939,8 +4389,8 @@
       ? transfers.filter(item => Number(item && item.id) > 0)
       : [];
 
-    if (validTransfers.length !== 2) {
-      message.error(t('Both account transfer movements are required.'));
+    if (validTransfers.length < 2) {
+      message.error(t('The account transfer movements are required.'));
       return;
     }
 
@@ -3959,7 +4409,7 @@
       content: (
         <div>
           <div>{t('The account transfer movements were created successfully.')}</div>
-          <div style={{ marginTop: 8 }}>{t('Approval will execute both the outgoing and incoming movements.')}</div>
+          <div style={{ marginTop: 8 }}>{t('Approval will execute all outgoing and incoming movements.')}</div>
           <div>
             <strong>{t('Outgoing movement ID')}:</strong> {validTransfers[0].id}
             {' - '}
@@ -3970,7 +4420,7 @@
             {' - '}
             {formatMoney(Math.abs(Number(validTransfers[1].amount) || 0))}
           </div>
-          <div style={{ marginTop: 8 }}>{t('Do you want to execute both movements now?')}</div>
+          <div style={{ marginTop: 8 }}>{t('Do you want to execute all movements now?')}</div>
         </div>
       ),
       okText: t('Yes'),
@@ -4166,6 +4616,70 @@
           message.error(error && error.message ? error.message : String(error));
         })
         .finally(() => setPayerLoading(false));
+    }, 400);
+  }
+
+  function searchRefundBeneficiaries(value) {
+    const text = getTrimmedString(value);
+    const isNumericId = /^\d+$/.test(text);
+
+    if (refundBeneficiarySearchTimer.current) {
+      clearTimeout(refundBeneficiarySearchTimer.current);
+      refundBeneficiarySearchTimer.current = null;
+    }
+
+    if (text.length < 3 && !isNumericId) {
+      setRefundBeneficiaryOptions([]);
+      setRefundBeneficiaryLoading(false);
+      return;
+    }
+
+    refundBeneficiarySearchTimer.current = setTimeout(() => {
+      const escaped = escapeSqlString(text);
+      const numericId = isNumericId ? Number(text) : 0;
+      const idFilter = numericId > 0 ? ` OR [id] = ${numericId}` : '';
+      const filter = isNumericId && text.length < 3
+        ? `(inactive=0) AND [id] = ${numericId}`
+        : `(inactive=0) AND (([name] LIKE N'%${escaped}%') OR ([surname1] LIKE N'%${escaped}%') OR ([surname2] LIKE N'%${escaped}%') OR ([cnp] LIKE N'%${escaped}%') OR ([nif] LIKE N'%${escaped}%')${idFilter})`;
+
+      setRefundBeneficiaryLoading(true);
+      exe('GetContacts', { operation: 'GET', filter: filter, size: 15 })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Beneficiaries could not be loaded.'));
+          }
+
+          const options = getRows(response).map(contact => {
+            const name = getTrimmedString(contact && (contact.FullName || contact.fullName || [
+              contact.name,
+              contact.surname1,
+              contact.surname2
+            ].filter(Boolean).join(' ')));
+            const identifier = getTrimmedString(contact && (contact.cnp || contact.nif || contact.passport));
+            const id = contact && contact.id !== undefined && contact.id !== null ? String(contact.id) : '';
+
+            return {
+              value: contact && contact.id,
+              name: name || t('Unnamed contact'),
+              identifier: identifier || t('No identification'),
+              label: (
+                <div style={{ lineHeight: 1.25 }}>
+                  <div>{name || t('Unnamed contact')}</div>
+                  <div style={{ color: '#8c8c8c', fontSize: 11 }}>
+                    {identifier || t('No identification')} | #{id}
+                  </div>
+                </div>
+              )
+            };
+          }).filter(item => item.value !== undefined && item.value !== null);
+
+          setRefundBeneficiaryOptions(options);
+        })
+        .catch(error => {
+          setRefundBeneficiaryOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setRefundBeneficiaryLoading(false));
     }, 400);
   }
 
@@ -4379,20 +4893,20 @@
 
     if (!row) return 0;
 
-    const amount = getAuditNumber(row.amount);
-    const deposit = getAuditNumber(row.deposit);
+    const amount = Math.abs(getAuditNumber(row.amount));
+    const deposit = Math.abs(getAuditNumber(row.deposit));
     const cashFund = getAuditNumber(row.assignedFund);
 
-    // Deposits are returned with their accounting sign, so the available balance
-    // must include the previous deposit and the assigned cash fund.
-    return Math.max(0, amount + deposit + cashFund);
+    // The summary can return the movement amount with either accounting sign.
+    // A deposit always reduces the amount available for a new deposit.
+    return Math.max(0, amount - deposit + cashFund);
   }
 
   function getBalanceAvailableAmount(row) {
-    const amount = getAuditNumber(row && row.amount);
-    const deposit = getAuditNumber(row && row.deposit);
+    const amount = Math.abs(getAuditNumber(row && row.amount));
+    const deposit = Math.abs(getAuditNumber(row && row.deposit));
     const cashFund = getAuditNumber(row && row.assignedFund);
-    return Math.max(0, amount + deposit + cashFund);
+    return Math.max(0, amount - deposit + cashFund);
   }
 
   function getUniqueDepositRows(currency) {
@@ -4505,7 +5019,21 @@
       return;
     }
 
-    const expectedAmount = getAuditNumber(values && values.expectedAmount);
+    const currency = getTrimmedString(values && values.currency);
+    const paymentMethod = getTrimmedString(values && values.paymentMethod);
+    const expectedAmount = isUniqueDeposit
+      ? getUniqueDepositExpectedAmount(currency)
+      : getDepositExpectedAmount(paymentMethod, currency);
+    if (!isUniqueDeposit && !paymentMethod) {
+      message.warning(t('Select a payment method.'));
+      setDepositSubmitting(false);
+      return;
+    }
+    if (expectedAmount <= 0) {
+      message.warning(t('There is no available balance for the selected deposit.'));
+      setDepositSubmitting(false);
+      return;
+    }
     if (amount > expectedAmount + 0.01) {
       message.warning(t('The deposited amount cannot exceed the expected amount.'));
       setDepositSubmitting(false);
@@ -4519,15 +5047,14 @@
         return;
       }
 
-      const currency = getTrimmedString(values && values.currency);
       const incomeType = getTrimmedString(values && values.incomeType);
       const concept = getTrimmedString(values && values.reference);
       const depositRows = isUniqueDeposit
         ? getUniqueDepositRows(currency)
         : [{
           row: null,
-          amount: getAuditNumber(values && values.expectedAmount),
-          paymentMethod: getTrimmedString(values && values.paymentMethod)
+          amount: expectedAmount,
+          paymentMethod: paymentMethod
         }];
 
       if (depositRows.length === 0) {
@@ -4542,7 +5069,7 @@
       for (const depositRow of depositRows) {
         if (remainingAmount <= 0) break;
 
-        const rowAmount = isUniqueDeposit ? depositRow.amount : getAuditNumber(values && values.expectedAmount);
+        const rowAmount = isUniqueDeposit ? depositRow.amount : expectedAmount;
         const depositAmount = Math.min(remainingAmount, rowAmount);
         if (depositAmount <= 0) continue;
 
@@ -4697,11 +5224,11 @@
     let currency = 'USD';
 
     (Array.isArray(summary) ? summary : []).forEach(row => {
-      const amount = getAuditNumber(row && row.amount);
+      const amount = Math.abs(getAuditNumber(row && row.amount));
       const method = getTrimmedString(row && (row.paymentMethodName || row.paymentMethod)).toUpperCase();
       currency = getTrimmedString(row && row.currency) || currency;
       total += amount;
-      deposits += getAuditNumber(row && row.deposit);
+      deposits -= Math.abs(getAuditNumber(row && row.deposit));
       cashFund += getAuditNumber(row && row.cashFund);
 
       if (method.indexOf('EFECT') >= 0 || method === 'EFE') values.cash += amount;
@@ -4718,7 +5245,10 @@
       total: total,
       deposits: deposits,
       netIncome: total + deposits,
-      endBalance: total + deposits + cashFund,
+      endBalance: (Array.isArray(summary) ? summary : [])
+        .reduce((balance, row) => balance + getAuditNumber(row && (row.availableBalance !== undefined
+          ? row.availableBalance
+          : row.difference !== undefined ? row.difference : row.dif)), 0),
       currency: currency
     };
   }
@@ -4732,14 +5262,20 @@
 
     setCashDeskAuditVisible(true);
     setCashDeskAuditLoading(true);
-    exe('GetCashierIncomeSummary', { workspaceId: workspaceId })
+    exe('ExeChain', {
+      chain: 'cmdGetCashierBalanceSummary',
+      context: JSON.stringify({ workspaceId: workspaceId })
+    })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('Cash desk audit could not be loaded.'));
         }
 
-        const summary = response.outData && Array.isArray(response.outData.summary)
-          ? response.outData.summary
+        const payload = response.outData && !Array.isArray(response.outData)
+          ? response.outData
+          : {};
+        const summary = Array.isArray(payload.summary)
+          ? payload.summary
           : [];
         setCashDeskAudit(buildCashDeskAuditFromSummary(summary));
       })
@@ -4768,17 +5304,23 @@
     }
 
     setBalanceLoading(true);
-    exe('GetCashierIncomeSummary', { workspaceId: workspaceId })
+    exe('ExeChain', {
+      chain: 'cmdGetCashierBalanceSummary',
+      context: JSON.stringify({ workspaceId: workspaceId })
+    })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('Balances could not be loaded.'));
         }
 
-        const summary = response.outData && Array.isArray(response.outData.summary)
-          ? response.outData.summary
+        const payload = response.outData && !Array.isArray(response.outData)
+          ? response.outData
+          : {};
+        const summary = Array.isArray(payload.summary)
+          ? payload.summary
           : [];
 
-        setBalanceRows(summary.map((item, index) => ({
+        const rows = summary.map((item, index) => ({
           key: getTrimmedString(item && item.code) || `balance-${index}`,
           paymentMethodCode: getTrimmedString(item && item.paymentMethod),
           paymentMethod: getTrimmedString(item && item.paymentMethodName) || getBalancePaymentMethod(item),
@@ -4786,8 +5328,9 @@
           assignedFund: getAuditNumber(item && item.cashFund),
           amount: getAuditNumber(item && item.amount),
           deposit: getAuditNumber(item && item.deposit),
-          difference: getAuditNumber(item && item.dif)
-        })));
+          difference: getAuditNumber(item && (item.difference !== undefined ? item.difference : item.dif))
+        }));
+        setBalanceRows(rows);
       })
       .catch(error => {
         setBalanceRows([]);
@@ -5269,9 +5812,7 @@
   }
 
   async function openTransitPremiumCollection() {
-    const account = transitAccountRows.find(row =>
-      Number(row && row.id) === Number(selectedTransitAccountId)
-    );
+    const account = getSingleSelectedTransitAccount(t('Select exactly one transit account to collect a premium.'));
     const policyId = Number(account && (account.lifePolicyId || account.policyId));
     const availableAmount = Number(getTransitAccountBalance(account).toFixed(2));
 
@@ -5719,20 +6260,15 @@
       loadCashDeskBalances();
     }
 
-    if (key === 'transit-premiums' && selectedCashierRow && selectedCashierRow.id) {
-      loadTransitAccounts({
-        filters: transitAccountFilters && Object.keys(transitAccountFilters).length
-          ? transitAccountFilters
-          : { showAll: false },
-        pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
-      });
-    }
-
   }
 
   function selectCashDesk(record) {
     setSelectedCashierRow(record || null);
-    setSelectedTransitAccountId(null);
+    setSelectedTransitAccountId([]);
+    setTransitHasSearched(false);
+    setTransitAccountRows([]);
+    setTransitAccountTotal(0);
+    setExpandedTransitAccountKeys([]);
     if (!record) {
       setActiveTab('cash-desks');
       setBalanceRows([]);
@@ -7978,8 +8514,17 @@
         </Button>
         <Button
           className="cashier-supervisor-outline-button"
+          icon={<DownloadOutlined />}
+          loading={transitExportLoading}
+          disabled={!transitHasSearched || transitExportLoading}
+          onClick={exportTransitAccounts}
+        >
+          {t('Export Excel')}
+        </Button>
+        <Button
+          className="cashier-supervisor-outline-button"
           icon={<RevertMovementIcon />}
-          disabled={!transitHasSearched || !selectedTransitAccountId}
+          disabled={!transitHasSearched || getSelectedTransitAccountIds().length !== 1}
           onClick={openRefundMoneyModal}
         >
           {t('Return money')}
@@ -7987,10 +8532,18 @@
         <Button
           type="primary"
           icon={<PolicyIcon />}
-          disabled={!transitHasSearched || !selectedTransitAccountId}
+          disabled={!transitHasSearched || getSelectedTransitAccountIds().length !== 1}
           onClick={openTransitPremiumCollection}
         >
           {t('Collect premium')}
+        </Button>
+        <Button
+          type="primary"
+          icon={<TransferAccountIcon />}
+          disabled={!transitHasSearched || getSelectedTransitAccountIds().length === 0}
+          onClick={openPpxaApplyModal}
+        >
+          {t('Apply pending premiums (PPXA)')}
         </Button>
         <Button className="cashier-supervisor-success-button" icon={<TransferAccountIcon />} onClick={openAccountTransferModal}>
           {t('Transfer between accounts')}
@@ -8018,16 +8571,23 @@
         className="cashier-supervisor-table"
         loading={transitAccountLoading}
         rowSelection={{
-          type: 'radio',
-          selectedRowKeys: selectedTransitAccountId ? [String(selectedTransitAccountId)] : [],
-          onChange: keys => setSelectedTransitAccountId(keys.length > 0 ? String(keys[0]) : null)
+          type: 'checkbox',
+          selectedRowKeys: getSelectedTransitAccountIds(),
+          onChange: keys => setSelectedTransitAccountId(keys.map(key => String(key)))
         }}
         onRow={record => ({
           onClick: event => {
             if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper, .ant-pagination, .cashier-supervisor-transit-detail')) return;
-            setSelectedTransitAccountId(record && record.id !== undefined && record.id !== null
+            const accountId = record && record.id !== undefined && record.id !== null
               ? String(record.id)
-              : null);
+              : null;
+            if (!accountId) return;
+            setSelectedTransitAccountId(current => {
+              const selectedIds = Array.isArray(current) ? current.map(value => String(value)) : [];
+              return selectedIds.includes(accountId)
+                ? selectedIds.filter(value => value !== accountId)
+                : selectedIds.concat(accountId);
+            });
           }
         })}
         pagination={{
@@ -8643,6 +9203,13 @@
               style={{ width: '100%' }}
               options={currencyOptions}
               disabled={Boolean(editMode)}
+              onChange={value => {
+                const selectedIncomeType = getIncomeTypeOption(newIncomeTypeCode);
+                const internalType = getTrimmedString(selectedIncomeType && selectedIncomeType.internalType).toUpperCase();
+                if (internalType === 'PPXA') {
+                  loadPpxaNewIncomeDestination(value);
+                }
+              }}
             />
           </Form.Item>
           <Form.Item
@@ -9223,7 +9790,17 @@
               name="beneficiary"
               rules={[{ required: true, message: t('Enter a beneficiary.') }]}
             >
-              <Input disabled />
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                optionLabelProp="name"
+                options={refundBeneficiaryOptions}
+                loading={refundBeneficiaryLoading}
+                onSearch={searchRefundBeneficiaries}
+                placeholder={t('Search beneficiary')}
+                notFoundContent={refundBeneficiaryLoading ? t('Loading...') : t('Type at least 3 characters')}
+              />
             </Form.Item>
 
             <Form.Item
@@ -9243,6 +9820,60 @@
                   </Tooltip>
                 )}
               />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={t('Apply pending premiums (PPXA)')}
+          className="cashier-supervisor-collection-payment-modal"
+          open={ppxaApplyVisible}
+          onCancel={closePpxaApplyModal}
+          onOk={() => ppxaApplyForm.submit()}
+          okText={t('Execute')}
+          cancelText={t('Cancel')}
+          confirmLoading={ppxaApplyLoading || ppxaApplyAccountLoading}
+          destroyOnClose={false}
+          width={620}
+        >
+          <Form form={ppxaApplyForm} layout="vertical" onFinish={submitPpxaApply}>
+            <div className="cashier-supervisor-collection-allocation-summary">
+              <div><strong>{t('Selected balance')}:</strong> {formatMoney(ppxaApplyForm.getFieldValue('amount'))}</div>
+            </div>
+            <Form.Item label={t('Currency')} name="currency">
+              <Select disabled options={currencyOptions} />
+            </Form.Item>
+            <Form.Item
+              label={t('Amount')}
+              name="amount"
+              rules={[{ required: true, message: t('The selected balance is required.') }]}
+            >
+              <InputNumber disabled precision={2} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item
+              label={t('Destination account')}
+              name="destinationAccount"
+              rules={[{ required: true, message: t('Select a destination account.') }]}
+            >
+              <Select
+                showSearch
+                allowClear
+                filterOption={false}
+                optionFilterProp="label"
+                optionLabelProp="shortAccountLabel"
+                options={ppxaApplyAccountOptions}
+                loading={ppxaApplyAccountLoading}
+                placeholder={t('Search account')}
+                onSearch={searchPpxaApplyAccounts}
+                notFoundContent={ppxaApplyAccountLoading ? t('Loading...') : t('No accounts found')}
+              />
+            </Form.Item>
+            <Form.Item
+              label={t('Reference')}
+              name="reference"
+              rules={[{ required: true, message: t('Enter a reference.') }]}
+            >
+              <Input />
             </Form.Item>
           </Form>
         </Modal>
