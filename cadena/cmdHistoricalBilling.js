@@ -41,7 +41,7 @@ WITH BillingRows AS (
             ELSE 'INACTIVE'
         END AS [status],
         lp.[start] AS [start],
-        MAX(pp.[dueDate]) AS [end],
+        lp.[end] AS [end],
         SUM(ISNULL(pp.[minimum], pp.[expected])) AS [total],
         SUM(ISNULL(pp.[payed], 0)) AS [paid],
         SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0)) AS [pending],
@@ -80,6 +80,7 @@ WITH BillingRows AS (
         lp.[active],
         lp.[entityState],
         lp.[start],
+        lp.[end],
         cancellation.[annualPremiumDif]
 )
 SELECT

@@ -2744,8 +2744,8 @@
     const unallocatedTransfers = selectedTransfers.filter(item => item.allocationId <= 0);
 
     if (allocatedTransfers.length > 0) {
-      const allocatedIds = allocatedTransfers.map(item => item.transferId);
-      window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=[${allocatedIds.join(',')}]`, '_blank', 'noopener,noreferrer');
+      const transferId = allocatedTransfers[0].transferId;
+      window.open(`#/reportview/${reportName}/workspaceId=${workspaceId}&transferId=${transferId}`, '_blank', 'noopener,noreferrer');
     }
 
     unallocatedTransfers.forEach(item => {

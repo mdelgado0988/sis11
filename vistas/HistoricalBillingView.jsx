@@ -772,12 +772,8 @@
     return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
   }
 
-  // Policy validity, due dates and paid-through are calendar dates: show the stored day as written, never
-  // shifted to the browser time zone (a UTC-5 browser showed 2025-09-01 as 31/08/2025, AXX-815).
   function formatCalendarDate(value) {
-    const raw = text(value);
-    const calendarDay = raw.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/);
-    return calendarDay ? `${calendarDay[3]}/${calendarDay[2]}/${calendarDay[1]}` : formatDate(value);
+    return formatDate(value);
   }
 
   function calculatePremiumAccrual(startValue, endValue, premiumValue) {

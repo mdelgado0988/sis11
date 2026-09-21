@@ -633,17 +633,82 @@
         font-weight: normal;
       }
 
-      .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-thead > tr > th,
-      .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-tbody > tr > td {
-        padding: 3px 6px !important;
+      .cashier-supervisor-reversal-modal .cashier-premium-reversal-table .ant-table-thead > tr > th,
+      .cashier-supervisor-reversal-modal .cashier-premium-reversal-table .ant-table-tbody > tr > td {
+        padding: 5px 8px !important;
         font-size: 12px;
-        line-height: 16px;
+        line-height: 18px;
       }
 
-      .cashier-supervisor-view .cashier-premium-reversal-table .ant-table-body {
+      .cashier-supervisor-reversal-modal .cashier-premium-reversal-table .ant-table-body {
         overflow-x: scroll !important;
         overflow-y: scroll !important;
         scrollbar-gutter: stable;
+      }
+
+      .cashier-supervisor-reversal-modal .cashier-supervisor-table {
+        border: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-reversal-modal .cashier-supervisor-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-reversal-modal .cashier-supervisor-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .cashier-supervisor-reversal-modal .cashier-supervisor-table .ant-table-tbody > tr:hover > td {
+        background: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-input,
+      .cashier-supervisor-reversal-modal .ant-input-number,
+      .cashier-supervisor-reversal-modal .ant-picker,
+      .cashier-supervisor-reversal-modal .ant-select-selector {
+        border: 1px solid #b8c4d1 !important;
+        border-radius: 6px !important;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-input:focus,
+      .cashier-supervisor-reversal-modal .ant-input-number-focused,
+      .cashier-supervisor-reversal-modal .ant-picker-focused,
+      .cashier-supervisor-reversal-modal .ant-select-focused .ant-select-selector {
+        border-color: #1677ff !important;
+        box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2) !important;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-input:hover,
+      .cashier-supervisor-reversal-modal .ant-input-number:hover,
+      .cashier-supervisor-reversal-modal .ant-picker:hover,
+      .cashier-supervisor-reversal-modal .ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+        border-color: #8da9c2 !important;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-input:disabled,
+      .cashier-supervisor-reversal-modal .ant-input-number-disabled,
+      .cashier-supervisor-reversal-modal .ant-picker-disabled,
+      .cashier-supervisor-reversal-modal .ant-select-disabled .ant-select-selector {
+        border-color: #b8c4d1 !important;
+        background: #f5f5f5 !important;
+        cursor: not-allowed;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-form-item-label > label {
+        color: #1f1f1f;
+        font-weight: 600;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-modal-content {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-reversal-modal .ant-modal-header {
+        border-bottom: 1px solid #cbd1d8;
       }
 
       .cashier-supervisor-status-bar {
@@ -2278,7 +2343,7 @@
       setPpxaApplyAccountLoading(true);
       exe('ExeChain', {
         chain: 'cmdSearchTransitAccounts',
-        context: JSON.stringify({ page: 1, size: 10, accountName: query, currency: currency })
+        context: JSON.stringify({ page: 1, size: 10, accountName: query, currency: currency, showAll: true })
       })
         .then(response => {
           if (!response || response.ok === false) {
@@ -2856,7 +2921,7 @@
       setAccountTransferAccountLoading(true);
       exe('ExeChain', {
         chain: 'cmdSearchTransitAccounts',
-        context: JSON.stringify({ page: 1, size: 10, accountName: text, currency: currency })
+        context: JSON.stringify({ page: 1, size: 10, accountName: text, currency: currency, showAll: true })
       })
         .then(response => {
           if (!response || response.ok === false) {
@@ -3544,7 +3609,7 @@
       setNewIncomeDestinationAccountLoading(true);
       exe('ExeChain', {
         chain: 'cmdSearchTransitAccounts',
-        context: JSON.stringify({ page: 1, size: 10, accountName: text })
+        context: JSON.stringify({ page: 1, size: 10, accountName: text, showAll: true })
       })
         .then(response => {
           if (!response || response.ok === false) {
@@ -3645,7 +3710,8 @@
         accountName: source.accountName || '',
         policy: source.policy || '',
         holderId: Number.isFinite(contactId) && contactId > 0 ? contactId : 0,
-        currency: transferCurrency || undefined
+        currency: transferCurrency || undefined,
+        showAll: true
       })
     })
       .then(response => {
@@ -7131,6 +7197,10 @@
     if (Number.isInteger(transferId) && transferId > 0) {
       transferFilterParts.push(`id = ${transferId}`);
     }
+    const allocationId = Number(source.allocationId);
+    if (Number.isInteger(allocationId) && allocationId > 0) {
+      transferFilterParts.push(`allocationId = ${allocationId}`);
+    }
     if (hasAmount && Number.isFinite(amount)) {
       transferFilterParts.push(`amount >= ${amount}`);
       transferFilterParts.push(`amount <= ${amount}`);
@@ -7202,12 +7272,14 @@
   function applyPremiumReversalFilters(values) {
     const workspaceId = Number(values && values.workspaceId);
     const transferId = Number(values && values.transferId);
+    const allocationId = Number(values && values.allocationId);
     const rawAmount = values && values.amount;
     const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== '';
     const nextFilters = {
       workspaceId: Number.isInteger(workspaceId) && workspaceId > 0 ? workspaceId : null,
       cashier: getTrimmedString(values && values.cashier),
       transferId: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+      allocationId: Number.isInteger(allocationId) && allocationId > 0 ? allocationId : null,
       amount: hasAmount && Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : null,
       fromDate: formatTransferFilterBoundary(values && values.dateFrom, false),
       toDate: formatTransferFilterBoundary(values && values.dateTo, true)
@@ -10279,6 +10351,7 @@
 
         <Modal
           title={t('Premium reversals')}
+          className="cashier-supervisor-reversal-modal"
           open={premiumReversalVisible}
           onCancel={() => setPremiumReversalVisible(false)}
           footer={null}
@@ -10303,6 +10376,11 @@
               </Col>
               <Col span={6}>
                 <Form.Item label={t('Transfer ID')} name="transferId">
+                  <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item label={t('Allocation ID')} name="allocationId">
                   <InputNumber min={1} precision={0} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
@@ -10335,7 +10413,7 @@
             dataSource={premiumReversalRows}
             size="small"
             bordered
-            className="cashier-premium-reversal-table"
+            className="cashier-supervisor-table cashier-premium-reversal-table"
             loading={premiumReversalLoading}
             pagination={{
               current: premiumReversalPagination.current,
