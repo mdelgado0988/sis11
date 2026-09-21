@@ -136,6 +136,7 @@
   const [restructurePreviewRows, setRestructurePreviewRows] = React.useState([]);
   const [restructurePreviewDirty, setRestructurePreviewDirty] = React.useState(false);
   const [restructureTotalError, setRestructureTotalError] = React.useState('');
+  const [restructureDateError, setRestructureDateError] = React.useState('');
   const [policyReloadToken, setPolicyReloadToken] = React.useState(0);
   const [restructureForm] = Form.useForm();
   const [endorsementForm] = Form.useForm();
@@ -1826,6 +1827,7 @@
     setRestructurePreviewRows([]);
     setRestructurePreviewDirty(false);
     setRestructureTotalError('');
+    setRestructureDateError('');
     setRestructureModalOpen(true);
   }
 
@@ -1843,6 +1845,43 @@
     return t('The restructuring cannot be executed because the total installment amount changed.')
       + ' ' + t('Current total') + ': ' + formatMoney(currentTotal)
       + '. ' + t('New total') + ': ' + formatMoney(previewTotal) + '.';
+  }
+
+  function getRestructureDateError(rows, frequencyValue) {
+    const policyEndValue = detailPolicy.end
+      || detailPolicy.endDate
+      || detailPolicy.End
+      || detailPolicy.EndDate
+      || generalData.end
+      || generalData.endDate
+      || generalData.policyEnd
+      || generalData.policyEndDate;
+    if (typeof moment === 'undefined') return t('The policy end date could not be validated.');
+    if (!policyEndValue) return t('The policy end date could not be determined.');
+
+    const policyEnd = moment.utc(policyEndValue).local();
+    if (!policyEnd.isValid()) return t('The policy end date could not be validated.');
+
+    const frequencyMonths = getRestructureFrequencyMonths(frequencyValue);
+    const maximumDueDate = frequencyMonths === 1
+      ? policyEnd.clone().subtract(1, 'month')
+      : policyEnd.clone();
+    const invalidRow = (Array.isArray(rows) ? rows : []).find(row => {
+      const dueDate = getRestructureDueDateMoment(row);
+      return dueDate && dueDate.clone().local().isAfter(maximumDueDate, 'day');
+    });
+
+    if (!invalidRow) return '';
+
+    const limitLabel = frequencyMonths === 1
+      ? t('one month before the policy end date')
+      : t('the policy end date');
+    const invalidDueDate = getRestructureDueDateMoment(invalidRow);
+    return t('Installment') + ' ' + text(invalidRow && invalidRow.numberInYear)
+      + ' (' + formatCalendarDate(invalidDueDate && invalidDueDate.toISOString()) + ') '
+      + t('cannot be later than')
+      + ' ' + limitLabel
+      + ' (' + formatCalendarDate(maximumDueDate.toISOString()) + ').';
   }
 
   function calculateRestructure(values) {
@@ -1957,11 +1996,17 @@
 
     const previewRows = lockedRows.concat(newRows);
     const totalError = getRestructureTotalError(previewRows);
+    const dateError = getRestructureDateError(previewRows, values && values.newFrequency);
     setRestructurePreviewRows(previewRows);
     setRestructureTotalError(totalError);
+    setRestructureDateError(dateError);
     setRestructurePreviewDirty(false);
     if (totalError) {
       message.warning(totalError);
+      return;
+    }
+    if (dateError) {
+      message.warning(dateError);
       return;
     }
     message.success(t('Preview updated successfully'));
@@ -1975,6 +2020,14 @@
     const totalError = getRestructureTotalError(restructurePreviewRows);
     if (totalError || restructureTotalError) {
       message.warning(totalError || restructureTotalError);
+      return;
+    }
+    const dateError = getRestructureDateError(
+      restructurePreviewRows,
+      restructureForm.getFieldValue('newFrequency')
+    );
+    if (dateError || restructureDateError) {
+      message.warning(dateError || restructureDateError);
       return;
     }
     if (restructurePreviewDirty) {
@@ -2045,6 +2098,11 @@
         normalDueDate: updatedDate,
         edited: true
       };
+      const dateError = getRestructureDateError(
+        nextRows,
+        restructureForm.getFieldValue('newFrequency')
+      );
+      setRestructureDateError(dateError);
       return nextRows;
     });
     setRestructurePreviewDirty(false);
@@ -2142,6 +2200,13 @@
     if (totalError || restructureTotalError) {
       throw new Error(totalError || restructureTotalError);
     }
+    const dateError = getRestructureDateError(
+      restructurePreviewRows,
+      values && values.newFrequency
+    );
+    if (dateError || restructureDateError) {
+      throw new Error(dateError || restructureDateError);
+    }
     const effectiveDate = buildRestructureEffectiveDate(values && values.effectiveDate);
     if (!effectiveDate || !values.startDate || !text(values && values.description)) {
       throw new Error(t('The effective date and endorsement description are required.'));
@@ -2196,6 +2261,7 @@
      setEndorsementModalOpen(false);
      setRestructurePreviewRows([]);
      setRestructurePreviewDirty(false);
+     setRestructureDateError('');
      restructureForm.resetFields();
      endorsementForm.resetFields();
      setPolicyReloadToken(value => value + 1);
@@ -2971,6 +3037,14 @@
                   type="warning"
                   showIcon
                   message={restructureTotalError}
+                  style={{ marginBottom: 12 }}
+                />
+              )}
+              {restructureDateError && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={restructureDateError}
                   style={{ marginBottom: 12 }}
                 />
               )}

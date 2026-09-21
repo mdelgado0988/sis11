@@ -1,6 +1,15 @@
+/**
+ * @author Michael Delgado
+ * @email michael.delgado@axxis-systems.com
+ * @created 2026/09/21
+ * @name PayPlanChangeEndorsement
+ * @version 1.0
+ * @purpose: Reestructurar el plan de pagos de una póliza mediante un endoso,
+ *           recalculando cuotas y ejecutando el mismo flujo de aprobación.
+ */
 ()=>{
   const { useEffect, useMemo, useState } = React;
-  const { Table, Button, Row, Col, Form, Select, Input, InputNumber, DatePicker, Skeleton, Empty, message, Space, Divider, Modal } = A;
+  const { Table, Button, Row, Col, Form, Select, Input, InputNumber, DatePicker, Skeleton, Empty, Alert, message, Space, Divider, Modal } = A;
   const { Column } = Table;
 
   const fallbackFrequencyOptions = [
@@ -314,6 +323,7 @@
     const [endorsementForm] = Form.useForm();
     const [endorsementModalOpen, setEndorsementModalOpen] = useState(false);
     const [previewNeedsRefresh, setPreviewNeedsRefresh] = useState(false);
+    const [previewDateError, setPreviewDateError] = useState('');
     const frequencyLabelMap = useMemo(function() {
       return frequencyOptions.reduce(function(acc, item) {
         acc[String(item.value).toLowerCase()] = item.label;
@@ -421,6 +431,7 @@
         setPaymentMethods(methodOptions);
         setFrequencyOptions(currentFrequencyOptions);
         setPreviewNeedsRefresh(false);
+        setPreviewDateError('');
 
         form.setFieldsValue({
           currentPaymentMethod: getPaymentMethodCode(currentPolicy),
@@ -462,6 +473,35 @@
       return method ? method.label : (code || '-');
     }
 
+    function getPreviewDateError(rows, frequencyMonths) {
+      const policyEnd = toPanamaMoment(policy && policy.end);
+      if (!policyEnd || !policyEnd.isValid()) {
+        return t('The policy validity is not available.');
+      }
+
+      const maximumDueDate = frequencyMonths === 1
+        ? policyEnd.clone().subtract(1, 'month')
+        : policyEnd.clone();
+      const invalidRow = toRows(rows).find(function(row) {
+        const dueDate = getPlanDueDateMoment(row);
+        return dueDate && dueDate.isAfter(maximumDueDate, 'day');
+      });
+
+      if (!invalidRow) {
+        return '';
+      }
+
+      const dueDateLabel = formatDate(invalidRow.dueDate || invalidRow.normalDueDate || invalidRow.coveredUntil);
+      const limitLabel = maximumDueDate.format('DD/MM/YYYY');
+      const ruleLabel = frequencyMonths === 1
+        ? t('one month before the policy end date')
+        : t('the policy end date');
+      return t('Installment') + ' ' + safeString(invalidRow.numberInYear)
+        + ' (' + dueDateLabel + ') '
+        + t('cannot be later than') + ' ' + ruleLabel
+        + ' (' + limitLabel + ').';
+    }
+
     const policyHref = policy && policy.id ? `/#/lifePolicy/${policy.id}` : '#/home';
 
     function openEndorsementModal() {
@@ -473,6 +513,15 @@
 
       if (!hasEndorsementChanges(formValues)) {
         message.error(t('No changes were detected in the endorsement.'));
+        return;
+      }
+
+      const currentFrequency = getFrequencyMonths(formValues.newFrequency, frequencyOptions);
+      const currentPreview = newPayPlans.length ? newPayPlans : payPlans;
+      const dateError = getPreviewDateError(currentPreview, currentFrequency);
+      if (dateError || previewDateError) {
+        setPreviewDateError(dateError || previewDateError);
+        message.error(dateError || previewDateError);
         return;
       }
 
@@ -608,8 +657,14 @@
           }
 
           const previewRows = lockedPreviewRows.concat(recalculatedRows);
+          const dateError = getPreviewDateError(previewRows, frequencyMonths);
           setNewPayPlans(previewRows);
           setPreviewNeedsRefresh(false);
+          setPreviewDateError(dateError);
+          if (dateError) {
+            message.error(dateError);
+            return;
+          }
           message.success(t('Preview updated successfully'));
         } catch (error) {
           message.error((error && error.message) ? error.message : t('Unable to build the preview.'));
@@ -960,6 +1015,13 @@
           throw new Error(t('Please calculate installments again before executing the endorsement.'));
         }
 
+        const currentFrequency = getFrequencyMonths(currentValues.newFrequency, frequencyOptions);
+        const currentPreview = newPayPlans.length ? newPayPlans : payPlans;
+        const dateError = getPreviewDateError(currentPreview, currentFrequency);
+        if (dateError || previewDateError) {
+          throw new Error(dateError || previewDateError);
+        }
+
         const effectiveDate = buildEffectiveDateTime(policy && policy.start, values.effectiveDate);
         if (!effectiveDate) {
           throw new Error(t('The effective date is invalid.'));
@@ -1095,6 +1157,11 @@
             normalDueDate: updatedDate
           })
         };
+
+        setPreviewDateError(getPreviewDateError(
+          rows,
+          getFrequencyMonths(form.getFieldValue('newFrequency'), frequencyOptions)
+        ));
 
         return rows;
       });
@@ -1257,6 +1324,15 @@
               <Col xs={24} lg={12}>
                 <div style={{ border: '1px solid #d9f7be', borderRadius: 8, padding: 12, background: '#f6ffed' }}>
                   <h3 style={{ marginTop: 0, marginBottom: 12 }}>{t('After')}</h3>
+
+                  {previewDateError && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message={previewDateError}
+                      style={{ marginBottom: 12 }}
+                    />
+                  )}
 
                   <Form form={form} layout="vertical">
                     <Row gutter={8}>
