@@ -11,8 +11,8 @@
  * @context The same filter parameters accepted by FilterTransfer:
  *          workspaceId, groupByAllocation, size, page, currency, allocated,
  *          external, executed, concept, minAmount, maxAmount, month,
- *          claimPaymentId, allocationId, fromDate, toDate, id, paymentMethod
- *          and incomeType.
+ *          claimPaymentId, allocationId, fromDate, toDate, id, paymentMethod,
+ *          incomeType, policy and payerId.
  * @notes Related transfers are loaded without the workspace restriction so
  *        reversals linked to an allocation are kept in AllocationMovements.
  */
@@ -29,9 +29,11 @@ try {
     : [];
 
   const allTransfers = mergeTransfers(transfers, relatedTransfers);
+  const policyIds = resolvePolicyIds(input);
+  const filteredTransfers = filterByPolicyAndPayer(allTransfers, input, policyIds);
   const groups = input.groupByAllocation
-    ? groupByAllocation(allTransfers, transfers)
-    : transfers.map(item => ({
+    ? groupByAllocation(filteredTransfers, filteredTransfers)
+    : filteredTransfers.map(item => ({
         ...item,
         AllocationMovements: []
       }));
@@ -80,7 +82,10 @@ function normalizeInput(source) {
     id: positiveInteger(value.id),
     paymentMethod: getText(value.paymentMethod),
     incomeType: getText(value.incomeType),
-    cashier: getText(value.cashier)
+    cashier: getText(value.cashier),
+    policy: getText(value.policy),
+    payerId: positiveInteger(value.payerId),
+    payerName: getText(value.payerName)
   };
 }
 
@@ -115,6 +120,91 @@ function buildFilter(input) {
   if (input.allocated === true) filters.push('allocationId IS NOT NULL');
   if (input.allocated === false) filters.push('allocationId IS NULL');
   return filters.length > 0 ? filters.join(' AND ') : '1 = 1';
+}
+
+function resolvePolicyIds(input) {
+  return {
+    policyIds: input.policy ? loadPolicyIds(`code LIKE N'%${escapeSql(input.policy)}%'`) : [],
+    payerPolicyIds: input.payerId > 0
+      ? loadPolicyIds(`(holderId = ${input.payerId} OR payerId = ${input.payerId})`)
+      : []
+  };
+}
+
+function loadPolicyIds(filter) {
+  doCmd({
+    cmd: 'RepoLifePolicy',
+    data: {
+      operation: 'GET',
+      filter,
+      fields: 'id',
+      size: 0,
+      page: 0,
+      noTracking: true
+    }
+  });
+
+  if (typeof RepoLifePolicy === 'undefined' || !RepoLifePolicy || RepoLifePolicy.ok === false) {
+    return [];
+  }
+
+  return uniquePositiveIds((RepoLifePolicy.outData || []).map(item => item && item.id));
+}
+
+function filterByPolicyAndPayer(records, input, resolvedIds) {
+  const hasPolicyFilter = Boolean(input.policy);
+  const hasPayerFilter = input.payerId > 0;
+  if (!hasPolicyFilter && !hasPayerFilter) return records;
+
+  const policyIds = new Set((resolvedIds && resolvedIds.policyIds) || []);
+  const payerPolicyIds = new Set((resolvedIds && resolvedIds.payerPolicyIds) || []);
+  const payerIdText = String(input.payerId || '');
+  const payerNameText = input.payerName.toLowerCase();
+
+  return (records || []).filter(record => {
+    const recordPolicyIds = getRecordPolicyIds(record);
+    const policyMatches = !hasPolicyFilter
+      || recordPolicyIds.some(id => policyIds.has(id));
+
+    if (!policyMatches) return false;
+    if (!hasPayerFilter) return true;
+
+    const incomeFormValue = record && record.jIncomeTypeForm;
+    const incomeFormText = (incomeFormValue && typeof incomeFormValue === 'object'
+      ? JSON.stringify(incomeFormValue)
+      : getText(incomeFormValue)).toLowerCase();
+    const matchesDynamicForm = incomeFormText.includes(payerIdText)
+      || (payerNameText && incomeFormText.includes(payerNameText));
+    const matchesPolicyHolder = recordPolicyIds.some(id => payerPolicyIds.has(id));
+    return matchesDynamicForm || matchesPolicyHolder;
+  });
+}
+
+function getRecordPolicyIds(record) {
+  const ids = [];
+  addPositiveId(ids, record && (record.lifePolicyId || record.policyId || record.LifePolicyId));
+
+  const allocation = record && (record.Allocation || record.allocation);
+  const installmentPremiums = allocation && (
+    allocation.InstallmentPremiums
+    || allocation.installmentPremiums
+    || allocation.installments
+  );
+
+  (Array.isArray(installmentPremiums) ? installmentPremiums : []).forEach(installment => {
+    addPositiveId(ids, installment && (
+      installment.lifePolicyId
+      || installment.policyId
+      || installment.LifePolicyId
+    ));
+  });
+
+  return uniquePositiveIds(ids);
+}
+
+function addPositiveId(values, value) {
+  const id = positiveInteger(value);
+  if (id > 0) values.push(id);
 }
 
 function loadTransfers(filter) {

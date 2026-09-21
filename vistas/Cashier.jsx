@@ -265,6 +265,8 @@
   const [movementFilters, setMovementFilters] = React.useState({});
   const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
   const [movementFilterForm] = Form.useForm();
+  const [movementPayerOptions, setMovementPayerOptions] = React.useState([]);
+  const [movementPayerLoading, setMovementPayerLoading] = React.useState(false);
   const [movementActionId, setMovementActionId] = React.useState(0);
   const [movementSelectedRowKeys, setMovementSelectedRowKeys] = React.useState([]);
   const [movementViewVisible, setMovementViewVisible] = React.useState(false);
@@ -364,6 +366,7 @@
   const [payerOptions, setPayerOptions] = React.useState([]);
   const [payerLoading, setPayerLoading] = React.useState(false);
   const payerSearchTimer = React.useRef(null);
+  const movementPayerSearchTimer = React.useRef(null);
   const [refundBeneficiaryOptions, setRefundBeneficiaryOptions] = React.useState([]);
   const [refundBeneficiaryLoading, setRefundBeneficiaryLoading] = React.useState(false);
   const refundBeneficiarySearchTimer = React.useRef(null);
@@ -3315,11 +3318,15 @@
     const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== '';
     const amount = Number(rawAmount);
     const incomeType = getTrimmedString(values && values.incomeType);
+    const payer = movementPayerOptions.find(item => String(item.value) === String(values && values.payerId));
     const nextFilters = {
       pending: values && values.pending === true,
       transferId: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
       amount: hasAmount && Number.isFinite(amount) && amount >= 0 ? amount : null,
-      incomeType: incomeType || null
+      incomeType: incomeType || null,
+      policy: getTrimmedString(values && values.policy) || null,
+      payerId: payer && Number(payer.id) > 0 ? Number(payer.id) : null,
+      payerName: payer && payer.name ? payer.name : null
     };
 
     setMovementFilters(nextFilters);
@@ -3332,6 +3339,11 @@
 
   function clearMovementFilters() {
     movementFilterForm.resetFields();
+    if (movementPayerSearchTimer.current) {
+      clearTimeout(movementPayerSearchTimer.current);
+      movementPayerSearchTimer.current = null;
+    }
+    setMovementPayerOptions([]);
     setMovementFilters({});
     setMovementFilterVisible(false);
     loadMovements({
@@ -4682,6 +4694,61 @@
           message.error(error && error.message ? error.message : String(error));
         })
         .finally(() => setPayerLoading(false));
+    }, 400);
+  }
+
+  function searchMovementPayers(value) {
+    const searchText = getTrimmedString(value);
+    const isNumericId = /^\d+$/.test(searchText);
+
+    if (movementPayerSearchTimer.current) {
+      clearTimeout(movementPayerSearchTimer.current);
+      movementPayerSearchTimer.current = null;
+    }
+
+    if ((!isNumericId && searchText.length < 3) || !searchText) {
+      setMovementPayerOptions([]);
+      setMovementPayerLoading(false);
+      return;
+    }
+
+    movementPayerSearchTimer.current = setTimeout(() => {
+      const escaped = escapeSqlString(searchText);
+      const filter = isNumericId
+        ? `[id] = ${Number(searchText)}`
+        : `(([name] LIKE N'%${escaped}%') OR ([surname1] LIKE N'%${escaped}%') OR ([surname2] LIKE N'%${escaped}%') OR ([cnp] LIKE N'%${escaped}%') OR ([nif] LIKE N'%${escaped}%'))`;
+
+      setMovementPayerLoading(true);
+      exe('GetContacts', { operation: 'GET', filter: filter, size: 15 })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Payers could not be loaded.'));
+          }
+
+          const options = getRows(response).map(contact => {
+            const name = getTrimmedString(contact && (contact.FullName || contact.fullName || [
+              contact.name,
+              contact.surname1,
+              contact.surname2
+            ].filter(Boolean).join(' ')));
+            const identifier = getTrimmedString(contact && (contact.cnp || contact.nif || contact.passport));
+            const id = Number(contact && contact.id);
+
+            return {
+              value: id,
+              id: id,
+              name: name || String(id),
+              identifier: identifier
+            };
+          }).filter(item => Number.isFinite(item.id) && item.id > 0);
+
+          setMovementPayerOptions(options);
+        })
+        .catch(error => {
+          setMovementPayerOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setMovementPayerLoading(false));
     }, 400);
   }
 
@@ -7346,7 +7413,10 @@
         toDate: null,
         id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
         paymentMethod: null,
-        incomeType: incomeType || null
+        incomeType: incomeType || null,
+        policy: getTrimmedString(filters && filters.policy) || null,
+        payerId: Number(filters && filters.payerId) > 0 ? Number(filters.payerId) : null,
+        payerName: getTrimmedString(filters && filters.payerName) || null
       })
     })
       .then(response => {
@@ -10495,6 +10565,37 @@
                 style={{ width: '100%' }}
                 placeholder={t('Transfer ID')}
               />
+            </Form.Item>
+
+            <Form.Item label={t('Policy')} name="policy">
+              <Input
+                allowClear
+                placeholder={t('Search by policy or code')}
+              />
+            </Form.Item>
+
+            <Form.Item label={t('Client')} name="payerId">
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                loading={movementPayerLoading}
+                onSearch={searchMovementPayers}
+                optionLabelProp="label"
+                placeholder={t('Search client')}
+                notFoundContent={movementPayerLoading ? t('Loading') : t('Type at least 3 characters')}
+              >
+                {movementPayerOptions.map(item => (
+                  <Option key={item.id} value={item.id} label={item.name}>
+                    <div>
+                      <div>{item.name}</div>
+                      <div style={{ fontSize: 11, color: '#8c8c8c' }}>
+                        {`${t('ID')}: ${item.id}${item.identifier ? ` | ${item.identifier}` : ''}`}
+                      </div>
+                    </div>
+                  </Option>
+                ))}
+              </Select>
             </Form.Item>
 
             <Form.Item label={t('Amount')} name="amount">
