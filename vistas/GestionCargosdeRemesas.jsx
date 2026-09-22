@@ -98,6 +98,7 @@
   const [deletingBatchId, setDeletingBatchId] = React.useState(null);
   const [validationModalOpen, setValidationModalOpen] = React.useState(false);
   const [validationErrors, setValidationErrors] = React.useState([]);
+  const [validationExporting, setValidationExporting] = React.useState(false);
   const [newCashDeskOpen, setNewCashDeskOpen] = React.useState(false);
   const [newCashDeskLoading, setNewCashDeskLoading] = React.useState(false);
   const [currentUserEmail, setCurrentUserEmail] = React.useState('');
@@ -159,7 +160,8 @@
     if (value === null || value === undefined || value === '' || typeof value === 'boolean') return EMPTY_VALUE;
     const amount = Number(value);
     if (!isFinite(amount)) return EMPTY_VALUE;
-    return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const normalizedAmount = Math.abs(amount) < 0.005 ? 0 : Number(amount.toFixed(2));
+    return normalizedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const progressFor = (record) => {
@@ -857,10 +859,15 @@
     .filter(Boolean)
     .map((detail, index) => {
       const rowMatch = detail.match(/^Fila\s+(\d+):\s*(.*)$/i);
+      const cleanDetail = rowMatch ? rowMatch[2] : detail;
+      const duplicateMatch = cleanDetail.match(/^póliza duplicada\s+(\S+)(?:\s+para la póliza\s+(.+?))?\s+\(también aparece en la fila\s+(\d+)\)\.?$/i);
       return {
         key: String(index + 1),
         row: rowMatch ? rowMatch[1] : EMPTY_VALUE,
-        detail: rowMatch ? rowMatch[2] : detail
+        policyId: duplicateMatch ? duplicateMatch[1] : EMPTY_VALUE,
+        policyCode: duplicateMatch && duplicateMatch[2] ? duplicateMatch[2] : EMPTY_VALUE,
+        duplicateRow: duplicateMatch ? duplicateMatch[3] : EMPTY_VALUE,
+        detail: cleanDetail
       };
     });
 
@@ -871,15 +878,16 @@
     validationRows.forEach((row, index) => {
       const policyCode = normalizedCashDeskValue(row && row.policyCode).toUpperCase();
       const policyId = normalizedCashDeskValue(row && row.policyId).toUpperCase();
-      if (!policyCode || !policyId) return;
+      const amountKey = normalizedAmountKey(row && row.monto);
+      if (!policyId || !amountKey) return;
 
-      const key = policyId + '|' + normalizedCashDeskValue(row && row.monto);
+      const key = paymentCompositeKey(policyId, row && row.monto);
       if (seen[key]) {
         errors.push({
           key: 'duplicate-' + String(index + 1),
           row: String(index + 1),
           detail: t('póliza duplicada') + ' ' + policyId
-            + ' ' + t('para la póliza') + ' ' + policyCode
+            + (policyCode ? ' ' + t('para la póliza') + ' ' + policyCode : '')
             + ' (' + t('también aparece en la fila') + ' ' + seen[key] + ').'
         });
       } else {
@@ -1239,7 +1247,9 @@
       transfer.id AS paymentNumber,
       transfer.amount AS transferAmount,
       policy.code AS policyCode,
-      policy.id AS policyId
+      policy.id AS policyId,
+      ISNULL(appliedPremium.appliedPremiumAmount, 0) AS appliedPremiumAmount,
+      ISNULL(transitAmount.transitAmount, 0) AS transitAmount
     FROM Transfer transfer
     INNER JOIN AllocationInstallment allocationInstallment
       ON allocationInstallment.allocationId = transfer.allocationId
@@ -1247,6 +1257,18 @@
     INNER JOIN LifePolicy policy ON policy.id = allocationInstallment.lifePolicyId
     LEFT JOIN [Change] policyChange ON policyChange.id = payPlan.changeId
     LEFT JOIN Bill bill ON bill.changeId = policyChange.id
+    OUTER APPLY (
+      SELECT SUM(ISNULL(installment.moneyInAmount, 0)) AS appliedPremiumAmount
+      FROM AllocationInstallment installment
+      WHERE installment.allocationId = transfer.allocationId
+        AND installment.lifePolicyId = policy.id
+    ) appliedPremium
+    OUTER APPLY (
+      SELECT SUM(ISNULL(supplementary.moneyInAmount, 0)) AS transitAmount
+      FROM AllocationSupplementary supplementary
+      WHERE supplementary.allocationId = transfer.allocationId
+        AND supplementary.lifePolicyId = policy.id
+    ) transitAmount
     OUTER APPLY (
       SELECT TOP (1)
         TRY_CAST(JSON_VALUE(formField.value, '$.userData[0]') AS INT) AS remittanceId
@@ -1267,6 +1289,7 @@
 
   const enrichPaymentRows = (paymentRows, references, clientReferences) => {
     const transferIdsByKey = {};
+    const breakdownByPaymentNumber = {};
     const clientNamesByHolderId = {};
 
     references.forEach((reference) => {
@@ -1275,12 +1298,18 @@
       const transferAmount = queryValue(reference, ['transferAmount', 'TransferAmount']);
       const paymentNumber = Number(queryValue(reference, ['paymentNumber', 'PaymentNumber']) || 0);
       const compositeKey = paymentCompositeKey(policyId, transferAmount);
+      const appliedPremiumAmount = numericPaymentAmount(queryValue(reference, ['appliedPremiumAmount', 'AppliedPremiumAmount']));
+      const transitAmount = numericPaymentAmount(queryValue(reference, ['transitAmount', 'TransitAmount']));
 
       if (paymentNumber > 0) {
         if (!transferIdsByKey[compositeKey]) transferIdsByKey[compositeKey] = [];
         if (transferIdsByKey[compositeKey].indexOf(paymentNumber) < 0) {
           transferIdsByKey[compositeKey].push(paymentNumber);
         }
+        breakdownByPaymentNumber[paymentNumber + '|' + normalizedCompositeText(policyId)] = {
+          appliedPremiumAmount: appliedPremiumAmount === null ? 0 : appliedPremiumAmount,
+          transitAmount: transitAmount === null ? 0 : transitAmount
+        };
       }
     });
 
@@ -1298,6 +1327,10 @@
     return paymentRows.map((item) => {
       const transferIds = transferIdsByKey[paymentCompositeKey(item.policyId, item.monto)] || [];
       const clientNames = clientNamesByHolderId[holderIdentityKey(item.holderId)] || [];
+      const paymentNumber = transferIds.length === 1 ? transferIds[0] : null;
+      const breakdown = paymentNumber
+        ? breakdownByPaymentNumber[paymentNumber + '|' + normalizedCompositeText(item.policyId)]
+        : null;
       const existingClient = normalizedCashDeskValue(item.client);
       const safeExistingClient = existingClient
         && existingClient !== normalizedCashDeskValue(item.holderId)
@@ -1305,7 +1338,9 @@
         ? existingClient
         : null;
       return Object.assign({}, item, {
-        paymentNumber: transferIds.length === 1 ? transferIds[0] : null,
+        paymentNumber: paymentNumber,
+        appliedPremiumAmount: breakdown ? breakdown.appliedPremiumAmount : 0,
+        transitAmount: breakdown ? breakdown.transitAmount : 0,
         client: clientNames.length === 1 ? clientNames[0] : safeExistingClient
       });
     });
@@ -1314,6 +1349,8 @@
   const summarizeBatchDetail = (record, paymentRows) => {
     const boxes = [];
     let totalAmount = 0;
+    let totalPremiums = 0;
+    let totalTransit = 0;
     let hasAmount = false;
 
     paymentRows.forEach((item) => {
@@ -1324,6 +1361,10 @@
         totalAmount += amount;
         hasAmount = true;
       }
+      const appliedPremiumAmount = numericPaymentAmount(item.appliedPremiumAmount);
+      const transitAmount = numericPaymentAmount(item.transitAmount);
+      if (appliedPremiumAmount !== null) totalPremiums += appliedPremiumAmount;
+      if (transitAmount !== null) totalTransit += transitAmount;
     });
 
     return {
@@ -1332,6 +1373,9 @@
         .find(Boolean) || EMPTY_VALUE,
       movimientos: paymentRows.length,
       totalRemesa: hasAmount ? totalAmount : null,
+      totalPrimas: totalPremiums,
+      totalDepositos: totalTransit,
+      diferenciaTotal: (hasAmount ? totalAmount : 0) - totalPremiums - totalTransit,
       paymentRows: paymentRows,
       record: record
     };
@@ -1658,6 +1702,11 @@
       .then((parsedRows) => {
         return validateOpenUploadCashDesk(selectedUploadCashDeskId).then((cashDesk) => {
           const remittanceRows = remittanceRowsForCashDesk(parsedRows, selectedUploadCashDeskId, cashDesk, selectedUploadPayer);
+          const duplicateErrors = duplicateValidationErrors(normalizePaymentRows(remittanceRows));
+          if (duplicateErrors.length) {
+            const details = duplicateErrors.map((item) => 'Fila ' + item.row + ': ' + item.detail);
+            throw new Error('@PRE OPERATION rechazada. No se realizó ningún cobro. ' + details.join(' | '));
+          }
 
           return resolveImportConfigId().then((configId) => exe('RepoBatch', {
             operation: 'ADD',
@@ -1681,7 +1730,9 @@
         return loadBatches(1, pagination.pageSize || PAGE_SIZE, filters);
       })
       .catch((error) => {
-        message.error(error && error.message ? error.message : String(error || t('No se pudo cargar la remesa.')));
+        if (!showValidationErrors(error)) {
+          message.error(error && error.message ? error.message : String(error || t('No se pudo cargar la remesa.')));
+        }
       })
       .then(() => setUploading(false));
   };
@@ -1917,13 +1968,15 @@
       .gestion-remesas-detail-drawer .ant-drawer-header,
       .gestion-remesas-standard-modal .ant-modal-header,
       .gestion-remesas-upload-modal .ant-modal-header,
-      .gestion-remesas-line-modal .ant-modal-header {
+      .gestion-remesas-line-modal .ant-modal-header,
+      .gestion-remesas-validation-modal .ant-modal-header {
         border-bottom: 1px solid #cbd1d8;
       }
 
       .gestion-remesas-standard-modal .ant-modal-footer,
       .gestion-remesas-upload-modal .ant-modal-footer,
-      .gestion-remesas-line-modal .ant-modal-footer {
+      .gestion-remesas-line-modal .ant-modal-footer,
+      .gestion-remesas-validation-modal .ant-modal-footer {
         border-top: 1px solid #cbd1d8;
       }
 
@@ -1931,6 +1984,54 @@
       .gestion-remesas-distribution-card,
       .gestion-remesas-line-summary-card {
         border: 1px solid #cbd1d8;
+      }
+
+      .gestion-remesas-validation-modal .ant-table {
+        border: 1px solid #b7c8d9;
+      }
+
+      .gestion-remesas-validation-table,
+      .gestion-remesas-validation-table .ant-spin-nested-loading,
+      .gestion-remesas-validation-table .ant-spin-container,
+      .gestion-remesas-validation-table .ant-table,
+      .gestion-remesas-validation-table .ant-table-container {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .gestion-remesas-validation-modal .ant-modal-body {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        height: calc(80dvh - 120px);
+        overflow: hidden !important;
+      }
+
+      .gestion-remesas-validation-modal .ant-table-body {
+        height: calc(80dvh - 240px) !important;
+        max-height: calc(80dvh - 240px) !important;
+        overflow-y: scroll !important;
+        scrollbar-gutter: stable;
+      }
+
+      .gestion-remesas-validation-modal .ant-table-thead > tr > th {
+        background: #bfbfbf;
+        border-color: #aeb7c1;
+        color: #111;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .gestion-remesas-validation-modal .ant-table-tbody > tr > td {
+        border-color: #d5dbe1;
+        padding: 6px 8px;
+        vertical-align: top;
+      }
+
+      .gestion-remesas-validation-modal .ant-table-tbody > tr:nth-child(even) > td {
+        background: #f5f8fb;
       }
 
       .gestion-remesas-caja-card .ant-card-head,
@@ -2248,7 +2349,6 @@
     numero: batchDetail ? batchDetail.caja : EMPTY_VALUE,
     fecha: selectedBatch ? formatCashDeskDate(selectedBatch.launched || selectedBatch.created) : EMPTY_VALUE,
     sucursal: batchDetail ? displayValue(batchDetail.sucursal) : EMPTY_VALUE,
-    codigo: EMPTY_VALUE,
     cajero: selectedBatch ? displayValue(selectedBatch.user) : EMPTY_VALUE,
     movimientos: batchDetail ? String(batchDetail.movimientos) : EMPTY_VALUE
   };
@@ -2256,12 +2356,14 @@
   const distributionValues = {
     remesa: selectedBatch ? displayValue(selectedBatch.id) : EMPTY_VALUE,
     totalRemesa: batchDetail ? formatAmount(batchDetail.totalRemesa) : EMPTY_VALUE,
-    totalPrimas: EMPTY_VALUE,
-    totalDeposito: EMPTY_VALUE,
-    totalDescuadre: EMPTY_VALUE,
+    totalPrimas: batchDetail ? formatAmount(batchDetail.totalPrimas) : EMPTY_VALUE,
+    totalDeposito: batchDetail ? formatAmount(batchDetail.totalDepositos) : EMPTY_VALUE,
+    totalDescuadre: batchDetail ? formatAmount(batchDetail.diferenciaTotal) : EMPTY_VALUE,
     fechaIngreso: selectedBatch ? formatDate(selectedBatch.created) : EMPTY_VALUE,
     creadaPor: selectedBatch ? displayValue(selectedBatch.user) : EMPTY_VALUE,
-    procesadaPor: selectedBatch ? displayValue(selectedBatch.processedBy || selectedBatch.processedUser) : EMPTY_VALUE
+    procesadaPor: selectedBatch && ['running', 'finished'].indexOf(batchExecutionState(selectedBatch)) >= 0
+      ? displayValue(selectedBatch.user)
+      : EMPTY_VALUE
   };
 
   const paymentStatus = (item) => {
@@ -2305,6 +2407,8 @@
       systemMessage: paymentSystemMessage(item),
       accountNumber: item.accountNumber,
       paymentNumber: item.paymentNumber,
+      appliedPremiumAmount: item.appliedPremiumAmount,
+      transitAmount: item.transitAmount,
       client: item.client
     }))
     : [];
@@ -2353,6 +2457,8 @@
     },
     { title: 'Mensaje del sistema', dataIndex: 'systemMessage', key: 'systemMessage', width: 300, ellipsis: true, render: renderLongText },
     { title: t('Payment No.'), dataIndex: 'paymentNumber', key: 'paymentNumber', width: 130, render: displayValue },
+    { title: t('Applied to premiums'), dataIndex: 'appliedPremiumAmount', key: 'appliedPremiumAmount', width: 150, align: 'right', render: formatAmount },
+    { title: t('Transit amount'), dataIndex: 'transitAmount', key: 'transitAmount', width: 140, align: 'right', render: formatAmount },
     { title: t('Client'), dataIndex: 'client', key: 'client', width: 220, ellipsis: true, render: renderLongText }
   ];
 
@@ -2370,6 +2476,8 @@
         t(row.status),
         displayValue(row.systemMessage),
         displayValue(row.paymentNumber),
+        numericPaymentAmount(row.appliedPremiumAmount) || 0,
+        numericPaymentAmount(row.transitAmount) || 0,
         displayValue(row.client)
       ];
     });
@@ -2381,6 +2489,8 @@
       t('Status'),
       t('System message'),
       t('Payment No.'),
+      t('Applied to premiums'),
+      t('Transit amount'),
       t('Client')
     ];
 
@@ -2395,6 +2505,10 @@
         exportRows.forEach((row, index) => {
           const amountCell = worksheet['D' + (index + 2)];
           if (amountCell && typeof row[3] === 'number') amountCell.z = '#,##0.00';
+          const appliedPremiumCell = worksheet['H' + (index + 2)];
+          if (appliedPremiumCell && typeof row[7] === 'number') appliedPremiumCell.z = '#,##0.00';
+          const transitCell = worksheet['I' + (index + 2)];
+          if (transitCell && typeof row[8] === 'number') transitCell.z = '#,##0.00';
         });
         worksheet['!cols'] = [
           { wch: 8 },
@@ -2404,9 +2518,11 @@
           { wch: 16 },
           { wch: 42 },
           { wch: 18 },
+          { wch: 18 },
+          { wch: 18 },
           { wch: 28 }
         ];
-        worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:H1' };
+        worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:J1' };
 
         const workbook = xlsxLibrary.utils.book_new();
         xlsxLibrary.utils.book_append_sheet(workbook, worksheet, 'Remittance Detail');
@@ -2422,9 +2538,58 @@
       .then(() => setDetailExporting(false));
   };
 
+  const exportValidationErrors = () => {
+    if (!validationErrors.length || validationExporting) return;
+
+    const exportRows = validationErrors.map((item) => [
+      displayValue(item.row),
+      displayValue(item.policyId),
+      displayValue(item.policyCode),
+      displayValue(item.duplicateRow),
+      displayValue(item.detail)
+    ]);
+    const headers = [
+      t('Fila'),
+      t('Policy ID'),
+      t('Policy'),
+      t('Duplicate row'),
+      t('Detalle')
+    ];
+
+    setValidationExporting(true);
+    ensureXlsxLibrary()
+      .then((xlsxLibrary) => {
+        if (!isUsableXlsxExportLibrary(xlsxLibrary)) {
+          throw new Error(t('The Excel component required to export the validation errors is not available.'));
+        }
+
+        const worksheet = xlsxLibrary.utils.aoa_to_sheet([headers].concat(exportRows));
+        worksheet['!cols'] = [
+          { wch: 10 },
+          { wch: 16 },
+          { wch: 24 },
+          { wch: 16 },
+          { wch: 90 }
+        ];
+        worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:E1' };
+
+        const workbook = xlsxLibrary.utils.book_new();
+        xlsxLibrary.utils.book_append_sheet(workbook, worksheet, 'Validation errors');
+        xlsxLibrary.writeFile(workbook, 'remittance-validation-errors.xlsx', {
+          bookType: 'xlsx',
+          compression: true
+        });
+        message.success(t('The validation errors were exported successfully.'));
+      })
+      .catch((error) => {
+        message.error(error && error.message ? error.message : t('The validation errors could not be exported.'));
+      })
+      .then(() => setValidationExporting(false));
+  };
+
   const detailField = (label, value) => (
     <Form.Item label={label} style={{ marginBottom: 8 }}>
-      <Input disabled value={detailLoading ? t('Loading...') : value} />
+      <Input readOnly value={detailLoading ? t('Loading...') : value} />
     </Form.Item>
   );
 
@@ -2609,7 +2774,6 @@
                 {detailField(t('Cash desk No.'), cajaValues.numero)}
                 {detailField(t('Date'), cajaValues.fecha)}
                 {detailField(t('Branch'), cajaValues.sucursal)}
-                {detailField(t('Code'), cajaValues.codigo)}
                 {detailField('Cajero', cajaValues.cajero)}
                 {detailField(t('Movements'), cajaValues.movimientos)}
               </Form>
@@ -2862,8 +3026,24 @@
           className="gestion-remesas-validation-modal"
           open={validationModalOpen}
           onCancel={() => setValidationModalOpen(false)}
-          footer={null}
-          width={760}
+          footer={(
+            <Space>
+              <Button onClick={() => setValidationModalOpen(false)}>
+                <CloseIcon />
+                {t('Close')}
+              </Button>
+              <Button
+                className="gestion-remesas-export-button"
+                loading={validationExporting}
+                disabled={!validationErrors.length}
+                onClick={exportValidationErrors}
+              >
+                <ExportIcon />
+                {t('Export')}
+              </Button>
+            </Space>
+          )}
+          width={1120}
           destroyOnClose={false}
         >
           <Table
@@ -2873,10 +3053,14 @@
             rowKey="key"
             columns={[
               { title: t('Fila'), dataIndex: 'row', key: 'row', width: 90, align: 'center' },
-              { title: t('Detalle'), dataIndex: 'detail', key: 'detail' }
+              { title: t('Policy ID'), dataIndex: 'policyId', key: 'policyId', width: 120, align: 'center' },
+              { title: t('Policy'), dataIndex: 'policyCode', key: 'policyCode', width: 180, render: renderLongText },
+              { title: t('Duplicate row'), dataIndex: 'duplicateRow', key: 'duplicateRow', width: 130, align: 'center' },
+              { title: t('Detalle'), dataIndex: 'detail', key: 'detail', width: 620, render: renderLongText }
             ]}
             dataSource={validationErrors}
-            pagination={{ pageSize: 10, showSizeChanger: false }}
+            scroll={{ x: 1080, y: 440 }}
+            pagination={{ pageSize: 15, showSizeChanger: false, showTotal: (total) => String(total) + ' ' + t('errors') }}
             locale={{ emptyText: t('No se encontraron errores de validación.') }}
           />
         </Modal>

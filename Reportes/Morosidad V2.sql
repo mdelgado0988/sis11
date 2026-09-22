@@ -1,7 +1,7 @@
 use sis11
 go
 
-DECLARE  @Fecha DATE = '20260916'
+DECLARE  @Fecha DATE = GETDATE()
 		,@ramo varchar(50) = null
 		,@producto varchar(50) = null,
 		@poliza varchar(50) = 'IN-IL-003249',
@@ -96,7 +96,7 @@ OUTER APPLY (SELECT TOP (1) 1 Tiene
 			 FROM PayPlan pl
 			 WHERE pl.lifePolicyId = p.id
 			 AND pl.cancellationDate IS NULL
-			 AND pl.payed = 0 AND pl.minimum > 0) tpl
+			 AND ISNULL(NULLIF(pl.expected, 0), pl.minimum) - ISNULL(pl.payed, 0) > 0) tpl
 
 LEFT JOIN PaymentMethodCatalog pm ON pm.code = p.paymentMethod
 

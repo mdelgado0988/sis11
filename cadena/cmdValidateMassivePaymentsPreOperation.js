@@ -104,12 +104,12 @@ function validateDuplicates(rowsToValidate, validationErrors) {
 
     rowsToValidate.forEach(function (row, index) {
         const rowNumber = index + 1;
-        const policyCode = normalize(row && row.policyCode).toUpperCase();
         const policyId = normalize(row && row.policyId);
-        const amount = normalize(row && row.monto);
+        const amount = Number(row && row.monto);
+        const amountKey = Number.isFinite(amount) ? amount.toFixed(2) : '';
 
-        if (policyId && amount) {
-            const policyPaymentKey = policyId + '|' + amount;
+        if (policyId && amountKey) {
+            const policyPaymentKey = policyId + '|' + amountKey;
             if (policyPayments[policyPaymentKey]) {
                 validationErrors.push('Fila ' + rowNumber + ': póliza duplicada ' + policyId
                     + ' (también aparece en la fila ' + policyPayments[policyPaymentKey] + ').');
