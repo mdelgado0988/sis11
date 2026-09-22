@@ -122,6 +122,12 @@ function getCoverageValidity(coverages) {
 }
 
 function getCalendarDuration(start, end) {
+  // Validity is calendar-based. Ignore the time component so a start at
+  // 12:00 UTC and an end at 00:00 UTC on the same calendar date do not create
+  // a negative remainder.
+  start = toUtcCalendarDate(start);
+  end = toUtcCalendarDate(end);
+
   let years = end.getUTCFullYear() - start.getUTCFullYear();
   let cursor = addYears(start, years);
 
@@ -132,16 +138,29 @@ function getCalendarDuration(start, end) {
 
   let months = (end.getUTCFullYear() - cursor.getUTCFullYear()) * 12
     + end.getUTCMonth() - cursor.getUTCMonth();
-  cursor = addMonths(cursor, months);
+  const monthAnchor = cursor;
+  cursor = addMonths(monthAnchor, months);
 
   if (cursor.getTime() > end.getTime()) {
     months -= 1;
-    cursor = addMonths(cursor, months);
+    cursor = addMonths(monthAnchor, months);
   }
 
   const days = Math.floor((end.getTime() - cursor.getTime()) / 86400000);
 
   return { years, months, days };
+}
+
+function toUtcCalendarDate(date) {
+  return new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    12,
+    0,
+    0,
+    0
+  ));
 }
 
 function addYears(date, years) {

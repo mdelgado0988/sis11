@@ -8,7 +8,8 @@
  * executing the ChangeCoverage endorsement, and synchronizing insured-object data.
  */
 () => {
-  const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, Spin, message } = A;
+  const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, Spin, Tabs, message } = A;
+  const { TabPane } = Tabs;
 
   // ---------------------------------------------------------------- utilities
   // Date rule (§2.3): every date is handled as a CALENDAR date in the browser
@@ -48,10 +49,10 @@
   const fmtAtNoon = (value) => {
     const raw = String(value == null ? '' : value).trim();
     const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
-    if (datePart) return datePart[0] + 'T12:00:00';
+    if (datePart) return datePart[0] + 'T12:00:00Z';
     const calendarDate = toLocalDate(value);
     const calendar = fmt(calendarDate);
-    return calendar ? calendar + 'T12:00:00' : '';
+    return calendar ? calendar + 'T12:00:00Z' : '';
   };
   const toPolicyLocalDate = (value) => {
     if (!value) return null;
@@ -75,6 +76,14 @@
     return days == null ? null : days + 1;
   };
   const addDays = (date, n) => (!date || n == null ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate() + n));
+  const addMonths = (date, months) => {
+    if (!date || !Number.isFinite(months)) return null;
+    const result = new Date(date.getFullYear(), date.getMonth(), 1);
+    result.setMonth(result.getMonth() + months);
+    const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+    result.setDate(Math.min(date.getDate(), lastDay));
+    return result;
+  };
   const txt = (v) => String(v == null ? '' : v).trim();
   const translatedMessage = (value, fallback) => value ? t(String(value)) : t(fallback);
   const parseJson = (value, fallback) => {
@@ -295,6 +304,14 @@
         border: 1px solid #cbd1d8;
       }
 
+      .proceed-order-endorsement-view.ant-card > .ant-card-head {
+        padding: 0 4px;
+      }
+
+      .proceed-order-endorsement-view.ant-card > .ant-card-body {
+        padding: 4px !important;
+      }
+
       .proceed-order-endorsement-view .proceed-order-coverage-table .ant-table-thead > tr > th {
         background: #bfbfbf !important;
         border: 1px solid #cbd1d8 !important;
@@ -315,6 +332,109 @@
 
       .proceed-order-endorsement-view .proceed-order-coverage-table .ant-table-tbody > tr:hover > td {
         background: #b7d7ff !important;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-result-tabs > .ant-tabs-nav {
+        margin: 0;
+        border-bottom: 1px solid #cbd1d8;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-result-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+        margin: 0 2px 0 0;
+        padding: 7px 12px;
+        background: #f5f5f5;
+        border: 1px solid #cbd1d8;
+        border-radius: 6px 6px 0 0;
+        color: #262626;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-result-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab:hover {
+        border-color: #8da9c2;
+        color: #0b3f7d;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-result-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+        background: #fff;
+        border-color: #1677ff;
+        border-bottom-color: #fff;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-result-tabs > .ant-tabs-content-holder {
+        border: 1px solid #cbd1d8;
+        border-top: 0;
+        padding: 8px;
+      }
+
+      .proceed-order-endorsement-view .ant-input,
+      .proceed-order-endorsement-view .ant-input-affix-wrapper,
+      .proceed-order-endorsement-view .ant-picker,
+      .proceed-order-endorsement-view .ant-select:not(.ant-select-customize-input) .ant-select-selector {
+        border: 1px solid #b8c4d1 !important;
+        border-radius: 6px;
+      }
+
+      .proceed-order-endorsement-view .ant-input:hover,
+      .proceed-order-endorsement-view .ant-input-affix-wrapper:hover,
+      .proceed-order-endorsement-view .ant-picker:hover,
+      .proceed-order-endorsement-view .ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+        border-color: #8da9c2 !important;
+      }
+
+      .proceed-order-endorsement-view .ant-input:focus,
+      .proceed-order-endorsement-view .ant-input-focused,
+      .proceed-order-endorsement-view .ant-input-affix-wrapper-focused,
+      .proceed-order-endorsement-view .ant-picker-focused,
+      .proceed-order-endorsement-view .ant-select-focused .ant-select-selector {
+        border-color: #1677ff !important;
+        box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2) !important;
+      }
+
+      .proceed-order-endorsement-view .ant-input:disabled,
+      .proceed-order-endorsement-view .ant-input-affix-wrapper-disabled,
+      .proceed-order-endorsement-view .ant-picker-disabled,
+      .proceed-order-endorsement-view .ant-select-disabled .ant-select-selector {
+        border-color: #b8c4d1 !important;
+        background: #f5f5f5 !important;
+        cursor: not-allowed;
+        opacity: 1;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-action-bar {
+        background: transparent !important;
+        border: 1px solid #e6ebf2 !important;
+        border-radius: 6px;
+        padding: 10px 12px !important;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-action-bar .ant-btn:not(.ant-btn-primary) {
+        border-color: #8f9aa7;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-action-bar .ant-btn:disabled {
+        border-color: #6f7b88;
+        opacity: 1;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-context-summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin-left: 8px;
+        color: #262626;
+        font-size: 13px;
+        line-height: 18px;
+        white-space: nowrap;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-context-summary strong {
+        font-weight: 600;
+      }
+
+      @media (max-width: 900px) {
+        .proceed-order-endorsement-view .proceed-order-context-summary {
+          flex-wrap: wrap;
+          white-space: normal;
+        }
       }
 
       .proceed-order-endorsement-view .proceed-order-summary-table .ant-descriptions-view {
@@ -496,7 +616,67 @@
     }
   };
 
-  const getCoverageChangePayload = function (effectiveDateValue) {
+  const loadPayPlanSnapshot = async function () {
+    const response = await exe('RepoPayPlan', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + Number(policyId) + ' AND cancellationDate IS NULL',
+      include: ['PayPlanDetail'],
+      size: 0
+    });
+    if (!response || !response.ok) {
+      throw new Error(translatedMessage(response && response.msg, 'The current payment plan could not be loaded.'));
+    }
+    return Array.isArray(response.outData) ? response.outData : [];
+  };
+
+  const getPayPlanFrequencyMonths = function () {
+    const value = txt(
+      policy && (policy.periodicity || policy.frequency || policy.paymentFrequency || policy.frecuencia)
+    ).toLowerCase();
+    if (['y', 'year', 'yearly', 'annual', 'anual', '12'].includes(value)) return 12;
+    if (['s', 'semiannual', 'semi-annual', 'semestral', 'semestrally', '6'].includes(value)) return 6;
+    if (['t', 'quarter', 'quarterly', 'trimestral', 'trimestralmente', '3'].includes(value)) return 3;
+    if (['b', 'bimonthly', 'bi-monthly', 'bimensual', 'bimestral', '2'].includes(value)) return 2;
+    return 1;
+  };
+
+  const recalculateAdjustablePayPlanDates = function (payPlan, firstDueDate, frequencyMonths) {
+    const rows = Array.isArray(payPlan) ? payPlan : [];
+    let pendingIndex = 0;
+    return rows.map((installment) => {
+      const row = { ...installment };
+      const concept = txt(row.concept || row.Concept).toUpperCase();
+      const dueDateKey = row.dueDate !== undefined ? 'dueDate' : (row.DueDate !== undefined ? 'DueDate' : null);
+      const normalDueDateKey = row.normalDueDate !== undefined ? 'normalDueDate' : (row.NormalDueDate !== undefined ? 'NormalDueDate' : null);
+      const paidValue = row.payed !== undefined
+        ? Number(row.payed)
+        : (row.paid !== undefined ? Number(row.paid) : 0);
+      const installmentAmount = row.minimum !== undefined
+        ? Number(row.minimum)
+        : Number(row.expected);
+      const isFullyPaid = Number.isFinite(paidValue)
+        && Number.isFinite(installmentAmount)
+        && paidValue >= installmentAmount - 0.005;
+      const isCancellation = concept === 'CANCELLATION' || row.cancellationDate;
+
+      // Only fully paid installments remain locked. Pending and partially paid
+      // installments are rebuilt from the endorsement date; cancellation rows
+      // keep their original dates.
+      if (!dueDateKey || isFullyPaid || isCancellation || !firstDueDate || !Number.isFinite(frequencyMonths)) {
+        return row;
+      }
+
+      const nextDueDate = addMonths(firstDueDate, pendingIndex * frequencyMonths);
+      pendingIndex += 1;
+      row[dueDateKey] = fmtAtNoon(nextDueDate);
+      if (normalDueDateKey) {
+        row[normalDueDateKey] = fmtAtNoon(nextDueDate);
+      }
+      return row;
+    });
+  };
+
+  const getCoverageChangePayload = function (effectiveDateValue, oldPayPlan, newPayPlan) {
     const oldCoverages = coverages.map((coverage) => ({ ...coverage }));
     const newCoverages = coverages.map((coverage) => {
       const row = model.rows.filter((item) => item.code === txt(coverage.code))[0];
@@ -515,8 +695,74 @@
       newStart: model.mainRow && model.mainRow.newStart ? fmtAtNoon(model.mainRow.newStart) : '',
       newEnd: model.mainRow && model.mainRow.newEnd ? fmtAtNoon(model.mainRow.newEnd) : '',
       effectiveDate: fmtAtNoon(effectiveDateValue),
+      jOldPayPlan: Array.isArray(oldPayPlan) ? JSON.stringify(oldPayPlan) : null,
+      jNewPayPlan: Array.isArray(newPayPlan) ? JSON.stringify(newPayPlan) : null,
+      jEditedPayPlan: Array.isArray(newPayPlan) ? JSON.stringify(newPayPlan) : null,
       jAdditional: JSON.stringify({ endorsementType: 'PROCEEDORDER' })
     };
+  };
+
+  const persistChangePayPlan = async function (changeId, oldPayPlan, newPayPlan) {
+    const oldPlanJson = JSON.stringify(Array.isArray(oldPayPlan) ? oldPayPlan : []).replace(/'/g, "''");
+    const newPlanJson = JSON.stringify(Array.isArray(newPayPlan) ? newPayPlan : []).replace(/'/g, "''");
+    const response = await exe('SetField', {
+      entity: 'Change',
+      entityId: Number(changeId),
+      fieldValue: "jOldPayPlan='" + oldPlanJson + "',jNewPayPlan='" + newPlanJson + "',jEditedPayPlan='" + newPlanJson + "'",
+      raw: true
+    });
+    if (!response || !response.ok) {
+      throw new Error(translatedMessage(response && response.msg, 'The endorsement payment plan could not be saved.'));
+    }
+  };
+
+  const updateExecutedPayPlanDates = async function (plannedPayPlan) {
+    const response = await exe('RepoPayPlan', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + Number(policyId) + ' AND cancellationDate IS NULL',
+      include: ['PayPlanDetail'],
+      size: 0
+    });
+    if (!response || !response.ok) {
+      throw new Error(translatedMessage(response && response.msg, 'The executed payment plan could not be loaded.'));
+    }
+
+    const currentRows = Array.isArray(response.outData) ? response.outData : [];
+    const targetRows = Array.isArray(plannedPayPlan) ? plannedPayPlan : [];
+    const findTarget = (current) => targetRows.find((target) => (
+      Number(target && target.numberInYear) === Number(current && current.numberInYear)
+      && Number(target && target.contractYear || 0) === Number(current && current.contractYear || 0)
+    ));
+
+    for (const current of currentRows) {
+      const target = findTarget(current);
+      const concept = txt(current && (current.concept || current.Concept)).toUpperCase();
+      const paidValue = current && current.payed !== undefined
+        ? Number(current.payed)
+        : Number(current && current.paid || 0);
+      const installmentAmount = current && current.minimum !== undefined
+        ? Number(current.minimum)
+        : Number(current && current.expected);
+      const isFullyPaid = Number.isFinite(paidValue)
+        && Number.isFinite(installmentAmount)
+        && paidValue >= installmentAmount - 0.005;
+      const targetDueDate = target && (target.dueDate || target.normalDueDate);
+
+      if (!current || !Number(current.id) || !target || !targetDueDate || isFullyPaid || concept === 'CANCELLATION' || current.cancellationDate) {
+        continue;
+      }
+
+      const dueDate = fmtAtNoon(targetDueDate).replace(/'/g, "''");
+      const update = await exe('SetField', {
+        entity: 'PayPlan',
+        entityId: Number(current.id),
+        fieldValue: "dueDate='" + dueDate + "',normalDueDate='" + dueDate + "'",
+        raw: true
+      });
+      if (!update || !update.ok) {
+        throw new Error(translatedMessage(update && update.msg, 'The executed payment plan dates could not be updated.'));
+      }
+    }
   };
 
   // This endorsement does not change premium, sum insured or reinsurance
@@ -648,7 +894,13 @@
 
     try {
       const eff = fmt(toLocalDate(effectiveDate));
-      const quote = await exe('ChangeCoverage', getCoverageChangePayload(eff));
+      const oldPayPlan = await loadPayPlanSnapshot();
+      const newPayPlan = recalculateAdjustablePayPlanDates(
+        oldPayPlan,
+        toLocalDate(eff),
+        getPayPlanFrequencyMonths()
+      );
+      const quote = await exe('ChangeCoverage', getCoverageChangePayload(eff, oldPayPlan, newPayPlan));
 
       if (!quote || !quote.ok || !quote.outData) {
         pushStep(t('Calculate the coverage change'), false, translatedMessage(quote && quote.msg, 'no response'));
@@ -688,7 +940,7 @@
         return;
       }
 
-      setCalculation({ key: calculationKey, quote: quote.outData });
+      setCalculation({ key: calculationKey, quote: quote.outData, oldPayPlan: oldPayPlan, newPayPlan: newPayPlan });
       pushStep(t('Calculate the coverage change'), true, '');
       pushStep(t('Billing invariant'), true, t('Bill matches the current policy and BillDiff is zero.'));
       pushStep(t('Premium invariant (CA6)'), true, t('premium, sum insured and reinsurance unchanged'));
@@ -766,7 +1018,11 @@
       const eff = fmt(toLocalDate(effectiveDate));
 
       // --- generate the endorsement
-      const addPayload = getCoverageChangePayload(eff);
+      const addPayload = getCoverageChangePayload(
+        eff,
+        calculation.oldPayPlan,
+        calculation.newPayPlan
+      );
       const reinsuranceSnapshot = await loadCurrentReinsuranceSnapshot();
       addPayload.jAdditional = JSON.stringify({
         endorsementType: 'PROCEEDORDER',
@@ -789,6 +1045,9 @@
       executionChangeId = Number(cid || 0);
       setChangeId(cid);
       pushStep(t('Generate the endorsement'), true, t('endorsement ') + cid);
+
+      await persistChangePayPlan(cid, calculation.oldPayPlan, calculation.newPayPlan);
+      pushStep(t('Save installment dates'), true, t('Pending installment dates were preserved in the endorsement.'));
 
       await approveEndorsementWorkflow(created.outData.processId);
       pushStep(t('Approve endorsement workflow'), true, '');
@@ -853,6 +1112,17 @@
       }
       reinsuranceFinalized = true;
       pushStep(t('Version reinsurance'), true, translatedMessage(reinsurance.msg, ''));
+
+      try {
+        await updateExecutedPayPlanDates(calculation.newPayPlan);
+        pushStep(t('Update installment dates'), true, t('Pending installment dates were updated after execution.'));
+      } catch (payPlanError) {
+        const payPlanMessage = translatedMessage(payPlanError && payPlanError.message, 'The installment dates could not be updated after execution.');
+        pushStep(t('Update installment dates'), false, payPlanMessage);
+        setResult({ kind: 'partial', msg: t('The endorsement was applied, but the installment dates could not be updated. ') + payPlanMessage });
+        message.error(t('The endorsement was applied, but the installment dates could not be updated.'));
+        return;
+      }
 
       try {
         await generateEndorsementDocument(cid);
@@ -970,13 +1240,19 @@
   const dateCell = (d, days) => (
     <span>{d ? fmt(d) : <span style={{ color: '#bfbfbf' }}>—</span>}{days != null && d ? <span style={{ color: '#8c8c8c' }}> ({days}d)</span> : null}</span>
   );
+  const amountCell = (value, emptyValue) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return emptyValue || '—';
+    const color = amount > 0 ? '#198754' : (amount < 0 ? '#d32f2f' : '#262626');
+    return <span style={{ color: color }}>{amount.toFixed(2)}</span>;
+  };
 
   const columns = [
     { title: t('Coverage ID'), dataIndex: 'coverageId', key: 'coverageId',
       render: (v, r) => <span>{v} {r.isMain ? <Tag color="blue">{t('Main')}</Tag> : (r.isDependent ? <Tag>{t('Dependent')}</Tag> : null)}</span> },
     { title: t('Code'), dataIndex: 'code', key: 'code' },
     { title: t('Coverage name'), dataIndex: 'name', key: 'name' },
-    { title: t('Premium'), dataIndex: 'premium', key: 'premium' },
+    { title: t('Premium'), dataIndex: 'premium', key: 'premium', align: 'right', render: value => amountCell(value) },
     { title: t('Start date (before)'), key: 'cs', render: (v, r) => dateCell(r.curStart) },
     { title: t('End date (before)'), key: 'ce', render: (v, r) => dateCell(r.curEnd, r.duration) },
     { title: t('Start date (after)'), key: 'ns', render: (v, r) => dateCell(r.newStart) },
@@ -984,6 +1260,50 @@
     { title: t('Note'), dataIndex: 'note', key: 'note' },
   ];
   const policyHref = policyId > 0 ? '/#/lifePolicy/' + policyId : '/#/home';
+  const payPlanPreviewRows = calculation && Array.isArray(calculation.oldPayPlan)
+    ? calculation.oldPayPlan.map((oldInstallment, index) => {
+      const newInstallment = calculation.newPayPlan && calculation.newPayPlan[index] || oldInstallment;
+      const amount = oldInstallment && (oldInstallment.minimum !== undefined
+        ? oldInstallment.minimum
+        : oldInstallment.expected);
+      return {
+        key: String(oldInstallment && (oldInstallment.id || oldInstallment.numberInYear) || index),
+        number: oldInstallment && (oldInstallment.numberInYear || oldInstallment.number || index + 1),
+        amount: amount,
+        paid: oldInstallment && (oldInstallment.payed !== undefined ? oldInstallment.payed : oldInstallment.paid),
+        oldDueDate: oldInstallment && (oldInstallment.dueDate || oldInstallment.normalDueDate || oldInstallment.coveredUntil),
+        newDueDate: newInstallment && (newInstallment.dueDate || newInstallment.normalDueDate || newInstallment.coveredUntil)
+      };
+    })
+    : [];
+  const payPlanPreviewColumns = [
+    { title: t('Installment no.'), dataIndex: 'number', key: 'number', width: 120, align: 'center' },
+    { title: t('Installment amount'), dataIndex: 'amount', key: 'amount', width: 150, align: 'right', render: value => amountCell(value) },
+    { title: t('Paid'), dataIndex: 'paid', key: 'paid', width: 130, align: 'right', render: value => amountCell(value, '0.00') },
+    { title: t('Previous due date'), dataIndex: 'oldDueDate', key: 'oldDueDate', width: 170, align: 'center', render: value => value ? <span style={{ color: '#d32f2f' }}>{fmt(toPolicyLocalDate(value))}</span> : '—' },
+    { title: t('New due date'), dataIndex: 'newDueDate', key: 'newDueDate', width: 170, align: 'center', render: value => value ? <span style={{ color: '#1677ff' }}>{fmt(toPolicyLocalDate(value))}</span> : '—' }
+  ];
+  const accrualPremium = (() => {
+    if (!model || !model.curBondStart || !model.curBondEnd || !effectiveDateValue) return null;
+    const premiumCandidates = [
+      policy && policy.anualPremium,
+      policy && policy.annualPremium,
+      policy && policy.grossValue,
+      model.rows.reduce((total, row) => total + Number(row.premium || 0), 0)
+    ];
+    const premium = premiumCandidates
+      .map(value => Number(value))
+      .find(value => Number.isFinite(value));
+    if (!Number.isFinite(premium)) return null;
+
+    const totalDays = Math.max(1, daysBetween(model.curBondStart, model.curBondEnd) || 0);
+    const elapsedDays = Math.min(
+      totalDays,
+      Math.max(0, daysBetween(model.curBondStart, effectiveDateValue) || 0)
+    );
+    const earned = Math.max(0, premium) * (elapsedDays / totalDays);
+    return { earned: earned, deferred: Math.max(0, premium) - earned };
+  })();
 
   if (loading) return <Card title={t('Proceed Order endorsement')}><Skeleton active /></Card>;
 
@@ -1024,7 +1344,7 @@
         />
       ) : null}
 
-      <div style={{
+      <div className="proceed-order-action-bar" style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -1068,9 +1388,20 @@
           <span style={{ color: '#d48806' }}>
             {calculation
               ? t('The endorsement data changed. Calculate again before executing.')
-              : t('Calculate before executing the endorsement.')}
+            : t('Calculate before executing the endorsement.')}
           </span>
         ) : null))}
+        <span className="proceed-order-context-summary">
+          <span><strong>{t('Policy start date')}:</strong> {fmt(policyStartDate) || '—'}</span>
+          <span><strong>{t('Policy')}:</strong> {policy ? (policy.code || policy.id) : '—'}</span>
+          <span><strong>{t('Product')}:</strong> {policy
+            ? ((policy.Product && policy.Product.name)
+              || (policy.product && policy.product.name)
+              || policy.productName
+              || policy.productCode
+              || '—')
+            : '—'}</span>
+        </span>
         <span style={{ flex: 1 }} />
         <Button type="default" href={policyHref}>
           {t('Back to policy')}
@@ -1094,20 +1425,6 @@
           borderRadius: 2
         }}
       >
-        <Descriptions size="small" column={3} bordered style={{ marginBottom: 12 }}>
-          <Descriptions.Item label={t('Policy start date')}><span id="policyStartDate">{fmt(policyStartDate)}</span></Descriptions.Item>
-          <Descriptions.Item label={t('Policy')}>{policy ? (policy.code || policy.id) : ''}</Descriptions.Item>
-          <Descriptions.Item label={t('Product')}>
-            {policy
-              ? ((policy.Product && policy.Product.name)
-                || (policy.product && policy.product.name)
-                || policy.productName
-                || policy.productCode
-                || '')
-              : ''}
-          </Descriptions.Item>
-        </Descriptions>
-
         <Row gutter={16}>
           <Col span={8}>
             <Form.Item label={t('Change date')} required
@@ -1135,22 +1452,51 @@
         : null}
 
       {model && !model.error ? (
-        <div>
-          <Divider orientation="left">{t('Coverage comparison')}</Divider>
-          <Table className="proceed-order-coverage-table" size="small" pagination={false} rowKey="key" dataSource={model.rows} columns={columns} />
+        <Tabs className="proceed-order-result-tabs" defaultActiveKey="coverage" type="card">
+          <TabPane tab={t('Coverage comparison')} key="coverage">
+            <Divider orientation="left">{t('Coverage comparison')}</Divider>
+            <Table className="proceed-order-coverage-table" size="small" pagination={false} rowKey="key" dataSource={model.rows} columns={columns} />
 
-          <Divider orientation="left">{t('Bond validity summary')}</Divider>
-          <Descriptions className="proceed-order-summary-table" size="small" column={2} bordered>
-            <Descriptions.Item label={t('Start before endorsement')}>{fmt(model.curBondStart)}</Descriptions.Item>
-            <Descriptions.Item label={t('End before endorsement')}>{fmt(model.curBondEnd)}</Descriptions.Item>
-            <Descriptions.Item label={t('Start after endorsement')}>{model.newBondStart ? fmt(model.newBondStart) : '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('End after endorsement')}>{model.newBondEnd ? fmt(model.newBondEnd) : '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('Main coverage (from configuration)')}>{model.mainCode}</Descriptions.Item>
-            <Descriptions.Item label={t('Main coverage duration (days)')}>
-              {model.mainRow ? model.mainRow.duration + ' → ' + (model.mainRow.newDuration == null ? '—' : model.mainRow.newDuration) : ''}
-            </Descriptions.Item>
-          </Descriptions>
-        </div>
+            <Divider orientation="left">{t('Bond validity summary')}</Divider>
+            <Descriptions className="proceed-order-summary-table" size="small" column={2} bordered>
+              <Descriptions.Item label={t('Start before endorsement')}>{fmt(model.curBondStart)}</Descriptions.Item>
+              <Descriptions.Item label={t('End before endorsement')}>{fmt(model.curBondEnd)}</Descriptions.Item>
+              <Descriptions.Item label={t('Start after endorsement')}>{model.newBondStart ? fmt(model.newBondStart) : '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('End after endorsement')}>{model.newBondEnd ? fmt(model.newBondEnd) : '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('Main coverage (from configuration)')}>{model.mainCode}</Descriptions.Item>
+              <Descriptions.Item label={t('Main coverage duration (days)')}>
+                {model.mainRow ? model.mainRow.duration + ' → ' + (model.mainRow.newDuration == null ? '—' : model.mainRow.newDuration) : ''}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('Earned premium')}>
+                {accrualPremium ? amountCell(accrualPremium.earned, '—') : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('Unearned premium')}>
+                {accrualPremium ? amountCell(accrualPremium.deferred, '—') : '—'}
+              </Descriptions.Item>
+            </Descriptions>
+          </TabPane>
+          <TabPane tab={t('Installment preview')} key="installments">
+            {!calculationIsCurrent ? (
+              <Alert
+                type="info"
+                showIcon
+                message={t('Calculate the endorsement to preview the installment dates.')}
+                style={{ marginBottom: 12 }}
+              />
+            ) : null}
+            <Table
+              className="proceed-order-coverage-table"
+              size="small"
+              bordered
+              pagination={false}
+              rowKey="key"
+              dataSource={calculationIsCurrent ? payPlanPreviewRows : []}
+              columns={payPlanPreviewColumns}
+              locale={{ emptyText: t('Calculate the endorsement to preview the installment dates.') }}
+              scroll={{ x: 760 }}
+            />
+          </TabPane>
+        </Tabs>
       ) : null}
     </Card>
   );
