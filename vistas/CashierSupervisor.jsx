@@ -16,6 +16,7 @@
     Form,
     Dropdown,
     Layout,
+    Input,
     InputNumber,
     Modal,
     Row,
@@ -146,6 +147,8 @@
   const [movementFilters, setMovementFilters] = React.useState({});
   const [movementFilterVisible, setMovementFilterVisible] = React.useState(false);
   const [movementFilterForm] = Form.useForm();
+  const [movementPayerOptions, setMovementPayerOptions] = React.useState([]);
+  const [movementPayerLoading, setMovementPayerLoading] = React.useState(false);
   const [quickSearchRows, setQuickSearchRows] = React.useState([]);
   const [quickSearchLoading, setQuickSearchLoading] = React.useState(false);
   const [quickSearchMovementNavigationLoading, setQuickSearchMovementNavigationLoading] = React.useState(false);
@@ -193,6 +196,7 @@
   const [supervisorPolicyCodes, setSupervisorPolicyCodes] = React.useState({});
   const cashierSearchTimeoutRef = React.useRef(null);
   const quickSearchPayerSearchTimeoutRef = React.useRef(null);
+  const movementPayerSearchTimeoutRef = React.useRef(null);
   const supervisorPolicySearchTimeoutRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
@@ -1943,32 +1947,42 @@
 
     const pagination = params.pagination || movementPagination;
     const filters = params.filters || movementFilters;
-    const rawAmount = filters && filters.amount;
-    const amount = Number(rawAmount);
-    const hasAmount = rawAmount !== undefined && rawAmount !== null && rawAmount !== '' && Number.isFinite(amount);
+    const rawMinAmount = filters && filters.minAmount;
+    const rawMaxAmount = filters && filters.maxAmount;
+    const minAmount = Number(rawMinAmount);
+    const maxAmount = Number(rawMaxAmount);
+    const hasMinAmount = rawMinAmount !== undefined && rawMinAmount !== null && rawMinAmount !== '' && Number.isFinite(minAmount);
+    const hasMaxAmount = rawMaxAmount !== undefined && rawMaxAmount !== null && rawMaxAmount !== '' && Number.isFinite(maxAmount);
     const transferId = Number(filters && filters.transferId);
+    const incomeType = getTrimmedString(filters && filters.incomeType);
 
     setMovementLoading(true);
-    exe('FilterTransfer', {
-      workspaceId,
-      groupByAllocation: true,
-      size: Number(pagination.pageSize) || 15,
-      page: Math.max((Number(pagination.current) || 1) - 1, 0),
-      currency: null,
-      allocated: null,
-      external: null,
-      executed: filters && filters.pending === true ? false : null,
-      concept: null,
-      minAmount: hasAmount ? amount : null,
-      maxAmount: hasAmount ? amount : null,
-      month: null,
-      claimPaymentId: null,
-      allocationId: null,
-      fromDate: null,
-      toDate: null,
-      id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
-      paymentMethod: null,
-      incomeType: getTrimmedString(filters && filters.incomeType) || null
+    exe('ExeChain', {
+      chain: 'cmdFilterCashierTransfer',
+      context: JSON.stringify({
+        workspaceId: workspaceId,
+        groupByAllocation: true,
+        size: Number(pagination.pageSize) || 15,
+        page: Math.max((Number(pagination.current) || 1) - 1, 0),
+        currency: null,
+        allocated: null,
+        external: null,
+        executed: filters && filters.pending === true ? false : null,
+        concept: null,
+        minAmount: hasMinAmount ? minAmount : null,
+        maxAmount: hasMaxAmount ? maxAmount : null,
+        month: null,
+        claimPaymentId: null,
+        allocationId: null,
+        fromDate: null,
+        toDate: null,
+        id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+        paymentMethod: null,
+        incomeType: incomeType || null,
+        policy: getTrimmedString(filters && filters.policy) || null,
+        payerId: Number(filters && filters.payerId) > 0 ? Number(filters.payerId) : null,
+        payerName: getTrimmedString(filters && filters.payerName) || null
+      })
     })
       .then(response => {
         if (!response || response.ok === false) throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
@@ -2056,6 +2070,60 @@
           message.error(error && error.message ? error.message : String(error));
         })
         .finally(() => setQuickSearchPayerLoading(false));
+    }, 350);
+  }
+
+  function searchMovementPayers(value) {
+    const searchText = getTrimmedString(value);
+    const isNumericId = /^\d+$/.test(searchText);
+
+    if (movementPayerSearchTimeoutRef.current) {
+      clearTimeout(movementPayerSearchTimeoutRef.current);
+      movementPayerSearchTimeoutRef.current = null;
+    }
+
+    if ((!isNumericId && searchText.length < 3) || !searchText) {
+      setMovementPayerOptions([]);
+      setMovementPayerLoading(false);
+      return;
+    }
+
+    movementPayerSearchTimeoutRef.current = setTimeout(() => {
+      const escaped = escapeSqlString(searchText);
+      const filter = isNumericId
+        ? `[id] = ${Number(searchText)}`
+        : `(([name] LIKE N'%${escaped}%') OR ([surname1] LIKE N'%${escaped}%') OR ([surname2] LIKE N'%${escaped}%') OR ([cnp] LIKE N'%${escaped}%') OR ([nif] LIKE N'%${escaped}%'))`;
+
+      setMovementPayerLoading(true);
+      exe('GetContacts', { operation: 'GET', filter: filter, size: 15 })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Payers could not be loaded.'));
+          }
+
+          const options = getRows(response).map(contact => {
+            const name = getTrimmedString(contact && (contact.FullName || contact.fullName || [
+              contact.name,
+              contact.surname1,
+              contact.surname2
+            ].filter(Boolean).join(' ')));
+            const identifier = getTrimmedString(contact && (contact.cnp || contact.nif || contact.passport));
+            const id = Number(contact && contact.id);
+            return {
+              value: id,
+              id: id,
+              name: name || String(id),
+              identifier: identifier
+            };
+          }).filter(item => Number.isFinite(item.id) && item.id > 0);
+
+          setMovementPayerOptions(options);
+        })
+        .catch(error => {
+          setMovementPayerOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setMovementPayerLoading(false));
     }, 350);
   }
 
@@ -2166,17 +2234,21 @@
       operation: 'GET',
       filter: buildQuickSearchFilter(filters),
       include: ['SplitPayments', 'IncomeType', 'DestinationAccount', 'Allocation', 'Allocation.InstallmentPremiums'],
-      size: pageSize,
-      page: Math.max(currentPage - 1, 0)
+      size: 0,
+      page: 0
     })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('Movements could not be loaded.'));
         }
-        const rows = getRows(response);
+        const allRows = getRows(response).slice().sort((left, right) =>
+          Number(right && right.id || 0) - Number(left && left.id || 0)
+        );
+        const start = (currentPage - 1) * pageSize;
+        const rows = allRows.slice(start, start + pageSize);
         loadSupervisorPolicyCodes(rows).catch(() => {});
         setQuickSearchRows(rows);
-        setQuickSearchTotal(getResponseTotal(response, rows));
+        setQuickSearchTotal(allRows.length);
         setQuickSearchPagination({ current: currentPage, pageSize });
       })
       .catch(error => {
@@ -2614,30 +2686,39 @@
 
       const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
       const filters = movementFilters || {};
-      const rawAmount = filters.amount;
-      const amount = Number(rawAmount);
-      const hasAmount = rawAmount !== undefined && rawAmount !== null && rawAmount !== '' && Number.isFinite(amount);
+      const rawMinAmount = filters.minAmount;
+      const rawMaxAmount = filters.maxAmount;
+      const minAmount = Number(rawMinAmount);
+      const maxAmount = Number(rawMaxAmount);
+      const hasMinAmount = rawMinAmount !== undefined && rawMinAmount !== null && rawMinAmount !== '' && Number.isFinite(minAmount);
+      const hasMaxAmount = rawMaxAmount !== undefined && rawMaxAmount !== null && rawMaxAmount !== '' && Number.isFinite(maxAmount);
       const transferId = Number(filters.transferId);
-      const exportResponse = await exe('FilterTransfer', {
-        workspaceId,
-        groupByAllocation: true,
-        size: Math.max(Number(movementTotal) || movementRows.length, movementRows.length),
-        page: 0,
-        currency: null,
-        allocated: null,
-        external: null,
-        executed: filters.pending === true ? false : null,
-        concept: null,
-        minAmount: hasAmount ? amount : null,
-        maxAmount: hasAmount ? amount : null,
-        month: null,
-        claimPaymentId: null,
-        allocationId: null,
-        fromDate: null,
-        toDate: null,
-        id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
-        paymentMethod: null,
-        incomeType: getTrimmedString(filters.incomeType) || null
+      const exportResponse = await exe('ExeChain', {
+        chain: 'cmdFilterCashierTransfer',
+        context: JSON.stringify({
+          workspaceId,
+          groupByAllocation: true,
+          size: Math.max(Number(movementTotal) || movementRows.length, movementRows.length),
+          page: 0,
+          currency: null,
+          allocated: null,
+          external: null,
+          executed: filters.pending === true ? false : null,
+          concept: null,
+          minAmount: hasMinAmount ? minAmount : null,
+          maxAmount: hasMaxAmount ? maxAmount : null,
+          month: null,
+          claimPaymentId: null,
+          allocationId: null,
+          fromDate: null,
+          toDate: null,
+          id: Number.isInteger(transferId) && transferId > 0 ? transferId : null,
+          paymentMethod: null,
+          incomeType: getTrimmedString(filters.incomeType) || null,
+          policy: getTrimmedString(filters.policy) || null,
+          payerId: Number(filters.payerId) > 0 ? Number(filters.payerId) : null,
+          payerName: getTrimmedString(filters.payerName) || null
+        })
       });
       if (!exportResponse || exportResponse.ok === false) {
         throw new Error(exportResponse && exportResponse.msg ? exportResponse.msg : t('Movements could not be loaded.'));
@@ -3395,11 +3476,35 @@
   ];
 
   function applySupervisorMovementFilters(values) {
+    const rawMinAmount = values && values.minAmount;
+    const rawMaxAmount = values && values.maxAmount;
+    const hasMinAmount = rawMinAmount !== undefined && rawMinAmount !== null && rawMinAmount !== '';
+    const hasMaxAmount = rawMaxAmount !== undefined && rawMaxAmount !== null && rawMaxAmount !== '';
+    const minAmount = Number(rawMinAmount);
+    const maxAmount = Number(rawMaxAmount);
+
+    if (hasMinAmount !== hasMaxAmount) {
+      message.warning(t('Select both the minimum and maximum amount.'));
+      return;
+    }
+    if (hasMinAmount && (!Number.isFinite(minAmount) || !Number.isFinite(maxAmount))) {
+      message.warning(t('The minimum and maximum amounts must be valid numbers.'));
+      return;
+    }
+    if (hasMinAmount && minAmount > maxAmount) {
+      message.warning(t('The minimum amount cannot be greater than the maximum amount.'));
+      return;
+    }
+
     const filters = {
       pending: values && values.pending === true,
       transferId: values && values.transferId,
-      amount: values && values.amount,
-      incomeType: values && values.incomeType
+      minAmount: hasMinAmount ? minAmount : null,
+      maxAmount: hasMaxAmount ? maxAmount : null,
+      incomeType: values && values.incomeType,
+      policy: getTrimmedString(values && values.policy) || null,
+      payerId: Number(values && values.payerId) > 0 ? Number(values.payerId) : null,
+      payerName: getTrimmedString((movementPayerOptions.find(item => String(item.value) === String(values && values.payerId)) || {}).name) || null
     };
     setMovementFilters(filters);
     setMovementFilterVisible(false);
@@ -3411,6 +3516,11 @@
 
   function clearSupervisorMovementFilters() {
     movementFilterForm.resetFields();
+    if (movementPayerSearchTimeoutRef.current) {
+      clearTimeout(movementPayerSearchTimeoutRef.current);
+      movementPayerSearchTimeoutRef.current = null;
+    }
+    setMovementPayerOptions([]);
     applySupervisorMovementFilters({});
   }
 
@@ -3436,6 +3546,11 @@
 
     if (hasAmountFrom !== hasAmountTo) {
       message.warning(t('Select both the minimum and maximum amount.'));
+      return;
+    }
+
+    if (hasAmountFrom && (!Number.isFinite(Number(minAmount)) || !Number.isFinite(Number(maxAmount)))) {
+      message.warning(t('The minimum and maximum amounts must be valid numbers.'));
       return;
     }
 
@@ -4278,9 +4393,44 @@
             <Form.Item label={t('Transfer ID')} name="transferId">
               <InputNumber min={1} precision={0} style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item label={t('Amount')} name="amount">
-              <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+            <Form.Item label={t('Policy')} name="policy">
+              <Input allowClear placeholder={t('Search by policy or code')} />
             </Form.Item>
+            <Form.Item label={t('Client')} name="payerId">
+              <Select
+                allowClear
+                showSearch
+                filterOption={false}
+                loading={movementPayerLoading}
+                onSearch={searchMovementPayers}
+                optionLabelProp="label"
+                placeholder={t('Search client')}
+                notFoundContent={movementPayerLoading ? t('Loading') : t('Type at least 3 characters')}
+              >
+                {movementPayerOptions.map(item => (
+                  <Option key={item.id} value={item.id} label={item.name}>
+                    <div>
+                      <div>{item.name}</div>
+                      <div style={{ fontSize: 11, color: '#8c8c8c' }}>
+                        {`${t('ID')}: ${item.id}${item.identifier ? ` | ${item.identifier}` : ''}`}
+                      </div>
+                    </div>
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item label={t('Min amount')} name="minAmount">
+                  <InputNumber precision={2} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label={t('Maximum amount')} name="maxAmount">
+                  <InputNumber precision={2} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
             <Form.Item label={t('Income type')} name="incomeType">
               <Select
                 allowClear
@@ -4321,12 +4471,12 @@
             <Row gutter={12}>
               <Col span={12}>
                 <Form.Item label={t('Min amount')} name="minAmount">
-                  <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+                  <InputNumber precision={2} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col span={12}>
                 <Form.Item label={t('Maximum amount')} name="maxAmount">
-                  <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+                  <InputNumber precision={2} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
             </Row>

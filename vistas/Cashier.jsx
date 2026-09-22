@@ -349,6 +349,10 @@
   const [transitCollectionMode, setTransitCollectionMode] = React.useState(false);
   const [transitCollectionAccount, setTransitCollectionAccount] = React.useState(null);
   const [transitCollectionPolicyRow, setTransitCollectionPolicyRow] = React.useState(null);
+  const [transitCollectionPolicyRows, setTransitCollectionPolicyRows] = React.useState([]);
+  const [transitCollectionPolicySelectionVisible, setTransitCollectionPolicySelectionVisible] = React.useState(false);
+  const [transitCollectionPolicySelection, setTransitCollectionPolicySelection] = React.useState([]);
+  const [transitCollectionPolicyLoading, setTransitCollectionPolicyLoading] = React.useState(false);
   const [collectionExpectedAmount, setCollectionExpectedAmount] = React.useState(0);
   const [collectionChargeStep, setCollectionChargeStep] = React.useState('payment');
   const [collectionPolicyRows, setCollectionPolicyRows] = React.useState([]);
@@ -1431,6 +1435,69 @@
 
       .cashier-supervisor-collection-payment-modal .cashier-supervisor-table .ant-table-tbody > tr:hover > td {
         background: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-modal-content {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-modal-header {
+        border-bottom: 1px solid #cbd1d8;
+        margin-bottom: 12px;
+      }
+
+      .cashier-supervisor-transit-policy-modal .cashier-supervisor-transit-policy-table {
+        border: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-transit-policy-modal .cashier-supervisor-transit-policy-table .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-transit-policy-modal .cashier-supervisor-transit-policy-table .ant-table-tbody > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        padding: 5px 8px !important;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cashier-supervisor-transit-policy-modal .cashier-supervisor-transit-policy-table .ant-table-tbody > tr:hover > td {
+        background: #b7d7ff !important;
+      }
+
+      .cashier-supervisor-transit-policy-modal .cashier-supervisor-transit-policy-table .ant-table-tbody > tr.ant-table-row-selected > td {
+        background: #86b4ff !important;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-checkbox-inner {
+        border: 1px solid #8f9aa7 !important;
+        border-radius: 4px;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-checkbox:hover .ant-checkbox-inner,
+      .cashier-supervisor-transit-policy-modal .ant-checkbox-wrapper:hover .ant-checkbox-inner {
+        border-color: #1677ff !important;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-checkbox-checked .ant-checkbox-inner,
+      .cashier-supervisor-transit-policy-modal .ant-checkbox-indeterminate .ant-checkbox-inner {
+        background: #1677ff !important;
+        border-color: #1677ff !important;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-modal-footer {
+        border-top: 1px solid #cbd1d8;
+      }
+
+      .cashier-supervisor-transit-policy-modal .ant-modal-footer .ant-btn:not(.ant-btn-primary) {
+        border-color: #8f9aa7;
       }
 
       .cashier-supervisor-restructure-modal .ant-modal-content {
@@ -5879,6 +5946,9 @@
   }
 
   function getSelectedCollectionRows() {
+    if (transitCollectionMode && transitCollectionPolicyRows.length > 0) {
+      return transitCollectionPolicyRows;
+    }
     if (transitCollectionMode && transitCollectionPolicyRow) {
       return [transitCollectionPolicyRow];
     }
@@ -5925,6 +5995,9 @@
     setTransitCollectionMode(false);
     setTransitCollectionAccount(null);
     setTransitCollectionPolicyRow(null);
+    setTransitCollectionPolicyRows([]);
+    setTransitCollectionPolicySelection([]);
+    setTransitCollectionPolicySelectionVisible(false);
     setCollectionChargeStep('payment');
     setCollectionPolicyRows([]);
     setCollectionSupplementaryRows([]);
@@ -5946,11 +6019,11 @@
 
   async function openTransitPremiumCollection() {
     const account = getSingleSelectedTransitAccount(t('Select exactly one transit account to collect a premium.'));
-    const policyId = Number(account && (account.lifePolicyId || account.policyId));
     const availableAmount = Number(getTransitAccountBalance(account).toFixed(2));
+    const policyCode = getTrimmedString(account && (account.policyCode || account.lifePolicyCode || account.policy));
 
-    if (!account || !Number.isFinite(policyId) || policyId <= 0) {
-      message.warning(t('The selected transit account does not have a valid policy.'));
+    if (!account || !policyCode) {
+      message.warning(t('The selected transit account does not have a valid policy code.'));
       return;
     }
 
@@ -5960,57 +6033,97 @@
     }
 
     try {
+      setTransitCollectionPolicyLoading(true);
       const response = await exe('ExeChain', {
         chain: 'cmdPremiumCollectionCashier',
-        context: JSON.stringify({ policyId: policyId, page: 1, size: 1, onlyOverdue: false })
+        context: JSON.stringify({ policyCode: policyCode, page: 1, size: 10000, onlyOverdue: false })
       });
       const payload = response && response.outData && typeof response.outData === 'object'
         ? response.outData
         : {};
-      const policyRows = Array.isArray(payload.data) ? payload.data : [];
-      const policyRow = policyRows[0];
+      const policyRows = (Array.isArray(payload.data) ? payload.data : [])
+        .filter(row => getCollectionPolicyPending(row) > 0);
 
-      if (!policyRow) {
-        message.warning(t('The policy associated with the transit account has no pending premiums.'));
+      if (policyRows.length === 0) {
+        message.warning(t('No policy with pending premiums was found for this policy code.'));
         return;
       }
 
-      const policyPending = getCollectionPolicyPending(policyRow);
-      const collectionAmount = Math.min(availableAmount, policyPending);
-      if (collectionAmount <= 0) {
-        message.warning(t('The policy associated with the transit account has no pending premiums.'));
-        return;
-      }
-
-      clearNewIncomeForm();
-      setTransitCollectionMode(true);
       setTransitCollectionAccount({ ...account, availableAmount: availableAmount });
-      setTransitCollectionPolicyRow(policyRow);
-      setCollectionChargeStep('payment');
-      setCollectionPolicyRows([]);
-      setCollectionSupplementaryRows([]);
-      setCollectionExpectedAmount(collectionAmount);
-      const transitPaymentKey = Date.now();
-      setNewIncomePayments([{ key: transitPaymentKey, methodCode: 'OT', amount: collectionAmount.toFixed(2) }]);
-      updateNewIncomePaymentMethod(transitPaymentKey, 'OT');
+      setTransitCollectionPolicyRows(policyRows);
+      setTransitCollectionPolicySelection(policyRows.length === 1
+        ? [String(getCollectionRowKey(policyRows[0]))]
+        : []);
 
-      const premiumIncomeType = incomeTypeOptions.find(item =>
-        getTrimmedString(item && item.internalType).toUpperCase() === 'PREMIUM'
-      );
-      if (!premiumIncomeType) {
-        message.error(t('The premium collection income type is not configured.'));
+      if (policyRows.length > 1) {
+        setTransitCollectionPolicySelectionVisible(true);
         return;
       }
 
-      newIncomeForm.setFieldsValue({
-        incomeType: premiumIncomeType.value,
-        currency: getTrimmedString(account.currency) || 'USD'
-      });
-      updateNewIncomeType(premiumIncomeType.value);
-      setCollectionChargeVisible(true);
+      openTransitPremiumCollectionForPolicies(policyRows, { ...account, availableAmount: availableAmount });
     } catch (error) {
       message.error(error && error.message ? error.message : t('The policy premiums could not be loaded.'));
+    } finally {
+      setTransitCollectionPolicyLoading(false);
     }
+  }
+
+  function openTransitPremiumCollectionForPolicies(policyRows, accountOverride) {
+    const selectedPolicies = Array.isArray(policyRows) ? policyRows.filter(Boolean) : [];
+    const sourceAccount = accountOverride || transitCollectionAccount;
+    const availableAmount = Number(sourceAccount && sourceAccount.availableAmount) || 0;
+    const policyPending = selectedPolicies.reduce((total, row) => total + getCollectionPolicyPending(row), 0);
+    const collectionAmount = Math.min(availableAmount, policyPending);
+
+    if (selectedPolicies.length === 0 || collectionAmount <= 0) {
+      message.warning(t('Select at least one policy with pending premiums.'));
+      return;
+    }
+
+    clearNewIncomeForm();
+    setTransitCollectionMode(true);
+    setTransitCollectionAccount(sourceAccount);
+    setTransitCollectionPolicyRows(selectedPolicies);
+    setTransitCollectionPolicyRow(selectedPolicies[0]);
+    setCollectionChargeStep('payment');
+    setCollectionPolicyRows([]);
+    setCollectionSupplementaryRows([]);
+    setCollectionExpectedAmount(collectionAmount);
+    const transitPaymentKey = Date.now();
+    setNewIncomePayments([{ key: transitPaymentKey, methodCode: 'OT', amount: collectionAmount.toFixed(2) }]);
+    updateNewIncomePaymentMethod(transitPaymentKey, 'OT');
+
+    const premiumIncomeType = incomeTypeOptions.find(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'PREMIUM'
+    );
+    if (!premiumIncomeType) {
+      message.error(t('The premium collection income type is not configured.'));
+      return;
+    }
+
+    newIncomeForm.setFieldsValue({
+      incomeType: premiumIncomeType.value,
+      currency: getTrimmedString(sourceAccount && sourceAccount.currency) || 'USD'
+    });
+    updateNewIncomeType(premiumIncomeType.value);
+    setTransitCollectionPolicySelectionVisible(false);
+    setCollectionChargeVisible(true);
+  }
+
+  function confirmTransitPremiumPolicySelection() {
+    const selectedKeys = (Array.isArray(transitCollectionPolicySelection)
+      ? transitCollectionPolicySelection
+      : []).map(value => String(value));
+    const selectedPolicies = transitCollectionPolicyRows.filter(row =>
+      selectedKeys.indexOf(String(getCollectionRowKey(row))) >= 0
+    );
+
+    if (selectedPolicies.length === 0) {
+      message.warning(t('Select at least one policy with pending premiums.'));
+      return;
+    }
+
+    openTransitPremiumCollectionForPolicies(selectedPolicies);
   }
 
   function getCollectionPaymentAmount() {
@@ -6053,8 +6166,18 @@
     return 0;
   }
 
+  function getCollectionPolicyOldestDueDate(row) {
+    const installments = Array.isArray(row && row.Cuotas) ? row.Cuotas : [];
+    const timestamps = installments
+      .map(item => new Date(item && item.dueDate).getTime())
+      .filter(value => Number.isFinite(value));
+    return timestamps.length > 0 ? Math.min(...timestamps) : Number.MAX_SAFE_INTEGER;
+  }
+
   function buildCollectionAllocationPreview() {
-    const selectedRows = getSelectedCollectionRows();
+    const selectedRows = getSelectedCollectionRows()
+      .slice()
+      .sort((left, right) => getCollectionPolicyOldestDueDate(left) - getCollectionPolicyOldestDueDate(right));
     let remainingAmount = getCollectionPaymentAmount();
 
     const policyRows = selectedRows.map(row => {
@@ -6123,7 +6246,8 @@
       if (transitCollectionMode) {
         const amount = getCollectionPaymentAmount();
         const availableAmount = Number(transitCollectionAccount && transitCollectionAccount.availableAmount) || 0;
-        const policyPending = getCollectionPolicyPending(transitCollectionPolicyRow);
+        const policyPending = getSelectedCollectionRows()
+          .reduce((total, row) => total + getCollectionPolicyPending(row), 0);
 
         if (amount > availableAmount + 0.01) {
           message.error(t('The amount cannot exceed the transit account balance.'));
@@ -6267,6 +6391,9 @@
       setTransitCollectionMode(false);
       setTransitCollectionAccount(null);
       setTransitCollectionPolicyRow(null);
+      setTransitCollectionPolicyRows([]);
+      setTransitCollectionPolicySelection([]);
+      setTransitCollectionPolicySelectionVisible(false);
       clearNewIncomeForm();
       loadCollection({
         pagination: {
@@ -10192,6 +10319,68 @@
         </Modal>
 
         <Modal
+          title={t('Select policies for premium payment')}
+          className="cashier-supervisor-transit-policy-modal"
+          open={transitCollectionPolicySelectionVisible}
+          onCancel={() => {
+            setTransitCollectionPolicySelectionVisible(false);
+            setTransitCollectionPolicySelection([]);
+            setTransitCollectionPolicyRows([]);
+            setTransitCollectionAccount(null);
+          }}
+          width={900}
+          destroyOnClose
+          footer={[
+            <Button
+              key="cancel"
+              onClick={() => {
+                setTransitCollectionPolicySelectionVisible(false);
+                setTransitCollectionPolicySelection([]);
+                setTransitCollectionPolicyRows([]);
+                setTransitCollectionAccount(null);
+              }}
+            >
+              {t('Cancel')}
+            </Button>,
+            <Button
+              key="continue"
+              type="primary"
+              loading={transitCollectionPolicyLoading}
+              onClick={confirmTransitPremiumPolicySelection}
+            >
+              {t('Continue')}
+            </Button>
+          ]}
+        >
+          <Table
+            rowKey={record => String(getCollectionRowKey(record))}
+            size="small"
+            bordered
+            className="cashier-supervisor-transit-policy-table"
+            loading={transitCollectionPolicyLoading}
+            rowSelection={{
+              type: 'checkbox',
+              selectedRowKeys: transitCollectionPolicySelection,
+              onChange: keys => setTransitCollectionPolicySelection(keys.map(key => String(key)))
+            }}
+            columns={[
+              { title: t('Policy ID'), dataIndex: 'lifePolicyId', key: 'lifePolicyId', width: 100, align: 'center' },
+              { title: t('Policy'), dataIndex: 'poliza', key: 'poliza', width: 180 },
+              {
+                title: t('Validity'),
+                key: 'validity',
+                width: 210,
+                render: (_, record) => `${formatDate(record && record.vigenciaDesde)} - ${formatDate(record && record.vigenciaHasta)}`
+              },
+              { title: t('Pending'), dataIndex: 'pendiente', key: 'pendiente', align: 'right', render: renderGridMoney },
+              { title: t('Overdue'), dataIndex: 'vencido', key: 'vencido', align: 'right', render: renderGridMoney }
+            ]}
+            dataSource={transitCollectionPolicyRows}
+            pagination={false}
+          />
+        </Modal>
+
+        <Modal
           title={t('Collect premiums')}
           className="cashier-supervisor-collection-payment-modal"
           open={collectionChargeVisible}
@@ -10200,6 +10389,9 @@
             setTransitCollectionMode(false);
             setTransitCollectionAccount(null);
             setTransitCollectionPolicyRow(null);
+            setTransitCollectionPolicyRows([]);
+            setTransitCollectionPolicySelection([]);
+            setTransitCollectionPolicySelectionVisible(false);
             setCollectionChargeStep('payment');
             setCollectionPolicyRows([]);
             setCollectionSupplementaryRows([]);
