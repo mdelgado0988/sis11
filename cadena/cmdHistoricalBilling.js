@@ -165,7 +165,7 @@ function normalizeInput(source) {
 }
 
 function buildFilter(input) {
-  const conditions = [];
+  const conditions = ['AND lp.[activeDate] IS NOT NULL'];
 
   if (input.clientId > 0) conditions.push(`AND lp.[holderId] = ${input.clientId}`);
   if (input.policyId > 0) conditions.push(`AND lp.[id] = ${input.policyId}`);
