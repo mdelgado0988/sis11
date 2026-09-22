@@ -25,6 +25,7 @@
     Switch,
     Table,
     Tabs,
+    Tag,
     Alert,
     message
   } = A;
@@ -1219,7 +1220,7 @@
     setPaymentsLoading(true);
     exe('RepoTransfer', {
       operation: 'GET',
-      filter: `([Transfer].lifePolicyId = ${id} OR EXISTS (SELECT 1 FROM AllocationInstallment ai WHERE ai.allocationId = [Transfer].allocationId AND ai.lifePolicyId = ${id})) AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1 AND [Transfer].[isExternal] = 1`,
+      filter: `([Transfer].lifePolicyId = ${id} OR EXISTS (SELECT 1 FROM AllocationInstallment ai WHERE ai.allocationId = [Transfer].allocationId AND ai.lifePolicyId = ${id})) AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1 AND ([Transfer].[isExternal] = 1 OR ([Transfer].[isExternal] = 0 AND [Transfer].[transactionCode] = N'PREMIUMPAY' AND [Transfer].[allocationId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [Transfer] externalTransfer WHERE externalTransfer.[allocationId] = [Transfer].[allocationId] AND externalTransfer.[status] in (1,2) AND externalTransfer.[executed] = 1 AND externalTransfer.[isExternal] = 1)))`,
       include: ['Allocation', 'Allocation.InstallmentPremiums', 'TransferWorkspace', 'IncomeType'],
       noTracking: true
     }).then(response => {
@@ -1810,6 +1811,26 @@
     return [concept, reference].filter(Boolean).join(' - ') || '-';
   }
 
+  function isPaymentReverted(group) {
+    const movementItems = [group].concat(getPaymentMovementChildren(group));
+    return movementItems.some(item => {
+      const allocation = item && (item.Allocation || item.allocation);
+      return Boolean(item && (
+        item.reverted === true
+        || item.reverted === 1
+        || item.reverted === 'true'
+        || item.reversalDate
+        || Number(item.reversalOfId) > 0
+        || allocation && (
+          allocation.reverted === true
+          || allocation.reverted === 1
+          || allocation.reverted === 'true'
+          || allocation.reversalDate
+        )
+      ));
+    });
+  }
+
   const paymentGridRows = paymentRows.map((group, index) => {
     const movementChildren = getPaymentMovementChildren(group);
     const item = movementChildren.find(movement => Number(movement && movement.id) === Number(group && group.id))
@@ -1849,6 +1870,7 @@
       cashDate: workspace && (workspace.date || workspace.Date) || group.date || item.date,
       currency: text(group.currency || item.currency || allocation && allocation.currency) || '-',
       observations: getPaymentReference(group, item),
+      reverted: isPaymentReverted(group),
       transferId: item.id || group.id || '-',
       allocationId: allocation && allocation.id || group && group.allocationId || item && item.allocationId || '-',
       line: paymentLine || '-',
@@ -1865,6 +1887,14 @@
     { title: t('Cash desk date'), dataIndex: 'cashDate', key: 'cashDate', width: 120, align: 'center', render: formatDate },
     { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' },
     { title: t('Observations'), dataIndex: 'observations', key: 'observations', width: 240, ellipsis: true },
+    {
+      title: t('Status'),
+      dataIndex: 'reverted',
+      key: 'status',
+      width: 110,
+      align: 'center',
+      render: value => <Tag color={value ? 'red' : 'green'}>{t(value ? 'Reverted' : 'Executed')}</Tag>
+    },
     { title: t('Transfer ID'), dataIndex: 'transferId', key: 'transferId', width: 110, align: 'center' },
     { title: t('Allocation ID'), dataIndex: 'allocationId', key: 'allocationId', width: 110, align: 'center', render: renderAllocationLink },
     { title: t('Line of business'), dataIndex: 'line', key: 'line', width: 170, ellipsis: true },
@@ -1875,8 +1905,9 @@
     { title: t('Cashier'), dataIndex: 'cashier', key: 'cashier', width: 220, ellipsis: true },
     { title: t('Payer'), dataIndex: 'payer', key: 'payer', width: 220, ellipsis: true, render: value => renderContactLink(detailHolder, value) }
   ];
-  const paymentTotalPaid = paymentGridRows.reduce((total, row) => total + number(row.paid), 0);
-  const paymentTotalComplementary = paymentGridRows.reduce((total, row) => total + number(row.complementary), 0);
+  const validPaymentRows = paymentGridRows.filter(row => !row.reverted);
+  const paymentTotalPaid = validPaymentRows.reduce((total, row) => total + number(row.paid), 0);
+  const paymentTotalComplementary = validPaymentRows.reduce((total, row) => total + number(row.complementary), 0);
 
   const restructureFrequencyOptions = [
     { value: 'm', label: t('Monthly'), months: 1 },
@@ -2950,12 +2981,12 @@
                   summary={() => (
                     <Table.Summary>
                       <Table.Summary.Row>
-                        <Table.Summary.Cell index={0} colSpan={8}>
+                        <Table.Summary.Cell index={0} colSpan={9}>
                           <strong>{t('Totals')}</strong> | {t('Payments')}: {paymentGridRows.length}
                         </Table.Summary.Cell>
-                        <Table.Summary.Cell index={8} align="right">{renderMoney(paymentTotalPaid)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={9} align="right">{renderMoney(paymentTotalComplementary)}</Table.Summary.Cell>
-                        <Table.Summary.Cell index={10} colSpan={2}></Table.Summary.Cell>
+                        <Table.Summary.Cell index={9} align="right">{renderMoney(paymentTotalPaid)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={10} align="right">{renderMoney(paymentTotalComplementary)}</Table.Summary.Cell>
+                        <Table.Summary.Cell index={11} colSpan={2}></Table.Summary.Cell>
                       </Table.Summary.Row>
                     </Table.Summary>
                   )}
