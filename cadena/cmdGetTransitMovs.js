@@ -12,6 +12,7 @@
  *   page?: number,
  *   size?: number,
  *   holderId?: number,
+ *   transferId?: number,
  *   policy?: string|number,
  *   accountName?: string,
  *   accountCode?: string,
@@ -116,13 +117,18 @@ function normalizeInput(source) {
     page: Math.max(toPositiveInteger(value.page) || 1, 1),
     size: Math.min(Math.max(toPositiveInteger(value.size) || 15, 1), 100),
     holderId: toPositiveInteger(value.holderId),
+    transferId: toPositiveInteger(value.transferId),
     policy: normalizeText(value.policy),
     accountName: normalizeText(value.accountName),
     accountCode: normalizeText(value.accountCode),
     currency: normalizeText(value.currency).toUpperCase(),
     name: normalizeText(value.name),
     cancellations: value.cancellations === true,
-    onlyWithBalance: value.showAll !== true && value.onlyWithBalance !== false
+    // A transfer search must include both sides of the movement, even when
+    // one side has no positive balance after the transfer.
+    onlyWithBalance: value.showAll !== true
+      && value.onlyWithBalance !== false
+      && toPositiveInteger(value.transferId) <= 0
   };
 }
 
@@ -147,6 +153,15 @@ function buildFilter(input) {
 
   if (input.holderId > 0) {
     conditions.push(`a.[holderId] = ${input.holderId}`);
+  }
+
+  if (input.transferId > 0) {
+    conditions.push(`EXISTS (
+      SELECT 1
+      FROM [AccountMov] transferMovement
+      WHERE transferMovement.[accountId] = a.[id]
+        AND transferMovement.[transferId] = ${input.transferId}
+    )`);
   }
 
   if (input.policy) {

@@ -398,6 +398,7 @@
   const [newIncomeDynamicForms, setNewIncomeDynamicForms] = React.useState({});
   const [newIncomeTypeDynamicForm, setNewIncomeTypeDynamicForm] = React.useState(null);
   const [newIncomeActiveFormKey, setNewIncomeActiveFormKey] = React.useState(null);
+  const [newIncomeTransitContact, setNewIncomeTransitContact] = React.useState(null);
   const newIncomeFormRefs = React.useRef({});
   const newIncomeTypeFormRef = React.useRef(null);
   const newIncomeDestinationSearchTimer = React.useRef(null);
@@ -2044,6 +2045,9 @@
         holderId: filters && filters.holderId !== undefined && filters.holderId !== null
           ? filters.holderId
           : '',
+        transferId: filters && filters.transferId !== undefined && filters.transferId !== null
+          ? filters.transferId
+          : '',
         policy: getTrimmedString(filters && filters.policy),
         accountName: getTrimmedString(filters && filters.accountName),
         accountCode: getTrimmedString(filters && filters.accountCode),
@@ -2134,6 +2138,7 @@
   function applyTransitFilters(values) {
     const nextFilters = {
       holderId: values && values.contact !== undefined && values.contact !== null ? values.contact : '',
+      transferId: Number(values && values.transferId) > 0 ? Number(values.transferId) : '',
       policy: getTrimmedString(values && values.policy),
       accountName: getTrimmedString(values && values.accountName),
       accountCode: getTrimmedString(values && values.accountCode),
@@ -2198,6 +2203,7 @@
             page: currentPage,
             size: pageSize,
             holderId: filters.holderId !== undefined && filters.holderId !== null ? filters.holderId : '',
+            transferId: filters.transferId !== undefined && filters.transferId !== null ? filters.transferId : '',
             policy: getTrimmedString(filters.policy),
             accountName: getTrimmedString(filters.accountName),
             accountCode: getTrimmedString(filters.accountCode),
@@ -3612,6 +3618,7 @@
       ));
       setNewIncomeDestinationAccountOptions(options);
       newIncomeForm.setFieldsValue({ destination: options.length > 0 ? options[0].value : undefined });
+      updateNewIncomeTransitContact(options[0] && options[0].account, 'PPXA');
     } catch (error) {
       setNewIncomeDestinationAccountOptions([]);
       newIncomeForm.setFieldsValue({ destination: undefined });
@@ -3623,6 +3630,7 @@
 
   function updateNewIncomeType(value) {
     setNewIncomeTypeCode(value);
+    setNewIncomeTransitContact(null);
     newIncomeForm.setFieldsValue({ destination: undefined });
     setNewIncomeDestinationAccountOptions([]);
 
@@ -3769,6 +3777,114 @@
     }).filter(option => Number.isFinite(option.value) && option.value > 0);
   }
 
+  function isFixedFundsTransitAccount(account) {
+    const fixedFundsOption = externalSourceOptions[0];
+    const fixedFundsAccountNo = getTrimmedString(fixedFundsOption && fixedFundsOption.destinationAccNo).toUpperCase();
+    const accountNo = getTrimmedString(account && account.accNo).toUpperCase();
+    const accountName = getTrimmedString(account && account.name)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    return Boolean(fixedFundsAccountNo && accountNo === fixedFundsAccountNo)
+      || accountName === 'fondos fijos'
+      || accountName === 'fixed funds';
+  }
+
+  function getTransitAccountContact(account) {
+    const contact = account && (account.Contact || account.Holder || account.contact || account.holder);
+    const contactId = Number(
+      account && (account.contactId || account.holderId || account.payerId)
+      || contact && contact.id
+    );
+    const contactName = getTrimmedString(
+      account && (account.contactName || account.holderName || account.holder)
+      || contact && (contact.FullName || contact.fullName || [contact.name, contact.surname1, contact.surname2].filter(Boolean).join(' '))
+    );
+
+    if (!Number.isFinite(contactId) || contactId <= 0) return null;
+
+    return {
+      id: contactId,
+      name: contactName || String(contactId),
+      accountId: Number(account && (account.id || account.accountId)) || 0
+    };
+  }
+
+  function updateNewIncomeTransitContact(account, incomeTypeCode) {
+    if (!isTransitIncomeType(incomeTypeCode || newIncomeTypeCode) || isFixedFundsTransitAccount(account)) {
+      setNewIncomeTransitContact(null);
+      return;
+    }
+
+    setNewIncomeTransitContact(getTransitAccountContact(account));
+  }
+
+  function applyNewIncomeTransitContact(container) {
+    const contact = newIncomeTransitContact;
+    if (!container) return;
+
+    if (!contact) {
+      container.querySelectorAll('[data-transit-contact-locked="true"]').forEach(control => {
+        control.disabled = false;
+        control.readOnly = false;
+        control.removeAttribute('data-transit-contact-locked');
+        control.removeAttribute('aria-disabled');
+        control.value = '';
+      });
+      const previousContactCodeInput = container.querySelector('#hiddenCodigoCliente');
+      if (previousContactCodeInput) previousContactCodeInput.value = '';
+      return;
+    }
+
+    const contactInput = container.querySelector('#clientePA');
+    const contactCodeInput = container.querySelector('#hiddenCodigoCliente');
+    const identificationInput = container.querySelector('#identificacionPagador');
+    if (contactInput) {
+      contactInput.value = contact.name;
+      contactInput.disabled = true;
+      contactInput.readOnly = true;
+      contactInput.setAttribute('data-transit-contact-locked', 'true');
+      contactInput.setAttribute('aria-disabled', 'true');
+      if (typeof $ !== 'undefined') {
+        $(contactInput).data('selectedItem', {
+          codigo: contact.id,
+          nombreCompleto: contact.name
+        });
+      }
+    }
+    if (contactCodeInput) {
+      contactCodeInput.value = String(contact.id);
+      if (!contactCodeInput.getAttribute('name')) {
+        contactCodeInput.setAttribute('name', 'hiddenCodigoCliente');
+      }
+    }
+    if (identificationInput) {
+      identificationInput.disabled = true;
+      identificationInput.setAttribute('data-transit-contact-locked', 'true');
+      identificationInput.setAttribute('aria-disabled', 'true');
+    }
+
+    container.querySelectorAll('[name]').forEach(control => {
+      const normalizedName = getTrimmedString(control.getAttribute('name'))
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      const isContactField = ['contact', 'contactid', 'contactname', 'holderid', 'payerid'].includes(normalizedName);
+      if (!isContactField) return;
+
+      if (control.tagName.toLowerCase() === 'select'
+        && !Array.from(control.options).some(option => String(option.value) === String(contact.id))) {
+        control.add(new Option(contact.name, String(contact.id)));
+      }
+
+      control.value = normalizedName === 'contactname' ? contact.name : String(contact.id);
+      control.setAttribute('data-transit-contact-locked', 'true');
+      control.disabled = true;
+      control.readOnly = true;
+      control.setAttribute('aria-disabled', 'true');
+    });
+  }
+
   function loadNewIncomeAccountSearch(values, pagination) {
     const source = values || newIncomeAccountSearchForm.getFieldsValue();
     const currentPage = Number(pagination && pagination.current) || 1;
@@ -3844,6 +3960,7 @@
         current.filter(item => Number(item && item.value) !== id)
       ));
       newIncomeForm.setFieldsValue({ destination: selectedOption.value });
+      updateNewIncomeTransitContact(account);
       setAccountTransferSearchTarget(null);
       setNewIncomeAccountSearchVisible(false);
       return;
@@ -3912,6 +4029,7 @@
   function clearNewIncomeForm() {
     newIncomeForm.resetFields();
     setNewIncomeTypeCode(undefined);
+    setNewIncomeTransitContact(null);
     setNewIncomeDestinationAccountOptions([]);
     setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: '' }]);
     setCollectionExpectedAmount(0);
@@ -4653,9 +4771,11 @@
         container.innerHTML = '';
         $(container).formRender({ formData: formData });
         applyDynamicFormLayout(container);
+        applyNewIncomeTransitContact(container);
 
         try {
           evalNewIncomeFormLogic(config.form.logic, getPremiumContactFormContext(config.form));
+          applyNewIncomeTransitContact(container);
         } catch (error) {
           message.error(error && error.message ? error.message : String(error));
         }
@@ -4672,7 +4792,7 @@
       retryTimers.forEach(timer => clearTimeout(timer));
       clearTimeout(modalTimer);
     };
-  }, [newIncomeTypeDynamicForm, collectionChargeVisible, movementEditVisible, activeTab]);
+  }, [newIncomeTypeDynamicForm, newIncomeTransitContact, collectionChargeVisible, movementEditVisible, activeTab]);
 
   React.useEffect(() => {
     const config = reversalFormConfig;
@@ -9438,6 +9558,10 @@
                       options={newIncomeDestinationAccountOptions}
                       loading={newIncomeDestinationAccountLoading}
                       onSearch={searchNewIncomeDestinationAccounts}
+                      onChange={value => {
+                        const selectedOption = newIncomeDestinationAccountOptions.find(option => String(option && option.value) === String(value));
+                        updateNewIncomeTransitContact(selectedOption && selectedOption.account);
+                      }}
                       notFoundContent={newIncomeDestinationAccountLoading ? t('Loading...') : null}
                     />
                   </Form.Item>
@@ -11020,6 +11144,9 @@
                 placeholder={t('Type at least 3 characters')}
                 notFoundContent={t('No payers found')}
               />
+            </Form.Item>
+            <Form.Item label={t('Transfer ID')} name="transferId">
+              <InputNumber min={1} precision={0} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item label={t('Policy')} name="policy">
               <Input
