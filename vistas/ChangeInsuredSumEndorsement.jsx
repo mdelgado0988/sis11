@@ -637,10 +637,10 @@
     return (
       <div className="axx-rea-editor">
         <span className="axx-rea-editor-label">{t('Editar contrato')}</span>
-        <label>{t('% Retencion')}<InputNumber size="small" min={0} max={100} value={contractPercentage(group, 'proportionCed')} onChange={function (v) { editContractPercentage(groupKey, 'proportionCed', v); }} /></label>
+        <label>{t('Pct. Retencion')}<InputNumber size="small" min={0} max={100} value={contractPercentage(group, 'proportionCed')} onChange={function (v) { editContractPercentage(groupKey, 'proportionCed', v); }} /></label>
         <label>{t('Suma retencion')}<InputNumber size="small" value={sumCedant} onChange={function (v) { distributeContractValue(groupKey, 'sumInsuredCedant', v); }} /></label>
         <label>{t('Prima retencion')}<InputNumber size="small" value={totals.cedant || 0} onChange={function (v) { distributeContractValue(groupKey, 'premiumCedant', v); }} /></label>
-        <label>{t('% Cedido')}<InputNumber size="small" min={0} max={100} value={contractPercentage(group, 'proportionRe')} onChange={function (v) { editContractPercentage(groupKey, 'proportionRe', v); }} /></label>
+        <label>{t('Pct. Cedido')}<InputNumber size="small" min={0} max={100} value={contractPercentage(group, 'proportionRe')} onChange={function (v) { editContractPercentage(groupKey, 'proportionRe', v); }} /></label>
         <label>{t('Suma cedida')}<InputNumber size="small" value={sumRe} onChange={function (v) { distributeContractValue(groupKey, 'sumInsuredRe', v); }} /></label>
         <label>{t('Prima cedida')}<InputNumber size="small" value={totals.re || 0} onChange={function (v) { distributeContractValue(groupKey, 'premiumRe', v); }} /></label>
         <label>{t('Comision')}<InputNumber size="small" value={totals.commission || 0} onChange={function (v) { distributeContractValue(groupKey, 'commission', v); }} /></label>
@@ -1975,10 +1975,10 @@
     { title: t('Suma movimiento'), dataIndex: 'sumInsuredMovement', align: 'right', width: 130, render: function (v, row) { return fmt(rowSumMovement(row)); } },
     { title: t('Movimiento'), dataIndex: 'premiumMovement', align: 'right', width: 120, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
     { title: t('Base prorrateada'), dataIndex: 'proratedMovement', align: 'right', width: 140, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
-    { title: t('% Retencion'), dataIndex: 'proportionCed', align: 'right', width: 120, render: function (v) { return (Number(v || 0) * 100).toFixed(2) + '%'; } },
+    { title: t('Pct. Retencion'), dataIndex: 'proportionCed', align: 'right', width: 120, render: function (v) { return (Number(v || 0) * 100).toFixed(2) + '%'; } },
     { title: t('Suma retencion'), dataIndex: 'sumInsuredCedant', align: 'right', width: 130, render: function (v) { return fmt(v); } },
     { title: t('Prima retencion'), dataIndex: 'premiumCedant', align: 'right', width: 130, render: function (v) { return fmt(v); } },
-    { title: t('% Cedido'), dataIndex: 'proportionRe', align: 'right', width: 110, render: function (v) { return (Number(v || 0) * 100).toFixed(2) + '%'; } },
+    { title: t('Pct. Cedido'), dataIndex: 'proportionRe', align: 'right', width: 110, render: function (v) { return (Number(v || 0) * 100).toFixed(2) + '%'; } },
     { title: t('Suma cedida'), dataIndex: 'sumInsuredRe', align: 'right', width: 130, render: function (v) { return fmt(v); } },
     { title: t('Prima cedida'), dataIndex: 'premiumRe', align: 'right', width: 130, render: function (v) { return fmt(v); } },
     { title: t('Comision'), dataIndex: 'commission', align: 'right', width: 120, render: function (v) { return fmt(v); } },
@@ -2127,13 +2127,13 @@
     { title: t('Prima'), dataIndex: 'premium', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, row.manualPrefix + 'Premium', x); }} />;
     } },
-    { title: t('% Comision'), dataIndex: 'commissionPercentage', align: 'right', width: 135, render: function (v, row) {
+    { title: t('Pct. Comision'), dataIndex: 'commissionPercentage', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={4} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { editContractRate(row.groupKey, 'commission', x); }} />;
     } },
     { title: t('Comision'), dataIndex: 'commission', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, 'Commission', x); }} />;
     } },
-    { title: t('% Impuesto'), dataIndex: 'taxPercentage', align: 'right', width: 135, render: function (v, row) {
+    { title: t('Pct. Impuesto'), dataIndex: 'taxPercentage', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={4} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { editContractRate(row.groupKey, 'tax', x); }} />;
     } },
     { title: t('Impuesto'), dataIndex: 'tax', align: 'right', width: 135, render: function (v, row) {

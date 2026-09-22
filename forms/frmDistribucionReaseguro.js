@@ -1071,6 +1071,19 @@ async function loadCessions(){
 
   cessions = filterCurrentCessions(cessions, policyId);
 
+  // A full cancellation can leave no active snapshot. In that case, use the
+  // latest cancellation and the last positive movement per coverage from history.
+  if (cessions.length === 0) {
+    const historicalRepoCession = await me.exe("RepoCession", {
+      operation: "GET",
+      filter: `lifePolicyId = ${policyId}`
+    });
+    const historicalCessions = historicalRepoCession.outData ?? [];
+    if (historicalCessions.some(item => item.premiumType === "CANCELLATION")) {
+      cessions = filterCurrentCessions(historicalCessions, policyId);
+    }
+  }
+
   if(cessions.length <= 0)
     mostrarNotificacion(`No existe reaseguro en la póliza, por favor asegúrese de cotizar primero la póliza`, "warning");
 
