@@ -43,33 +43,71 @@ WITH BillingRows AS (
         lp.[start] AS [start],
         lp.[end] AS [end],
         SUM(ISNULL(pp.[minimum], pp.[expected])) AS [total],
-        SUM(ISNULL(pp.[payed], 0)) AS [paid],
-        SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0)) AS [pending],
-        COALESCE(cancellation.[annualPremiumDif], 0) AS [cancellation],
-        SUM(ISNULL(pp.[minimum], pp.[expected]))
-            + COALESCE(cancellation.[annualPremiumDif], 0) AS [balance]
+        SUM(ISNULL(pp.[payed], 0)) + COALESCE(MAX(cancellationPlanPayments.[paidAmount]), 0) AS [paid],
+        SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0))
+            - COALESCE(MAX(cancellationPlanPayments.[paidAmount]), 0)
+            - ABS(COALESCE(cancellation.[annualPremiumDif], 0)) AS [pending],
+        ABS(COALESCE(cancellation.[annualPremiumDif], 0)) AS [cancellation]
     FROM [PayPlan] pp
     INNER JOIN [LifePolicy] lp ON lp.[id] = pp.[lifePolicyId]
     LEFT JOIN [Product] pro
         ON pro.[lobCode] = lp.[lob]
        AND pro.[code] = lp.[productCode]
     LEFT JOIN (
-        SELECT [lifePolicyId], [annualPremiumDif]
-        FROM (
+        SELECT
+            ch.[lifePolicyId],
+            SUM(
+                CASE
+                    WHEN cancellationAmounts.[annualPremiumDif] < 0
+                        THEN cancellationAmounts.[annualPremiumDif] + cancellationAmounts.[paidAmount]
+                    ELSE cancellationAmounts.[annualPremiumDif] - cancellationAmounts.[paidAmount]
+                END
+            ) AS [annualPremiumDif]
+        FROM [Change] ch
+        OUTER APPLY (
+            SELECT SUM(TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(planPayment.[value], '$.payed'))) AS [paidFromPlan]
+            FROM OPENJSON(ch.[jNewPayPlan]) planPayment
+            WHERE UPPER(ISNULL(JSON_VALUE(planPayment.[value], '$.concept'), '')) <> N'CANCELLATION'
+        ) planPayments
+        OUTER APPLY (
+            SELECT SUM(TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(planPayment.[value], '$.payed'))) AS [paidFromPositiveCancellationPlan]
+            FROM OPENJSON(ch.[jNewPayPlan]) planPayment
+            WHERE UPPER(ISNULL(JSON_VALUE(planPayment.[value], '$.concept'), '')) = N'CANCELLATION'
+              AND COALESCE(
+                    TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(planPayment.[value], '$.minimum')),
+                    TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(planPayment.[value], '$.expected')),
+                    0
+                  ) > 0
+        ) cancellationPlanPayments
+        CROSS APPLY (
             SELECT
-                ch.[lifePolicyId],
                 TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(ch.[jDetail], '$.annualPremiumDif')) AS [annualPremiumDif],
-                ROW_NUMBER() OVER (
-                    PARTITION BY ch.[lifePolicyId]
-                    ORDER BY COALESCE(ch.[executionDate], ch.[effectiveDate], ch.[creationDate]) DESC, ch.[id] DESC
-                ) AS [rowNumber]
-            FROM [Change] ch
-            WHERE ch.[Discriminator] = N'CancellationChange'
-              AND ch.[status] = 1
-        ) latestCancellation
-        WHERE [rowNumber] = 1
+                CASE
+                    WHEN ABS(TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(ch.[jDetail], '$.annualPremiumDif')))
+                        < ABS(COALESCE(NULLIF(cancellationPlanPayments.[paidFromPositiveCancellationPlan], 0),
+                            NULLIF(planPayments.[paidFromPlan], 0),
+                            TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(ch.[jDetail], '$.amountPaid')), 0))
+                    THEN ABS(TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(ch.[jDetail], '$.annualPremiumDif')))
+                    ELSE ABS(COALESCE(NULLIF(cancellationPlanPayments.[paidFromPositiveCancellationPlan], 0),
+                        NULLIF(planPayments.[paidFromPlan], 0),
+                        TRY_CONVERT(DECIMAL(18, 2), JSON_VALUE(ch.[jDetail], '$.amountPaid')), 0))
+                END AS [paidAmount]
+        ) cancellationAmounts
+        WHERE ch.[Discriminator] = N'CancellationChange'
+          AND ch.[status] = 1
+        GROUP BY ch.[lifePolicyId]
     ) cancellation
         ON cancellation.[lifePolicyId] = lp.[id]
+    LEFT JOIN (
+        SELECT
+            cancellationPlan.[lifePolicyId],
+            SUM(ISNULL(cancellationPlan.[payed], 0)) AS [paidAmount]
+        FROM [PayPlan] cancellationPlan
+        WHERE UPPER(ISNULL(cancellationPlan.[concept], '')) = N'CANCELLATION'
+          AND ISNULL(cancellationPlan.[minimum], cancellationPlan.[expected]) > 0
+        GROUP BY cancellationPlan.[lifePolicyId]
+    ) cancellationPlanPayments
+        ON cancellationPlanPayments.[lifePolicyId] = lp.[id]
     WHERE 1 = 1
       AND ISNULL(pp.[concept], '') <> N'Cancellation'
       ${where}
@@ -95,7 +133,6 @@ SELECT
     [paid],
     [pending],
     [cancellation],
-    [balance],
     COUNT(1) OVER() AS [totalRows]
 FROM BillingRows
 ORDER BY [policyId], [end]
@@ -214,8 +251,7 @@ function mapRow(row) {
     total: toNumber(item.total),
     paid: toNumber(item.paid),
     pending: toNumber(item.pending),
-    cancellation: toNumber(item.cancellation),
-    balance: toNumber(item.balance)
+    cancellation: Math.abs(toNumber(item.cancellation))
   };
 }
 

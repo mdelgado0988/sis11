@@ -398,6 +398,19 @@
       return discriminator.indexOf('CANCELLATION') >= 0;
     }
 
+    function getMovementType(change) {
+      const discriminator = String(change && change.Discriminator || '');
+      if (discriminator.toUpperCase() !== 'COVERAGECHANGE') {
+        return discriminator || t('Endorsement');
+      }
+
+      const additional = parseJsonObject(change && change.jAdditional);
+      const endorsementType = String(additional.endorsementType || '').trim().toUpperCase();
+      if (endorsementType === 'PROCEEDORDER') return 'ProceedOrder';
+      if (endorsementType === 'CHANGE_COVERAGE_SURETY') return 'ChangeCoverageSurety';
+      return discriminator;
+    }
+
     function buildCancellationBill(changeDetail) {
       const annualPremiumDif = Number(changeDetail && changeDetail.annualPremiumDif) || 0;
       const coveragesDif = Number(changeDetail && changeDetail.coveragesDif) || 0;
@@ -521,7 +534,7 @@
         paymentGroup: paymentGroups[changeId],
         startDate: change && (change.effectiveDate || change.executionDate),
         endDate: changeDetail.policyEnd || (paymentGroups[changeId] && paymentGroups[changeId].end),
-        movementType: change && (change.Discriminator || t('Endorsement')),
+        movementType: change && getMovementType(change),
         incomeDate: change && change.executionDate,
         id: change && change.id,
         changeId: change && change.id,
