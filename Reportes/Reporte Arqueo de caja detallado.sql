@@ -8,13 +8,34 @@ COALESCE(SUM(CASE WHEN sp.paymentMethod = '1' THEN sp.amount ELSE 0 END), 0) AS 
 COALESCE(SUM(CASE WHEN sp.paymentMethod = 'CH' THEN sp.amount ELSE 0 END), 0) AS Cheque,  
 COALESCE(SUM(CASE WHEN sp.paymentMethod IN ('TCD', 'TC') THEN sp.amount ELSE 0 END), 0) AS Tarjeta,  
 COALESCE(SUM(CASE WHEN sp.paymentMethod NOT IN ('1', 'CH', 'TCD', 'TC') OR sp.paymentMethod IS NULL THEN sp.amount ELSE 0 END), 0) AS Otros,
-COALESCE(SUM(sp.amount), 0) AS Total,     t.concept AS Concepto,  
-JSON_VALUE(t.jIncomeTypeForm, '$[0].userData[0]') AS Cliente
+COALESCE(SUM(sp.amount), 0) AS Total,     t.concept AS Concepto,
+CASE
+    WHEN incomeType.internalType = 'PREMIUM' THEN COALESCE(policyPayer.Cliente, dynamicForm.Cliente)
+    ELSE dynamicForm.Cliente
+END AS Cliente
 FROM dbo.Transfer t
 LEFT JOIN dbo.SplitPayment sp ON sp.transferId = t.id
+LEFT JOIN dbo.IncomeTypeCatalog incomeType ON incomeType.code = t.incomeType
+OUTER APPLY (
+    SELECT TOP (1)
+        CASE
+            WHEN contact.isPerson = 1
+                THEN CONCAT_WS(' ', contact.name, contact.surname1, contact.surname2)
+            ELSE contact.surname2
+        END AS Cliente
+    FROM dbo.AllocationInstallment allocationInstallment
+    INNER JOIN dbo.LifePolicy policy ON policy.id = allocationInstallment.lifePolicyId
+    INNER JOIN dbo.Contact contact ON contact.id = policy.holderId
+    WHERE allocationInstallment.allocationId = t.allocationId
+    ORDER BY policy.id
+) policyPayer
+OUTER APPLY (
+    SELECT JSON_VALUE(t.jIncomeTypeForm, '$[0].userData[0]') AS Cliente
+) dynamicForm
 WHERE t.transferWorkspaceId = @TransferWorkSpaceId   AND t.isExternal = 1
 AND t.[status] = 1
-GROUP BY     t.id,     t.concept,     t.jIncomeTypeForm 
+GROUP BY     t.id,     t.concept,     t.jIncomeTypeForm, incomeType.internalType,
+             policyPayer.Cliente, dynamicForm.Cliente
 
 go
 

@@ -790,8 +790,12 @@
       ? Object.assign({}, currentBatch, freshBatch)
       : currentBatch);
 
-    if (freshBatch._batchDetail && Number(selectedBatchIdRef.current) === batchId) {
-      setBatchDetail(Object.assign({}, freshBatch._batchDetail, { record: freshBatch }));
+    if (Number(selectedBatchIdRef.current) === batchId) {
+      if (batchExecutionState(freshBatch) === 'finished') {
+        loadBatchDetail(freshBatch);
+      } else if (freshBatch._batchDetail) {
+        setBatchDetail(Object.assign({}, freshBatch._batchDetail, { record: freshBatch }));
+      }
     }
   };
 
@@ -1390,20 +1394,18 @@
     setBatchDetail(null);
     setDetailLoading(true);
 
-    const paymentRowsPromise = record && record._batchDetail
-      ? Promise.resolve(record._batchDetail.paymentRows || [])
-      : exe('LoadEntity', {
-        entity: 'Batch',
-        fields: 'jData',
-        filter: 'id = ' + batchId,
-        noTracking: true
-      }).then((result) => {
-        if (!result || result.ok === false || !result.outData) {
-          throw new Error(result && result.msg ? result.msg : t('The remittance detail could not be loaded.'));
-        }
-        const entity = Array.isArray(result.outData) ? result.outData[0] : result.outData;
-        return parseBatchJData(entity && entity.jData);
-      });
+    const paymentRowsPromise = exe('LoadEntity', {
+      entity: 'Batch',
+      fields: 'jData',
+      filter: 'id = ' + batchId,
+      noTracking: true
+    }).then((result) => {
+      if (!result || result.ok === false || !result.outData) {
+        throw new Error(result && result.msg ? result.msg : t('The remittance detail could not be loaded.'));
+      }
+      const entity = Array.isArray(result.outData) ? result.outData[0] : result.outData;
+      return parseBatchJData(entity && entity.jData);
+    });
 
     return paymentRowsPromise.then((paymentRows) => Promise.all([
       loadBatchPaymentReferences(batchId, paymentRows).then((references) => ({ references: references, error: null }))
