@@ -55,7 +55,10 @@ OUTER APPLY (
     FROM [ClaimPayment] cp
     WHERE cp.[sourceAccountId] = a.[id]
       AND cp.[claimId] IS NULL
-      AND cp.[producer] IS NULL
+      AND (cp.[producer] IS NULL OR (
+        UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
+        AND ISNULL(cp.[paymentType], '') = '15'
+      ))
       AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
       AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')
 ) requests
@@ -145,7 +148,10 @@ function buildFilter(input) {
         FROM [ClaimPayment] cp
         WHERE cp.[sourceAccountId] = a.[id]
           AND cp.[claimId] IS NULL
-          AND cp.[producer] IS NULL
+          AND (cp.[producer] IS NULL OR (
+            UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
+            AND ISNULL(cp.[paymentType], '') = '15'
+          ))
           AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
           AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')), 0)
     ), 2) > 0`);
@@ -222,8 +228,7 @@ function movementPredicate(alias, input) {
     return `ISNULL(${alias}.[transaction], '') = 'Cancellation'`;
   }
 
-  return `ISNULL(${alias}.[transactionCode], '') <> 'PREMIUMPAY'
-    AND ISNULL(${alias}.[transactionCode], '') <> 'MONEYOUT'`;
+  return `ISNULL(${alias}.[transactionCode], '') <> 'PREMIUMPAY'`;
 }
 
 function getQueryResult() {

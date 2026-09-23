@@ -372,8 +372,12 @@
   const payerSearchTimer = React.useRef(null);
   const movementPayerSearchTimer = React.useRef(null);
   const [refundBeneficiaryOptions, setRefundBeneficiaryOptions] = React.useState([]);
+  const [refundDestinationAccountOptions, setRefundDestinationAccountOptions] = React.useState([]);
+  const [refundDestinationAccountLoading, setRefundDestinationAccountLoading] = React.useState(false);
+  const [refundNeedsManualDestination, setRefundNeedsManualDestination] = React.useState(false);
   const [refundBeneficiaryLoading, setRefundBeneficiaryLoading] = React.useState(false);
   const refundBeneficiarySearchTimer = React.useRef(null);
+  const refundDestinationAccountSearchTimer = React.useRef(null);
   const [policyOptions, setPolicyOptions] = React.useState([]);
   const [policyLoading, setPolicyLoading] = React.useState(false);
   const policySearchTimer = React.useRef(null);
@@ -2092,7 +2096,6 @@
       const transactionCode = getTrimmedString(item && item.transactionCode).toUpperCase();
       const amount = Number(item && item.amount);
       return transactionCode !== 'PREMIUMPAY'
-        && transactionCode !== 'MONEYOUT'
         && Number.isFinite(amount);
     });
 
@@ -2675,6 +2678,10 @@
         )
       }
       : null;
+    const selectedPolicyId = Number(selectedAccount.lifePolicyId || selectedAccount.policyId);
+    const needsManualDestination = !Number.isFinite(selectedPolicyId) || selectedPolicyId <= 0;
+    setRefundNeedsManualDestination(needsManualDestination);
+    setRefundDestinationAccountOptions([]);
     setRefundBeneficiaryOptions(defaultBeneficiaryOption ? [defaultBeneficiaryOption] : []);
     refundMoneyForm.setFieldsValue({
       currency: currency,
@@ -2683,9 +2690,13 @@
       amount: Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount))),
       paymentMethod: undefined,
       beneficiary: defaultBeneficiaryOption ? beneficiaryId : undefined,
+      accountId: undefined,
       reference: ''
     });
     setRefundMoneyVisible(true);
+    if (needsManualDestination && defaultBeneficiaryOption) {
+      loadRefundDestinationAccounts('');
+    }
   }
 
   function updateRefundPercentage(value) {
@@ -2720,20 +2731,27 @@
       clearTimeout(refundBeneficiarySearchTimer.current);
       refundBeneficiarySearchTimer.current = null;
     }
+    if (refundDestinationAccountSearchTimer.current) {
+      clearTimeout(refundDestinationAccountSearchTimer.current);
+      refundDestinationAccountSearchTimer.current = null;
+    }
     setRefundMoneyVisible(false);
     setRefundBeneficiaryOptions([]);
+    setRefundDestinationAccountOptions([]);
+    setRefundDestinationAccountLoading(false);
+    setRefundNeedsManualDestination(false);
     refundMoneyForm.resetFields();
+  }
+
+  function getRefundFixedFundsOption() {
+    // RepoExternalSourceCatalog returns the fixed-funds destination first.
+    return externalSourceOptions[0] || null;
   }
 
   function getRefundIncomeType() {
     return incomeTypeOptions.find(item =>
       getTrimmedString(item && item.internalType).toUpperCase() === 'REFUND'
     );
-  }
-
-  function getRefundFixedFundsOption() {
-    // RepoExternalSourceCatalog returns the fixed-funds destination first.
-    return externalSourceOptions[0] || null;
   }
 
   async function resolveRefundDestinationAccount() {
@@ -2751,22 +2769,6 @@
       option: fixedFundsOption,
       accountId: destinationAccountId
     };
-  }
-
-  async function findCreatedRefundRequestId(lifePolicyId, reference, currency, total) {
-    const response = await exe('LoadEntities', {
-      entity: 'PayoutRequest',
-      fields: 'id, lifePolicyId',
-      filter: `lifePolicyId = ${lifePolicyId}`,
-      noTracking: true
-    });
-
-    if (!response || response.ok === false) return 0;
-
-    return getRows(response).reduce((lastId, row) => {
-      const rowId = Number(row && row.id);
-      return Number.isFinite(rowId) && rowId > lastId ? rowId : lastId;
-    }, 0);
   }
 
   async function createRefundTransfer(values, selectedAccount, lifePolicyId, total, requestId) {
@@ -2795,9 +2797,6 @@
       throw new Error(t('Select an open cash desk first.'));
     }
 
-    const fixedFundsOption = refundDestination.option;
-    const destinationAccountId = refundDestination.accountId;
-
     const transferResponse = await exe('RepoTransfer', {
       operation: 'ADD',
       entity: {
@@ -2805,9 +2804,9 @@
         amount: Number(total.toFixed(2)),
         sourceAccountId: sourceAccountId,
         sourceName: getTrimmedString(selectedAccount && selectedAccount.name),
-        destinationAccountId: destinationAccountId,
+        destinationAccountId: refundDestination.accountId,
         destinationName: beneficiary,
-        sourceExternal: fixedFundsOption.value,
+        sourceExternal: refundDestination.option.value,
         concept: transferReference,
         paymentMethod: paymentMethod,
         paymentMethodName: paymentMethodName,
@@ -2820,7 +2819,7 @@
           transferId: 0
         }],
         transactionCode: 'REFUND',
-        lifePolicyId: lifePolicyId,
+        ...(Number(lifePolicyId) > 0 ? { lifePolicyId: Number(lifePolicyId) } : {}),
         date: getCurrentUtcDateTime(),
         status: 0,
         executed: false,
@@ -2844,16 +2843,11 @@
         ? transferResponse.outData
         : null);
     const transferId = Number(transfer && (transfer.id || transfer.transferId));
-
     if (!Number.isFinite(transferId) || transferId <= 0) {
       throw new Error(t('The refund transfer was created, but its identifier could not be identified.'));
     }
 
-    const executionResponse = await exe('DoTransfer', {
-      transferId: transferId,
-      transfer: null
-    });
-
+    const executionResponse = await exe('DoTransfer', { transferId: transferId, transfer: null });
     if (!executionResponse || executionResponse.ok === false) {
       throw new Error(executionResponse && executionResponse.msg
         ? executionResponse.msg
@@ -2865,14 +2859,13 @@
 
   async function submitRefundMoneyRequest(values) {
     const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
-    const lifePolicyId = Number(selectedAccount && (selectedAccount.lifePolicyId || selectedAccount.policyId));
+    const selectedPolicyId = Number(selectedAccount && (selectedAccount.lifePolicyId || selectedAccount.policyId));
+    const lifePolicyId = Number.isFinite(selectedPolicyId) && selectedPolicyId > 0 ? selectedPolicyId : null;
     const sourceAccountId = Number(values && values.sourceAccount);
     const contactId = Number(values && values.beneficiary);
     const total = getAuditNumber(values && values.amount);
-    const percentage = getAuditNumber(values && values.sourcePercentage);
 
-    if (!selectedAccount || !Number.isFinite(lifePolicyId) || lifePolicyId <= 0) {
-      message.error(t('The selected transit account does not have a valid policy.'));
+    if (!selectedAccount) {
       return;
     }
 
@@ -2886,26 +2879,57 @@
       return;
     }
 
+    const branch = getTrimmedString(
+      selectedCashierRow && (
+        selectedCashierRow.branchCode
+        || (selectedCashierRow.Branch && (selectedCashierRow.Branch.code || selectedCashierRow.Branch.id))
+      )
+    );
+    if (!branch) {
+      message.error(t('The open cash desk has no branch configured.'));
+      return;
+    }
+
     if (!Number.isFinite(total) || total <= 0) {
       message.error(t('Enter a valid amount.'));
       return;
     }
 
+    const manualDestinationAccountId = Number(values && values.accountId);
+    if (lifePolicyId === null
+      && (!Number.isFinite(manualDestinationAccountId) || manualDestinationAccountId <= 0)) {
+      message.error(t('Select a destination account.'));
+      return;
+    }
+
     setRefundMoneySubmitting(true);
     try {
-      const refundDestination = await resolveRefundDestinationAccount();
-      const response = await exe('DoPaymentRequest', {
-        lifePolicyId: lifePolicyId,
+      const destinationAccountId = lifePolicyId === null
+        ? manualDestinationAccountId
+        : (await resolveRefundDestinationAccount()).accountId;
+      const response = await exe('DoManualPaymentRequest', {
+        contactId: contactId,
         currency: getTrimmedString(values && values.currency),
+        grossAmount: Number(total.toFixed(2)),
+        paymentMethodCode: getTrimmedString(values && values.paymentMethod),
+        branch: branch,
+        receiptTypeCode: '1',
+        paymentType: '15',
+        taxes: 0,
+        retentions: 0,
+        deductions: 0,
         total: total,
         sourceAccountId: sourceAccountId,
-        paymentMethodCode: getTrimmedString(values && values.paymentMethod),
-        contactId: contactId,
-        perc: percentage,
+        accountId: destinationAccountId,
+        requiresFiscalNumber: false,
+        fiscalNumber: null,
         reference: getTrimmedString(values && values.reference),
-        noWorkflow: true,
-        destinationAccountId: refundDestination.accountId,
-        claimId: null
+        concept: 'Devoluciones de primas por cargo a cuentas o préstamos del cliente',
+        lifePolicyId: lifePolicyId,
+        noWorkflow: false,
+        producer: 'MANUAL',
+        Taxes: null,
+        CostCenters: null
       });
 
       if (!response || response.ok === false) {
@@ -2914,21 +2938,14 @@
 
       const requestRows = getRows(response);
       const request = requestRows[0]
-        || (response.outData && !Array.isArray(response.outData) ? response.outData : null);
+        || (response.outData && !Array.isArray(response.outData) && typeof response.outData === 'object'
+          ? response.outData
+          : null);
       const requestMessage = getTrimmedString(response && response.msg);
       const requestMatch = requestMessage.match(/(?:Solicitud|Request)\s+(\d+)\s+(?:creada|created)/i);
-      const requestIdFromMessage = requestMatch ? Number(requestMatch[1]) : 0;
-      let requestId = Number(request && (request.id || request.requestId || response.id))
-        || requestIdFromMessage;
-
-      if (!Number.isFinite(requestId) || requestId <= 0) {
-        requestId = await findCreatedRefundRequestId(
-          lifePolicyId,
-          getTrimmedString(values && values.reference),
-          getTrimmedString(values && values.currency),
-          total
-        );
-      }
+      const requestId = Number(request && (request.id || request.requestId))
+        || Number(response && response.outData)
+        || (requestMatch ? Number(requestMatch[1]) : 0);
 
       if (!Number.isFinite(requestId) || requestId <= 0) {
         throw new Error(t('The refund request was created, but its identifier could not be identified.'));
@@ -3464,12 +3481,12 @@
   function isTransitIncomeType(incomeTypeCode) {
     const option = getIncomeTypeOption(incomeTypeCode);
     const internalType = getTrimmedString(option && option.internalType).toUpperCase();
-    return ['TRANSIT', 'DEPOPAYMENT', 'PPXA'].includes(internalType);
+    return ['TRANSIT', 'DEPOPAYMENT', 'PPXA', 'REFUND'].includes(internalType);
   }
 
-  function isVisibleNewIncomeType(option) {
+  function isVisibleNewIncomeType(option, includeRefund = false) {
     const internalType = getTrimmedString(option && option.internalType).toUpperCase();
-    return !internalType.startsWith('DEPOSIT-') && internalType !== 'REFUND';
+    return !internalType.startsWith('DEPOSIT-') && (includeRefund || internalType !== 'REFUND');
   }
 
   function normalizeIncomeTypeFormName(value) {
@@ -3812,7 +3829,9 @@
   }
 
   function updateNewIncomeTransitContact(account, incomeTypeCode) {
-    if (!isTransitIncomeType(incomeTypeCode || newIncomeTypeCode) || isFixedFundsTransitAccount(account)) {
+    if (!collectionChargeVisible
+      || !isTransitIncomeType(incomeTypeCode || newIncomeTypeCode)
+      || isFixedFundsTransitAccount(account)) {
       setNewIncomeTransitContact(null);
       return;
     }
@@ -3885,16 +3904,22 @@
     });
   }
 
-  function loadNewIncomeAccountSearch(values, pagination) {
+  function loadNewIncomeAccountSearch(values, pagination, targetOverride) {
     const source = values || newIncomeAccountSearchForm.getFieldsValue();
     const currentPage = Number(pagination && pagination.current) || 1;
     const pageSize = Number(pagination && pagination.pageSize) || 10;
-    const contactId = Number(source.contact);
-    const isAccountTransferSearch = accountTransferSearchTarget === 'sourceAccount'
-      || accountTransferSearchTarget === 'destinationAccount';
-    const transferCurrency = isAccountTransferSearch
-      ? getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase()
-      : '';
+    const searchTarget = targetOverride || accountTransferSearchTarget;
+    const isRefundAccountSearch = searchTarget === 'refundDestinationAccount';
+    const contactId = isRefundAccountSearch
+      ? Number(refundMoneyForm.getFieldValue('beneficiary'))
+      : Number(source.contact);
+    const isAccountTransferSearch = searchTarget === 'sourceAccount'
+      || searchTarget === 'destinationAccount';
+    const transferCurrency = isRefundAccountSearch
+      ? getTrimmedString(refundMoneyForm.getFieldValue('currency')).toUpperCase()
+      : isAccountTransferSearch
+        ? getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase()
+        : '';
 
     setNewIncomeAccountSearchLoading(true);
     exe('ExeChain', {
@@ -3941,8 +3966,81 @@
     setNewIncomeAccountSearchVisible(true);
   }
 
-  function clearNewIncomeAccountSearch() {
+  function openRefundDestinationAccountSearch() {
+    const beneficiaryId = Number(refundMoneyForm.getFieldValue('beneficiary'));
+    if (!Number.isFinite(beneficiaryId) || beneficiaryId <= 0) {
+      message.warning(t('Select a beneficiary before searching for a destination account.'));
+      return;
+    }
+
     newIncomeAccountSearchForm.resetFields();
+    setAccountTransferSearchTarget('refundDestinationAccount');
+    setNewIncomeAccountSearchRows([]);
+    setNewIncomeAccountSearchTotal(0);
+    setNewIncomeAccountSearchPagination({ current: 1, pageSize: 10 });
+    newIncomeAccountSearchForm.setFieldsValue({ contact: beneficiaryId });
+    setNewIncomeAccountSearchVisible(true);
+    loadNewIncomeAccountSearch(
+      { contact: beneficiaryId, accountName: '', policy: '' },
+      { current: 1, pageSize: 10 },
+      'refundDestinationAccount'
+    );
+  }
+
+  function loadRefundDestinationAccounts(value) {
+    const accountName = getTrimmedString(value);
+    const beneficiaryId = Number(refundMoneyForm.getFieldValue('beneficiary'));
+    const currency = getTrimmedString(refundMoneyForm.getFieldValue('currency')).toUpperCase();
+
+    if (refundDestinationAccountSearchTimer.current) {
+      clearTimeout(refundDestinationAccountSearchTimer.current);
+      refundDestinationAccountSearchTimer.current = null;
+    }
+
+    if (!Number.isFinite(beneficiaryId) || beneficiaryId <= 0 || !currency) {
+      setRefundDestinationAccountOptions([]);
+      return;
+    }
+
+    refundDestinationAccountSearchTimer.current = setTimeout(() => {
+      setRefundDestinationAccountLoading(true);
+      exe('ExeChain', {
+        chain: 'cmdSearchTransitAccounts',
+        context: JSON.stringify({
+          page: 1,
+          size: 50,
+          accountName: accountName,
+          policy: '',
+          holderId: beneficiaryId,
+          currency: currency,
+          showAll: true
+        })
+      })
+        .then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
+          }
+
+          const options = mapTransitAccountOptions(getAccountSearchRows(response))
+            .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency);
+          setRefundDestinationAccountOptions(options);
+        })
+        .catch(error => {
+          setRefundDestinationAccountOptions([]);
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setRefundDestinationAccountLoading(false));
+    }, 250);
+  }
+
+  function clearNewIncomeAccountSearch() {
+    const keepRefundBeneficiary = accountTransferSearchTarget === 'refundDestinationAccount'
+      ? Number(refundMoneyForm.getFieldValue('beneficiary'))
+      : 0;
+    newIncomeAccountSearchForm.resetFields();
+    if (keepRefundBeneficiary > 0) {
+      newIncomeAccountSearchForm.setFieldsValue({ contact: keepRefundBeneficiary });
+    }
     setNewIncomeAccountSearchRows([]);
     setNewIncomeAccountSearchTotal(0);
   }
@@ -3984,6 +4082,20 @@
         const balance = getTransitAccountBalance(account);
         setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
       }
+      setAccountTransferSearchTarget(null);
+      setNewIncomeAccountSearchVisible(false);
+      return;
+    }
+
+    if (accountTransferSearchTarget === 'refundDestinationAccount') {
+      const options = mapTransitAccountOptions([account]);
+      const selectedOption = options[0];
+      if (!selectedOption) return;
+
+      setRefundDestinationAccountOptions(current => [selectedOption].concat(
+        current.filter(option => Number(option && option.value) !== id)
+      ));
+      refundMoneyForm.setFieldsValue({ accountId: id });
       setAccountTransferSearchTarget(null);
       setNewIncomeAccountSearchVisible(false);
       return;
@@ -8880,6 +8992,13 @@
       align: 'center'
     },
     {
+      title: t('Requests in process'),
+      key: 'pendingRefundAmount',
+      width: 150,
+      align: 'right',
+      render: (_, record) => renderGridMoney(record && record.pendingRefundAmount)
+    },
+    {
       title: t('Balance'),
       key: 'balance',
       width: 130,
@@ -9527,10 +9646,10 @@
               optionFilterProp="label"
               filterOption={(input, option) => getTrimmedString(option && option.label).toLowerCase().indexOf(getTrimmedString(input).toLowerCase()) >= 0}
               options={collectionChargeVisible
-                ? incomeTypeOptions.filter(isVisibleNewIncomeType)
+                ? incomeTypeOptions.filter(item => isVisibleNewIncomeType(item))
                 : incomeTypeOptions.filter(item =>
                   getTrimmedString(item && item.internalType).toUpperCase() !== 'PREMIUM'
-                  && isVisibleNewIncomeType(item)
+                  && isVisibleNewIncomeType(item, true)
                 )}
               disabled={collectionChargeVisible || editMode}
               onChange={updateNewIncomeType}
@@ -10191,10 +10310,53 @@
                 options={refundBeneficiaryOptions}
                 loading={refundBeneficiaryLoading}
                 onSearch={searchRefundBeneficiaries}
+                onChange={value => {
+                  refundMoneyForm.setFieldsValue({ accountId: undefined });
+                  setRefundDestinationAccountOptions([]);
+                  if (value && refundNeedsManualDestination) {
+                    loadRefundDestinationAccounts('');
+                  }
+                }}
                 placeholder={t('Search beneficiary')}
                 notFoundContent={refundBeneficiaryLoading ? t('Loading...') : t('Type at least 3 characters')}
               />
             </Form.Item>
+
+            {refundNeedsManualDestination && (
+              <Form.Item label={t('Destination account')}>
+                <Input.Group compact style={{ display: 'flex', width: '100%' }}>
+                  <Form.Item
+                    name="accountId"
+                    noStyle
+                    preserve={false}
+                    rules={[{ required: true, message: t('Select a destination account.') }]}
+                  >
+                    <Select
+                      showSearch
+                      allowClear
+                      filterOption={false}
+                      optionFilterProp="label"
+                      optionLabelProp="shortAccountLabel"
+                      options={refundDestinationAccountOptions}
+                      loading={refundDestinationAccountLoading}
+                      placeholder={t('Search destination account')}
+                      style={{ width: 'calc(100% - 40px)' }}
+                      onSearch={loadRefundDestinationAccounts}
+                      notFoundContent={refundDestinationAccountLoading ? t('Loading...') : t('No accounts found')}
+                      onChange={value => {
+                        if (!value) setRefundDestinationAccountOptions([]);
+                      }}
+                    />
+                  </Form.Item>
+                  <Button
+                    icon={<InstallmentsIcon />}
+                    aria-label={t('Search accounts')}
+                    onClick={openRefundDestinationAccountSearch}
+                    style={{ width: 40 }}
+                  />
+                </Input.Group>
+              </Form.Item>
+            )}
 
             <Form.Item
               label={t('Reference')}
@@ -10570,9 +10732,12 @@
               <Form.Item label={t('Contact')} name="contact">
                 <Select
                   showSearch
-                  allowClear
+                  allowClear={accountTransferSearchTarget !== 'refundDestinationAccount'}
+                  disabled={accountTransferSearchTarget === 'refundDestinationAccount'}
                   filterOption={false}
-                  options={payerOptions}
+                  options={accountTransferSearchTarget === 'refundDestinationAccount'
+                    ? refundBeneficiaryOptions
+                    : payerOptions}
                   loading={payerLoading}
                   onSearch={searchPayers}
                   optionLabelProp="name"

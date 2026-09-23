@@ -48,14 +48,16 @@ OUTER APPLY (
     FROM [AccountMov] am
     WHERE am.[accountId] = a.[id]
       AND ISNULL(am.[transactionCode], '') <> 'PREMIUMPAY'
-      AND ISNULL(am.[transactionCode], '') <> 'MONEYOUT'
 ) balance
 OUTER APPLY (
     SELECT SUM(ISNULL(cp.[total], 0)) AS [pendingRefundAmount]
     FROM [ClaimPayment] cp
     WHERE cp.[sourceAccountId] = a.[id]
       AND cp.[claimId] IS NULL
-      AND cp.[producer] IS NULL
+      AND (cp.[producer] IS NULL OR (
+        UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
+        AND ISNULL(cp.[paymentType], '') = '15'
+      ))
       AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
       AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')
 ) requests
@@ -116,13 +118,15 @@ function buildFilter(input) {
       ISNULL((SELECT SUM(ISNULL(ab.[amount], 0))
         FROM [AccountMov] ab
         WHERE ab.[accountId] = a.[id]
-          AND ISNULL(ab.[transactionCode], '') <> 'PREMIUMPAY'
-          AND ISNULL(ab.[transactionCode], '') <> 'MONEYOUT'), 0)
+          AND ISNULL(ab.[transactionCode], '') <> 'PREMIUMPAY'), 0)
       - ISNULL((SELECT SUM(ISNULL(cp.[total], 0))
         FROM [ClaimPayment] cp
         WHERE cp.[sourceAccountId] = a.[id]
           AND cp.[claimId] IS NULL
-          AND cp.[producer] IS NULL
+          AND (cp.[producer] IS NULL OR (
+            UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
+            AND ISNULL(cp.[paymentType], '') = '15'
+          ))
           AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
           AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')), 0)
     ), 2) > 0`);
