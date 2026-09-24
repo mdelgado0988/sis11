@@ -1,3 +1,12 @@
+/**
+ * @name PolicyRenew
+ * @description Vista para consultar pólizas próximas a renovación, seleccionar
+ *              pólizas elegibles y administrar lotes de cotización y emisión.
+ * @purpose Permitir la gestión masiva del proceso de renovación por aniversario.
+ * @category RENOVACION
+ * @version 1.0
+ * @created 2026-09-23
+ */
 () => {
     const { useMemo } = React;
     const { Form, Select, DatePicker, Input, Row, Col, Card, Collapse, Button, Space, Table, Tabs,  Layout , InputNumber, Radio, Divider,Empty,Tag, Tooltip, 
@@ -1600,11 +1609,26 @@
                                 throw new Error(
                                     periodResponse && periodResponse.msg
                                         ? periodResponse.msg
-                                        : `No fue posible actualizar la vigencia de la oferta ${policy.poliza}`
-                                );
+                                    : `No fue posible actualizar la vigencia de la oferta ${policy.poliza}`
+                            );
                             }
 
-                            return newPolicyId;
+                            setBatchGenerationText(`Actualizando valores GAP de la oferta ${policy.poliza}`);
+
+                            return exe("ExeChain", {
+                                chain: "cmdActualizarValoresRenovacionGAP",
+                                context: `{ offerPolicyId: ${newPolicyId} }`
+                            }).then(gapResponse => {
+                                if (!gapResponse || gapResponse.ok === false) {
+                                    throw new Error(
+                                        gapResponse && gapResponse.msg
+                                            ? gapResponse.msg
+                                            : `No fue posible actualizar los valores GAP de la oferta ${policy.poliza}`
+                                    );
+                                }
+
+                                return newPolicyId;
+                            });
                         });
                     });
 

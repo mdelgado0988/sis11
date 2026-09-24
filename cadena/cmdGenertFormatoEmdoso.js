@@ -265,7 +265,7 @@ function getInsuredObjects(change) {
 
   const lob = String(policy?.lob ?? '').trim();
   const isSurety = ['81', '82', '83', '84'].includes(lob);
-  const objectDefinitionCode = lob === '31'
+  const objectDefinitionCode = isLifePolicyLob(lob)
     ? 'DT_ACCIDENTES_V1'
     : isSurety
     ? 'OBJFIANZA'
@@ -434,7 +434,7 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
     return reportes.vidaTarjetaProtegida;
   }
 
-  if (String(policy?.lob ?? '').trim() === '31') {
+  if (isLifePolicyLob(policy?.lob)) {
     return hasEndorsementPremium(billDiff, change)
       ? reportes.vida.conPrima
       : reportes.vida.sinPrima;
@@ -458,6 +458,10 @@ function esEndosoTarjetaProtegida(change) {
     || change?.Discriminator === 'ChangePolicyCapital'
     || change?.action === 'ChangePolicyCapital';
   return esCambioCapital && tipo === 'CHANGE_PROTECTED_CARD';
+}
+
+function isLifePolicyLob(lob) {
+  return ['20', '31', '71'].includes(String(lob ?? '').trim());
 }
 
 function suretyValue(userData, names) {
@@ -785,7 +789,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const addr = (holder.Addresses && holder.Addresses[0]) || {};
   const insuredData = InsuredObject.userData || {};
   const suretyCatalogs = isSuretyPolicy(policy) ? loadSuretyCatalogs() : null;
-  const isLife = String(policy?.lob ?? '').trim() === '31';
+  const isLife = isLifePolicyLob(policy?.lob);
   const lifeCatalogs = isLife ? loadLifeCatalogs() : null;
   const riesgo = isSuretyPolicy(policy)
     ? buildSuretyRisk(insuredData, suretyCatalogs)

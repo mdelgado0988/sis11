@@ -65,7 +65,7 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 84
+declare @ramo int = 20
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -125,7 +125,7 @@ WHERE cramo = 81  and itiporec = 'P'
 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 81
+declare @cramo int = 20
 declare @cplan varchar(15) = 'FIAGCCOG';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
@@ -181,9 +181,10 @@ WHERE c.cramo IN (81,82,83,84)
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
-where cramo in (31)
+where cramo in (20)
 and xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
+--AND xformula1 is not null and xformula1 <> '0'
 order by 1,2
 /*AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
 'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_descrp',
@@ -195,9 +196,14 @@ order by 1,2
 
 SELECT
     RTRIM(pl.xplan) AS Producto, STRING_AGG(CONVERT(varchar(max), c.ccobertura), ',') WITHIN GROUP (ORDER BY c.ccobertura) AS Coberturas,
-    RTRIM(pl.cplan) AS cplan, 'CL-EVR-AP1' AS Evento, 'CL-EV-AP11,CL-EV-AP12' AS EventoAsegurado
+    RTRIM(pl.cplan) AS cplan, 'CL-EVR-CV1' AS Evento, 'CL-EV-CV11,CL-EV-CV12,CL-EV-CV13,CL-EV-CV14,CL-EV-CV15,CL-EV-CV16' AS EventoAsegurado
 FROM (SELECT DISTINCT cramo, cplan, ccobertura
     FROM maplancob
-    WHERE cramo = 31 ) c
+    WHERE cramo = 20 ) c
 INNER JOIN maplanes pl ON pl.cramo = c.cramo AND pl.cplan = c.cplan
 GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
+
+
+select cramo, ccausa, xcausa from macausasin where cramo = 20
+
+	

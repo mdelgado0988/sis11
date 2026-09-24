@@ -1735,6 +1735,51 @@ function setDefaultData(){
         $("#CodigoCategoriaActividad").val(categoria);
     });
 
+    bindCalculoValorFaltante();
+    actualizarValorFaltante();
+
+}
+
+function bindCalculoValorFaltante() {
+    $(document)
+        .off("input.dtAccidentesValorFaltante change.dtAccidentesValorFaltante", campoValorSelector("txtValorFinal") + ", " + campoValorSelector("txtValorActual"))
+        .on("input.dtAccidentesValorFaltante change.dtAccidentesValorFaltante", campoValorSelector("txtValorFinal") + ", " + campoValorSelector("txtValorActual"), actualizarValorFaltante);
+
+    obtenerCampoValor("txtValorFaltante")
+        .prop("readonly", true)
+        .addClass("readonly-style");
+}
+
+function campoValorSelector(name) {
+    return `#${name}, [name="${name}"], [data-field="${name}"]`;
+}
+
+function obtenerCampoValor(name) {
+    const $field = $(`#${name}`);
+    return $field.length ? $field.first() : $(`[name="${name}"], [data-field="${name}"]`).first();
+}
+
+function actualizarValorFaltante() {
+    const parseValor = value => {
+        const normalized = String(value ?? '').replace(/,/g, '').trim();
+        if (!normalized) return 0;
+
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const $valorFinal = obtenerCampoValor("txtValorFinal");
+    const $valorActual = obtenerCampoValor("txtValorActual");
+    const $valorFaltante = obtenerCampoValor("txtValorFaltante");
+    const valorFinal = parseValor($valorFinal.val());
+    const valorActual = parseValor($valorActual.val());
+    const valorFaltante = valorFinal - valorActual;
+
+    if ($valorFaltante.attr("type") === "number") {
+        $valorFaltante.val(Number(valorFaltante.toFixed(2)));
+    } else {
+        $valorFaltante.val(n2(valorFaltante));
+    }
 }
 
 function esPolizaEmitida() {
