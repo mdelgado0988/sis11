@@ -164,7 +164,7 @@ function getCancellationAmounts(policy, change) {
   return {
     prima: prima,
     impuestoPrimasIncendio: impuestoPrimasIncendio,
-    gastoPrimaIncendio: toDecimal(prima * 0.02),
+    gastoPrimaIncendio: getGastoPrima(policy, prima),
     primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
     cancelacion: true,
     renovacion: false,
@@ -186,7 +186,7 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
   return {
     prima: prima,
     impuestoPrimasIncendio: impuestoPrimasIncendio,
-    gastoPrimaIncendio: toDecimal(prima * 0.02),
+    gastoPrimaIncendio: getGastoPrima(policy, prima),
     primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
     cancelacion: false,
     renovacion: tipo === 2,
@@ -209,7 +209,8 @@ function getLatestQuoteTax(rows) {
 
 /**
  * Calculates endorsement amounts from BillDiff, including negative movements.
- * The fire expense is always calculated as 2% of the endorsement premium.
+ * The fire expense is calculated as 2% of the endorsement premium except for
+ * surety branches, which do not apply this expense.
  */
 function getEndorsementAmounts(policy, change, id, tipo) {
   if (!change) {
@@ -236,7 +237,7 @@ function getEndorsementAmounts(policy, change, id, tipo) {
     return {
       prima: prima,
       impuestoPrimasIncendio: impuestoPrimasIncendio,
-      gastoPrimaIncendio: toDecimal(prima * 0.02),
+      gastoPrimaIncendio: getGastoPrima(policy, prima),
       primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
       cancelacion: false,
       renovacion: false,
@@ -251,7 +252,7 @@ function getEndorsementAmounts(policy, change, id, tipo) {
   return {
     prima: toDecimal(billCoverages),
     impuestoPrimasIncendio: toDecimal(billTax),
-    gastoPrimaIncendio: toDecimal(billCoverages * 0.02),
+    gastoPrimaIncendio: getGastoPrima(policy, billCoverages),
     primaPorCobrar: toDecimal(billCoverages + billTax),
     cancelacion: billCoverages < 0,
     renovacion: false,
@@ -317,6 +318,14 @@ function getEmissionCode(lob) {
   }
 
   return 'Emision';
+}
+
+function getGastoPrima(policy, prima) {
+  const ramo = String(policy && policy.lob || '').trim();
+  if (['81', '82', '83', '84'].includes(ramo)) {
+    return 0;
+  }
+  return toDecimal(toNumber(prima) * 0.02);
 }
 
 function loadPolicy(filter) {

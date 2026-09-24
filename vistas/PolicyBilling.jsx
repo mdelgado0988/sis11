@@ -400,12 +400,17 @@
 
     function getMovementType(change) {
       const discriminator = String(change && change.Discriminator || '');
-      if (discriminator.toUpperCase() !== 'COVERAGECHANGE') {
+      const discriminatorKey = discriminator.toUpperCase();
+      if (discriminatorKey !== 'COVERAGECHANGE' && discriminatorKey !== 'CAPITALCHANGE') {
         return discriminator || t('Endorsement');
       }
 
       const additional = parseJsonObject(change && change.jAdditional);
-      const endorsementType = String(additional.endorsementType || '').trim().toUpperCase();
+      const rawEndorsementType = String(additional.endorsementType || '').trim();
+      const endorsementType = rawEndorsementType.toUpperCase();
+      if (discriminatorKey === 'CAPITALCHANGE' && rawEndorsementType) {
+        return rawEndorsementType;
+      }
       if (endorsementType === 'PROCEEDORDER') return 'ProceedOrder';
       if (endorsementType === 'CHANGE_COVERAGE_SURETY') return 'ChangeCoverageSurety';
       return discriminator;

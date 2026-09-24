@@ -26,6 +26,7 @@ return InstallmentPremiums.map( premium =>{
   const tipoRiesgo = ['81', '82', '83', '84'].includes(String(poliza?.lob ?? '').trim())
     ? 'Fianza'
     : 'Poliza';
+  const impuestosPorDanios = tipoRiesgo === 'Fianza' ? 0 : ImpuestosPorDanios;
 
   const primaDetalle = primasDetalle.find(x => x.payPlanId == premium.payPlanId);
   
@@ -40,7 +41,7 @@ return InstallmentPremiums.map( premium =>{
   montoPrima = montoPrima ? montoPrima : premium.moneyInAmount;
 
   const taxAmount = round2(montoPrima * ImpuestoSobrePrimas);
-  const taxIncAmount = round2(montoPrima * ImpuestosPorDanios);
+  const taxIncAmount = round2(montoPrima * impuestosPorDanios);
                              
   montoPrima = montoPrima + (premium.moneyInAmount - (montoPrima + taxAmount));
   
