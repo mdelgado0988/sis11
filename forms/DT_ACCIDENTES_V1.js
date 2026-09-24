@@ -13,6 +13,37 @@ let policy;
 let policyId = window.location.href.split('/')[5] ?? 3357;
 let contact;
 let polizaConfirmada = false;
+const isEndorsment = window.location.href.includes('tab12');
+const camposEditablesEnEndoso = new Set([
+    'txtNoPrestamo',
+    'txtPolizaCobis',
+    'txtObservaciones',
+    'cmbRenovacion',
+    'txtMotivoRenovacion'
+]);
+const camposConRestriccion = [
+    'txtEdadSuscripcion',
+    'txtSumaExcedente',
+    'txtNoCobis',
+    'txtPeso',
+    'txtAltura',
+    'cmbOcupacion',
+    'CodigoCategoriaActividad',
+    'cmbMonedaSalario',
+    'txtSalario',
+    'chkProfesionAltoRiesgo',
+    'cmbTipoPrestamo',
+    'txtPolizaCobis',
+    'cmbProducto',
+    'txtObservaciones',
+    'txtValorFinal',
+    'txtMontoMensual',
+    'txtValorActual',
+    'txtTasaInteres',
+    'txtValorFaltante',
+    'cmbRenovacion',
+    'txtMotivoRenovacion'
+];
 
 const requiredData = [
     { productCode: "P10", fields: ["cmbOcupacion"] },
@@ -82,10 +113,10 @@ async function loadDataTable({
 
             $(reference).append(`
                 <option 
-                    value="${item[indexCode]?.trim() || ''}"
+                    value="${item[indexCode] == null ? '' : String(item[indexCode]).trim()}"
                     ${extraAttributes}
                 >
-                    ${item[indexDisplay]?.trim() || ''}
+                    ${item[indexDisplay] == null ? '' : String(item[indexDisplay]).trim()}
                 </option>
             `);
         });
@@ -137,11 +168,13 @@ function inicializarTabs(containerSelector = "#contenedorCobtar") {
                 <div class="tabs-header">
                 <div class="tab-link active" data-tab="tab1">Datos Generales</div>
                 <div class="tab-link" data-tab="tabAdicional">Valores</div>
+                <div class="tab-link" data-tab="tabRenovacion">Datos Renovación</div>
                 <div class="tab-link" data-tab="tab2">Tarifas de Entrada</div>
                 </div>
 
                 <div id="tab1" class="tab-content active"></div>
                 <div id="tabAdicional" class="tab-content"></div>
+                <div id="tabRenovacion" class="tab-content"></div>
                 <div id="tab2" class="tab-content"></div>
             </div>
             `);
@@ -171,9 +204,11 @@ function moverCamposATabGeneral() {
     
         const $tab1 = $("#tab1");
         const $tabAdicional = $("#tabAdicional");
+        const $tabRenovacion = $("#tabRenovacion");
 
         const movedRows = new Set();
         const movedRowsAdicional = new Set();
+        const movedRowsRenovacion = new Set();
 
         $(".ptab").each(function () {
             const $row = $(this).closest(".row");
@@ -190,6 +225,15 @@ function moverCamposATabGeneral() {
             if ($row.length && !movedRowsAdicional.has($row[0])) {
             movedRowsAdicional.add($row[0]);
             $tabAdicional.append($row);
+            }
+        });
+
+        $(".rtab").each(function () {
+            const $row = $(this).closest(".row");
+
+            if ($row.length && !movedRowsRenovacion.has($row[0])) {
+            movedRowsRenovacion.add($row[0]);
+            $tabRenovacion.append($row);
             }
         });
 
@@ -614,6 +658,8 @@ function formatearFecha(fecha) {
 function inyectarEstilosAntdCobtar() {
   const STYLE_ID = "antd-cobtar-styles";
 
+  $("#hiddenFormStyle").closest("form").addClass("dt-accidentes-form");
+
   // elimina estilos anteriores si existen
   $("#" + STYLE_ID).remove();
 
@@ -738,13 +784,50 @@ function inyectarEstilosAntdCobtar() {
         list-style: none !important;
     }
 
-    .readonly-style {
+  .readonly-style {
         background-color: #f5f5f5 !important;
         color: #666 !important;
         border: 1px solid #d9d9d9 !important;
         cursor: not-allowed !important;
         pointer-events: none;
         opacity: 1 !important;
+    }
+
+    .select-readonly {
+        pointer-events: none;
+        background-color: #e9ecef !important;
+        color: #6c757d !important;
+        cursor: not-allowed;
+    }
+
+    /* ===== INPUTS DEL FORMULARIO ===== */
+    .dt-accidentes-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+    .dt-accidentes-form select,
+    .dt-accidentes-form textarea {
+        border: 1px solid #b8c4d1 !important;
+        border-radius: 6px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .dt-accidentes-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):hover,
+    .dt-accidentes-form select:hover,
+    .dt-accidentes-form textarea:hover {
+        border-color: #8da9c2 !important;
+    }
+
+    .dt-accidentes-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):focus,
+    .dt-accidentes-form select:focus,
+    .dt-accidentes-form textarea:focus {
+        border-color: #1677ff !important;
+        box-shadow: 0 0 0 2px rgba(22,119,255,0.2);
+        outline: none;
+    }
+
+    .dt-accidentes-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):disabled,
+    .dt-accidentes-form select:disabled,
+    .dt-accidentes-form textarea:disabled {
+        border-color: #b8c4d1 !important;
+        background: #f5f5f5;
     }
 
     .required-label::after{
@@ -830,19 +913,37 @@ function inyectarEstilosAntdCobtar() {
     }
 
     #modalCoberturas .tabla-cob-modal th{
-      background:#fafafa;
-      border-bottom:1px solid #f0f0f0;
-      padding:10px;
+      background:#bfbfbf;
+      color:rgba(0,0,0,.85);
+      font-weight:500;
+      border:1px solid #d9d9d9;
+      padding:8px 10px;
       text-align:left;
     }
 
     #modalCoberturas .tabla-cob-modal td{
-      padding:10px;
-      border-bottom:1px solid #f0f0f0;
+      padding:8px 10px;
+      border:1px solid #d9d9d9;
     }
 
-    #modalCoberturas .tabla-cob-modal tbody tr:hover{
+    #modalCoberturas .tabla-cob-modal tbody tr:hover td{
       background:#fafafa;
+    }
+
+    #modalCoberturas .tabla-cob-modal input[type="checkbox"]{
+      width:16px;
+      height:16px;
+      accent-color:#1677ff;
+      vertical-align:middle;
+    }
+
+    #modalCoberturas .cobertura-center{
+      text-align:center !important;
+    }
+
+    #modalCoberturas .cobertura-number{
+      text-align:right !important;
+      font-variant-numeric:tabular-nums;
     }
 
     /* ===================================================================================== */
@@ -1022,19 +1123,18 @@ async function setProductCoverages() {
     return;
   }
 
-  if(product.Coverages.length == 0){
+  const productCoveragesConfig = Array.isArray(product.Coverages)
+    ? product.Coverages
+    : [];
+
+  if(productCoveragesConfig.length == 0){
     console.error("El producto no tiene coberturas asignadas");
     return;
   }
 
-  if(configCoverages.length == 0){
-    console.error("No se encontró configuración de coberturas para saber si suman o no.");
-    return;
-  }
-
   //Hacer cruce entre policyCoverages y product.Coverages y obtener información de sumaAsegurad ay prima de las coberturas de la póliza, para luego renderizarlas en el modal y permitir su edición
-  productCoverages = product.Coverages.map(pc => {
-    const polCob = policy.Coverages.find(c => c.code.trim().toUpperCase() == pc.code.trim().toUpperCase());
+  productCoverages = productCoveragesConfig.map(pc => {
+    const polCob = (policy.Coverages ?? []).find(c => c.code.trim().toUpperCase() == pc.code.trim().toUpperCase());
     const cfgCob = configCoverages.find(c => c.coverageCode.trim().toUpperCase() == pc.code.trim().toUpperCase());
     return {
       id: 0,
@@ -1043,7 +1143,7 @@ async function setProductCoverages() {
       name: pc?.name ?? "Cobertura desconocida",
       sumaAsegurada: polCob ? (polCob?.limit || 0) : 0,
       prima: polCob ? (polCob?.premium || 0) : 0,
-      suma: cfgCob ? (cfgCob.isCoverage.toUpperCase() == "SI" ? "Si" : "No") : "No",
+      suma: String(cfgCob?.isCoverage ?? "NO").trim().toUpperCase() == "SI" ? "Si" : "No",
       mandatory: pc?.mandatory ?? false,
       incluido: polCob ? true : false,
       limit: 0,
@@ -1098,6 +1198,7 @@ function renderToolbarCoberturas() {
 
     // evita duplicados por rerender
     $("#toolbarCoberturas").remove();
+    polizaConfirmada = esPolizaEmitida();
 
     const toolbarHtml = `
       <div id="toolbarCoberturas">
@@ -1106,6 +1207,7 @@ function renderToolbarCoberturas() {
           type="button"
           id="btnGestionarCoberturas"
           class="ant-btn ant-btn-primary btn-gestionar-cob"
+          ${polizaConfirmada ? 'disabled' : ''}
         >
 
           <span class="btn-gestionar-icon">
@@ -1141,7 +1243,6 @@ function renderToolbarCoberturas() {
     // insertar siempre arriba
     $tab.prepend(toolbarHtml);
 
-    polizaConfirmada = policy.active;
     // if(polizaConfirmada){      
     //   $("#btnCotizarCoberturas").prop("disabled", true);
     // }
@@ -1193,232 +1294,52 @@ function renderToolbarCoberturas() {
 }
 
 function renderModalCoberturas() {
-
   try {
-
     $("#modalCoberturas").remove();
-
     const rows = productCoverages.map(c => `
       <tr>
-
-        <td style="text-align:center;">
-          <input
-            type="checkbox"
-            class="chk-cobertura"
-            value="${c.code}"
-            data-mandatory="${c.mandatory}"
-            data-incluido="${c.incluido}"
+        <td class="cobertura-check-cell">
+          <input type="checkbox" class="chk-cobertura" value="${c.code}"
+            data-mandatory="${c.mandatory}" data-incluido="${c.incluido}"
             ${c.mandatory || c.incluido ? 'checked' : ''}
-            ${c.mandatory || polizaConfirmada ? 'disabled' : ''}
-          />
+            ${c.mandatory || polizaConfirmada ? 'disabled' : ''}>
         </td>
-
-        <td style="text-align:center;">
-          ${c.code}
-        </td>
-
-        <td>
-          ${c.name}
-        </td>
-
-        <td style="text-align:right;">
-          ${formatMoney(c.sumaAsegurada)}
-        </td>
-
-        <td style="text-align:right;">
-          ${formatMoney(c.prima)}
-        </td>
-
-        <td style="text-align:center;">
-          ${c.suma.trim().toUpperCase() == "SI" ? 'Sí' : 'No'}
-        </td>
-
+        <td>${c.code}</td>
+        <td>${c.name}</td>
+        <td class="cobertura-number">${formatMoney(c.sumaAsegurada)}</td>
+        <td class="cobertura-number">${formatMoney(c.prima)}</td>
+        <td class="cobertura-center">${c.suma.trim().toUpperCase() === "SI" ? 'Sí' : 'No'}</td>
       </tr>
-    `).join("");
+    `).join('');
 
-    const modalHtml = `
-      <div
-        id="modalCoberturas"
-        style="
-          display:none;
-          position:fixed;
-          top:0;
-          left:0;
-          width:100vw;
-          height:100vh;
-          background:rgba(0,0,0,.45);
-          z-index:999999999;
-        "
-      >
-
-        <div
-          style="
-            width:900px;
-            max-width:95%;
-            background:#fff;
-            border-radius:8px;
-            overflow:hidden;
-            position:absolute;
-            top:50%;
-            left:50%;
-            transform:translate(-50%, -50%);
-            box-shadow:0 10px 30px rgba(0,0,0,.2);
-          "
-        >
-
-          <div
-            style="
-              height:56px;
-              display:flex;
-              align-items:center;
-              justify-content:space-between;
-              padding:0 20px;
-              border-bottom:1px solid #f0f0f0;
-              font-size:16px;
-              font-weight:600;
-            "
-          >
-
+    $("body").append(`
+      <div id="modalCoberturas" class="modal-cob-overlay">
+        <div class="modal-cob-container">
+          <div class="modal-cob-header">
             <span>Gestión de Coberturas</span>
-
-            <button
-              type="button"
-              id="btnCerrarModalCob"
-              style="
-                border:none;
-                background:none;
-                font-size:24px;
-                cursor:pointer;
-              "
-            >
-              ×
-            </button>
-
+            <button type="button" id="btnCerrarModalCob" class="modal-close" aria-label="Cerrar">×</button>
           </div>
-
-          <div
-            style="
-              padding:16px;
-              max-height:500px;
-              overflow:auto;
-            "
-          >
-
-            <table
-              style="
-                width:100%;
-                border-collapse:collapse;
-                font-size:14px;
-              "
-            >
-
-              <thead>
-
-                <tr style="background:#fafafa;">
-
-                  <th style="
-                    width:40px;
-                    text-align:center;
-                    padding:10px;
-                    border-bottom:1px solid #f0f0f0;
-                  ">
-
-                    <input
-                      type="checkbox"
-                      id="chkAllCoberturas"
-                      ${polizaConfirmada ? 'disabled': ''}
-                    />
-
-                  </th>
-
-                  <th style="
-                    text-align:center;
-                    padding:10px;
-                    border-bottom:1px solid #f0f0f0;
-                  ">
-                    Código
-                  </th>
-
-                  <th style="
-                    text-align:left;
-                    padding:10px;
-                    border-bottom:1px solid #f0f0f0;
-                  ">
-                    Nombre
-                  </th>
-
-                  <th style="
-                    text-align:right;
-                    padding:10px;
-                    border-bottom:1px solid #f0f0f0;
-                  ">
-                    Suma Asegurada
-                  </th>
-
-                  <th style="
-                    text-align:right;
-                    padding:10px;
-                    border-bottom:1px solid #f0f0f0;
-                  ">
-                    Prima
-                  </th>
-
-                  <th style="
-                    text-align:center;
-                    padding:10px;
-                    border-bottom:1px solid #f0f0f0;
-                  ">
-                    ¿Suma?
-                  </th>
-
-                </tr>
-
-              </thead>
-
-              <tbody>
-                ${rows}
-              </tbody>
-
+          <div class="modal-cob-body">
+            <table class="tabla-cob-modal">
+              <thead><tr>
+                <th class="cobertura-center"><input type="checkbox" id="chkAllCoberturas" ${polizaConfirmada ? 'disabled' : ''}></th>
+                <th>Código</th><th>Nombre</th>
+                <th class="cobertura-number">Suma asegurada</th>
+                <th class="cobertura-number">Prima</th>
+                <th class="cobertura-center">¿Suma?</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
             </table>
-
           </div>
-
-          <div
-            style="
-              padding:16px;
-              border-top:1px solid #f0f0f0;
-              display:flex;
-              justify-content:flex-end;
-            "
-          >
-
-            <button
-              type="button"
-              id="btnGuardarCoberturas"
-              class="ant-btn ant-btn-primary"
-            >
-              <span>Guardar</span>
-            </button>
-
+          <div class="modal-cob-footer">
+            <button type="button" id="btnGuardarCoberturas" class="ant-btn ant-btn-primary" ${polizaConfirmada ? 'disabled' : ''}>Guardar</button>
           </div>
-
         </div>
-
       </div>
-    `;
-
-    $("body").append(modalHtml);
-
-    if(polizaConfirmada){      
-      $("#btnGuardarCoberturas").prop("disabled", true);
-    }
-
+    `);
   } catch (error) {
-
     console.error(error);
-
   }
-
 }
 
 async function bindEventosCoberturas() {
@@ -1439,7 +1360,7 @@ async function bindEventosCoberturas() {
     .off("click", "#btnGestionarCoberturas")
     .on("click", "#btnGestionarCoberturas", function () {
 
-      $("#modalCoberturas").show();
+      $("#modalCoberturas").css("display", "flex");
 
     });
 
@@ -1692,6 +1613,11 @@ function renderFooterTarifas() {
       <div class="footer-success-icon"></div>
 
       <div class="footer-tarifas-item">
+        <span class="label">Coberturas</span>
+        <span class="value" id="lblCantidadTarifas">0</span>
+      </div>
+
+      <div class="footer-tarifas-item">
         <span class="label">
           Suma Total
         </span>
@@ -1728,8 +1654,9 @@ function actualizarResumenTarifas() {
 
   let sumaTotal = 0;
   let primaTotal = 0;
+  const coberturasIncluidas = policy?.Coverages ?? [];
 
-  policy.Coverages.forEach(pc => {
+  coberturasIncluidas.forEach(pc => {
 
     const cfgCob = configCoverages.find(c => c.coverageCode.trim().toUpperCase() == pc.code.trim().toUpperCase());
 
@@ -1739,6 +1666,8 @@ function actualizarResumenTarifas() {
     primaTotal += Number(pc.premium || 0);
 
   });
+
+  $("#lblCantidadTarifas").text(coberturasIncluidas.length);
 
   $("#lblSumaTotalTarifas")
     .text(formatMoney(sumaTotal));
@@ -1808,6 +1737,51 @@ function setDefaultData(){
 
 }
 
+function esPolizaEmitida() {
+    const active = policy?.active;
+    const activeDate = policy?.activeDate;
+    const tieneFechaEmision = activeDate !== null
+        && activeDate !== undefined
+        && String(activeDate).trim() !== '';
+
+    return tieneFechaEmision
+        || active === true
+        || active === 1
+        || String(active).toLowerCase() === 'true'
+        || String(active) === '1';
+}
+
+function aplicarRestriccionesEdicion() {
+    if (!esPolizaEmitida() && !isEndorsment) return;
+
+    camposConRestriccion.forEach(id => {
+        const $campo = $(`#${id}`);
+        if (!$campo.length) return;
+
+        if ($campo.is(':checkbox, :radio')) {
+            $campo.prop('disabled', true);
+        } else if ($campo.is('select')) {
+            $campo.css({
+                pointerEvents: 'none',
+                backgroundColor: '#f5f5f5',
+                color: '#8c8c8c'
+            });
+        } else {
+            $campo.prop('readonly', true);
+        }
+    });
+
+    if (isEndorsment) {
+        camposEditablesEnEndoso.forEach(id => {
+            $(`#${id}`)
+                .prop('disabled', false)
+                .prop('readonly', false)
+                .css({ pointerEvents: '', backgroundColor: '', color: '' })
+                .removeClass('disabled readonly-style select-readonly');
+        });
+    }
+}
+
 async function initForm() {
 
   const maxIntentos = 10;
@@ -1843,6 +1817,9 @@ async function initForm() {
         validaInputs();
     
         await cargarCatalogos();
+        aplicarRestriccionesEdicion();
+        setTimeout(aplicarRestriccionesEdicion, 0);
+        setTimeout(aplicarRestriccionesEdicion, 250);
         return;
     }
 

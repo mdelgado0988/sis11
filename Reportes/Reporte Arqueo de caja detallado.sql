@@ -1,6 +1,6 @@
 use sis11
 
-DECLARE @TransferWorkSpaceId INT = 86;
+DECLARE @TransferWorkSpaceId INT = 99;
 
 SELECT     t.id AS IdTransferencia,
 COALESCE(SUM(CASE WHEN sp.paymentMethod = '1' THEN sp.amount ELSE 0 END), 0) AS Efectivo,   

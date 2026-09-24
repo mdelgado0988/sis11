@@ -38,7 +38,13 @@ const reportesEndoso = {
   fianza: {
     conPrima: 'FormatoEndososFianza.docx',
     sinPrima: 'FormatoEndososSinCoberturaFianza.docx'
-  }
+  },
+  vida: {
+    conPrima: 'FormatoEndososVida.docx',
+    sinPrima: 'FormatoEndososSinCoberturaVida.docx'
+  },
+  vidaTarjetaProtegida: 'FormatoEndososVidaTarjetaProtegida.docx'
+  
 };
 const { eventName, nombreEndoso } = mapChangeName(changeName);
 // return change
@@ -259,7 +265,9 @@ function getInsuredObjects(change) {
 
   const lob = String(policy?.lob ?? '').trim();
   const isSurety = ['81', '82', '83', '84'].includes(lob);
-  const objectDefinitionCode = isSurety
+  const objectDefinitionCode = lob === '31'
+    ? 'DT_ACCIDENTES_V1'
+    : isSurety
     ? 'OBJFIANZA'
     : (policy?.productCode === '1_17' ? 'DTINCENDIO_SUMA' : 'DT_INCENDIO_V3');
 
@@ -422,6 +430,16 @@ function hasEndorsementPremium(billDiff, change) {
 }
 
 function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
+  if (esEndosoTarjetaProtegida(change)) {
+    return reportes.vidaTarjetaProtegida;
+  }
+
+  if (String(policy?.lob ?? '').trim() === '31') {
+    return hasEndorsementPremium(billDiff, change)
+      ? reportes.vida.conPrima
+      : reportes.vida.sinPrima;
+  }
+
   if (!isSuretyPolicy(policy)) {
     return change.Discriminator === "LoadingChange"
       ? reportes.incendio.sinPrima
@@ -431,6 +449,15 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   return hasEndorsementPremium(billDiff, change)
     ? reportes.fianza.conPrima
     : reportes.fianza.sinPrima;
+}
+
+function esEndosoTarjetaProtegida(change) {
+  const additional = safeJson(change?.jAdditional, {});
+  const tipo = String(additional?.endorsementType ?? '').trim().toUpperCase();
+  const esCambioCapital = change?.Discriminator === 'CapitalChange'
+    || change?.Discriminator === 'ChangePolicyCapital'
+    || change?.action === 'ChangePolicyCapital';
+  return esCambioCapital && tipo === 'CHANGE_PROTECTED_CARD';
 }
 
 function suretyValue(userData, names) {
@@ -465,6 +492,64 @@ function loadSuretyCatalogs() {
     tipoVigencia: loadSuretyCatalog('tipovigencia'),
     vigenciaFianza: loadSuretyCatalog('vigenciafianza'),
     tipoLicitacion: loadSuretyCatalog('tipolicitacion')
+  };
+}
+
+function loadLifeCatalogs() {
+  return {
+    actividad: loadSuretyCatalog('actividad'),
+    tipoPrestamo: loadSuretyCatalog('tbTipoPrestamo'),
+    producto: loadSuretyCatalog('tbProductoVida')
+  };
+}
+
+function buildLifeRisk(userData, catalogs) {
+  const data = userData || {};
+  const lookup = catalogs || {};
+  const profesionAltoRiesgo = suretyValue(data, ['chkProfesionAltoRiesgo']);
+
+  const monedas = {
+    USD: 'Dólar Estadounidense',
+    PAB: 'Balboa'
+  };
+
+  const renovaciones = {
+    'Sin Accion': 'Sin Accion',
+    'Aviso Vto.': 'Aviso Vto.',
+    'Lista Renovar': 'Lista Renovar',
+    'No Renovar': 'No Renovar',
+    'Renovada': 'Renovada',
+    'Procesando': 'Procesando',
+    'NR: Alta Siniestralidad': 'NR: Alta Siniestralidad',
+    'NR: Riesgo Agravado': 'NR: Riesgo Agravado',
+    'NR: Renuncia Colaborador': 'NR: Renuncia Colaborador',
+    'NR: Póliza Financiada': 'NR: Póliza Financiada'
+  };
+
+  return {
+    EdadSuscripcion: suretyValue(data, ['txtEdadSuscripcion']),
+    SumaAsegurada: suretyValue(data, ['txtSumaAsegurada']),
+    SumaReExcedente: suretyValue(data, ['txtSumaExcedente']),
+    NoCobis: suretyValue(data, ['txtNoCobis']),
+    Altura: suretyValue(data, ['txtAltura']),
+    Peso: suretyValue(data, ['txtPeso']),
+    Ocupacion: catalogText(lookup.actividad, suretyValue(data, ['cmbOcupacion']), 0, 1),
+    CodigoOcupacion: suretyValue(data, ['cmbOcupacion']),
+    CategoriaOcupacion: suretyValue(data, ['CodigoCategoriaActividad']),
+    MonedaSalario: monedas[suretyValue(data, ['cmbMonedaSalario'])]
+      || suretyValue(data, ['cmbMonedaSalario']),
+    Salario: suretyValue(data, ['txtSalario']),
+    ProfesionAltoRiesgo: ['1', 'true', 'si', 'sí'].includes(String(profesionAltoRiesgo).trim().toLowerCase()) ? 'Sí' : 'No',
+    NoPrestamo: suretyValue(data, ['txtNoPrestamo']),
+    TipoPrestamo: catalogText(lookup.tipoPrestamo, suretyValue(data, ['cmbTipoPrestamo']), 0, 1),
+    CodigoTipoPrestamo: suretyValue(data, ['cmbTipoPrestamo']),
+    PolizaCobis: suretyValue(data, ['txtPolizaCobis']),
+    Producto: catalogText(lookup.producto, suretyValue(data, ['cmbProducto']), 0, 1),
+    CodigoProducto: suretyValue(data, ['cmbProducto']),
+    Observaciones: suretyValue(data, ['txtObservaciones']),
+    EstadoRenovacion: renovaciones[suretyValue(data, ['cmbRenovacion'])]
+      || suretyValue(data, ['cmbRenovacion']),
+    MotivoRenovacion: suretyValue(data, ['txtMotivoRenovacion'])
   };
 }
 
@@ -700,9 +785,13 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const addr = (holder.Addresses && holder.Addresses[0]) || {};
   const insuredData = InsuredObject.userData || {};
   const suretyCatalogs = isSuretyPolicy(policy) ? loadSuretyCatalogs() : null;
+  const isLife = String(policy?.lob ?? '').trim() === '31';
+  const lifeCatalogs = isLife ? loadLifeCatalogs() : null;
   const riesgo = isSuretyPolicy(policy)
     ? buildSuretyRisk(insuredData, suretyCatalogs)
-    : buildFireRisk(insuredData, countries, sectors, procincias, Municipios);
+    : isLife
+      ? buildLifeRisk(insuredData, lifeCatalogs)
+      : buildFireRisk(insuredData, countries, sectors, procincias, Municipios);
 
   // Lookups seguros (sin [0].name)
   const sectorName = addr.sector
@@ -830,6 +919,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       Nombre: row.nombreEndoso,
       DetalleEndoso: change?.note || "Sin Detalles"
     },
+    AseguradosCambioSuma: obtenerAseguradosCambioSuma(change),
     Riesgo: riesgo
     
   };
@@ -1045,6 +1135,11 @@ function safeJson(raw, fallback) {
   } catch (e) {
     return fallback;
   }
+}
+
+function obtenerAseguradosCambioSuma(change) {
+  const additional = safeJson(change?.jAdditional, {});
+  return Array.isArray(additional?.insureds) ? additional.insureds : [];
 }
 
 function normalizeDetails(d) {

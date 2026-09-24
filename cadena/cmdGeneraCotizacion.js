@@ -15,16 +15,12 @@ let policy;
 let vIdDoc=0;
 
 const Reportes = [{ lob: 1, productCode: "0", reportName: "OfertaIncendio.docx" },
-                  { lob: 6, productCode: "0", reportName: "Oferta Automovil.docx" }
-                  /*{ lob: 81, productCode: "81FIAGCCOG", reportName: "Fianza Cumplimiento Gobierno.docx" },                  
-                  { lob: 81, productCode: "81FIAGCCOP", reportName: "Fianza Cumplimiento Privado.docx" },                  
-                  { lob: 81, productCode: "81PROPUESTA", reportName: "Fianza Propuesta Privado.docx" },
-                  { lob: 81, productCode: "81ANTICIPO", reportName: "Fianza Anticipo Gobierno.docx" },
-                  { lob: 81, productCode: "81PAGO", reportName: "Fianza Pago Gobierno.docx" },
-                  { lob: 81, productCode: "0", reportName: "Fianza de Gobierno.docx" }*/];
+                  { lob: 6, productCode: "0", reportName: "Oferta Automovil.docx" },
+                  { lob: 31, productCode: "0", reportName: "Oferta API.docx" }];
 
 const chains = [{lob:1, name: "getOfertaModeloSisIncendio", context: `{id: ${policyId}}`},
-                {lob:6, name: "cmdDocumentoAutoDTO", context: `{policyId: ${policyId}}`}]
+                {lob:6, name: "cmdDocumentoAutoDTO", context: `{policyId: ${policyId}}`},
+                {lob:31, name: "cmdDocumentoVidaDTO", context: `{policyId: ${policyId}}`}]
 
 // AXX-303: oferta por los ramos de Fianzas del catalogo verificado.
 for (const lobFianza of [81,82,83,84]) {

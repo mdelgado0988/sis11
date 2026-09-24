@@ -19,16 +19,20 @@ let acreedor;
 let insured;
 let resultado = {};
 let oaUserData;
+let beneficiariesUserData;
 let limites;
+let parentescos = [];
 const objectDefinitionCode = 'DT_ACCIDENTES_V1';
+const beneficiariesObjectDefinitionCode = 'BENEFICIARIOS_VIDA';
 const hoy = new Date();
-const dia = hoy.getDate();
+const hoyPanama = toPanamaDate(hoy);
+const dia = hoyPanama.getDate();
 const meses = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
-const mes = meses[hoy.getMonth()];
-const anio = hoy.getFullYear();
+const mes = meses[hoyPanama.getMonth()];
+const anio = hoyPanama.getFullYear();
 const celPhoneType = "PHONETYPE2";
 const faxPhoneType = "PHONETYPE4";
 
@@ -55,16 +59,17 @@ setHolder();
 setSeller();
 setInsured();
 setInsuredObject();
+setParentescos();
 setLimites();
 setAcreedor();
 //return holder;
 
-const dateIni = new Date(policy.start);
+const dateIni = toPanamaDate(policy.start);
 const diaIni = dateIni.getDate();
 const mesIni = meses[dateIni.getMonth()];
 const anioIni = dateIni.getFullYear();
 
-const dateFin = new Date(policy.end);
+const dateFin = toPanamaDate(policy.end);
 const diaFin = dateFin.getDate();
 const mesFin = meses[dateFin.getMonth()];
 const anioFin = dateFin.getFullYear();
@@ -85,7 +90,7 @@ resultado.Provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${hold
 resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${holder.Addresses?.[0]?.state}' AND code = '${holder.Addresses?.[0]?.city}'`, "name") ?? "";
 
 //Datos del asegurado
-const fnacimiento = new Date(insured.birth);
+const fnacimiento = toPanamaDate(insured.birth);
 resultado.DiaNac = fnacimiento.getDate();
 resultado.MesNac = fnacimiento.getMonth();
 resultado.AnioNac = fnacimiento.getFullYear();
@@ -102,6 +107,7 @@ resultado.Acreedor = getNombreCompleto(acreedor);
 resultado.Acreedor = resultado.Acreedor == "" ? "No Tiene" : resultado.Acreedor;
 
 //Datos de la póliza
+resultado.IdPoliza = policy.id;
 resultado.Poliza = policy.code;
 resultado.Certificado = 0;
 resultado.Moneda = policy.currency;
@@ -109,7 +115,7 @@ resultado.Suma = n(policy.insuredSum);
 resultado.SumaLetras = numeroALetras(policy.insuredSum ?? 0);
 resultado.Desde = toFecha(policy.start);
 resultado.Hasta = toFecha(policy.end);
-resultado.Hora = getHora(policy.end);
+resultado.Hora = "12:00 AM";
 resultado.Observaciones = policy.description ?? "";
 resultado.Frecuencia = dataFrecuenciaPago.find(x => x.code == policy.periodicity)?.name ?? "";
 resultado.Plan = PlanConversion.find(x => x.code == policy.productCode).plan ?? policy.productCode;
@@ -128,6 +134,15 @@ resultado.Categoria = oaUserData?.CodigoCategoriaActividad ?? "0";
 resultado.Cuotas = policy.PayPlan?.length ?? 0
 resultado.Ocupacion = getTableValue("actividad", "cactividad", oaUserData?.cmbOcupacion ?? "0", "xactividad");
 resultado.Cobtar = oaUserData?.hiddenCobtar ? JSON.parse(oaUserData.hiddenCobtar) : [];
+const beneficiarios = obtenerBeneficiarios(
+  beneficiariesUserData?.hiddenBeneficiarios,
+  policy.start,
+  parentescos
+);
+resultado.Beneficiarios = beneficiarios;
+resultado.TotalPorcentajeBeneficiarios = n(
+  beneficiarios.reduce((total, beneficiario) => total + aNumero(beneficiario.porcentaje), 0)
+);
 
 //Datos de las coberturas
 resultado.Coberturas = policy.Coverages.map(({ code, name, limit, premium }) => {
@@ -155,7 +170,7 @@ resultado.Coberturas = policy.Coverages.map(({ code, name, limit, premium }) => 
 resultado.DiaFecha = dia;
 resultado.MesFecha = mes;
 resultado.AnioFecha = anio;
-resultado.FechaActual = toFecha(hoy);
+resultado.FechaActual = toFecha(new Date());
 
 resultado.DiaVigenciaIni = diaIni;
 resultado.MesVigenciaIni = mesIni;
@@ -207,17 +222,147 @@ function setInsured() {
 }
 
 function setInsuredObject() {
+  oaUserData = loadInsuredObjectData(objectDefinitionCode, true);
+  beneficiariesUserData = loadInsuredObjectData(beneficiariesObjectDefinitionCode, false);
 
-  doCmd({cmd: "RepoObjectDefinition", data: { operation: "GET", filter: `code = '${objectDefinitionCode}'` }});
-  const objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
-  
-  if(objectDefinitionId == 0)
-    throw new Error(`No se encontró objeto asegurado definido: ${RepoObjectDefinition.msg}`);
-  
-  doCmd({cmd: "RepoInsuredObject", data: { operation: "GET", filter: `lifePolicyId = ${policyId} AND objectDefinitionId = ${objectDefinitionId}` }});
-  oaUserData = RepoInsuredObject.outData?.[0].userData;
   if(!oaUserData)
-    throw new Error(`No se pudo recuperar el objeto asegurado: ${RepoInsuredObject.msg}`);
+    throw new Error('No se pudo recuperar el objeto asegurado de accidentes personales');
+}
+
+function setParentescos() {
+  const respuesta = doCmd({cmd: "RepoRelationshipCatalog", data: {
+    operation: "GET",
+    filter: "principalType = 'BENEFICIARY'"
+  }});
+
+  parentescos = (respuesta?.outData ?? []).map(item => ({
+    id: item.id,
+    name: decodificarHtml(item.name)
+  }));
+}
+
+function loadInsuredObjectData(code, required) {
+  doCmd({cmd: "RepoObjectDefinition", data: { operation: "GET", filter: `code = '${code}'` }});
+  const objectDefinitionId = RepoObjectDefinition.outData?.[0]?.id ?? 0;
+
+  if (objectDefinitionId === 0) {
+    if (required) {
+      throw new Error(`No se encontró objeto asegurado definido: ${code}`);
+    }
+    return null;
+  }
+
+  doCmd({cmd: "RepoInsuredObject", data: {
+    operation: "GET",
+    filter: `lifePolicyId = ${policyId} AND objectDefinitionId = ${objectDefinitionId}`
+  }});
+
+  return RepoInsuredObject.outData?.[0]?.userData ?? null;
+}
+
+function obtenerBeneficiarios(valor, fechaInicioPoliza, catalogoParentescos) {
+  try {
+    if (!valor) return [];
+
+    const parsed = typeof valor === "string" ? JSON.parse(valor) : valor;
+    const lista = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.beneficiarios)
+        ? parsed.beneficiarios
+        : [];
+
+    const periodoPoliza = obtenerPeriodoPoliza(fechaInicioPoliza);
+
+    return lista.map((beneficiario, index) => {
+      const datos = beneficiario && typeof beneficiario === "object"
+        ? beneficiario
+        : { Valor: beneficiario };
+      const tieneIdentificacion = tieneIdentificacionBeneficiario(datos);
+      const menorEdad = tieneIdentificacion ? "No" : "Si";
+      const nombreParentesco = obtenerNombreParentesco(datos, catalogoParentescos);
+      const datosSalida = {
+        ...datos,
+        parentesco: nombreParentesco || datos.parentesco || "",
+        NombreParentesco: nombreParentesco,
+        AnioPoliza: periodoPoliza.anio,
+        MesPoliza: periodoPoliza.mes,
+        menorEdad,
+        porcentaje: n(datos.porcentaje ?? 0)
+      };
+
+      return {
+        Numero: index + 1,
+        ...datosSalida,
+        Atributos: [
+          ...Object.entries(datosSalida).map(([atributo, dato]) => ({
+            Atributo: atributo,
+            Valor: dato === null || dato === undefined
+              ? ""
+              : typeof dato === "object"
+                ? JSON.stringify(dato)
+                : String(dato)
+          })),
+        ]
+      };
+    });
+  } catch (error) {
+    return [];
+  }
+}
+
+function obtenerNombreParentesco(datos, catalogoParentescos) {
+  const id = datos.parentescoId ?? (
+    datos.parentesco !== null && datos.parentesco !== undefined && /^\d+$/.test(String(datos.parentesco).trim())
+      ? datos.parentesco
+      : null
+  );
+
+  const parentesco = (catalogoParentescos ?? []).find(item => String(item.id) === String(id));
+  return parentesco?.name ?? (
+    datos.parentesco !== null && datos.parentesco !== undefined && !/^\d+$/.test(String(datos.parentesco).trim())
+      ? String(datos.parentesco)
+      : ""
+  );
+}
+
+function obtenerPeriodoPoliza(fecha) {
+  const fechaParseada = toPanamaDate(fecha);
+  if (isNaN(fechaParseada.getTime())) return { anio: "", mes: "" };
+
+  return {
+    anio: fechaParseada.getFullYear(),
+    mes: meses[fechaParseada.getMonth()] ?? ""
+  };
+}
+
+function decodificarHtml(valor) {
+  return String(valor ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
+
+function aNumero(valor) {
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : 0;
+  const normalizado = String(valor ?? "").replace(/,/g, "").trim();
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function tieneIdentificacionBeneficiario(datos) {
+  const llave = Object.keys(datos).find(key => {
+    const normalizada = key
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return /identific|document|cedula|pasaporte|passport|cnp|nif|dni/.test(normalizada);
+  });
+
+  const valor = llave ? datos[llave] : null;
+  return valor !== null && valor !== undefined && String(valor).trim() !== "";
 }
 
 function getCatalogValue(catalogName, filter, fieldName) {
@@ -299,7 +444,7 @@ function getNombreCompleto(contact) {
 function toFecha(value) {
   if (!value) return "";
 
-  const date = (value instanceof Date) ? value : new Date(value);
+  const date = toPanamaDate(value);
 
   // Validar fecha inválida
   if (isNaN(date.getTime())) return "";
@@ -312,7 +457,7 @@ function toFecha(value) {
 }
 
 function getHora(fecha) {
-  const date = new Date(fecha);
+  const date = toPanamaDate(fecha);
 
   if (isNaN(date)) return "";
 
@@ -323,6 +468,33 @@ function getHora(fecha) {
   horas = horas % 12 || 12;
 
   return `${String(horas).padStart(2, "0")}:${minutos} ${periodo}`;
+}
+
+function toPanamaDate(value) {
+  if (value === null || value === undefined || value === "") return new Date(NaN);
+
+  const utcDate = value instanceof Date
+    ? new Date(value.getTime())
+    : crearFechaUtc(value);
+
+  if (isNaN(utcDate.getTime())) return new Date(NaN);
+
+  // Panamá permanece en UTC-5 durante todo el año.
+  return new Date(utcDate.getTime() - (5 * 60 * 60 * 1000));
+}
+
+function crearFechaUtc(value) {
+  const texto = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+    return new Date(`${texto}T00:00:00.000Z`);
+  }
+
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(texto)) {
+    return new Date(texto);
+  }
+
+  return new Date(`${texto}Z`);
 }
 
 function n(value) {

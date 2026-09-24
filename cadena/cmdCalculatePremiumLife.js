@@ -16,20 +16,25 @@ const objectDefinitionCode = "DT_ACCIDENTES_V1";
 let tarifas;
 let oaUserData;
 let resultCoverages = [];
-const tarifaVida = [{ lob: 31, name: "tarificacionSIS9Vida"  }, { lob: 71, name: "tarificacionSIS9VidaIndividual"  }]
+const tarifaVida = [
+  { lob: 20, name: "tarificacionSIS9VidaColectivo"  }, 
+  { lob: 31, name: "tarificacionSIS9Vida"  },   
+  { lob: 71, name: "tarificacionSIS9VidaIndividual"  }
+]
 
 try {
 
-  log("Calculando tarifas");
+  // log("Calculando tarifas");
   setTarifas();
 
-  log("Calculando objeto asegurado");
+  // log("Calculando objeto asegurado");
   setInsuredObject();
+  aplicarNuevaSumaEndoso();
 
-  log("Estableciendo coberturas");
+  // log("Estableciendo coberturas");
   setResultCoverages();
 
-  log("Iterando coberturas para cálculos");
+  // log("Iterando coberturas para cálculos");
 
   for (let cov of poliza.Coverages) {
 
@@ -38,13 +43,13 @@ try {
 
     //log(`obj: $${JSON.stringify(obj)}`);
 
-    log(`Tarificando cobertura: ${cov.code}`);
+    // log(`Tarificando cobertura: ${cov.code}`);
     
     //find configs by coverageCode
     const configs = tarifas.filter(x => x.ccobertura == cov.code);    
     for (let tarifa of configs) {
       
-      log(`Condición: ${tarifa.condicion}`);
+      // log(`Condición: ${tarifa.condicion}`);
       const condicion = evalConfig(obj, tarifa.condicion);      
 
       //log(`Condición res: ${condicion}`);
@@ -52,23 +57,23 @@ try {
       //Si encuentro condición en verdadero recupero los valores y no continuo;
       if(condicion){
 
-        log(`Evaluando suma: ${tarifa.sumaasegurada}`);
+        // log(`Evaluando suma: ${tarifa.sumaasegurada}`);
         resultCoverage.limit = evalConfig(obj, tarifa.sumaasegurada);    
         resultCoverage.limit = n(resultCoverage.limit);   // a dos decimales
         oaUserData[`SUMA${cov.code}`] = resultCoverage.limit;
 
-        log(`Evaluando prima: ${tarifa.prima}`);
+        // log(`Evaluando prima: ${tarifa.prima}`);
         //log(`objeto: ${JSON.stringify(obj)}`);
         resultCoverage.premium = evalConfig(obj, tarifa.prima);    
         resultCoverage.premium = n(resultCoverage.premium);   // a dos decimales
         oaUserData[`PRIMA${cov.code}`] = resultCoverage.premium;
 
-        log(`Evaluando deducible}: ${tarifa.deducible}`);
+        // log(`Evaluando deducible}: ${tarifa.deducible}`);
         resultCoverage.dedutible = evalConfig(obj, tarifa.deducible);    
         resultCoverage.dedutible = n(resultCoverage.dedutible);   // a dos decimales
         oaUserData[`DEDU${cov.code}`] = resultCoverage.dedutible;
 
-        log(`Evaluando etiqueta}: ${tarifa.etiqueta}`);
+        // log(`Evaluando etiqueta}: ${tarifa.etiqueta}`);
         resultCoverage.description = evalConfig(obj, tarifa.etiqueta);    
         oaUserData[`DES${cov.code}`] = resultCoverage.description;
 
@@ -89,6 +94,9 @@ try {
     
   }
 
+  //MSN-000030 (AXX-1589): prima fija del endoso EndosoTarjetaProtegida
+  aplicarPrimaFijaEndoso();
+
   return resultCoverages
   
 }
@@ -96,9 +104,78 @@ catch(error){
   throw `@${error.toString()}`;
 }
 
+/*
+  *MSN-000030 (AXX-1589) - EndosoTarjetaProtegida
+  *Si el endoso de cambio de suma trae en jAdditional el marcador ENDOSOTARJETAPROTEGIDA (endorsementSubtype o endorsementType) y una prima final,
+  *la prima de coberturas devuelta es esa prima final, repartida entre las coberturas en proporción a la prima
+  *de tarifa de cada una (si todas son cero, en proporción a la suma asegurada; si también, en partes iguales).
+  *Sin marcador no hace nada: el cálculo queda idéntico.
+*/
+function aplicarPrimaFijaEndoso() {
+  if (action != "ChangePolicyCapital") return;
+  let adicional = extra && extra.data ? extra.data.jAdditional : null;
+  if (!adicional) return;
+  if (typeof adicional === "string") {
+    try { adicional = JSON.parse(adicional); } catch (errorAdicional) { return; }
+  }
+  if (!adicional) return;
+  //la vista conserva endorsementType del cambio de suma (reaseguro y contabilidad idénticos) y se marca en endorsementSubtype
+  const marcaEndoso = String(adicional.endorsementSubtype || adicional.endorsementType || "");
+  if (marcaEndoso !== "ENDOSOTARJETAPROTEGIDA") return;
+
+  const primaFija = n(adicional.fixedPremium);
+  const movimientoPrima = n(adicional.premiumMovement);
+  const dataEndoso = extra && extra.data ? extra.data : {};
+  const movimientoSuma = n(adicional.sumMovement !== undefined
+    ? adicional.sumMovement
+    : (dataEndoso.newCapital - dataEndoso.oldCapital));
+  if (movimientoSuma > 0 && movimientoPrima < 0) {
+    throw "Para un aumento de suma, la prima debe ser positiva o cero";
+  }
+  if (movimientoSuma < 0 && movimientoPrima > 0) {
+    throw "Para una disminucion de suma, la prima debe ser negativa o cero";
+  }
+  if (primaFija < 0) throw "La prima final no puede ser negativa";
+  if (!resultCoverages.length) throw "La póliza no tiene coberturas para distribuir la prima";
+
+  let pesos = resultCoverages.map(c => Math.abs(Number(c.premium) || 0));
+  let totalPesos = pesos.reduce((a, b) => a + b, 0);
+  if (totalPesos <= 0) {
+    pesos = resultCoverages.map(c => Math.abs(Number(c.limit) || 0));
+    totalPesos = pesos.reduce((a, b) => a + b, 0);
+  }
+  if (totalPesos <= 0) {
+    pesos = resultCoverages.map(() => 1);
+    totalPesos = pesos.length;
+  }
+
+  //el redondeo lo absorbe la cobertura de mayor peso
+  let indiceMayor = 0;
+  pesos.forEach((p, i) => { if (p > pesos[indiceMayor]) indiceMayor = i; });
+  let asignado = 0;
+  resultCoverages.forEach((c, i) => {
+    if (i == indiceMayor) return;
+    c.premium = round2(primaFija * pesos[i] / totalPesos);
+    asignado = round2(asignado + c.premium);
+  });
+  resultCoverages[indiceMayor].premium = round2(primaFija - asignado);
+  // log(`Prima fija del endoso ${primaFija} distribuida: ${JSON.stringify(resultCoverages.map(c => ({ code: c.code, premium: c.premium })))}`);
+}
+
+function aplicarNuevaSumaEndoso() {
+  if (action != "ChangePolicyCapital") return;
+  const dataEndoso = extra && extra.data ? extra.data : {};
+  const nuevaSuma = n(dataEndoso.newCapital);
+  if (nuevaSuma <= 0) return;
+
+  // Las formulas de tarifa leen estas variables del objeto asegurado.
+  oaUserData.txtSumaAsegurada = nuevaSuma;
+  oaUserData.msumaaseg = nuevaSuma;
+}
+
 function getQuotationObject(coverageCode) {
 
-  log(`Calculando objeto cov: ${coverageCode}`);
+  // log(`Calculando objeto cov: ${coverageCode}`);
   
   // clonar objeto base    
   const obj = JSON.parse(JSON.stringify(oaUserData));

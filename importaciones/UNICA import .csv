@@ -1,0 +1,3 @@
+casegurado;cacreedor;Sucursal;Frecuencia_Pago;Forma_Pago;Fdesde;Fhasta;SumaAsegurada;Salario;Peso;Altura;NroPrestamo;TipoPrestamo;Cob_168*;Cob_168_Suma Asegurada;Cob_169*;Cob_169_Suma Asegurada
+3;30;1;Trimestral;CPR;01/11/2026;01/11/2027;15000;3200;72;1.68;9027012;OTROS;S;15000;S;15000
+93;30;1;m;ACH;01/10/2026;01/10/2027;10000;;;;9027003;;S;;S;

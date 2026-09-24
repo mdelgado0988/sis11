@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 84
+declare @ramoXY int = 31
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -35,6 +35,7 @@ select c.cramo, rtrim(c.cplan) cplan, rtrim(pl.xplan) xplan, rtrim(mc.ccobertura
 		, c.CGRUPO
 		, c.CGRUPO1, c.CGRUPO2
 		, c.ccontrea, c.cramorea, qordenimp, c.SA SADefault
+		, pl.qedadmax
 INTO #Coberturas
 from macoberturas mc
 inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
@@ -178,11 +179,11 @@ WHERE c.cramo IN (81,82,83,84)
 
 --reportes endosos de fianzas
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
-	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode
+	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
-where cramo in (81,82,83,84)
+where cramo in (31)
 and xnombrep not like '%endoso%'
-AND xformula1 <> '0'
+--AND xformula1 <> '0'
 order by 1,2
 /*AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
 'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_descrp',

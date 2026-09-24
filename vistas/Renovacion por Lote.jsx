@@ -1,3 +1,14 @@
+/**
+ * @name Renovacion por Lote
+ * @description Vista para consultar pólizas próximas a renovación, seleccionar
+ *              pólizas elegibles y administrar lotes de cotización y emisión.
+ * @purpose Permitir la gestión masiva del proceso de renovación por aniversario.
+ * @category RENOVACION
+ * @objectCode DT_ACCIDENTES_V1
+ * @renewalField cmbRenovacion
+ * @version 1.0
+ * @created 2026-09-23
+ */
 () => {
     const { Form, Select, DatePicker, Input, Row, Col, Card, Collapse, Button, Space, Table, Tabs,  Layout , InputNumber, Radio, Divider,Empty,Tag, Tooltip, 
            notification, Popover, Modal, Spin, Skeleton, Progress, Badge } = A;
