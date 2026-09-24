@@ -182,7 +182,7 @@ select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END 
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
 where cramo in (31)
-and xnombrep like '%endoso%'
+and xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 order by 1,2
 /*AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
@@ -195,7 +195,7 @@ order by 1,2
 
 SELECT
     RTRIM(pl.xplan) AS Producto, STRING_AGG(CONVERT(varchar(max), c.ccobertura), ',') WITHIN GROUP (ORDER BY c.ccobertura) AS Coberturas,
-    RTRIM(pl.cplan) AS cplan, 'CL-EV-AP1' AS Evento, 'CL-EV-AP11,CL-EV-AP12' AS EventoAsegurado
+    RTRIM(pl.cplan) AS cplan, 'CL-EVR-AP1' AS Evento, 'CL-EV-AP11,CL-EV-AP12' AS EventoAsegurado
 FROM (SELECT DISTINCT cramo, cplan, ccobertura
     FROM maplancob
     WHERE cramo = 31 ) c

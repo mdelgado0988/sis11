@@ -12,9 +12,7 @@
  */
 
 const claimId = context?.row?.reclamo;
-const timeZoneOffsetMinutes = Number.isFinite(Number(context?.row?.timeZoneOffsetMinutes))
-  ? Number(context.row.timeZoneOffsetMinutes)
-  : -300;
+const PANAMA_TIME_ZONE_OFFSET_MINUTES = -300;
 const objectDefinitionId = [46,47]
 const quitarCodigo = texto => texto.split(" - ").slice(1).join(" - ");
 const n2 = value => Number(String(value ?? '').replace(/,/g, ''));
@@ -45,7 +43,10 @@ resultado.edificio = policy.insuredObject?.userData?.txtEdificios ?? "";
 resultado.apartamento = policy.insuredObject?.userData?.aptoocasa ?? "";
 resultado.calle = policy.insuredObject?.userData?.calleoavenida ?? "";
 resultado.poliza = policy.code;
-resultado.fechaSiniestro = claim.occurrence;
+resultado.fechaSiniestro = formatDatePanama(claim.occurrence);
+resultado.FechaUltimoPago = getLastPaymentDate(claim.payments);
+resultado.FechaActual = formatCurrentDate();
+resultado.NoTarjetaCli = "Cuenta";
 const ubicacion = [resultado.edificio, resultado.calle]
   .map(value => String(value ?? '').trim())
   .filter(Boolean);
@@ -84,6 +85,8 @@ resultado.totalcontenido = formatN2(sumPaymentDetailsByCoverageIds(claim.payment
 // Edificio sigue el criterio histórico: todo lo pagado que no pertenezca a contenido.
 resultado.totaledificio = formatN2(sumPaymentDetailsExcludingCoverageIds(claim.payments, resultado.lifeCoverageIdsContenido));
 resultado.total = formatN2(sumPaymentDetails(claim.payments));
+resultado.Moneda = "B/.";
+resultado.MonedaMonto = `${resultado.Moneda} ${resultado.total}`;
 
 resultado.chequetotal = getCurrentCheckNumber(claim.payments);
 
@@ -102,7 +105,7 @@ cmbSector: "80802"
 */
 
 resultado.totalhotelletras = montoEnLetras(n2(resultado.totalhotel));
-resultado.fechaletras = fechaEnLetras(resultado.fechaSiniestro, timeZoneOffsetMinutes);
+resultado.fechaletras = fechaEnLetras(claim.occurrence);
 resultado.totalletras = montoEnLetras(n2(resultado.total));
 
 return resultado;
@@ -256,9 +259,74 @@ function getCurrentCheckNumber(payments, predicate = () => true) {
   return candidates[0].checkNum;
 }
 
+function getLastPaymentDate(payments) {
+  const candidates = (payments || [])
+    .map(payment => ({
+      value: payment?.date,
+      date: parsePaymentDate(payment?.date)
+    }))
+    .filter(item => item.date);
+
+  if (!candidates.length) {
+    return '';
+  }
+
+  candidates.sort((a, b) => b.date.getTime() - a.date.getTime());
+  return formatDatePanama(candidates[0].value);
+}
+
+function formatCurrentDate() {
+  const currentDate = getPanamaDateParts(new Date());
+  const months = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+  ];
+
+  return `${currentDate.day} días del mes de ${months[currentDate.month]} del año ${currentDate.year}`;
+}
+
 function parsePaymentDate(value) {
-  const date = new Date(value);
+  const date = parseUtcDate(value);
   return isNaN(date.getTime()) ? null : date;
+}
+
+function parseUtcDate(value) {
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+
+  const text = String(value ?? '').trim();
+  if (!text) return new Date(NaN);
+
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? `${text}T00:00:00Z`
+    : /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)
+      ? text
+      : `${text}Z`;
+
+  return new Date(normalized);
+}
+
+function getPanamaDateParts(value) {
+  const date = parseUtcDate(value);
+  if (isNaN(date.getTime())) return null;
+
+  const localDate = new Date(
+    date.getTime() + PANAMA_TIME_ZONE_OFFSET_MINUTES * 60 * 1000
+  );
+
+  return {
+    day: localDate.getUTCDate(),
+    month: localDate.getUTCMonth(),
+    year: localDate.getUTCFullYear()
+  };
+}
+
+function formatDatePanama(value) {
+  const parts = getPanamaDateParts(value);
+  if (!parts) return '';
+
+  return `${String(parts.day).padStart(2, '0')}/${String(parts.month + 1).padStart(2, '0')}/${parts.year}`;
 }
 
 function safeJson(raw, fallback) {
@@ -321,23 +389,18 @@ function montoEnLetras(monto) {
   return letras;
 }
 
-function fechaEnLetras(fecha, timeZoneOffsetMinutes = -300) {
+function fechaEnLetras(fecha) {
   const meses = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ];
 
-  const f = new Date(fecha);
+  const parts = getPanamaDateParts(fecha);
+  if (!parts) return '';
 
-  if (isNaN(f)) return '';
-
-  const offset = Number.isFinite(Number(timeZoneOffsetMinutes))
-    ? Number(timeZoneOffsetMinutes)
-    : -300;
-  const localDate = new Date(f.getTime() + offset * 60 * 1000);
-  const dia = localDate.getUTCDate();
-  const mes = meses[localDate.getUTCMonth()];
-  const anio = localDate.getUTCFullYear();
+  const dia = parts.day;
+  const mes = meses[parts.month];
+  const anio = parts.year;
 
   return `${dia} de ${mes} de ${anio}`;
 }
