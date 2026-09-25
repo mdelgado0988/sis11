@@ -131,6 +131,11 @@
   const [paymentRows, setPaymentRows] = React.useState([]);
   const [paymentsLoading, setPaymentsLoading] = React.useState(false);
   const paymentsLoadedPolicyRef = React.useRef(null);
+  const [refundAmount, setRefundAmount] = React.useState(0);
+  const [refundLoading, setRefundLoading] = React.useState(false);
+  const [accountMovementRows, setAccountMovementRows] = React.useState([]);
+  const [accountMovementsLoading, setAccountMovementsLoading] = React.useState(false);
+  const accountMovementsLoadedPolicyRef = React.useRef(null);
   const [activeTab, setActiveTab] = React.useState('search');
   const [restructureModalOpen, setRestructureModalOpen] = React.useState(false);
   const [restructureLoading, setRestructureLoading] = React.useState(false);
@@ -165,6 +170,11 @@
       setRenewalInfo(null);
       setAccountingInfo(null);
       setPaymentRows([]);
+      setRefundAmount(0);
+      setRefundLoading(false);
+      setAccountMovementRows([]);
+      setAccountMovementsLoading(false);
+      accountMovementsLoadedPolicyRef.current = null;
       setPaymentsLoading(false);
       setPolicyLoading(false);
       return undefined;
@@ -996,11 +1006,34 @@
 
   function handleSearch(values) {
     paymentsLoadedPolicyRef.current = null;
+    accountMovementsLoadedPolicyRef.current = null;
     setPaymentRows([]);
+    setAccountMovementRows([]);
+    setRefundAmount(0);
     setSelectedRow(null);
     setPolicyInfo(null);
     setActiveTab('search');
     search(values, { current: 1, pageSize: pagination.pageSize });
+  }
+
+  function handleRefresh() {
+    if (!searched) {
+      message.warning(t('Apply a filter before refreshing.'));
+      return;
+    }
+
+    paymentsLoadedPolicyRef.current = null;
+    accountMovementsLoadedPolicyRef.current = null;
+    setPaymentRows([]);
+    setAccountMovementRows([]);
+    setRefundAmount(0);
+    setSelectedRow(null);
+    setPolicyInfo(null);
+    setActiveTab('search');
+    search(filterForm.getFieldsValue(), {
+      current: pagination.current,
+      pageSize: pagination.pageSize
+    });
   }
 
   function handleTableChange(nextPagination) {
@@ -1220,7 +1253,10 @@
 
   function handleRowSelect(record) {
     paymentsLoadedPolicyRef.current = null;
+    accountMovementsLoadedPolicyRef.current = null;
     setPaymentRows([]);
+    setAccountMovementRows([]);
+    setRefundAmount(0);
     setCollectionCutoffValue(undefined);
     setPolicyLoading(true);
     setSelectedRow(record);
@@ -1251,9 +1287,35 @@
     }).finally(() => setPaymentsLoading(false));
   }
 
+  function loadPolicyAccountMovements(policyId) {
+    const id = Number(policyId) || 0;
+    if (!id || accountMovementsLoadedPolicyRef.current === id) return;
+
+    accountMovementsLoadedPolicyRef.current = id;
+    setAccountMovementsLoading(true);
+    exe('RepoTransfer', {
+      operation: 'GET',
+      filter: `([Transfer].lifePolicyId = ${id} OR EXISTS (SELECT 1 FROM AllocationInstallment ai WHERE ai.allocationId = [Transfer].allocationId AND ai.lifePolicyId = ${id}) OR EXISTS (SELECT 1 FROM ClaimPayment cp WHERE cp.id = [Transfer].claimPaymentId AND cp.lifePolicyId = ${id})) AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1`,
+      include: ['Allocation', 'Allocation.InstallmentPremiums', 'TransferWorkspace', 'IncomeType'],
+      noTracking: true
+    }).then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('Account movements could not be loaded.'));
+      }
+      setAccountMovementRows(getRows(response));
+    }).catch(error => {
+      accountMovementsLoadedPolicyRef.current = null;
+      setAccountMovementRows([]);
+      message.error(error && error.message ? error.message : t('Account movements could not be loaded.'));
+    }).finally(() => setAccountMovementsLoading(false));
+  }
+
   function handleTabChange(tabKey) {
     if (tabKey === 'payments' && selectedRow) {
       loadPolicyPayments(selectedRow.policyId);
+    }
+    if (tabKey === 'account-balance' && selectedRow) {
+      loadPolicyAccountMovements(selectedRow.policyId);
     }
     setActiveTab(tabKey);
   }
@@ -1359,19 +1421,6 @@
     totals.paid += paid;
     return totals;
   }, { signedAmount: 0, paid: 0 });
-  const cancellationGroupCancelledAmount = cancellationGroupAmounts.signedAmount;
-  const hasCancellationGroupAmounts = cancellationGroupAmounts.paid !== 0 || cancellationGroupCancelledAmount !== 0;
-  const cancellationGroupRow = cancellationInstallmentRows.length > 0
-    && latestDisplayableCancellation
-    && hasCancellationGroupAmounts ? {
-    id: 'cancellation-group',
-    concept: 'CANCELLATION',
-    isCancellationGroup: true,
-    cancellationInstallmentCount: cancellationInstallmentRows.length,
-    minimum: 0,
-    payed: cancellationGroupAmounts.paid,
-    cancellationAmount: cancellationGroupCancelledAmount
-  } : null;
   const isTechnicalCancellation = installment => isCancellationInstallment(installment)
     && !isLatestDisplayableCancellation(installment);
   const getInstallmentIssuedAmount = installment => installment && installment.isCancellationGroup
@@ -1382,7 +1431,7 @@
       ? Math.abs(getInstallmentRawAmount(installment))
       : getInstallmentRawAmount(installment)));
   const getInstallmentPaidAmount = installment => installment && installment.isCancellationGroup
-    ? installment.payed
+    ? (installment.cancellationAmount < 0 ? -Math.abs(installment.payed) : installment.payed)
     : (isTechnicalCancellation(installment) ? 0 : firstNumber(installment, ['payed', 'paid'], 0));
   const getInstallmentCancelledAmount = installment => {
     if (installment && installment.isCancellationGroup) return installment.cancellationAmount;
@@ -1404,6 +1453,24 @@
     && !!(installment && installment.cancellationDate));
   const refundInstallmentRows = installmentRows.filter(installment => isCancellationInstallment(installment) && getInstallmentRawAmount(installment) < 0);
   const totalRefundAmount = Math.abs(refundInstallmentRows.reduce((total, installment) => total + getInstallmentRawAmount(installment), 0));
+  const refundAppliedAmount = Math.min(totalRefundAmount, Math.max(refundAmount, 0));
+  const remainingRefundAmount = Math.max(totalRefundAmount - refundAppliedAmount, 0);
+  const cancellationGroupCancelledAmount = cancellationGroupAmounts.signedAmount;
+  const cancellationGroupPaidAmount = totalRefundAmount > 0
+    ? Math.min(totalRefundAmount, cancellationGroupAmounts.paid + refundAppliedAmount)
+    : cancellationGroupAmounts.paid;
+  const hasCancellationGroupAmounts = cancellationGroupPaidAmount !== 0 || cancellationGroupCancelledAmount !== 0;
+  const cancellationGroupRow = cancellationInstallmentRows.length > 0
+    && latestDisplayableCancellation
+    && hasCancellationGroupAmounts ? {
+    id: 'cancellation-group',
+    concept: 'CANCELLATION',
+    isCancellationGroup: true,
+    cancellationInstallmentCount: cancellationInstallmentRows.length,
+    minimum: 0,
+    payed: cancellationGroupPaidAmount,
+    cancellationAmount: cancellationGroupCancelledAmount
+  } : null;
   const regularInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
   const displayedInstallmentRows = (showCancelledInstallments
     ? regularInstallmentRows
@@ -1610,10 +1677,68 @@
   }, 0);
   const totalInstallmentPending = installmentTotalRows.reduce((total, installment) => total + getInstallmentBalance(installment), 0);
   const detailHolder = firstEntity(detailPolicy, ['Holder', 'holder', 'Payer', 'payer']);
+  const detailHolderId = firstNumber(detailHolder, ['id', 'contactId'], firstNumber(detailPolicy, ['holderId', 'payerId', 'contactId'], firstNumber(generalData, ['clientId', 'holderId', 'payerId'], 0)));
   const collectionPaymentInsuredObjects = (Array.isArray(detailPolicy.InsuredObjects)
     ? detailPolicy.InsuredObjects
     : (Array.isArray(detailPolicy.insuredObjects) ? detailPolicy.insuredObjects : []))
     .filter(item => ['DTCheque', 'DTTarjeta', 'DTACH'].includes(getInsuredObjectDefinitionCode(item)));
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const policyId = Number(selectedRow && selectedRow.policyId) || 0;
+    const contactId = Number(detailHolderId) || 0;
+    if (!policyId || !contactId) {
+      setRefundAmount(0);
+      setRefundLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    setRefundLoading(true);
+    const claimPaymentRequest = exe('LoadEntities', {
+      entity: 'ClaimPayment',
+      fields: 'id,claimId,contactId,lifePolicyId,total,transferId,date,concept,paymentType,entityState',
+      filter: `lifePolicyId = ${policyId} AND contactId = ${contactId} AND transferId IS NOT NULL`,
+      noTracking: true
+    });
+    const refundTransferRequest = exe('RepoTransfer', {
+      operation: 'GET',
+      filter: `[Transfer].[lifePolicyId] = ${policyId} AND [Transfer].[transactionCode] = N'REFUND' AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1`,
+      noTracking: true
+    });
+
+    Promise.all([claimPaymentRequest, refundTransferRequest]).then(([claimPaymentResponse, transferResponse]) => {
+      if (!claimPaymentResponse || claimPaymentResponse.ok === false) {
+        throw new Error(claimPaymentResponse && claimPaymentResponse.msg ? claimPaymentResponse.msg : t('Refunds could not be loaded.'));
+      }
+      if (!transferResponse || transferResponse.ok === false) {
+        throw new Error(transferResponse && transferResponse.msg ? transferResponse.msg : t('Refunds could not be loaded.'));
+      }
+
+      const refundTransfers = getRows(transferResponse)
+        .filter(item => !isPaymentReverted(item));
+      const refundTransferIds = new Set(refundTransfers
+        .map(item => Number(item && item.id))
+        .filter(id => id > 0));
+      const transferAmount = refundTransfers.reduce((total, item) => total + Math.abs(firstNumber(item, ['amount'], 0)), 0);
+      const claimPaymentAmount = getRows(claimPaymentResponse)
+        .filter(item => Number(item && item.claimId || 0) <= 0 && Number(item && item.transferId || 0) > 0)
+        .filter(item => !refundTransferIds.has(Number(item.transferId)))
+        .reduce((total, item) => total + Math.abs(firstNumber(item, ['total'], 0)), 0);
+
+      return transferAmount + claimPaymentAmount;
+    }).then(amount => {
+      if (!cancelled) setRefundAmount(Number(amount) || 0);
+    }).catch(error => {
+      if (!cancelled) {
+        setRefundAmount(0);
+        message.error(error && error.message ? error.message : t('Refunds could not be loaded.'));
+      }
+    }).finally(() => {
+      if (!cancelled) setRefundLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [selectedRow ? selectedRow.policyId : 0, detailHolderId]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1979,6 +2104,47 @@
   const validPaymentRows = paymentGridRows.filter(row => !row.reverted);
   const paymentTotalPaid = validPaymentRows.reduce((total, row) => total + number(row.paid), 0);
   const paymentTotalComplementary = validPaymentRows.reduce((total, row) => total + number(row.complementary), 0);
+  const accountMovementGridRows = accountMovementRows.reduce((result, group, groupIndex) => {
+    const children = getPaymentMovementChildren(group);
+    const movements = (children.length ? children : [group]).filter(item =>
+      text(item && item.transactionCode || group && group.transactionCode).toUpperCase() !== 'PREMIUMPAY'
+    );
+    movements.forEach((item, movementIndex) => {
+      const movement = item || group || {};
+      const workspace = movement.TransferWorkspace || movement.transferWorkspace
+        || group && (group.TransferWorkspace || group.transferWorkspace);
+      const allocation = movement.Allocation || movement.allocation
+        || group && (group.Allocation || group.allocation);
+      const movementId = Number(movement.id || group && group.id || 0);
+      if (result.some(row => Number(row.transferId) === movementId && movementId > 0)) return;
+      result.push({
+        key: `account-${movementId || groupIndex}-${movementIndex}`,
+        date: workspace && (workspace.date || workspace.Date) || movement.date || group && group.date,
+        concept: getPaymentReference(group, movement),
+        transactionCode: text(movement.transactionCode || group && group.transactionCode) || '-',
+        source: text(movement.sourceName || group && group.sourceName) || '-',
+        destination: text(movement.destinationName || group && group.destinationName) || '-',
+        transferId: movementId || '-',
+        allocationId: allocation && allocation.id || movement.allocationId || group && group.allocationId || '-',
+        amount: number(movement.amount) || number(group && group.amount),
+        currency: text(movement.currency || group && group.currency) || '-',
+        reverted: isPaymentReverted({ ...group, ...movement })
+      });
+    });
+    return result;
+  }, []);
+  const accountMovementColumns = [
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 125, align: 'center', render: formatDate },
+    { title: t('Concept'), dataIndex: 'concept', key: 'concept', width: 260, ellipsis: true },
+    { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 150, ellipsis: true },
+    { title: t('Source account'), dataIndex: 'source', key: 'source', width: 180, ellipsis: true },
+    { title: t('Destination account'), dataIndex: 'destination', key: 'destination', width: 180, ellipsis: true },
+    { title: t('Transfer ID'), dataIndex: 'transferId', key: 'transferId', width: 110, align: 'center' },
+    { title: t('Allocation ID'), dataIndex: 'allocationId', key: 'allocationId', width: 110, align: 'center', render: renderAllocationLink },
+    { title: t('Currency'), dataIndex: 'currency', key: 'currency', width: 90, align: 'center' },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: renderMoney },
+    { title: t('Status'), dataIndex: 'reverted', key: 'status', width: 110, align: 'center', render: value => <Tag color={value ? 'red' : 'green'}>{t(value ? 'Reverted' : 'Executed')}</Tag> }
+  ];
 
   const restructureFrequencyOptions = [
     { value: 'm', label: t('Monthly'), months: 1 },
@@ -2736,7 +2902,10 @@
           <TabPane tab={<span><SearchTabIcon />{t('Search')}</span>} key="search">
             <div className="historical-billing-filter-panel">
               <div className="historical-billing-toolbar">
-                <Button type="primary" onClick={() => setFilterVisible(true)}>{t('Filter')}</Button>
+                <Space size={8}>
+                  <Button type="primary" onClick={() => setFilterVisible(true)}>{t('Filter')}</Button>
+                  <Button onClick={handleRefresh} disabled={!searched}>{t('Refresh')}</Button>
+                </Space>
               </div>
               <Drawer
                 title={t('Historical billing filters')}
@@ -2948,9 +3117,9 @@
                       <span>{t('Show cancelled installments')}</span>
                       <Switch checked={showCancelledInstallments} onChange={setShowCancelledInstallments} />
                     </Space>
-                    {totalRefundAmount > 0 && (
+                    {remainingRefundAmount > 0 && (
                       <span className="historical-billing-refund-summary">
-                        {t('Balance to refund')}: {renderCancellationMoney(totalRefundAmount)}
+                        {t('Balance to refund')}: {renderCancellationMoney(remainingRefundAmount)}
                       </span>
                     )}
                   </div>
@@ -2980,6 +3149,39 @@
                     locale={{ emptyText: t('No installments found.') }}
                   />
                 </>
+              )}
+            </div>
+          </TabPane>
+          <TabPane tab={<span><PaymentTabIcon />{t('Account balance')}</span>} key="account-balance" disabled={!selectedRow}>
+            <div className="historical-billing-filter-panel">
+              {!selectedRow ? (
+                <div className="historical-billing-general-empty">{t('Select a policy from the search results to view its account movements.')}</div>
+              ) : (
+                <Table
+                  className="historical-billing-table"
+                  rowKey="key"
+                  size="small"
+                  bordered
+                  loading={accountMovementsLoading}
+                  columns={accountMovementColumns}
+                  dataSource={accountMovementGridRows}
+                  summary={() => (
+                    <Table.Summary>
+                      <Table.Summary.Row>
+                        <Table.Summary.Cell index={0} colSpan={8}>
+                          <strong>{t('Totals')}</strong> | {t('Movements')}: {accountMovementGridRows.length}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={8} align="right">
+                          {renderMoney(accountMovementGridRows.filter(row => !row.reverted).reduce((total, row) => total + number(row.amount), 0))}
+                        </Table.Summary.Cell>
+                        <Table.Summary.Cell index={9}></Table.Summary.Cell>
+                      </Table.Summary.Row>
+                    </Table.Summary>
+                  )}
+                  pagination={false}
+                  scroll={{ x: 1400, y: 'calc(100dvh - 310px)' }}
+                  locale={{ emptyText: t('No account movements found.') }}
+                />
               )}
             </div>
           </TabPane>

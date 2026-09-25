@@ -181,16 +181,34 @@ WHERE c.cramo IN (81,82,83,84)
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
-where cramo in (20)
+where cramo in (96)
 and xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 --AND xformula1 is not null and xformula1 <> '0'
 order by 1,2
-/*AND xnombrep in ('endoso_cancelacion_fianzas','endoso_fianzas_mdprima',
-'endoso_generico_fianzas','endoso_orden_cambio','endoso_poliza_fianza_acreedor','endoso_poliza_fianza_descrp',
-'endoso_poliza_fianza_OP','endoso_poliza_fianza_orden_pro','endoso_poliza_fianza_valor_garantia','endoso_poliza_fianza_Vig')*/
 
+--Reportes de riesgos varios
+SELECT lob,producto, xnombrep, xdescripcion, CoverageCode, xdpto, ISNULL(oferta, oferta2) oferta 
+FROM (
+select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.cplan END [Producto], rtrim(r.xnombrep) xnombrep,
+	(rtrim(r.xdescripcion)) xdescripcion, r.xformula1 CoverageCode, r.xdpto,
+	(select max(p.cproces) oferta
+	from adpoliza p
+	inner join adrecibos rec on rec.cpoliza = p.cpoliza and rec.fanopol = p.fanopol and rec.fmespol = p.fmespol
+	inner join adpolcob c on c.crecibo = rec.crecibo and c.ccober = r.xformula1 ) AS oferta,
 
+	(select max(p.cproces) oferta
+	from adpoliza p
+	inner join adrecibos rec on rec.cpoliza = p.cpoliza and rec.fanopol = p.fanopol and rec.fmespol = p.fmespol
+	inner join adpolcob c on c.crecibo = rec.crecibo and c.isuma = 'S' ) AS oferta2
+
+from marepteccia r
+where r.cramo in (96)
+and r.xnombrep not like '%endoso%'
+--AND xformula1 <> '0'
+AND (r.xformula1 is not null and r.xformula1 <> '0' and isnumeric(r.xformula1) = 1)
+) t
+order by 1,2
 
 --endoso_orden_cambio, endoso_generico_fianzas, endoso_poliza_fianza_acreedor, endoso_poliza_fianza_descrp
 
@@ -207,3 +225,6 @@ GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 select cramo, ccausa, xcausa from macausasin where cramo = 20
 
 	
+
+quiero que busques estos reportes, guiate por la columna xnombrep, quiero que busques los reportes en la carpeta de: Reportes\Global, ubica el reporte de crystal, actualiza la cadena de conexión según la BD y genera el word, quiero que hagamos el cruce de los campos dinámicos según un DTO que te daré, primero genera los word con el objetivo de buscar la info dinámica y mapear con los datos que tengo en el DTO.
+Puedes usar la columna 

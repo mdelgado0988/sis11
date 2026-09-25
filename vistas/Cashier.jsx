@@ -2904,10 +2904,8 @@
 
     setRefundMoneySubmitting(true);
     try {
-      const destinationAccountId = lifePolicyId === null
-        ? manualDestinationAccountId
-        : (await resolveRefundDestinationAccount()).accountId;
-      const response = await exe('DoManualPaymentRequest', {
+      const requestCommand = lifePolicyId !== null ? 'DoPaymentRequest' : 'DoManualPaymentRequest';
+      const requestPayload = {
         contactId: contactId,
         currency: getTrimmedString(values && values.currency),
         grossAmount: Number(total.toFixed(2)),
@@ -2920,17 +2918,23 @@
         deductions: 0,
         total: total,
         sourceAccountId: sourceAccountId,
-        accountId: destinationAccountId,
         requiresFiscalNumber: false,
         fiscalNumber: null,
         reference: getTrimmedString(values && values.reference),
         concept: 'Devoluciones de primas por cargo a cuentas o préstamos del cliente',
-        lifePolicyId: lifePolicyId,
         noWorkflow: false,
-        producer: 'MANUAL',
         Taxes: null,
         CostCenters: null
-      });
+      };
+
+      if (lifePolicyId !== null) {
+        requestPayload.lifePolicyId = lifePolicyId;
+      } else {
+        requestPayload.accountId = manualDestinationAccountId;
+        requestPayload.producer = 'MANUAL';
+      }
+
+      const response = await exe(requestCommand, requestPayload);
 
       if (!response || response.ok === false) {
         throw new Error(response && response.msg ? response.msg : t('The refund request could not be created.'));

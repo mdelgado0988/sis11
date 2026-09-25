@@ -1,5 +1,5 @@
 casegurado;cacreedor;Sucursal;Frecuencia_Pago;Forma_Pago;Fdesde;Fhasta;SumaAsegurada;Salario;Peso;Altura;NroPrestamo;TipoPrestamo;Cob_168*;Cob_168_Suma Asegurada;Cob_169*;Cob_169_Suma Asegurada
-3;1;1;Trimestral;CPR;1/9/2026;30/9/2026;15000;3200;72;1.68;;OTROS;S;15000;S;15000
-93;1;1;m;ACH;1/9/2026;30/9/2026;10000;;;;;;S;;S;
-3;1;1;Trimestral;CPR;1/9/2026;30/9/2026;15000;3200;72;1.68;;OTROS;S;15000;S;15000
-93;1;1;Contado;PRO;1/9/2026;30/9/2026;10000;;;;;;S;;S;
+3;1;1;Trimestral;CPR;1/9/2026;1/10/2026;15000;3200;;;;OTROS;S;15000;S;15000
+93;1;1;m;ACH;1/9/2026;1/10/2026;10000;;;;;;S;;S;
+3;1;1;Trimestral;CPR;1/9/2026;1/10/2026;15000;3200;;;;OTROS;S;15000;S;15000
+93;1;1;Contado;PRO;1/9/2026;1/10/2026;10000;;;;;;S;;S;

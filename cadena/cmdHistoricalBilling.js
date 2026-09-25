@@ -43,10 +43,13 @@ WITH BillingRows AS (
         lp.[start] AS [start],
         lp.[end] AS [end],
         SUM(ISNULL(pp.[minimum], pp.[expected])) AS [total],
-        SUM(ISNULL(pp.[payed], 0)) + COALESCE(MAX(cancellationPlanPayments.[paidAmount]), 0) AS [paid],
+        SUM(ISNULL(pp.[payed], 0))
+            + COALESCE(MAX(cancellationPlanPayments.[paidAmount]), 0)
+            - refundApplied.[amount] AS [paid],
         SUM(ISNULL(pp.[minimum], pp.[expected]) - ISNULL(pp.[payed], 0))
             - COALESCE(MAX(cancellationPlanPayments.[paidAmount]), 0)
-            - ABS(COALESCE(cancellation.[annualPremiumDif], 0)) AS [pending],
+            - ABS(COALESCE(cancellation.[annualPremiumDif], 0))
+            + refundApplied.[amount] AS [pending],
         ABS(COALESCE(cancellation.[annualPremiumDif], 0)) AS [cancellation]
     FROM [PayPlan] pp
     INNER JOIN [LifePolicy] lp ON lp.[id] = pp.[lifePolicyId]
@@ -108,6 +111,35 @@ WITH BillingRows AS (
         GROUP BY cancellationPlan.[lifePolicyId]
     ) cancellationPlanPayments
         ON cancellationPlanPayments.[lifePolicyId] = lp.[id]
+    LEFT JOIN (
+        SELECT
+            refundTransfer.[lifePolicyId],
+            SUM(ABS(ISNULL(refundTransfer.[amount], 0))) AS [amount]
+        FROM [Transfer] refundTransfer
+        WHERE refundTransfer.[transactionCode] = N'REFUND'
+          AND refundTransfer.[status] in (1,2)
+          AND refundTransfer.[executed] = 1
+          AND refundTransfer.[reversalDate] IS NULL
+        GROUP BY refundTransfer.[lifePolicyId]
+    ) refundTransfers
+        ON refundTransfers.[lifePolicyId] = lp.[id]
+    LEFT JOIN (
+        SELECT
+            refundPlan.[lifePolicyId],
+            SUM(ABS(ISNULL(refundPlan.[minimum], refundPlan.[expected]))) AS [amount]
+        FROM [PayPlan] refundPlan
+        WHERE UPPER(ISNULL(refundPlan.[concept], '')) = N'CANCELLATION'
+          AND ISNULL(refundPlan.[minimum], refundPlan.[expected]) < 0
+        GROUP BY refundPlan.[lifePolicyId]
+    ) refundCancellation
+        ON refundCancellation.[lifePolicyId] = lp.[id]
+    OUTER APPLY (
+        SELECT CASE
+            WHEN COALESCE(refundTransfers.[amount], 0) > COALESCE(refundCancellation.[amount], 0)
+                THEN COALESCE(refundCancellation.[amount], 0)
+            ELSE COALESCE(refundTransfers.[amount], 0)
+        END AS [amount]
+    ) refundApplied
     WHERE 1 = 1
       AND ISNULL(pp.[concept], '') <> N'Cancellation'
       ${where}
@@ -119,7 +151,8 @@ WITH BillingRows AS (
         lp.[entityState],
         lp.[start],
         lp.[end],
-        cancellation.[annualPremiumDif]
+        cancellation.[annualPremiumDif],
+        refundApplied.[amount]
 )
 SELECT
     [policyId],
