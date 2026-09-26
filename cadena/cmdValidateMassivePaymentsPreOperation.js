@@ -11,13 +11,14 @@ const VALIDATION_BATCH_SIZE = 500;
 const input = context && typeof context === 'object' ? context : {};
 const rows = resolveRows(input);
 const errors = [];
+const fatalErrors = [];
 
 if (!rows.length) {
     throw '@La remesa no contiene filas para validar.';
 }
 
 if (!input.skipDuplicateValidation) validateDuplicates(rows, errors);
-if (!input.skipPremiumIncomeTypeValidation) validatePremiumIncomeType(errors);
+if (!input.skipPremiumIncomeTypeValidation) validatePremiumIncomeType(fatalErrors);
 
 const cashDeskCache = {};
 
@@ -30,15 +31,20 @@ for (let batchStart = 0; batchStart < rows.length; batchStart += VALIDATION_BATC
     });
 }
 
-if (errors.length) {
-    throw '@PRE OPERATION rechazada. No se realizó ningún cobro. ' + errors.join(' | ');
+if (fatalErrors.length) {
+    throw '@PRE OPERATION rechazada. No se realizó ningún cobro. ' + fatalErrors.join(' | ');
 }
 
 return {
     ok: true,
     outData: rows,
     outDataAux: [],
-    msg: 'PRE OPERATION finalizada: ' + rows.length + ' filas válidas.'
+    validationErrors: errors.map(function (error) {
+        return formatValidationError(error, rows, Number(input.rowOffset) || 0);
+    }),
+    msg: errors.length
+        ? 'PRE OPERATION finalizada con ' + errors.length + ' inconsistencia(s) de fila. Las filas válidas pueden procesarse.'
+        : 'PRE OPERATION finalizada: ' + rows.length + ' filas válidas.'
 };
 
 function resolveRows(source) {
@@ -138,6 +144,24 @@ function validatePremiumIncomeType(validationErrors) {
     if (!result || result.ok === false || !premiumType) {
         validationErrors.push('Configuración: no existe un tipo de ingreso válido para PREMIUM.');
     }
+}
+
+function formatValidationError(error, sourceRows, rowOffset) {
+    const text = String(error || '');
+    const rowMatch = text.match(/^Fila\s+(\d+):\s*(.*)$/i);
+    const localRowNumber = rowMatch ? Number(rowMatch[1]) : 0;
+    const rowNumber = localRowNumber > 0 ? localRowNumber + rowOffset : 0;
+    const row = localRowNumber > 0 && sourceRows[localRowNumber - 1] ? sourceRows[localRowNumber - 1] : {};
+    const detail = rowMatch ? rowMatch[2] : text;
+    const duplicateMatch = detail.match(/póliza duplicada\s+(\S+).*?fila\s+(\d+)/i);
+
+    return {
+        row: rowNumber > 0 ? String(rowNumber) : '',
+        policyId: row && row.policyId !== undefined ? String(row.policyId) : '',
+        policyCode: row && row.policyCode !== undefined ? String(row.policyCode) : '',
+        duplicateRow: duplicateMatch ? duplicateMatch[2] : '',
+        detail: detail
+    };
 }
 
 function validateRow(row, rowNumber, validationErrors, cashDeskCache) {

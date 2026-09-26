@@ -49,6 +49,11 @@ if(IsNull(Policy))
 if(Policy.holderId != row.holderId)
     throw '@El contratante propocionado no pertenece a la poliza';
 
+if(String(Policy.code || '').trim().toUpperCase() !== String(row.policyCode || '').trim().toUpperCase())
+    throw '@El código de póliza no coincide con la póliza indicada';
+
+validateBatchDuplicate(row, batchId);
+
 const payer = resolvePayer(row, Policy);
 
 setPaylan(Policy);
@@ -538,6 +543,37 @@ function ValidateDto(row,errors){
     }
     if(errors.length > 0)
         throw '@'+GetMsgErrors(errors,',');
+}
+
+function validateBatchDuplicate(paymentRow, batchId) {
+    doCmd({
+        cmd: 'DoQuery',
+        data: {
+            sql: `SELECT TOP (1) transfer.id
+                FROM [dbo].[Transfer] transfer
+                INNER JOIN [dbo].[AllocationInstallment] allocationInstallment
+                    ON allocationInstallment.allocationId = transfer.allocationId
+                OUTER APPLY (
+                    SELECT TOP (1)
+                        TRY_CAST(JSON_VALUE(formField.value, '$.userData[0]') AS INT) AS remittanceId
+                    FROM OPENJSON(transfer.jIncomeTypeForm) formField
+                    WHERE JSON_VALUE(formField.value, '$.name') = 'hiddenIdRemesa'
+                ) remittance
+                WHERE remittance.remittanceId = ${Number(batchId)}
+                  AND allocationInstallment.lifePolicyId = ${Number(paymentRow.policyId)}
+                  AND ABS(ISNULL(transfer.amount, 0) - ${Number(paymentRow.monto)}) < 0.005`
+        }
+    });
+
+    const result = typeof DoQuery !== 'undefined' ? DoQuery : null;
+    const rows = result && Array.isArray(result.outData) ? result.outData : [];
+    if (result && result.ok === false) {
+        throw new Error(result.msg || 'No fue posible validar duplicados de la remesa.');
+    }
+    if (rows.length) {
+        throw '@La póliza ' + String(paymentRow.policyCode || paymentRow.policyId)
+            + ' ya tiene un pago registrado en esta remesa.';
+    }
 }
 
 function validatePositiveId(value){

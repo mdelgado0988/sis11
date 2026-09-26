@@ -875,6 +875,22 @@
       };
     });
 
+  const normalizeValidationDetails = (items) => (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        return {
+          key: item.key || String(index + 1),
+          row: item.row || EMPTY_VALUE,
+          policyId: item.policyId || EMPTY_VALUE,
+          policyCode: item.policyCode || EMPTY_VALUE,
+          duplicateRow: item.duplicateRow || EMPTY_VALUE,
+          detail: item.detail || item.message || JSON.stringify(item)
+        };
+      }
+      return validationDetailsFromText(item);
+    })
+    .reduce((result, item) => result.concat(item), []);
+
   const duplicateValidationErrors = (validationRows) => {
     const seen = {};
     const errors = [];
@@ -890,6 +906,9 @@
         errors.push({
           key: 'duplicate-' + String(index + 1),
           row: String(index + 1),
+          policyId: policyId,
+          policyCode: policyCode,
+          duplicateRow: String(seen[key]),
           detail: t('póliza duplicada') + ' ' + policyId
             + (policyCode ? ' ' + t('para la póliza') + ' ' + policyCode : '')
             + ' (' + t('también aparece en la fila') + ' ' + seen[key] + ').'
@@ -915,6 +934,7 @@
       context: JSON.stringify({
         batchId: batchId,
         rows: rowsBatch,
+        rowOffset: batchIndex * validationBatchSize,
         skipDuplicateValidation: true,
         skipPremiumIncomeTypeValidation: batchIndex > 0
       })
@@ -935,6 +955,10 @@
             ? validationResult.msg
             : t('La validación previa de la remesa fue rechazada.')));
       }
+
+      if (Array.isArray(validationPayload.validationErrors)) {
+        validationErrorsForDisplay.push(...normalizeValidationDetails(validationPayload.validationErrors));
+      }
     }).catch((error) => {
       const messageText = error && error.message ? String(error.message) : String(error || '');
       const validationStart = messageText.indexOf('PRE OPERATION rechazada.');
@@ -946,14 +970,7 @@
       } else {
         throw error;
       }
-    })), Promise.resolve()).then(() => {
-      if (!validationErrorsForDisplay.length) return;
-
-      const details = validationErrorsForDisplay.map((item) => item.row !== EMPTY_VALUE
-        ? 'Fila ' + item.row + ': ' + item.detail
-        : item.detail);
-      throw new Error('@PRE OPERATION rechazada. No se realizó ningún cobro. ' + details.join(' | '));
-    });
+    })), Promise.resolve()).then(() => validationErrorsForDisplay);
   };
 
   const showValidationErrors = (error) => {
@@ -1015,9 +1032,11 @@
             if (freshBlockedMessage) throw new Error(freshBlockedMessage);
             return loadBatchValidationRows(batchId)
               .then((validationRows) => validateRemittanceInBatches(batchId, validationRows))
-              .then(() => exe('DoBatch', { batchId: batchId }));
+              .then((validationErrors) => exe('DoBatch', { batchId: batchId })
+                .then((result) => ({ result: result, validationErrors: validationErrors })));
           })
-          .then((result) => {
+          .then((execution) => {
+            const result = execution && execution.result;
             if (!result || result.ok === false) {
               throw new Error(result && result.msg ? result.msg : t('No se pudo ejecutar la remesa.'));
             }
@@ -1025,6 +1044,10 @@
             const pendingBatch = Object.assign({}, batch, { status: 'PENDING', processed: 0, success: 0, error: 0 });
             mergeFreshBatch(pendingBatch);
             message.success(result.msg || (t('La remesa') + ' ' + batchId + ' ' + t('fue enviada a procesamiento.')));
+            if (execution.validationErrors && execution.validationErrors.length) {
+              setValidationErrors(execution.validationErrors.map((item, index) => Object.assign({}, item, { key: String(index + 1) })));
+              setValidationModalOpen(true);
+            }
           })
           .catch((error) => {
             if (!showValidationErrors(error)) {
@@ -1704,12 +1727,6 @@
       .then((parsedRows) => {
         return validateOpenUploadCashDesk(selectedUploadCashDeskId).then((cashDesk) => {
           const remittanceRows = remittanceRowsForCashDesk(parsedRows, selectedUploadCashDeskId, cashDesk, selectedUploadPayer);
-          const duplicateErrors = duplicateValidationErrors(normalizePaymentRows(remittanceRows));
-          if (duplicateErrors.length) {
-            const details = duplicateErrors.map((item) => 'Fila ' + item.row + ': ' + item.detail);
-            throw new Error('@PRE OPERATION rechazada. No se realizó ningún cobro. ' + details.join(' | '));
-          }
-
           return resolveImportConfigId().then((configId) => exe('RepoBatch', {
             operation: 'ADD',
             entity: {
