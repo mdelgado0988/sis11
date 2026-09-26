@@ -1361,6 +1361,9 @@
   const generalData = selectedRow || {};
   const detailPolicy = policyInfo || {};
   const detailPayPlan = getSelectedPayPlan(detailPolicy);
+  // The search result provides the consolidated policy-level paid amount, including cancellation payments and refunds.
+  const searchPaid = Number(generalData && generalData.paid);
+  const hasSearchPaid = Number.isFinite(searchPaid);
   const hasLatestCancellation = latestCancellationDetail && typeof latestCancellationDetail === 'object';
   const detailGross = hasLatestCancellation
     ? firstNumber(latestCancellationDetail, ['oldCoverages'], 0)
@@ -1374,7 +1377,9 @@
   const detailTotal = hasLatestCancellation
     ? firstNumber(latestCancellationDetail, ['oldAnnualPremium'], 0)
     : firstNumber(detailPolicy, ['anualTotal', 'annualTotal'], Number(generalData.total) || 0);
-  const detailPaid = firstNumber(detailPayPlan, ['payed', 'paid'], Number(generalData.paid) || 0);
+  const detailPaid = hasSearchPaid
+    ? searchPaid
+    : firstNumber(detailPayPlan, ['payed', 'paid'], 0);
   const detailPending = detailTotal - detailPaid;
   const detailPremium = hasLatestCancellation
     ? firstNumber(latestCancellationDetail, ['oldCoverages'], 0)
@@ -1397,7 +1402,14 @@
     })
     : [];
   // Cancelled installments remain available for display, while collectible rows are used by aging.
-  const isCancellationInstallment = installment => text(installment && installment.concept).toUpperCase() === 'CANCELLATION';
+  const isCancellationInstallment = installment => {
+    const concept = text(installment && installment.concept)
+      .trim()
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    return concept === 'CANCELLATION' || concept === 'CANCELACION';
+  };
   const getInstallmentRawAmount = installment => firstNumber(installment, ['minimum', 'expected'], 0);
   const cancellationInstallmentRows = installmentRows.filter(installment => isCancellationInstallment(installment));
   const getCancellationSortValue = installment => {
@@ -1408,9 +1420,14 @@
   const latestCancellation = cancellationInstallmentRows
     .sort((left, right) => getCancellationSortValue(right) - getCancellationSortValue(left)
       || (Number(right && right.id) || 0) - (Number(left && left.id) || 0))[0] || null;
+  const latestCancellationAmount = latestCancellation ? getInstallmentRawAmount(latestCancellation) : 0;
+  const latestCancellationPaid = latestCancellation
+    ? firstNumber(latestCancellation, ['payed', 'paid'], 0)
+    : 0;
   const latestDisplayableCancellation = latestCancellation
-    && Math.max(Math.abs(getInstallmentRawAmount(latestCancellation))
-      - firstNumber(latestCancellation, ['payed', 'paid'], 0), 0) > 0
+    && (latestCancellationAmount > 0
+      || (latestCancellationAmount < 0
+        && Math.max(Math.abs(latestCancellationAmount) - latestCancellationPaid, 0) > 0))
     ? latestCancellation
     : null;
   const isLatestDisplayableCancellation = installment => installment === latestDisplayableCancellation
@@ -1456,9 +1473,19 @@
   const refundAppliedAmount = Math.min(totalRefundAmount, Math.max(refundAmount, 0));
   const remainingRefundAmount = Math.max(totalRefundAmount - refundAppliedAmount, 0);
   const cancellationGroupCancelledAmount = cancellationGroupAmounts.signedAmount;
-  const cancellationGroupPaidAmount = totalRefundAmount > 0
+  const calculatedCancellationGroupPaidAmount = totalRefundAmount > 0
     ? Math.min(totalRefundAmount, cancellationGroupAmounts.paid + refundAppliedAmount)
     : cancellationGroupAmounts.paid;
+  const regularInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
+  const regularInstallmentPaid = regularInstallmentRows.reduce(
+    (total, installment) => total + getInstallmentPaidAmount(installment),
+    0
+  );
+  // The search query includes payments linked to cancellation installments. Reconcile only the
+  // cancellation row so the grid totals remain the sum of the rows instead of an overridden total.
+  const cancellationGroupPaidAmount = hasSearchPaid && cancellationInstallmentRows.length > 0
+    ? searchPaid - regularInstallmentPaid
+    : calculatedCancellationGroupPaidAmount;
   const hasCancellationGroupAmounts = cancellationGroupPaidAmount !== 0 || cancellationGroupCancelledAmount !== 0;
   const cancellationGroupRow = cancellationInstallmentRows.length > 0
     && latestDisplayableCancellation
@@ -1471,7 +1498,6 @@
     payed: cancellationGroupPaidAmount,
     cancellationAmount: cancellationGroupCancelledAmount
   } : null;
-  const regularInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
   const displayedInstallmentRows = (showCancelledInstallments
     ? regularInstallmentRows
     : regularInstallmentRows.filter(installment => !(installment && installment.cancellationDate)))
@@ -3045,7 +3071,7 @@
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Taxes')}</div><div className="historical-billing-data-value">{renderMoney(detailTax)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Interest')}</div><div className="historical-billing-data-value">{renderMoney(detailInterest)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Total')}</div><div className="historical-billing-data-value">{renderMoney(detailTotal)}</div></div>
-                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid')}</div><div className="historical-billing-data-value">{renderMoney(hasCancelledInstallments ? totalInstallmentPaid : detailPaid)}</div></div>
+                      <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Paid')}</div><div className="historical-billing-data-value">{renderMoney(detailPaid)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Pending')}</div><div className="historical-billing-data-value">{renderMoney(hasCancelledInstallments ? totalInstallmentPending : detailPending)}</div></div>
                       <div className="historical-billing-data-row"><div className="historical-billing-data-label">{t('Cancelled')}</div><div className="historical-billing-data-value">{renderCancellationMoney(detailCancellation)}</div></div>
                     </div>
