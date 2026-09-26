@@ -565,7 +565,7 @@
           _executionError: row.error,
           success: counts ? counts.valid : row.success,
           error: counts ? counts.invalid : row.error,
-          records: counts ? counts.valid : row.records,
+          records: counts ? counts.valid + counts.invalid : row.records,
           tipoCarga: loadTypeLabel
         });
       });

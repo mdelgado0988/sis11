@@ -7,8 +7,7 @@ Category: PREPROCESSOR
 Version: 1
 */
 
-// AXX-1085: una poliza sin correo relacionado ya NO es una inconsistencia.
-// Entra al lote como fila valida, queda marcada en el detalle y no se le envia nada.
+// Una fila sin ningun correo valido no puede entrar al lote porque no puede generar una notificacion.
 const sendStatusWithEmail = "Con correo";
 const sendStatusNoEmail = "Sin correo";
 
@@ -164,14 +163,15 @@ policyRows.forEach(function (sourceRow) {
   let sendStatus = sendStatusNoEmail;
 
   if (contact) {
-    const email = String(contact.email || "").trim();
+    const validEmails = getValidContactEmails(contact);
     const surname1 = normalizeText(contact.surname1 || "");
     const surname2 = normalizeText(contact.surname2 || "");
 
-    // AXX-1085: la falta de correo, o un correo mal formado, no invalida la fila.
-    if (email && isValidEmail(email)) {
-      contactEmail = email;
+    if (validEmails.length) {
+      contactEmail = validEmails[0];
       sendStatus = sendStatusWithEmail;
+    } else {
+      errors.push("El cliente no tiene un correo válido registrado.");
     }
 
     if (surname1 === "NO DISPONIBLE" || surname2 === "NO DISPONIBLE") {
@@ -276,16 +276,17 @@ function loadLatestPolicy(policyCode) {
 
 function loadContact(contactId) {
   doCmd({
-    cmd: "LoadEntity",
+    cmd: "GetContacts",
     data: {
-      entity: "Contact",
-      fields: "id,name,middlename,surname1,surname2,isPerson,email",
+      operation: "GET",
       filter: "id = " + Number(contactId),
-      noTracking: true
+      include: ["Emails"]
     }
   });
 
-  return LoadEntity && LoadEntity.outData ? LoadEntity.outData : null;
+  return GetContacts && Array.isArray(GetContacts.outData) && GetContacts.outData.length
+    ? GetContacts.outData[0]
+    : null;
 }
 
 function loadVehicle(policyId, objectDefinitionId, catalogRows) {
@@ -401,6 +402,21 @@ function renderMessage(body, renderContext) {
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function getValidContactEmails(contact) {
+  const candidates = [];
+  if (contact) candidates.push(contact.email);
+  const relatedEmails = contact && Array.isArray(contact.Emails) ? contact.Emails : [];
+  relatedEmails.forEach(function (item) { candidates.push(item && (item.email || item.num)); });
+
+  const unique = [];
+  candidates.forEach(function (candidate) {
+    const email = String(candidate || "").trim();
+    const key = email.toLowerCase();
+    if (isValidEmail(email) && unique.indexOf(key) === -1) unique.push(key);
+  });
+  return unique;
 }
 
 function escapeSql(value) {
