@@ -275,6 +275,23 @@
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
   };
   const [claimId, setClaimId] = React.useState(routeClaimId);
+  const [newClaimModalOpen, setNewClaimModalOpen] = React.useState(false);
+  const [newClaimLoading, setNewClaimLoading] = React.useState(false);
+  const [newClaimError, setNewClaimError] = React.useState('');
+  const [newClaimRows, setNewClaimRows] = React.useState([]);
+  const [newClaimSelectedPolicy, setNewClaimSelectedPolicy] = React.useState(null);
+  const [newClaimMode, setNewClaimMode] = React.useState(false);
+  const [newClaimValidation, setNewClaimValidation] = React.useState({});
+  const newClaimModeRef = React.useRef(false);
+  const [newClaimLobOptions, setNewClaimLobOptions] = React.useState([]);
+  const [newClaimFilters, setNewClaimFilters] = React.useState({
+    code: '', holderId: null, insuredId: null, lob: '', dates: null
+  });
+  const newClaimCodeInput = React.useRef(null);
+  const [newClaimContactOptions, setNewClaimContactOptions] = React.useState({ holder: [], insured: [] });
+  const [newClaimContactLoading, setNewClaimContactLoading] = React.useState({ holder: false, insured: false });
+  const newClaimContactTimers = React.useRef({ holder: null, insured: null });
+  const newClaimContactRequests = React.useRef({ holder: 0, insured: 0 });
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [valuationWarning, setValuationWarning] = React.useState('');
@@ -336,6 +353,8 @@
   const reserveSavingRef = React.useRef(false);
   const reserveOperationRef = React.useRef(0);
   const [reserveSaving, setReserveSaving] = React.useState(false);
+  const sectionRefreshRef = React.useRef(false);
+  const [sectionRefreshing, setSectionRefreshing] = React.useState(false);
   const [reserveError, setReserveError] = React.useState('');
   const [reserveDirection, setReserveDirection] = React.useState('INCREASE');
   const [reserveType, setReserveType] = React.useState('IN');
@@ -370,6 +389,24 @@
   const [recoverySaving, setRecoverySaving] = React.useState(false);
   const [recoveryError, setRecoveryError] = React.useState('');
   const [, renderRecoveryForm] = React.useState(0);
+
+  const refreshSection = (loader, errorSetter) => {
+    if (sectionRefreshRef.current) return Promise.resolve(false);
+    sectionRefreshRef.current = true;
+    setSectionRefreshing(true);
+    if (typeof errorSetter === 'function') errorSetter('');
+    return Promise.resolve().then(loader).catch((caughtError) => {
+      if (typeof errorSetter === 'function' && mountedRef.current) {
+        errorSetter(caughtError && caughtError.message
+          ? caughtError.message : 'No fue posible actualizar la sección.');
+      }
+      return false;
+    }).then((result) => {
+      sectionRefreshRef.current = false;
+      if (mountedRef.current) setSectionRefreshing(false);
+      return result;
+    });
+  };
 
   const comments = React.useRef({ rows: [], draft: '', loading: false, saving: false,
     error: '', loaded: false, revision: 0 }).current;
@@ -652,6 +689,223 @@
     if (source && Array.isArray(source.data)) return source.data;
     if (source && Array.isArray(source.items)) return source.items;
     return source && typeof source === 'object' ? [source] : [];
+  };
+
+  const policySearchText = (value) => String(value == null ? '' : value).trim();
+  const policySearchDate = (value) => {
+    if (!value) return null;
+    const text = typeof value === 'string' ? value : value.format && value.format('YYYY-MM-DD');
+    return text || null;
+  };
+  const policyContactNames = (policy) => {
+    const contacts = [];
+    if (policy && policy.Holder) contacts.push(policy.Holder);
+    if (policy && policy.holder) contacts.push(policy.holder);
+    (Array.isArray(policy && policy.Insureds) ? policy.Insureds : []).forEach((insured) => {
+      contacts.push(insured && (insured.Contact || insured.contact || insured));
+    });
+    return contacts.map(personName).filter(Boolean).join(' ');
+  };
+  const policyContactSearchText = (policy) => {
+    const contacts = [];
+    if (policy && policy.Holder) contacts.push(policy.Holder);
+    if (policy && policy.holder) contacts.push(policy.holder);
+    (Array.isArray(policy && policy.Insureds) ? policy.Insureds : []).forEach((insured) => {
+      contacts.push(insured && (insured.Contact || insured.contact || insured));
+    });
+    return contacts.filter(Boolean).map((contact) => [personName(contact), contact.id, contact.cnp,
+      contact.nif, contact.passport, contact.nationalId].filter(Boolean).join(' ')).join(' ');
+  };
+  const policySearchLabel = (policy) => {
+    const code = firstValue(policy && policy.code, policy && policy.Code, '#' + (policy && policy.id));
+    const insured = policyContactNames(policy);
+    return insured ? String(insured) : String(code || 'Póliza');
+  };
+  const newClaimContactLabel = (contact) => {
+    const name = personName(contact) || 'Contacto';
+    const identifier = firstValue(contact && contact.cnp, contact && contact.nif,
+      contact && contact.passport, contact && contact.nationalId);
+    const id = Number(contact && contact.id);
+    return name + (identifier ? ' | ' + identifier : '') + (id > 0 ? ' | #' + id : '');
+  };
+  const searchNewClaimContacts = (kind, value) => {
+    const search = policySearchText(value);
+    if (newClaimContactTimers.current[kind]) window.clearTimeout(newClaimContactTimers.current[kind]);
+    newClaimContactRequests.current[kind] += 1;
+    const requestId = newClaimContactRequests.current[kind];
+    if (search.length < 2 && !/^\d+$/.test(search)) {
+      setNewClaimContactOptions((current) => Object.assign({}, current, { [kind]: [] }));
+      setNewClaimContactLoading((current) => Object.assign({}, current, { [kind]: false }));
+      return;
+    }
+    newClaimContactTimers.current[kind] = window.setTimeout(() => {
+      const escaped = search.replace(/'/g, "''").replace(/[\%_\[]/g, (match) => '[' + match + ']');
+      const numericId = /^\d+$/.test(search) && Number.isSafeInteger(Number(search)) ? Number(search) : 0;
+      const nameFilter = "TRIM(CONCAT_WS(' ', [name], [middlename], [surname1], [surname2])) LIKE N'%" + escaped + "%'";
+      const identityFilter = "[cnp] LIKE N'%" + escaped + "%' OR [nif] LIKE N'%" + escaped
+        + "%' OR [passport] LIKE N'%" + escaped + "%' OR [nationalId] LIKE N'%" + escaped + "%'";
+      const filter = '([inactive] = 0) AND (' + nameFilter + ' OR ' + identityFilter
+        + (numericId > 0 ? ' OR [id] = ' + numericId : '') + ')';
+      setNewClaimContactLoading((current) => Object.assign({}, current, { [kind]: true }));
+      exe('GetContacts', { operation: 'GET', filter: filter, page: 0, size: 15 })
+        .then((result) => {
+          if (!mountedRef.current || requestId !== newClaimContactRequests.current[kind]) return;
+          const options = responseRows(result, 'los contactos').map((contact) => ({
+            value: Number(contact && contact.id), label: newClaimContactLabel(contact), contact: contact
+          })).filter((option) => Number.isSafeInteger(option.value) && option.value > 0);
+          setNewClaimContactOptions((current) => Object.assign({}, current, { [kind]: options }));
+        })
+        .catch(() => {
+          if (mountedRef.current && requestId === newClaimContactRequests.current[kind]) {
+            setNewClaimContactOptions((current) => Object.assign({}, current, { [kind]: [] }));
+          }
+        })
+        .then(() => {
+          if (mountedRef.current && requestId === newClaimContactRequests.current[kind]) {
+            setNewClaimContactLoading((current) => Object.assign({}, current, { [kind]: false }));
+          }
+        });
+    }, 350);
+  };
+  const openNewClaimModal = () => {
+    setNewClaimError('');
+    setNewClaimRows([]);
+    newClaimCodeInput.current = null;
+    newClaimContactRequests.current.holder += 1;
+    newClaimContactRequests.current.insured += 1;
+    setNewClaimContactOptions({ holder: [], insured: [] });
+    setNewClaimContactLoading({ holder: false, insured: false });
+    setNewClaimFilters((current) => Object.assign({}, current, { holderId: null, insuredId: null }));
+    setNewClaimSelectedPolicy(null);
+    setNewClaimModalOpen(true);
+    if (!newClaimLobOptions.length) {
+      exe('RepoLob', { operation: 'GET' }).then((result) => {
+        if (!mountedRef.current || !result || result.ok === false) return;
+        setNewClaimLobOptions(responseRows(result, 'los ramos').map((row) => ({
+          value: String(firstValue(row.code, row.id, '')),
+          label: String(firstValue(row.name, row.description, row.code, row.id, ''))
+        })).filter((row) => row.value));
+      }).catch(() => {});
+    }
+  };
+  const searchNewClaimPolicies = () => {
+    const code = policySearchText(newClaimCodeInput.current === null
+      ? newClaimFilters.code : newClaimCodeInput.current);
+    const holderId = Number(newClaimFilters.holderId);
+    const insuredId = Number(newClaimFilters.insuredId);
+    const lob = policySearchText(newClaimFilters.lob);
+    const dates = newClaimFilters.dates || [];
+    const from = policySearchDate(dates[0]);
+    const to = policySearchDate(dates[1]);
+    if (!code && !(Number.isSafeInteger(holderId) && holderId > 0)
+      && !(Number.isSafeInteger(insuredId) && insuredId > 0) && !lob && !from && !to) {
+      setNewClaimError('Indique al menos un criterio de búsqueda.');
+      setNewClaimRows([]);
+      return Promise.resolve();
+    }
+    const conditions = ['active = 1'];
+    if (code) conditions.push("[code] LIKE N'%" + code.replace(/'/g, "''").replace(/[%_]/g, '[$&]') + "%'");
+    if (Number.isSafeInteger(holderId) && holderId > 0) conditions.push('[holderId] = ' + holderId);
+    if (Number.isSafeInteger(insuredId) && insuredId > 0) {
+      conditions.push('id IN (SELECT lifePolicyId FROM Insured WHERE contactId = ' + insuredId + ')');
+    }
+    if (lob) conditions.push("[lob] = '" + lob.replace(/'/g, "''") + "'");
+    if (from) conditions.push("[end] >= '" + from + "T00:00:00Z'");
+    if (to) conditions.push("[start] <= '" + to + "T23:59:59Z'");
+    setNewClaimLoading(true);
+    setNewClaimError('');
+    return exe('RepoLifePolicy', {
+      operation: 'GET',
+      filter: conditions.join(' AND '),
+      include: ['Holder', 'Insureds.Contact', 'Product', 'Lob', 'Branch', 'Coverages'],
+      orderBy: 'id', orderDir: 'DESC', page: 0, size: 50
+    }).then((result) => {
+      if (!mountedRef.current) return;
+      const rows = responseRows(result, 'las pólizas');
+      const filtered = rows;
+      setNewClaimRows(filtered.map((policy) => Object.assign({}, policy, {
+        __insuredLabel: policyContactNames(policy),
+        __lobLabel: firstValue(policy && policy.Lob && policy.Lob.name, policy && policy.lobName,
+          policy && policy.lob),
+        __productLabel: firstValue(policy && policy.Product && policy.Product.name,
+          policy && policy.productCode),
+        __startLabel: formatDate(policy && policy.start),
+        __endLabel: formatDate(policy && policy.end)
+      })));
+      if (!filtered.length) setNewClaimError('No se encontraron pólizas con esos criterios.');
+    }).catch((caughtError) => {
+      if (mountedRef.current) {
+        setNewClaimRows([]);
+        setNewClaimError(caughtError && caughtError.message ? caughtError.message : 'No se pudieron consultar las pólizas.');
+      }
+    }).finally(() => {
+      if (mountedRef.current) setNewClaimLoading(false);
+    });
+  };
+  const prepareNewClaimPolicy = (policy) => {
+    if (dirtyRef.current && !window.confirm('Hay cambios sin guardar. ¿Desea descartarlos para preparar un nuevo reclamo?')) return;
+    const policyId = Number(policy && (policy.id || policy.lifePolicyId));
+    const insured = policy && Array.isArray(policy.Insureds) && policy.Insureds.length
+      ? policy.Insureds[0] && (policy.Insureds[0].Contact || policy.Insureds[0].contact || policy.Insureds[0])
+      : null;
+    const contact = policy && (policy.Holder || policy.holder) || insured;
+    const contactId = Number(contact && contact.id);
+    if (!Number.isSafeInteger(policyId) || policyId <= 0 || !Number.isSafeInteger(contactId) || contactId <= 0) {
+      setNewClaimError('La póliza seleccionada no contiene un asegurado válido para iniciar el reclamo.');
+      return;
+    }
+    const claimType = String(firstValue(policy.policyType, policy.claimType,
+      policy.claimTypeCode, policy.type, 'I'));
+    const newClaim = {
+      id: 0, closed: false, lifePolicyId: policyId, Policy: policy,
+      claimType: claimType, stageCode: '1', claimerId: contactId, contactId: contactId,
+      Claimer: contact, Contact: contact, jCustomForms: null,
+      eventReason: '', insuredEvent: null, description: '', occurrence: null, notification: null
+    };
+    dirtyRef.current = false;
+    touchedRef.current = {};
+    requestRef.current += 1;
+    changeClaimContext(null);
+    newClaimModeRef.current = true;
+    setNewClaimMode(true);
+    setNewClaimValidation({});
+    setNewClaimSelectedPolicy(policy);
+    setNewClaimModalOpen(false);
+    setActiveTab('general');
+    setClaimId(null);
+    setError('');
+    currentClaimRef.current = newClaim;
+    const currency = typeof policy.currency === 'string' ? policy.currency.trim().toUpperCase() : '';
+    setClaimSummary({
+      policy: {
+        policyNumber: firstValue(policy.code, policy.id),
+        lineOfBusiness: firstValue(policy.Lob && policy.Lob.name, policy.lobName, policy.lob),
+        year: policyStartYear(policy.start),
+        certificateNumber: policy.certificate,
+        insured: personName(insured || contact),
+        payer: personName(policy.Payer || policy.PayerContact || policy.Holder || policy.holder),
+        branch: firstValue(policy.Branch && policy.Branch.name, policy.branchName, policy.branchCode),
+        policyType: policyTypeLabel(policy.policyType || policy.type),
+        startDate: formatDate(policy.start),
+        endDate: formatDate(policy.end),
+        creator: formatDate(policy.created),
+        status: firstValue(policy.entityState, policy.status),
+        modified: formatDate(policy.lastUpdate)
+      },
+      valuation: { currency: currency, reserves: null, payments: null,
+        recoveries: null, expenses: null, balance: null }
+    });
+    draftRef.current = createDraft(newClaim);
+    draftRef.current.stageCode = '1';
+    draftRef.current.claimantId = String(contactId);
+    draftRef.current.claimantLabel = personName(contact) || '';
+    setDraft(draftRef.current);
+    setClaimStageSelection('1');
+    setEditable(true);
+    setClaimantOptionList([claimantOption(contact, true)].filter(Boolean));
+    loadPolicySummaryLabels(newClaim, requestRef.current);
+    window.location.hash = '#/view/48';
+    dirtyRef.current = true;
   };
 
   const numericValue = (value) => {
@@ -971,6 +1225,7 @@
           personName(policyBeneficiaryContact), policyBeneficiary && policyBeneficiary.name) || null,
         affectedObject: (() => { try { const object = JSON.parse(payout.jAffectedObjects || 'null');
           return object && !Array.isArray(object) ? financialObjectLabel(object) : null; } catch (error) { return null; } })(),
+        checkRequestId: payment && payment.id != null ? payment.id : null,
         payment: payment
       };
     });
@@ -1350,10 +1605,50 @@
       fields = modal.renderer && Array.isArray(modal.renderer.userData)
         ? JSON.parse(JSON.stringify(modal.renderer.userData)) : JSON.parse(JSON.stringify(modal.fields));
       const container = document.getElementById('resumenAffectedObjectForm');
-      if (container && typeof container.checkValidity === 'function' && !container.checkValidity()) {
+      const configuredInvalid = [];
+      if (container) {
+        (modal.fields || fields).forEach((field) => {
+          if (!field || !field.required) return;
+          const controls = Array.prototype.filter.call(container.querySelectorAll('input, select, textarea'), (control) => control.name === field.name);
+          const visible = controls.filter((control) => {
+            const group = control.closest('.form-group');
+            return !group || window.getComputedStyle(group).display !== 'none';
+          });
+          if (visible.length && visible.every((control) => String(control.value || '').trim() === '')) {
+            configuredInvalid.push.apply(configuredInvalid, visible);
+          }
+        });
+      }
+      const nativeInvalid = container && typeof container.checkValidity === 'function' && !container.checkValidity()
+        ? Array.prototype.filter.call(container.querySelectorAll('input, select, textarea'), (control) => !control.validity.valid) : [];
+      const labelRequiredInvalid = container ? Array.prototype.reduce.call(container.querySelectorAll('.form-group'), (controls, group) => {
+        if (window.getComputedStyle(group).display === 'none') return controls;
+        const label = group.querySelector('label');
+        const control = group.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea');
+        const requiredByLabel = label && /\*/.test(label.textContent || '');
+        if (!requiredByLabel || !control || control.getAttribute('data-oa-skip-validation') === 'true' || String(control.value || '').trim() !== '') return controls;
+        controls.push(control);
+        return controls;
+      }, []) : [];
+      const invalid = Array.from(new Set(nativeInvalid.concat(configuredInvalid, labelRequiredInvalid)));
+      if (invalid.length) {
+        container.classList.add('resumen-validation-attempted');
+        Array.prototype.forEach.call(container.querySelectorAll('.resumen-field-invalid'), (group) => {
+          group.classList.remove('resumen-field-invalid');
+        });
+        invalid.forEach((control) => {
+          const group = control.closest('.form-group');
+          if (group) group.classList.add('resumen-field-invalid');
+        });
+        if (invalid[0] && typeof invalid[0].focus === 'function') invalid[0].focus();
         throw new Error('Complete los campos requeridos del objeto afectado.');
       }
-      validateCustomForms([{ fields: fields }]);
+      if (container) {
+        container.classList.remove('resumen-validation-attempted');
+        Array.prototype.forEach.call(container.querySelectorAll('.resumen-field-invalid'), (group) => {
+          group.classList.remove('resumen-field-invalid');
+        });
+      }
     } catch (error) {
       modal.error = error.message || 'Revise los campos requeridos.'; notifyAffected(); return Promise.resolve(false);
     }
@@ -1791,6 +2086,10 @@ END CATCH;`;
   };
 
   const changeActiveTab = (key) => {
+    if (newClaimMode && key !== 'general') {
+      setError('Cree el reclamo antes de acceder a las demás pestañas.');
+      return;
+    }
     setActiveTab(key);
     if (key === 'recoveries') loadRecoveries(currentClaimRef.current);
     if (key === 'comments') loadComments();
@@ -2716,6 +3015,16 @@ END CATCH;`;
     size: 1
   });
 
+  // General claim saves only need the scalar claim fields and the current insured event
+  // for the optimistic-concurrency check; avoid reloading policy and tab data here.
+  const claimSaveReadPayload = (requestedClaimId) => ({
+    operation: 'GET',
+    include: ['InsuredEvent'],
+    filter: 'id=' + requestedClaimId,
+    page: 0,
+    size: 1
+  });
+
   const loadPolicySummaryLabels = (claim, requestId) => {
     const policy = claim && claim.Policy || {};
     const lobCode = String(policy.lob || '').trim();
@@ -2748,6 +3057,53 @@ END CATCH;`;
     });
   };
 
+  const applyFinancialSnapshot = (claim, fresh, requestedClaimId, includePayments) => {
+    claim.Payouts = Array.isArray(fresh.Payouts) ? fresh.Payouts : [];
+    if (includePayments) claim.Payments = Array.isArray(fresh.Payments) ? fresh.Payments : [];
+    const nextCoverageRows = normalizeCoverageRows(claim);
+    coverageRowsRef.current = nextCoverageRows;
+    setCoverageRows(nextCoverageRows);
+    setSelectedCoverageId((currentId) => nextCoverageRows.some((row) => row.id === Number(currentId))
+      ? Number(currentId) : nextCoverageRows.length ? nextCoverageRows[0].id : null);
+    const indemnities = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
+      && String(row.reserveType || '').trim().toUpperCase() === 'IN');
+    const expenseRows = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
+      && String(row.reserveType || '').trim().toUpperCase() === 'EX');
+    const total = (rows, field) => roundMoney(rows.reduce((sum, row) => {
+      const value = numericValue(row[field]);
+      return sum + (value === null ? 0 : value);
+    }, 0));
+    const reserves = total(indemnities.filter(isReserveMovement), 'reserved');
+    const payments = total(indemnities, 'payed');
+    const expenses = expenseRows.length ? total(expenseRows, 'payed') : null;
+    setClaimSummary((summary) => Object.assign({}, summary, {
+      valuation: Object.assign({}, summary.valuation, {
+        reserves: reserves,
+        payments: payments,
+        expenses: expenses,
+        balance: valuationBalance(reserves, payments, expenses, summary.valuation && summary.valuation.recoveries)
+      })
+    }));
+  };
+
+  const refreshReserveData = (requestedClaimId) => {
+    const claim = currentClaimRef.current;
+    if (!claim || Number(claim.id) !== Number(requestedClaimId)
+      || routeClaimId() !== Number(requestedClaimId)) return Promise.resolve(false);
+    return repositoryRequest('RepoClaim', {
+      operation: 'GET', include: ['Payouts'],
+      filter: 'id=' + Number(requestedClaimId), page: 0, size: 1
+    }).then((result) => {
+      if (!mountedRef.current || currentClaimRef.current !== claim
+        || routeClaimId() !== Number(requestedClaimId)) return false;
+      const fresh = responseRows(result, 'las reservas').find((row) => row
+        && Number(row.id) === Number(requestedClaimId));
+      if (!fresh) throw new Error('No se pudieron actualizar las reservas del reclamo.');
+      applyFinancialSnapshot(claim, fresh, requestedClaimId, false);
+      return true;
+    });
+  };
+
   const refreshFinancialData = (requestedClaimId) => {
     const claim = currentClaimRef.current;
     if (!claim || Number(claim.id) !== Number(requestedClaimId)
@@ -2761,32 +3117,7 @@ END CATCH;`;
       const fresh = responseRows(result, 'los movimientos financieros').find((row) => row
         && Number(row.id) === Number(requestedClaimId));
       if (!fresh) throw new Error('No se pudo actualizar los movimientos financieros del reclamo.');
-      claim.Payouts = Array.isArray(fresh.Payouts) ? fresh.Payouts : [];
-      claim.Payments = Array.isArray(fresh.Payments) ? fresh.Payments : [];
-      const nextCoverageRows = normalizeCoverageRows(claim);
-      coverageRowsRef.current = nextCoverageRows;
-      setCoverageRows(nextCoverageRows);
-      setSelectedCoverageId((currentId) => nextCoverageRows.some((row) => row.id === Number(currentId))
-        ? Number(currentId) : nextCoverageRows.length ? nextCoverageRows[0].id : null);
-      const indemnities = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
-        && String(row.reserveType || '').trim().toUpperCase() === 'IN');
-      const expenseRows = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
-        && String(row.reserveType || '').trim().toUpperCase() === 'EX');
-      const total = (rows, field) => roundMoney(rows.reduce((sum, row) => {
-        const value = numericValue(row[field]);
-        return sum + (value === null ? 0 : value);
-      }, 0));
-      setClaimSummary((summary) => Object.assign({}, summary, {
-        valuation: Object.assign({}, summary.valuation, {
-          reserves: total(indemnities.filter(isReserveMovement), 'reserved'),
-          payments: total(indemnities, 'payed'),
-          expenses: expenseRows.length ? total(expenseRows, 'payed') : null,
-          balance: valuationBalance(
-            total(indemnities.filter(isReserveMovement), 'reserved'), total(indemnities, 'payed'),
-            expenseRows.length ? total(expenseRows, 'payed') : null, summary.valuation && summary.valuation.recoveries
-          )
-        })
-      }));
+      applyFinancialSnapshot(claim, fresh, requestedClaimId, true);
       return true;
     });
   };
@@ -3497,6 +3828,7 @@ END CATCH;`;
     return {
       ...Object.fromEntries(Object.entries(extraRead(claim && claim.jCustomForms).values).map(([key, value]) => ['extra_' + key, value])),
       claimNumber: claim && firstValue(claim.code, claim.id),
+      stageCode: claimStageCode(claim) || '',
       description: claim ? claim.description : null,
       claimantId: claim && positiveIdText(claim.claimerId) || '',
       claimantLabel: claim ? (personName(claim.Claimer) || '') : '',
@@ -3578,11 +3910,34 @@ END CATCH;`;
       : draftValue.eventReasonCode !== originalDraft.eventReasonCode;
     const insuredEventTouched = touchedFields ? !!touchedFields.insuredEvent
       : draftValue.insuredEventCode !== originalDraft.insuredEventCode;
+    const stageTouched = touchedFields ? !!touchedFields.stageCode
+      : draftValue.stageCode !== originalDraft.stageCode;
     entity.description = descriptionTouched ? draftValue.description : claim.description;
-    entity.occurrence = occurrenceTouched ? occurrenceIso(draftValue) : claim.occurrence;
-    entity.notification = notificationTouched
-      ? toUtcDate(draftValue.notificationDate, 'Fecha de Notificación') + 'T00:00:00Z'
-      : claim.notification;
+    const occurrenceValue = occurrenceTouched ? occurrenceIso(draftValue) : claim.occurrence;
+    entity.occurrence = occurrenceValue;
+    if (notificationTouched || occurrenceTouched) {
+      if (typeof occurrenceValue !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(occurrenceValue)) {
+        throw new Error('La fecha de ocurrencia no es válida.');
+      }
+      const occurrenceDate = occurrenceValue.slice(0, 10);
+      const notificationDate = notificationTouched
+        ? toUtcDate(draftValue.notificationDate, 'Fecha de Notificación')
+        : typeof claim.notification === 'string' ? claim.notification.slice(0, 10) : '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(notificationDate)) {
+        throw new Error('La fecha de notificación no es válida.');
+      }
+      if (notificationDate < occurrenceDate) {
+        throw new Error('La fecha de notificación no puede ser anterior a la fecha de ocurrencia.');
+      }
+      entity.notification = notificationDate === occurrenceDate
+        ? occurrenceValue : notificationTouched ? notificationDate + 'T00:00:00Z' : claim.notification;
+    } else {
+      entity.notification = claim.notification;
+    }
+    if (stageTouched) {
+      if (!isValidStageCode(draftValue.stageCode)) throw new Error('El estado seleccionado no es válido.');
+      entity.stageCode = draftValue.stageCode;
+    }
     if (claimantTouched) {
       const claimantId = positiveIdText(draftValue.claimantId);
       if (!claimantId) throw new Error('El reclamante seleccionado no es válido.');
@@ -3627,7 +3982,8 @@ END CATCH;`;
       }
     });
     if (!values.eventReason || !values.insuredEvent || !values.insuredEvent.code
-      || !values.claimType || !values.occurrence || !values.notification) {
+      || !values.claimType || !values.occurrence || !values.notification
+      || typeof values.elegibleCoverages !== 'string' || !values.elegibleCoverages.trim()) {
       throw new Error('Faltan datos verificados para crear el reclamo.');
     }
     return {
@@ -3638,6 +3994,7 @@ END CATCH;`;
       InsuredEvent: values.insuredEvent,
       elegibleCoverages: values.elegibleCoverages,
       claimType: values.claimType,
+      stageCode: values.stageCode,
       occurrence: values.occurrence,
       notification: values.notification,
       created: values.notification,
@@ -3646,6 +4003,15 @@ END CATCH;`;
       jCustomForms: values.jCustomForms,
       contactId: Number(values.contactId)
     };
+  };
+
+  const clearNewClaimValidation = (...fields) => {
+    if (!newClaimModeRef.current) return;
+    setNewClaimValidation((current) => {
+      const next = Object.assign({}, current);
+      fields.forEach((field) => { delete next[field]; });
+      return next;
+    });
   };
 
   const changeDraft = (field, value) => {
@@ -3657,6 +4023,7 @@ END CATCH;`;
     touchedRef.current[field] = true;
     dirtyRef.current = true;
     setDraft(next);
+    clearNewClaimValidation(field);
     if (field === 'additionalObservations') {
       const detail = customFormsRef.current.find((form) => form.label === CLAIM_CUSTOM_SECTION);
       const description = detail && detail.fields.find((item) => item && item.name === 'descripcion');
@@ -3888,7 +4255,8 @@ END CATCH;`;
     const expectedMode = typeof claimType === 'string' ? claimType.trim() : '';
     const codes = catalog && catalog.mappings[reasonCode] || [];
     const options = codes.map((code) => catalog.eventByCode[code]).filter((event) =>
-      event && event.disabled === false && expectedMode && event.mode === expectedMode)
+      event && event.disabled === false
+        && (newClaimModeRef.current || !expectedMode || event.mode === expectedMode))
       .map((event) => ({ value: event.code, label: event.name }));
     const selectedName = selectedEvent && typeof selectedEvent.name === 'string'
       ? selectedEvent.name.trim() : selectedCode;
@@ -3916,12 +4284,13 @@ END CATCH;`;
   const loadClaimCatalogs = (requestedClaimId) => {
     const claim = currentClaimRef.current;
     const claimIdValue = Number(requestedClaimId);
+    const isNewClaim = newClaimModeRef.current && claimIdValue === 0;
     const policy = claim && claim.Policy;
     const productValue = policy && policy.productCode !== null && policy.productCode !== undefined
       ? policy.productCode : policy && policy.Product ? policy.Product.code : null;
     const productCode = productValue === null || productValue === undefined ? '' : String(productValue).trim();
     if (!mountedRef.current || !claim || Number(claim.id) !== claimIdValue
-      || routeClaimId() !== claimIdValue) return Promise.resolve();
+      || !isNewClaim && routeClaimId() !== claimIdValue) return Promise.resolve();
     if (!productCode) {
       clearEventCatalog();
       setCatalogError('El reclamo no contiene un producto válido para cargar eventos.');
@@ -3934,7 +4303,9 @@ END CATCH;`;
     setCatalogLoading(true);
     setCatalogError('');
     const isCurrent = () => mountedRef.current && catalogOperationRef.current === operationId
-      && requestRef.current === requestId && routeClaimId() === claimIdValue;
+      && requestRef.current === requestId
+      && (isNewClaim ? newClaimModeRef.current && currentClaimRef.current === claim
+        : routeClaimId() === claimIdValue);
     return Promise.all([
       repositoryRequest('GetFullTable', { table: 'SysInsuredEventsPerCoverage', filter: '1=1' }),
       repositoryRequest('RepoEventReasonCatalog', catalogGetPayload()),
@@ -3985,7 +4356,8 @@ END CATCH;`;
     const catalog = eventCatalogRef.current;
     if (selected.length !== 1 || !catalog || !draftRef.current
       || !canEdit(currentClaimRef.current) || savingRef.current || stageSavingRef.current
-      || adjusterLoadingRef.current || routeClaimId() !== Number(currentClaimRef.current.id)) {
+      || adjusterLoadingRef.current || !newClaimModeRef.current
+        && routeClaimId() !== Number(currentClaimRef.current.id)) {
       setError('La razón de evento seleccionada no es válida.');
       return;
     }
@@ -4003,6 +4375,8 @@ END CATCH;`;
     touchedRef.current.eventReason = true;
     dirtyRef.current = true;
     setDraft(next);
+    clearNewClaimValidation('eventReasonCode');
+    if (next.insuredEventCode) clearNewClaimValidation('insuredEventCode');
     setEventOptionList(eventOptionsForReason(catalog, code,
       next.insuredEventCode, next.insuredEvent, claimTypeCode(currentClaimRef.current)));
     setError('');
@@ -4015,10 +4389,10 @@ END CATCH;`;
       && option.value === code && !option.disabled);
     const event = catalog && catalog.eventByCode[code];
     if (selected.length !== 1 || !event || event.disabled
-      || event.mode !== claimTypeCode(currentClaimRef.current)
+      || !newClaimModeRef.current && event.mode !== claimTypeCode(currentClaimRef.current)
       || !draftRef.current || !canEdit(currentClaimRef.current)
       || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
-      || routeClaimId() !== Number(currentClaimRef.current.id)) {
+      || !newClaimModeRef.current && routeClaimId() !== Number(currentClaimRef.current.id)) {
       setError('El evento asegurado seleccionado no es válido.');
       return;
     }
@@ -4033,6 +4407,7 @@ END CATCH;`;
     touchedRef.current.insuredEvent = true;
     dirtyRef.current = true;
     setDraft(next);
+    clearNewClaimValidation('insuredEventCode');
     setError('');
   };
 
@@ -4186,7 +4561,14 @@ END CATCH;`;
     }
     if (!mountedRef.current || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
       || !canEdit(currentClaimRef.current)) return;
+    if (!draftRef.current) return;
+    const next = Object.assign({}, draftRef.current, { stageCode: stageCode });
+    draftRef.current = next;
+    touchedRef.current.stageCode = true;
+    dirtyRef.current = true;
+    setDraft(next);
     setClaimStageSelection(stageCode);
+    clearNewClaimValidation('stageCode');
     setError('');
   };
 
@@ -4247,8 +4629,98 @@ END CATCH;`;
       });
   };
 
+  const createNewClaim = () => {
+    const claim = currentClaimRef.current;
+    const values = draftRef.current;
+    const policy = claim && claim.Policy;
+    if (!newClaimModeRef.current || !claim || !values || !policy) return Promise.resolve();
+    let entity;
+    try {
+      const eligibleCoverages = (Array.isArray(policy.Coverages) ? policy.Coverages : [])
+        .map((coverage) => Number(coverage && coverage.id))
+        .filter((id, index, ids) => Number.isSafeInteger(id) && id > 0 && ids.indexOf(id) === index)
+        .join(',');
+      const invalid = {
+        policy: !newClaimSelectedPolicy || !policy || !positiveIdText(policy.id || claim.lifePolicyId),
+        eligibleCoverages: !eligibleCoverages,
+        occurrenceDate: !values.occurrenceDate,
+        occurrenceHour: !values.occurrenceHour,
+        occurrenceMinute: !values.occurrenceMinute,
+        occurrencePeriod: !values.occurrencePeriod,
+        notificationDate: !values.notificationDate,
+        stageCode: !values.stageCode,
+        eventReasonCode: !values.eventReasonCode,
+        insuredEventCode: !values.insuredEventCode
+      };
+      setNewClaimValidation(invalid);
+      if (Object.keys(invalid).some((key) => invalid[key])) {
+        throw new Error('Complete los campos requeridos del reclamo.');
+      }
+      const claimantId = positiveIdText(values.claimantId || claim.claimerId);
+      const occurrence = occurrenceIso(Object.assign({}, values, {
+        occurrenceHour: values.occurrenceHour || '12',
+        occurrenceMinute: values.occurrenceMinute || '00',
+        occurrencePeriod: values.occurrencePeriod || 'am'
+      }));
+      const occurrenceDate = occurrence.slice(0, 10);
+      const notificationDate = toUtcDate(values.notificationDate, 'Fecha de Notificación');
+      if (notificationDate < occurrenceDate) {
+        throw new Error('La fecha de notificación no puede ser anterior a la fecha de ocurrencia.');
+      }
+      const notification = notificationDate === occurrenceDate
+        ? occurrence : notificationDate + 'T00:00:00Z';
+      entity = buildCreate({
+        lifePolicyId: claim.lifePolicyId || policy.id,
+        claimerId: claimantId,
+        contactId: claimantId,
+        eventReason: values.eventReasonCode,
+        insuredEvent: values.insuredEvent,
+        stageCode: values.stageCode,
+        claimType: claim.claimType,
+        occurrence: occurrence,
+        notification: notification,
+        description: values.description || '',
+        jCustomForms: null,
+        elegibleCoverages: eligibleCoverages
+      });
+    } catch (validationError) {
+      setError(validationError && validationError.message
+        ? validationError.message : 'Complete los datos requeridos del reclamo.');
+      return Promise.resolve();
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
+    return repositoryRequest('RepoClaim', { operation: 'ADD', entity: entity })
+      .then((result) => {
+        if (!result || result.ok !== true) {
+          throw new Error(result && result.msg ? result.msg : 'No fue posible crear el reclamo.');
+        }
+        const rows = responseRows(result, 'el reclamo creado');
+        const created = rows[0] || result.entity || result.data || result;
+        const createdId = Number(created && (created.id || created.claimId));
+        if (!Number.isSafeInteger(createdId) || createdId <= 0) {
+          throw new Error('El reclamo fue creado, pero la respuesta no incluyó su identificador.');
+        }
+        dirtyRef.current = false;
+        touchedRef.current = {};
+        setNewClaimValidation({});
+        notifyRecordUpdated();
+        window.location.hash = '#/view/48?claimId=' + createdId;
+      })
+      .catch((caughtError) => {
+        if (mountedRef.current) setError(caughtError && caughtError.message
+          ? caughtError.message : 'No fue posible crear el reclamo.');
+      })
+      .then(() => {
+        savingRef.current = false;
+        if (mountedRef.current) setSaving(false);
+      });
+  };
+
   const saveClaim = () => {
     if (documents.saving) return Promise.resolve();
+    if (newClaimModeRef.current) return createNewClaim();
     if (savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
       || !mountedRef.current || !dirtyRef.current
       || !canEdit(currentClaimRef.current) || routeClaimId() !== Number(currentClaimRef.current.id)) {
@@ -4279,7 +4751,8 @@ END CATCH;`;
     const savingDraft = Object.assign({}, draftRef.current);
     const touched = Object.assign({}, touchedRef.current);
     const savingForms = JSON.parse(JSON.stringify(customFormsRef.current));
-    return repositoryRequest('RepoClaim', claimReadPayload(savingClaimId))
+    let updatedEntity = null;
+    return repositoryRequest('RepoClaim', claimSaveReadPayload(savingClaimId))
       .then((result) => {
         if (!mountedRef.current || routeClaimId() !== savingClaimId) {
           throw new Error('La ruta cambió antes de guardar.');
@@ -4291,9 +4764,10 @@ END CATCH;`;
           JSON.stringify(touchedClaimValue(original, field))
             !== JSON.stringify(touchedClaimValue(fresh, field)));
         if (conflict) throw new Error('El reclamo fue modificado por otra sesión. Recargue antes de guardar.');
+        updatedEntity = buildUpdate(fresh, savingDraft, touched, savingForms);
         return repositoryRequest('RepoClaim', {
           operation: 'UPDATE',
-          entity: buildUpdate(fresh, savingDraft, touched, savingForms)
+          entity: updatedEntity
         });
       })
       .then((result) => {
@@ -4304,7 +4778,38 @@ END CATCH;`;
         dirtyRef.current = false;
         touchedRef.current = {};
         notifyRecordUpdated();
-        return loadClaim(savingClaimId);
+        const nextClaim = Object.assign({}, original, {
+          description: updatedEntity.description,
+          occurrence: updatedEntity.occurrence,
+          notification: updatedEntity.notification,
+          stageCode: updatedEntity.stageCode,
+          claimerId: updatedEntity.claimerId,
+          eventReason: updatedEntity.eventReason,
+          insuredEvent: touched.insuredEvent ? updatedEntity.insuredEvent : original.insuredEvent,
+          InsuredEvent: touched.insuredEvent ? updatedEntity.InsuredEvent : original.InsuredEvent,
+          jCustomForms: updatedEntity.jCustomForms
+        });
+        currentClaimRef.current = nextClaim;
+        draftRef.current = savingDraft;
+        setDraft(savingDraft);
+        setClaimStageSelection(savingDraft.stageCode);
+        const time = occurrenceTime(nextClaim.occurrence);
+        const stageLabel = (CLAIM_STAGE_OPTIONS.find((option) => option.value === savingDraft.stageCode) || {}).label
+          || savingDraft.stageCode;
+        const reasonLabel = (reasonOptionsRef.current.find((option) => option.value === savingDraft.eventReasonCode) || {}).label
+          || savingDraft.eventReasonCode;
+        setClaimDetails((details) => Object.assign({}, details, {
+          state: stageLabel || details.state,
+          claimant: savingDraft.claimantLabel || details.claimant,
+          cause: reasonLabel || details.cause,
+          occurrence: formatDate(nextClaim.occurrence),
+          notification: formatDate(nextClaim.notification),
+          hour: time.hour,
+          minute: time.minute,
+          period: time.period,
+          description: nextClaim.description
+        }));
+        return true;
       })
       .catch((caughtError) => {
         if (mountedRef.current && routeClaimId() === savingClaimId) {
@@ -4324,7 +4829,9 @@ END CATCH;`;
     if (documents.saving && currentClaimRef.current && Number(currentClaimRef.current.id) === requestedClaimId) return Promise.resolve();
     const preserveVisibleSnapshot = currentClaimRef.current
       && Number(currentClaimRef.current.id) === requestedClaimId;
-    changeClaimContext(requestedClaimId);
+    const preservingNewClaim = newClaimModeRef.current && requestedClaimId === null
+      && currentClaimRef.current && Number(currentClaimRef.current.id) === 0;
+    if (!preservingNewClaim) changeClaimContext(requestedClaimId);
     cancelClaimantSearch();
     cancelCatalogLoad();
     const requestId = requestRef.current + 1;
@@ -4332,12 +4839,15 @@ END CATCH;`;
 
     if (!Number.isSafeInteger(requestedClaimId) || requestedClaimId <= 0) {
       if (mountedRef.current) {
-        setClaimSummary(EMPTY_SUMMARY);
-        setClaimDetails(EMPTY_DETAILS);
+        if (!preservingNewClaim) {
+          setClaimSummary(EMPTY_SUMMARY);
+          setClaimDetails(EMPTY_DETAILS);
+        }
         setLoading(false);
         setValuationWarning('');
-        clearLoadedClaim();
-        setError('Abra el reclamo desde «Ver» en Búsqueda de Reclamos. La dirección debe incluir un claimId válido.');
+        if (!preservingNewClaim) clearLoadedClaim();
+        setError(newClaimModeRef.current ? ''
+          : 'Abra el reclamo desde «Ver» en Búsqueda de Reclamos. La dirección debe incluir un claimId válido.');
       }
       return Promise.resolve();
     }
@@ -4354,6 +4864,10 @@ END CATCH;`;
         const claims = responseRows(result, 'el reclamo');
         const claim = claims.find((row) => row && Number(row.id) === requestedClaimId);
         if (!claim) throw new Error('No se encontró el reclamo solicitado.');
+        newClaimModeRef.current = false;
+        setNewClaimMode(false);
+        setNewClaimValidation({});
+        setNewClaimSelectedPolicy(null);
         const nextDraft = createDraft(claim);
         const previousPolicy = currentClaimRef.current && (currentClaimRef.current.lifePolicyId
           || currentClaimRef.current.Policy && currentClaimRef.current.Policy.id);
@@ -4788,10 +5302,10 @@ END CATCH;`;
       <span className="resumen-section-marker" aria-hidden="true" />{children}
     </h3>
   );
-  const Field = React.useMemo(() => function Field({ label, children }) {
+  const Field = React.useMemo(() => function Field({ label, required, invalid, children }) {
     return (
-      <div className="resumen-form-field">
-        <label className="resumen-form-label">{label}:</label>
+      <div className={'resumen-form-field' + (invalid ? ' resumen-field-invalid' : '')}>
+        <label className="resumen-form-label">{label}{required ? <span className="resumen-required-mark">*</span> : null}:</label>
         <div className="resumen-form-control">{children}</div>
       </div>
     );
@@ -5053,18 +5567,17 @@ END CATCH;`;
             disabled={!editable || paymentSaving || !config.selected
             || !!nativePaymentGuidance(config.selected.paid, config.selected.status) || config.selected.available <= 0}
             onClick={config.openCheck}>Solicitud de cheque</Button>
-          <Button size="small" loading={loading} disabled={loading || paymentSaving}
-            onClick={refreshClaim}><ReloadOutlinedIcon /> Refrescar</Button>
+          <Button size="small" loading={sectionRefreshing} disabled={sectionRefreshing || paymentSaving}
+            onClick={() => refreshSection(() => config.refresh(), config.errorSetter)}><ReloadOutlinedIcon /> Refrescar</Button>
         </div>
       </div>
       <small>Solo movimientos del reclamo actual. Disponible corresponde al saldo pendiente de solicitud del movimiento.</small>
       {selectedFinancialIssue(config.selected) ? <div role="alert" className="resumen-reserve-error">{selectedFinancialIssue(config.selected)}</div> : null}
       <div className="resumen-table-wrap"><table className="resumen-data-table">
-        <thead><tr><th>No.</th><th>Cobertura</th><th>Concepto</th>{['payments', 'expenses'].includes(config.key) ? <th>Objeto afectado</th> : null}
-          <th className="resumen-cell-number">Reserva</th>
+        <thead><tr><th className="resumen-financial-payment-id">No.</th><th className="resumen-financial-coverage">Cobertura</th><th>Concepto</th>{['payments', 'expenses'].includes(config.key) ? <th className="resumen-financial-affected">Objeto afectado</th> : null}
           <th className="resumen-cell-number">{config.appliedLabel}</th>
           <th className="resumen-cell-number">Disponible</th>
-          <th>Fecha</th><th>Beneficiario</th><th>Referencia</th><th>Estado</th><th>Reaseguro</th></tr></thead>
+          <th>Fecha</th><th>Beneficiario</th><th className="resumen-financial-check-request">Solicitud de cheque</th><th>Referencia</th><th>Estado</th><th>Reaseguro</th></tr></thead>
         <tbody>{config.rows.length ? config.rows.map((row) => (
           <tr key={row.id} tabIndex="0"
             className={row.id === Number(config.selectedId) ? 'resumen-row-selected' : ''}
@@ -5072,17 +5585,17 @@ END CATCH;`;
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') config.select(row.id);
             }}>
-            <td>{displayValue(row.id)}</td><td>{row.coverage}</td><td>{displayValue(row.concept)}</td>
-            {['payments', 'expenses'].includes(config.key) ? <td>{displayValue(row.affectedObject)}</td> : null}
-            <td className="resumen-cell-number">{formatGridAmount(row.amount)}</td>
+            <td className="resumen-financial-payment-id">{displayValue(row.id)}</td><td className="resumen-financial-coverage" title={row.coverage || undefined}>{displayValue(row.coverage)}</td><td>{displayValue(row.concept)}</td>
+            {['payments', 'expenses'].includes(config.key) ? <td className="resumen-financial-affected" title={row.affectedObject || undefined}>{displayValue(row.affectedObject)}</td> : null}
             <td className="resumen-cell-number">{formatGridAmount(row.paid)}</td>
             <td className="resumen-cell-number">{formatGridAmount(row.available)}</td>
             <td>{displayValue(formatDate(row.date))}</td><td>{displayValue(row.beneficiary)}</td>
+            <td className="resumen-financial-check-request">{displayValue(row.checkRequestId)}</td>
             <td>{displayValue(row.payment && row.payment.reference)}</td>
             <td>{[0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
-            <td><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver reaseguro del movimiento</Button></td>
+            <td><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
           </tr>
-        )) : <tr><td className="resumen-empty-row" colSpan={['payments', 'expenses'].includes(config.key) ? 12 : 11}>{config.emptyText}</td></tr>}</tbody>
+        )) : <tr><td className="resumen-empty-row" colSpan="12">{config.emptyText}</td></tr>}</tbody>
       </table></div>
       {config.selected && nativePaymentGuidance(config.selected.paid, config.selected.status) ? <div role="status">{nativePaymentGuidance(config.selected.paid, config.selected.status)}</div> : null}
       {!config.reserveOpen && !config.checkOpen && config.error
@@ -5208,7 +5721,8 @@ END CATCH;`;
   React.useEffect(() => {
     mountedRef.current = true;
     const syncClaimIdFromRoute = () => {
-      if (dirtyRef.current && !window.confirm('Hay cambios sin guardar. ¿Desea descartarlos?')) {
+      if (dirtyRef.current && !newClaimModeRef.current
+        && !window.confirm('Hay cambios sin guardar. ¿Desea descartarlos?')) {
         window.history.replaceState(null, '', routeRef.current);
         return;
       }
@@ -5216,7 +5730,9 @@ END CATCH;`;
       touchedRef.current = {};
       routeRef.current = window.location.href;
       const nextClaimId = routeClaimId();
-      changeClaimContext(nextClaimId);
+      const preservingNewClaim = newClaimModeRef.current && nextClaimId === null
+        && currentClaimRef.current && Number(currentClaimRef.current.id) === 0;
+      if (!preservingNewClaim) changeClaimContext(nextClaimId);
       setClaimId(nextClaimId);
     };
     const warnUnsaved = (event) => {
@@ -5247,10 +5763,25 @@ END CATCH;`;
   }, []);
 
   React.useEffect(() => {
+    if (claimId != null || newClaimSelectedPolicy) return;
+    newClaimModeRef.current = true;
+    setNewClaimMode(true);
+    setActiveTab('general');
+    setNewClaimModalOpen(true);
+  }, [claimId, newClaimSelectedPolicy]);
+
+  React.useEffect(() => {
     loadClaim(claimId).then(() => Promise.all([
       loadAdjusters(claimId), loadClaimCatalogs(claimId)
     ]));
   }, [claimId]);
+
+  React.useEffect(() => {
+    if (newClaimMode && claimId == null && currentClaimRef.current
+      && Number(currentClaimRef.current.id) === 0) {
+      loadClaimCatalogs(0);
+    }
+  }, [newClaimMode, newClaimSelectedPolicy, claimId]);
 
   React.useEffect(() => {
     if (customFormCleanupRef.current) customFormCleanupRef.current();
@@ -5449,26 +5980,26 @@ END CATCH;`;
       .resumen-documents .resumen-document-delete { color: #40a9ff; padding: 4px; }
       .resumen-documents .resumen-document-delete[disabled] { color: #bfbfbf; }
 
-      .resumen-shell{--rz-ink:#1e293b;--rz-muted:#64748b;--rz-line:#e2e8f0;--rz-line-strong:#cbd5e1;--rz-page:#f4f6fa;--rz-brand:#1e4b8f;--rz-brand-dark:#15356b;--rz-brand-soft:#eaf1fb;--rz-accent:#2f6fce;--rz-good:#137a4c;--rz-warn:#9a5b12;--rz-warn-bg:#fdf3e3;--rz-warn-line:#f1d9ab;width:100%;min-height:0;padding:12px 18px 10px;box-sizing:border-box;color:var(--rz-ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;background:var(--rz-page)}
+      .resumen-shell{--rz-ink:#1e293b;--rz-muted:#64748b;--rz-line:#e2e8f0;--rz-line-strong:#cbd5e1;--rz-page:#f4f6fa;--rz-brand:#1e4b8f;--rz-brand-dark:#15356b;--rz-brand-soft:#eaf1fb;--rz-accent:#2f6fce;--rz-good:#137a4c;--rz-warn:#9a5b12;--rz-warn-bg:#fdf3e3;--rz-warn-line:#f1d9ab;width:100%;min-height:0;padding:4px;box-sizing:border-box;color:var(--rz-ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;background:var(--rz-page)}
       .resumen-shell *{box-sizing:border-box}
-      .resumen-shell .resumen-header{display:flex;align-items:center;gap:12px;min-height:50px;flex:0 0 auto;margin-bottom:12px;padding:2px 2px 10px;border-bottom:2px solid var(--rz-brand);background:transparent}
+      .resumen-shell .resumen-header{display:flex;align-items:center;gap:12px;min-height:50px;flex:0 0 auto;margin-bottom:4px;padding:2px 4px 4px;border-bottom:2px solid var(--rz-brand);background:transparent}
        .resumen-shell .resumen-header-icon{width:6px;height:30px;flex:0 0 6px;border-radius:3px;background:var(--rz-brand)}
        .resumen-shell .resumen-header-icon:before,.resumen-shell .resumen-header-icon:after{content:none}
        .resumen-shell .resumen-title{margin:0;color:var(--rz-brand-dark);font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.3}
        .resumen-shell .resumen-process-id{color:var(--rz-muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
-       .resumen-shell .resumen-status{flex:0 0 auto;margin-bottom:10px}
-      .resumen-shell .resumen-loading{display:flex;align-items:center;gap:8px;padding:6px 12px;color:var(--rz-brand-dark);background:var(--rz-brand-soft);border:1px solid #c7d9f2;border-radius:6px}
-      .resumen-shell .resumen-recovery-warning{margin-top:6px;padding:7px 11px;color:var(--rz-warn);background:var(--rz-warn-bg);border:1px solid var(--rz-warn-line);border-radius:6px;font-size:12px}
-       .resumen-shell .resumen-summary-card{flex:0 0 auto;border:1px solid #b8c4d1;border-radius:8px;box-shadow:0 1px 3px rgba(15,23,42,.08)}
-       .resumen-shell .resumen-summary-card>.ant-collapse-item{border-bottom:0}.resumen-shell .resumen-summary-card>.ant-collapse-item>.ant-collapse-header{color:#194b8b;font-weight:600;padding:10px 16px 10px 38px;border-bottom:1px solid #cbd5e1}.resumen-shell .resumen-summary-card .ant-collapse-arrow{color:#194b8b}.resumen-shell .resumen-summary-card .ant-collapse-content-box{padding:14px 16px}
-      .resumen-shell .resumen-section-title{display:flex;align-items:center;gap:8px;margin:0 0 10px;color:var(--rz-brand-dark);font-size:12.5px;font-weight:700;letter-spacing:.01em;line-height:1.4}
+       .resumen-shell .resumen-status{flex:0 0 auto;margin-bottom:4px}
+      .resumen-shell .resumen-loading{display:flex;align-items:center;gap:8px;padding:4px 8px;color:var(--rz-brand-dark);background:var(--rz-brand-soft);border:1px solid #c7d9f2;border-radius:6px}
+      .resumen-shell .resumen-recovery-warning{margin-top:4px;padding:4px 8px;color:var(--rz-warn);background:var(--rz-warn-bg);border:1px solid var(--rz-warn-line);border-radius:6px;font-size:12px}
+       .resumen-shell .resumen-summary-card{flex:0 0 auto;border:1px solid #aebdcd;border-radius:8px;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+       .resumen-shell .resumen-summary-card>.ant-collapse-item{border-bottom:0}.resumen-shell .resumen-summary-card>.ant-collapse-item>.ant-collapse-header{color:#194b8b;font-weight:600;padding:4px 8px 4px 28px;border-bottom:1px solid #cbd5e1}.resumen-shell .resumen-summary-card .ant-collapse-arrow{color:#194b8b}.resumen-shell .resumen-summary-card .ant-collapse-content-box{padding:4px}
+      .resumen-shell .resumen-section-title{display:flex;align-items:center;gap:8px;margin:0 0 4px;color:var(--rz-brand-dark);font-size:12.5px;font-weight:700;letter-spacing:.01em;line-height:1.4}
       .resumen-shell .resumen-section-marker{width:8px;height:8px;flex:0 0 8px;border-radius:2px;background:var(--rz-accent)}
-      .resumen-shell .resumen-policy{padding-right:20px}
-       .resumen-shell .resumen-valuation{height:100%;padding-left:20px;border-left:1px solid #cbd5e1}
+      .resumen-shell .resumen-policy{padding-right:4px}
+       .resumen-shell .resumen-valuation{height:100%;padding-left:4px;border-left:1px solid #cbd5e1}
       .resumen-shell .resumen-summary-field,.resumen-shell .resumen-valuation-row{display:flex;min-width:0;line-height:21px}
       .resumen-shell .resumen-summary-field{gap:6px;padding:2px 12px 2px 0}
-      .resumen-shell .resumen-policy .resumen-summary-field{padding:1px 10px 1px 0;font-size:12.5px;line-height:19px}
-      .resumen-shell .resumen-valuation .resumen-valuation-row{padding:1px 10px 1px 0;font-size:12.5px;line-height:19px}
+      .resumen-shell .resumen-policy .resumen-summary-field{padding:1px 4px 1px 0;font-size:12.5px;line-height:19px}
+      .resumen-shell .resumen-valuation .resumen-valuation-row{padding:1px 4px 1px 0;font-size:12.5px;line-height:19px}
       .resumen-shell .resumen-summary-label{flex:0 0 auto;color:var(--rz-muted);font-weight:500;white-space:nowrap}
       .resumen-shell .resumen-summary-value{min-width:0;color:var(--rz-accent);font-weight:600;overflow-wrap:anywhere}
       .resumen-shell .resumen-amount{min-width:0;color:var(--rz-ink);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
@@ -5478,25 +6009,30 @@ END CATCH;`;
       .resumen-shell .resumen-valuation-income{color:#237804}
       .resumen-shell .resumen-valuation-expense{color:#cf1322}
       .resumen-shell .resumen-action-icon{margin-right:5px;color:var(--rz-accent);font-weight:700}
-      .resumen-shell .resumen-tabs{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px;min-height:36px;padding:0;overflow:visible;background:transparent;border-bottom:1px solid var(--rz-line-strong)}
-      .resumen-shell .resumen-tab{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:36px;padding:0 13px;white-space:nowrap;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:transparent;color:var(--rz-muted);font-size:12.5px;font-weight:500;cursor:pointer;transition:color .15s ease,border-color .15s ease}
+      .resumen-shell .resumen-tabs{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px;min-height:32px;padding:0;overflow:visible;background:transparent;border-bottom:2px solid var(--rz-line-strong)}
+      .resumen-shell .resumen-tab{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:32px;padding:0 8px;white-space:nowrap;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;background:transparent;color:var(--rz-muted);font-size:12.5px;font-weight:500;cursor:pointer;transition:color .15s ease,border-color .15s ease}
       .resumen-shell .resumen-tab:hover{color:var(--rz-brand-dark)}
+      .resumen-shell .resumen-tab-disabled,.resumen-shell .resumen-tab:disabled{color:#aeb7c4;cursor:not-allowed;opacity:.7}
+      .resumen-shell .resumen-tab-disabled:hover,.resumen-shell .resumen-tab:disabled:hover{color:#aeb7c4}
       .resumen-shell .resumen-tab-active,.resumen-shell .resumen-tab-active:hover{color:var(--rz-brand);border-bottom-color:var(--rz-brand);font-weight:700}
-      .resumen-shell .resumen-secondary{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:38px;margin-top:10px;padding:6px 12px;color:#fff;background:var(--rz-brand-dark);border-radius:8px}
+      .resumen-shell .resumen-secondary{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:32px;margin-top:4px;padding:4px;color:#fff;background:var(--rz-brand-dark);border-radius:8px}
       .resumen-shell .resumen-secondary-actions{display:flex;align-items:center;gap:8px;min-width:0;overflow-x:auto}
       .resumen-shell .resumen-secondary-title{padding:2px 4px;color:#fff;font-weight:700;letter-spacing:.01em}
       .resumen-shell .resumen-secondary .ant-btn{height:26px;padding:0 12px;border-radius:6px;box-shadow:none;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.3);color:#fff}
       .resumen-shell .resumen-secondary .ant-btn[disabled]{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.55)}
       .resumen-shell .resumen-secondary .anticon{display:inline-flex;align-items:center;vertical-align:-.125em}
       .resumen-shell .resumen-secondary .anticon svg{width:1em;height:1em;fill:currentColor}
-      .resumen-shell .resumen-detail-card{flex:1 1 auto;min-height:0;margin-top:10px;overflow:hidden;border:1px solid var(--rz-line);border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
-      .resumen-shell .resumen-detail-card>.ant-card-body{height:100%;min-height:0;padding:16px 18px;box-sizing:border-box;display:flex;flex-direction:column;overflow:auto}
-      .resumen-shell .resumen-detail-heading{flex:0 0 auto;margin-bottom:10px}
+      .resumen-shell .resumen-detail-card{flex:1 1 auto;min-height:0;margin-top:4px;overflow:hidden;border:1px solid #aebdcd;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+      .resumen-shell .resumen-detail-card>.ant-card-body{height:100%;min-height:0;padding:4px;box-sizing:border-box;display:flex;flex-direction:column;overflow:auto}
+      .resumen-shell .resumen-detail-heading{flex:0 0 auto;margin-bottom:4px}
       .resumen-shell .resumen-detail-grid{flex:0 0 auto}
-      .resumen-shell .resumen-detail-column:first-child{padding-right:20px;border-right:1px solid var(--rz-line)}
-      .resumen-shell .resumen-detail-column:last-child{padding-left:20px}
+      .resumen-shell .resumen-detail-column:first-child{padding-right:4px;border-right:1px solid var(--rz-line)}
+      .resumen-shell .resumen-detail-column:last-child{padding-left:4px}
       .resumen-shell .resumen-form-field{display:grid;grid-template-columns:150px minmax(0,1fr);align-items:center;min-width:0;min-height:32px;margin-bottom:5px}
       .resumen-shell .resumen-form-label{padding-right:10px;text-align:left;color:var(--rz-muted);font-size:12px;font-weight:500;white-space:nowrap}
+      .resumen-shell .resumen-required-mark{margin-left:2px;color:#cf1322;font-weight:700}
+      .resumen-shell .resumen-field-invalid>.resumen-form-label{color:#cf1322}
+      .resumen-shell .resumen-field-invalid .ant-select-selector,.resumen-shell .resumen-field-invalid .ant-picker{border-color:#ff4d4f!important;box-shadow:0 0 0 2px rgba(255,77,79,.12)!important}
       .resumen-shell .resumen-form-control{min-width:0}
       .resumen-shell .resumen-form-control>.ant-input,.resumen-shell .resumen-form-control>.ant-select,.resumen-shell .resumen-form-control>.ant-picker{width:100%}
       .resumen-shell .resumen-claimant-control>.ant-select{width:100%}
@@ -5521,7 +6057,29 @@ END CATCH;`;
       .resumen-shell .ant-checkbox-wrapper-disabled,.resumen-shell .ant-checkbox-disabled+span{color:#b6bfc9!important;opacity:1}
       .resumen-shell .resumen-inline{display:flex;gap:6px;min-width:0}
       .resumen-shell .resumen-inline>*{flex:1 1 0;min-width:0}
-      .resumen-shell .resumen-stage-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;min-width:0}
+      .resumen-new-claim-search{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px;margin-bottom:14px}
+      .resumen-new-claim-search-field{min-width:0}
+      .resumen-new-claim-search-field label{display:block;margin-bottom:4px;color:#60708a;font-size:12px;font-weight:600}
+      .resumen-new-claim-modal .ant-modal-body{padding:16px 20px}
+      .resumen-new-claim-modal .ant-input,.resumen-new-claim-modal .ant-picker,.resumen-new-claim-modal .ant-select-selector{height:30px!important;min-height:30px!important;border:1px solid #aebfd4!important;border-radius:5px!important;box-shadow:none!important;background:#fff}
+      .resumen-new-claim-modal .ant-input{padding:4px 9px;color:#183153}
+      .resumen-new-claim-modal .ant-picker{display:flex;align-items:center;padding:0 8px}
+      .resumen-new-claim-modal .ant-picker-input>input{height:28px;border:0!important;box-shadow:none!important;color:#183153}
+      .resumen-new-claim-modal .ant-select{width:100%}
+      .resumen-new-claim-modal .ant-select-selection__rendered{line-height:28px}
+      .resumen-new-claim-modal .ant-input:hover,.resumen-new-claim-modal .ant-picker:hover,.resumen-new-claim-modal .ant-select:not(.ant-select-disabled):hover .ant-select-selector{border-color:#8da9c2!important}
+      .resumen-new-claim-modal .ant-input:focus,.resumen-new-claim-modal .ant-picker-focused,.resumen-new-claim-modal .ant-select-focused .ant-select-selector{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.12)!important}
+      .resumen-new-claim-search-field>.ant-select{width:100%}
+      .resumen-new-claim-search-actions{display:flex;align-items:flex-end;justify-content:flex-end}
+      .resumen-new-claim-results{max-height:360px;overflow:auto}
+      .resumen-new-claim-modal .resumen-new-claim-results{border:1px solid #d9e2ec;border-radius:5px;background:#fff}
+      .resumen-new-claim-modal .resumen-new-claim-results .ant-table{font-size:12px;color:#183153}
+      .resumen-new-claim-modal .resumen-new-claim-results .ant-table-thead>tr>th{padding:8px 10px;background:#f0f2f5;border-bottom:1px solid #c8d2df;color:#183153;font-weight:600;white-space:nowrap}
+      .resumen-new-claim-modal .resumen-new-claim-results .ant-table-tbody>tr>td{padding:7px 10px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
+      .resumen-new-claim-modal .resumen-new-claim-results .ant-table-tbody>tr:hover>td{background:#f5f9ff}
+      .resumen-new-claim-modal .resumen-new-claim-results .ant-pagination{margin:10px 8px}
+      .resumen-new-claim-modal .ant-alert{margin-bottom:12px;border-radius:5px}
+      .resumen-shell .resumen-stage-control{min-width:0}
       .resumen-shell .resumen-stage-control>.ant-select{width:100%}
       .resumen-shell .resumen-driver{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}
       .resumen-shell .resumen-bottom{flex:0 0 auto;min-height:0;margin-top:14px;padding-top:14px;border-top:1px solid var(--rz-line);display:grid;grid-template-rows:auto auto;gap:10px}
@@ -5536,6 +6094,10 @@ END CATCH;`;
       .resumen-shell .resumen-coverage-toolbar .ant-btn{height:28px;border-radius:6px}
       .resumen-shell .resumen-table-wrap{flex:0 0 auto;max-width:100%;overflow:auto;border:1px solid #cbd1d8;border-radius:6px;background:#fff}
       .resumen-shell .resumen-data-table{width:100%;min-width:1040px;border-collapse:collapse;font-size:12px;line-height:18px}
+      .resumen-shell .resumen-payments .resumen-data-table,.resumen-shell .resumen-expenses .resumen-data-table{table-layout:fixed}
+      .resumen-shell .resumen-financial-payment-id{width:52px;max-width:52px}
+      .resumen-shell .resumen-financial-coverage,.resumen-shell .resumen-financial-affected{width:180px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .resumen-shell .resumen-financial-check-request{text-align:center}
       .resumen-shell .resumen-data-table th{position:sticky;top:0;z-index:1;padding:5px 8px;text-align:left;white-space:nowrap;color:#262626;background:#bfbfbf;border-right:1px solid #cbd1d8;border-bottom:1px solid #cbd1d8;font-weight:700}
       .resumen-shell .resumen-data-table th:last-child{border-right:0}
       .resumen-shell .resumen-data-table td{padding:5px 8px;white-space:nowrap;border:0;border-bottom:1px solid #cbd1d8;font-variant-numeric:tabular-nums}
@@ -5566,6 +6128,8 @@ END CATCH;`;
       .resumen-affected-modal .resumen-custom-form .form-group{margin-bottom:12px}
       .resumen-affected-modal .resumen-custom-form label{display:block;margin-bottom:4px;color:#60708a;font-size:12px;font-weight:500}
       .resumen-affected-modal .resumen-custom-form input:not([type=checkbox]):not([type=radio]):not([class*="col-"]),.resumen-affected-modal .resumen-custom-form select:not([class*="col-"]),.resumen-affected-modal .resumen-custom-form textarea:not([class*="col-"]){width:100%;padding:5px 9px;color:#183153;background:#fff;border:1px solid #aebfd4;border-radius:5px}
+      .resumen-affected-modal .resumen-custom-form.resumen-validation-attempted input:invalid,.resumen-affected-modal .resumen-custom-form.resumen-validation-attempted select:invalid,.resumen-affected-modal .resumen-custom-form.resumen-validation-attempted textarea:invalid,.resumen-affected-modal .resumen-custom-form .resumen-field-invalid input,.resumen-affected-modal .resumen-custom-form .resumen-field-invalid select,.resumen-affected-modal .resumen-custom-form .resumen-field-invalid textarea{border-color:#ff4d4f!important;box-shadow:0 0 0 2px rgba(255,77,79,.12)!important}
+      .resumen-affected-modal .resumen-custom-form .resumen-field-invalid label{color:#cf1322!important}
       .resumen-affected-modal .rendered-form>.row{display:flex;flex-wrap:wrap;margin-right:-8px;margin-left:-8px}
       .resumen-affected-modal .rendered-form>.row>[class*="col-"]{position:relative;width:100%;min-height:1px;padding-right:8px;padding-left:8px}
       @media(min-width:768px){.resumen-affected-modal .rendered-form>.row>.col-md-4{flex:0 0 33.333333%;max-width:33.333333%}.resumen-affected-modal .rendered-form>.row>.col-md-6{flex:0 0 50%;max-width:50%}.resumen-affected-modal .rendered-form>.row>.col-md-8{flex:0 0 66.666667%;max-width:66.666667%}.resumen-affected-modal .rendered-form>.row>.col-md-12{flex:0 0 100%;max-width:100%}}
@@ -5609,7 +6173,8 @@ END CATCH;`;
       .resumen-shell .resumen-inactive{flex:1 1 auto;display:flex;align-items:center;justify-content:center;min-height:180px;color:var(--rz-muted)}
       @media(max-width:1199px){.resumen-shell .resumen-form-field{grid-template-columns:125px minmax(0,1fr)}.resumen-shell .resumen-bottom-field{grid-template-columns:190px minmax(0,1fr)}}
       @media(max-width:991px){.resumen-shell{overflow:auto}.resumen-shell .resumen-policy{padding-right:0}.resumen-shell .resumen-valuation{margin-top:12px;padding:12px 0 0;border-top:1px solid var(--rz-line);border-left:0}.resumen-shell .resumen-valuation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}.resumen-shell .resumen-detail-card{flex:0 0 auto;overflow:visible}.resumen-shell .resumen-detail-card>.ant-card-body{height:auto;overflow:visible}.resumen-shell .resumen-detail-column:first-child{padding-right:0;border-right:0}.resumen-shell .resumen-detail-column:last-child{margin-top:10px;padding:12px 0 0;border-top:1px solid var(--rz-line)}.resumen-shell .resumen-bottom{min-height:190px}}
-      @media(max-width:575px){.resumen-shell{padding:10px}.resumen-shell .resumen-title{font-size:16px}.resumen-shell .resumen-summary-card .ant-collapse-content-box{padding:12px}.resumen-shell .resumen-valuation-grid{grid-template-columns:1fr}.resumen-shell .resumen-form-field,.resumen-shell .resumen-bottom-field{grid-template-columns:1fr}.resumen-shell .resumen-form-label{padding:0 0 3px;text-align:left}.resumen-shell .resumen-driver{grid-template-columns:1fr}.resumen-shell .resumen-checks{flex-wrap:wrap;gap:8px 14px}.resumen-shell .resumen-reserve-actions{flex-wrap:wrap}.resumen-reserve-modal .resumen-reserve-form{grid-template-columns:1fr}}
+      @media(max-width:767px){.resumen-new-claim-search{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      @media(max-width:575px){.resumen-shell{padding:4px}.resumen-shell .resumen-title{font-size:16px}.resumen-shell .resumen-summary-card .ant-collapse-content-box{padding:4px}.resumen-shell .resumen-valuation-grid{grid-template-columns:1fr}.resumen-shell .resumen-form-field,.resumen-shell .resumen-bottom-field{grid-template-columns:1fr}.resumen-shell .resumen-form-label{padding:0 0 3px;text-align:left}.resumen-shell .resumen-driver{grid-template-columns:1fr}.resumen-shell .resumen-checks{flex-wrap:wrap;gap:8px 14px}.resumen-shell .resumen-reserve-actions{flex-wrap:wrap}.resumen-reserve-modal .resumen-reserve-form{grid-template-columns:1fr}.resumen-new-claim-search{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
     scheduleFit();
@@ -5648,6 +6213,72 @@ END CATCH;`;
             : null}
         </div>
       ) : null}
+
+      {newClaimSelectedPolicy ? <Alert type="info" showIcon
+        message={'Póliza seleccionada para nuevo reclamo: ' + displayValue(newClaimSelectedPolicy.code || newClaimSelectedPolicy.id)}
+        description={policySearchLabel(newClaimSelectedPolicy)} /> : null}
+
+      <Modal title="Nuevo reclamo: seleccionar póliza" visible={newClaimModalOpen}
+        width={1050} destroyOnClose wrapClassName="resumen-new-claim-modal"
+        onCancel={() => setNewClaimModalOpen(false)}
+        footer={<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button size="small" onClick={() => setNewClaimModalOpen(false)}>Cancelar</Button>
+        </div>}>
+        <div className="resumen-new-claim-search">
+          <div className="resumen-new-claim-search-field"><label>Código de póliza</label>
+            <Input size="small" defaultValue={newClaimFilters.code} placeholder="Aproximación"
+              onChange={(event) => {
+                newClaimCodeInput.current = event && event.target && event.target.value != null
+                  ? event.target.value : '';
+              }} />
+          </div>
+          <div className="resumen-new-claim-search-field"><label>Tenedor</label>
+            <Select size="small" showSearch allowClear filterOption={false}
+              value={newClaimFilters.holderId || undefined} loading={newClaimContactLoading.holder}
+              options={newClaimContactOptions.holder} placeholder="Nombre, ID, identificación o Cobis"
+              notFoundContent={newClaimContactLoading.holder ? 'Buscando...' : 'Escriba al menos 2 caracteres o un ID'}
+              onSearch={(value) => searchNewClaimContacts('holder', value)}
+              onChange={(value) => setNewClaimFilters((current) => Object.assign({}, current, { holderId: value || null }))} />
+          </div>
+          <div className="resumen-new-claim-search-field"><label>Asegurado</label>
+            <Select size="small" showSearch allowClear filterOption={false}
+              value={newClaimFilters.insuredId || undefined} loading={newClaimContactLoading.insured}
+              options={newClaimContactOptions.insured} placeholder="Nombre, ID, identificación o Cobis"
+              notFoundContent={newClaimContactLoading.insured ? 'Buscando...' : 'Escriba al menos 2 caracteres o un ID'}
+              onSearch={(value) => searchNewClaimContacts('insured', value)}
+              onChange={(value) => setNewClaimFilters((current) => Object.assign({}, current, { insuredId: value || null }))} />
+          </div>
+          <div className="resumen-new-claim-search-field"><label>Ramo</label>
+            <Select size="small" allowClear showSearch optionFilterProp="label" value={newClaimFilters.lob || undefined}
+              placeholder="Seleccione el ramo" options={newClaimLobOptions}
+              onChange={(value) => setNewClaimFilters((current) => Object.assign({}, current, { lob: value || '' }))} />
+          </div>
+          <div className="resumen-new-claim-search-field"><label>Vigencia</label>
+            <DatePicker.RangePicker size="small" format="DD/MM/YYYY" style={{ width: '100%' }}
+              value={newClaimFilters.dates || undefined}
+              onChange={(values) => setNewClaimFilters((current) => Object.assign({}, current, { dates: values || null }))} />
+          </div>
+          <div className="resumen-new-claim-search-actions">
+            <Button size="small" type="primary" loading={newClaimLoading} onClick={searchNewClaimPolicies}>Buscar</Button>
+          </div>
+        </div>
+        {newClaimError ? <Alert type="warning" showIcon message={newClaimError} /> : null}
+        <div className="resumen-table-wrap resumen-new-claim-results">
+          <A.Table size="small" rowKey={(row) => String(row.id)} loading={newClaimLoading}
+            dataSource={newClaimRows} pagination={{ pageSize: 8, hideOnSinglePage: true }}
+            locale={{ emptyText: newClaimLoading ? 'Consultando pólizas...' : 'Realice una búsqueda para ver resultados.' }}
+            columns={[
+              { title: 'Póliza', dataIndex: 'code', render: (value, row) => displayValue(value || row.id) },
+              { title: 'Cliente', dataIndex: '__insuredLabel', render: (value) => displayValue(value) },
+              { title: 'Ramo', dataIndex: '__lobLabel', render: (value) => displayValue(value) },
+              { title: 'Producto', dataIndex: '__productLabel', render: (value) => displayValue(value) },
+              { title: 'Inicio', dataIndex: '__startLabel', render: (value) => displayValue(value) },
+              { title: 'Fin', dataIndex: '__endLabel', render: (value) => displayValue(value) },
+              { title: '', key: 'select', width: 100, render: (_, row) => <Button size="small" type="primary"
+                onClick={() => prepareNewClaimPolicy(row)}>Seleccionar</Button> }
+            ]} />
+        </div>
+      </Modal>
 
       <Collapse className="resumen-summary-card" defaultActiveKey={['summary']} expandIconPosition="left" bordered>
         <Panel header="Datos de póliza y valoración" key="summary">
@@ -5689,7 +6320,9 @@ END CATCH;`;
       <nav className="resumen-tabs" aria-label="Secciones del reclamo">
         {tabItems.map((tab) => (
           <button type="button" key={tab[0]}
-            className={activeTab === tab[0] ? 'resumen-tab resumen-tab-active' : 'resumen-tab'}
+            disabled={newClaimMode && tab[0] !== 'general'}
+            className={(activeTab === tab[0] ? 'resumen-tab resumen-tab-active' : 'resumen-tab')
+              + (newClaimMode && tab[0] !== 'general' ? ' resumen-tab-disabled' : '')}
             onClick={() => changeActiveTab(tab[0])}>{tab[1]}</button>
         ))}
       </nav>
@@ -5697,15 +6330,15 @@ END CATCH;`;
       {activeTab === 'general' || activeTab === 'custom' ? (
         <div className="resumen-secondary">
           <div className="resumen-secondary-actions">
-            <Button size="small" disabled={!editable || !dirtyRef.current || saving}
+            <Button size="small" disabled={(!newClaimMode && !editable) || !dirtyRef.current || saving}
               loading={saving} onClick={saveClaim}>▣ Guardar</Button>
             <Button size="small" disabled={loading} loading={loading}
               icon={<ReloadOutlinedIcon />} onClick={refreshClaim}>Refrescar</Button>
-            <Button size="small" disabled>
+            <Button size="small" onClick={openNewClaimModal}>
               <span className="resumen-action-icon" aria-hidden="true">+</span>Nuevo Reclamo
             </Button>
           </div>
-          <span className="resumen-secondary-title">Siniestro No. {displayValue(claimId)}</span>
+          <span className="resumen-secondary-title">{newClaimMode ? 'Nuevo reclamo' : 'Siniestro No. ' + displayValue(claimId)}</span>
         </div>
       ) : null}
 
@@ -5723,14 +6356,10 @@ END CATCH;`;
                   placeholder="Seleccione un ajustador"
                   options={adjusterOptions}
                   onSelect={(value, option) => changeAdjuster(value, option && option.label)} /></Field>
-                <Field label="Estado"><div className="resumen-stage-control">
+                <Field label="Estado" required={newClaimMode} invalid={newClaimValidation.stageCode}><div className="resumen-stage-control">
                   <Select size="small" disabled={!editable || saving || stageSaving}
-                    value={stageSelection || undefined} placeholder={claimDetails.state || 'Seleccione'}
+                    value={draft && draft.stageCode ? draft.stageCode : undefined} placeholder={claimDetails.state || 'Seleccione'}
                     options={CLAIM_STAGE_OPTIONS} onChange={changeClaimStage} />
-                  <Button size="small" disabled={!editable || saving || stageSaving || dirtyRef.current
-                    || !isValidStageCode(stageSelection)
-                    || claimStageCode(currentClaimRef.current) === stageSelection}
-                    loading={stageSaving} onClick={updateClaimStage}>Aplicar estado</Button>
                 </div></Field>
                 <div className="resumen-form-field resumen-claimant-field"><label className="resumen-form-label">Reclamante:</label>
                   <div className="resumen-form-control resumen-claimant-control"><Select size="small" showSearch filterOption={false}
@@ -5745,13 +6374,13 @@ END CATCH;`;
                   onSelect={(value, option) => changeClaimant(value, option && option.label)} />
                   {claimantHasMore ? <div className="resumen-field-note">Mostrando 10 resultados. Refine la búsqueda.</div> : null}
                 </div></div>
-                <Field label="Razón de evento"><Select size="small"
+                <Field label="Razón de evento" required={newClaimMode} invalid={newClaimValidation.eventReasonCode}><Select size="small"
                   disabled={!editable || saving || stageSaving || catalogLoading || reasonOptions.length === 0}
                   loading={catalogLoading}
                   value={draft && draft.eventReasonCode || undefined}
                   placeholder="Seleccione una razón de evento"
                   options={reasonOptions} onChange={changeEventReason} /></Field>
-                <Field label="Evento asegurado"><Select size="small"
+                <Field label="Evento asegurado" required={newClaimMode} invalid={newClaimValidation.insuredEventCode}><Select size="small"
                   disabled={!editable || saving || stageSaving || catalogLoading || eventOptions.length === 0}
                   loading={catalogLoading}
                   value={draft && draft.insuredEventCode || undefined}
@@ -5771,11 +6400,13 @@ END CATCH;`;
                 </React.Fragment> : null}
               </Col>
               <Col xs={24} lg={12} className="resumen-detail-column">
-                <Field label="Fecha del Siniestro"><DatePicker size="small" disabled={!editable} allowClear
+                <Field label="Fecha del Siniestro" required={newClaimMode} invalid={newClaimValidation.occurrenceDate}><DatePicker size="small" disabled={!editable} allowClear
                   format="DD/MM/YYYY" style={{ width: '100%' }}
                   value={draft && draft.occurrenceDate ? moment(draft.occurrenceDate, 'DD/MM/YYYY', true) : null}
                   onChange={(_, dateString) => changeDraft('occurrenceDate', dateString || '')} /></Field>
-                <Field label="Hora"><div className="resumen-inline">
+                <Field label="Hora" required={newClaimMode}
+                  invalid={newClaimValidation.occurrenceHour || newClaimValidation.occurrenceMinute
+                    || newClaimValidation.occurrencePeriod}><div className="resumen-inline">
                   <Select size="small" disabled={!editable} value={draft ? draft.occurrenceHour : undefined}
                     placeholder="Hora" options={Array.from({ length: 12 }, (_, index) => {
                       const value = String(index + 1).padStart(2, '0');
@@ -5798,7 +6429,7 @@ END CATCH;`;
                   <Field label="Fecha de audiencia">{extraControl("fechaAudiencia")}</Field>
                   <Field label="Lugar de audiencia">{extraControl("lugarAudiencia")}</Field>
                 </React.Fragment> : null}
-                <Field label="Fecha de Notificación"><DatePicker size="small" disabled={!editable} allowClear
+                <Field label="Fecha de Notificación" required={newClaimMode} invalid={newClaimValidation.notificationDate}><DatePicker size="small" disabled={!editable} allowClear
                   format="DD/MM/YYYY" style={{ width: '100%' }}
                   value={draft && draft.notificationDate ? moment(draft.notificationDate, 'DD/MM/YYYY', true) : null}
                   onChange={(_, dateString) => changeDraft('notificationDate', dateString || '')} /></Field>
@@ -5879,8 +6510,8 @@ END CATCH;`;
           <section className="resumen-coverage" aria-label="Coberturas y reservas">
             <div className="resumen-coverage-toolbar">
               <SectionTitle>Coberturas vigentes de la póliza</SectionTitle>
-              <Button size="small" loading={loading} disabled={loading || reserveSaving}
-                onClick={refreshClaim}><ReloadOutlinedIcon /> Refrescar</Button>
+              <Button size="small" loading={sectionRefreshing} disabled={sectionRefreshing || reserveSaving}
+                onClick={() => refreshSection(() => refreshReserveData(claimId), setReserveError)}><ReloadOutlinedIcon /> Refrescar</Button>
             </div>
             <div className="resumen-table-wrap">
               <table className="resumen-data-table">
@@ -6002,7 +6633,7 @@ END CATCH;`;
                     <td className="resumen-cell-number">{formatGridAmount(signed)}</td>
                     <td>{displayValue(item.concept)}</td><td>{displayValue(item.user)}</td>
                     <td>{Number(item.status) === 2 ? 'Cerrada' : 'Activa'}</td>
-                    <td><Button size="small" onClick={() => openMovementReinsurance(item.id)}>Ver reaseguro del movimiento</Button></td>
+                    <td><Button size="small" onClick={() => openMovementReinsurance(item.id)}>Ver Reaseguro</Button></td>
                   </tr>;
                 }) : <tr><td className="resumen-empty-row" colSpan="10">
                   {selectedCoverage ? 'La cobertura seleccionada no tiene reservas.' : 'Seleccione una cobertura.'}
@@ -6018,6 +6649,7 @@ END CATCH;`;
           select: setSelectedPaymentReserveId, coverages: coverageRows.map((row) => Object.assign({}, row, { available: paymentSpendingAvailable(currentClaimRef.current, row.id, 'IN') })), coverageId: paymentCoverageId,
           setCoverageId: selectFinancialCoverage, amount: paymentAmount, setAmount: setPaymentAmount,
           concept: paymentConcept, setConcept: setPaymentConcept, error: paymentError,
+          errorSetter: setPaymentError, refresh: () => refreshFinancialData(claimId),
           reserveOpen: paymentReserveModalOpen, setReserveOpen: setPaymentReserveModalOpen,
           checkOpen: checkRequestModalOpen, setCheckOpen: setCheckRequestModalOpen,
           openReserve: () => {
@@ -6035,6 +6667,7 @@ END CATCH;`;
           select: setSelectedExpenseReserveId, coverages: expenseCoverageRows, coverageId: expenseCoverageId,
           setCoverageId: selectExpenseFinancialCoverage, amount: expenseAmount, setAmount: setExpenseAmount,
           concept: expenseConcept, setConcept: setExpenseConcept, error: expenseError,
+          errorSetter: setExpenseError, refresh: () => refreshFinancialData(claimId),
           reserveOpen: expenseReserveModalOpen, setReserveOpen: setExpenseReserveModalOpen,
           checkOpen: expenseCheckRequestModalOpen, setCheckOpen: setExpenseCheckRequestModalOpen,
           openReserve: () => {
