@@ -21,6 +21,17 @@ const reserveType = getReserveType(input);
 
 try {
 
+  const policyLob = getPolicyLob(lifePolicyId);
+  if(policyLob !== '1'){
+    return {
+      ok: true,
+      msg: 'La validación de reservas solo aplica para el ramo Incendio.',
+      totalReservado: 0,
+      montoMaximo: 0,
+      reserveType: reserveType
+    };
+  }
+
   //Se valida estado de decisión del reclamo para evitar poder crear reservas o pagos para reclamos anulados o rechazados
   const claim = getClaim(claimId);
   const approvalResponse = String(claim && claim.approvalResponse || '').trim().toUpperCase();
@@ -101,6 +112,19 @@ function getClaim(claimId) {
   if(!response)
     throw new Error("No se pudo recuperar reclamo");
   return response
+}
+
+function getPolicyLob(lifePolicyId) {
+  doCmd({cmd: 'LoadEntity', data: {
+    entity: 'LifePolicy',
+    fields: 'lob',
+    filter: `id = ${lifePolicyId}`
+  }});
+  const policy = LoadEntity && LoadEntity.outData;
+  if(!policy || policy.lob === undefined || policy.lob === null){
+    throw new Error('No se pudo recuperar el ramo de la póliza');
+  }
+  return String(policy.lob).trim();
 }
 
 function getReserveType(item) {

@@ -1,0 +1,1 @@
+{"id":674,"name":"CustomClaimAffectedBondForm","json":"[{\"type\":\"textarea\",\"required\":false,\"label\":\"Descripción\",\"className\":\"form-control\",\"name\":\"description\",\"access\":false,\"subtype\":\"textarea\"}]","logic":null}
