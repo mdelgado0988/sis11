@@ -5823,39 +5823,67 @@ END CATCH;`;
       </A.Tabs.TabPane>
     </A.Tabs>;
   };
-  const renderMovementReinsurance = () => <Modal
-    title={'Reaseguro del movimiento ' + (movementReinsurance ? movementReinsurance.id : '') + ' — Solo lectura'}
-    visible={!!movementReinsurance} width="95%" destroyOnClose
-    onCancel={closeMovementReinsurance}
-    footer={<Button onClick={closeMovementReinsurance}>Cerrar</Button>}>
-    {movementReinsurance && movementReinsurance.error ? <Alert type="error" showIcon message={movementReinsurance.error} /> : null}
-    {movementReinsurance && !movementReinsurance.loading && !movementReinsurance.error
-      && movementReinsurance.rows.length === 0 ? <Alert type="info" showIcon
-        message="Sin reaseguro asociado a este movimiento" /> : null}
-    <A.Table rowKey="id" size="small" loading={!!(movementReinsurance && movementReinsurance.loading)}
-      dataSource={movementReinsurance ? movementReinsurance.rows : []} scroll={{ x: 2600 }}
-      locale={{ emptyText: movementReinsurance && movementReinsurance.error ? 'Consulta no disponible' : 'Sin reaseguro asociado a este movimiento' }}
-      pagination={{ pageSize: 10, showSizeChanger: true }}
-      columns={[
-        { title: 'ID', dataIndex: 'id' },
-        { title: 'Cesión', render: (_, r) => r.Cession && r.Cession.id },
-        { title: 'Contrato', render: (_, r) => r.contractId || (r.Cession && r.Cession.contractId) },
-        { title: 'Ramo', render: (_, r) => r.Cession && r.Cession.LoB },
-        { title: 'Póliza', render: (_, r) => r.Cession && r.Cession.policyCode },
-        { title: 'Asegurado', dataIndex: 'insuredName' },
-        { title: 'Cobertura', render: (_, r) => <span title={r.coverageName}>{r.Cession && r.Cession.coverageId}</span> },
-        { title: 'Deducible', dataIndex: 'coverageDeductible', render: (v, r) => reinsuranceMoney(v, r.currency) },
-        { title: 'Reclamo', render: (_, r) => r.Payout && r.Payout.claimId },
-        { title: 'Ocurrencia', dataIndex: 'claimOccurrence', render: (v) => displayValue(formatDate(v)) },
-        { title: 'Notificación', dataIndex: 'claimNotification', render: (v) => displayValue(formatDate(v)) },
-        { title: 'Línea', render: (_, r) => r.lineId || (r.Cession && r.Cession.lineId) },
-        { title: 'Causa', dataIndex: 'eventReason' }, { title: 'Evento', dataIndex: 'insuredEvent' },
-        ...reinsuranceFields.map(([field, label]) => ({ title: label, dataIndex: field,
-          render: (v, r) => reinsuranceMoney(v, r.currency) })),
-        { title: 'Ex gratia', dataIndex: 'exGratia', render: (v) => v ? 'Sí' : 'No' }
-      ]}
-      expandable={{ expandedRowRender: reinsuranceDetail, expandRowByClick: true }} />
-  </Modal>;
+  const renderMovementReinsurance = () => {
+    const rows = movementReinsurance && Array.isArray(movementReinsurance.rows) ? movementReinsurance.rows : [];
+    const first = rows[0] || {};
+    const payout = currentClaimRef.current && Array.isArray(currentClaimRef.current.Payouts)
+      ? currentClaimRef.current.Payouts.find((item) => Number(item.id) === Number(movementReinsurance && movementReinsurance.id)) : null;
+    const total = (field) => rows.reduce((sum, row) => sum + (Number(row[field]) || 0), 0);
+    const movementType = payout && Number(payout.payed) !== 0 ? 'Pago' : 'Reserva';
+    const coverage = first.coverageName || (first.Cession && first.Cession.coverageId);
+    const currency = first.currency || (payout && payout.currency);
+    const summaryItems = [
+      ['Movimiento', movementType],
+      ['Cobertura', coverage],
+      ['Reserva retenida', reinsuranceMoney(total('retainedReserve'), currency)],
+      ['Reserva cedida', reinsuranceMoney(total('cededReserve'), currency)],
+      ['Pérdida retenida', reinsuranceMoney(total('retainedLoss'), currency)],
+      ['Pérdida cedida', reinsuranceMoney(total('cededLoss'), currency)]
+    ];
+    return <Modal
+      title={<span>Reaseguro del movimiento <strong>{movementReinsurance ? movementReinsurance.id : ''}</strong></span>}
+      visible={!!movementReinsurance} width={1200} destroyOnClose wrapClassName="resumen-reinsurance-modal"
+      onCancel={closeMovementReinsurance}
+      footer={<Button size="small" onClick={closeMovementReinsurance}>Cerrar</Button>}>
+      {movementReinsurance && movementReinsurance.error ? <Alert type="error" showIcon message={movementReinsurance.error} /> : null}
+      {movementReinsurance && !movementReinsurance.loading && !movementReinsurance.error && rows.length === 0
+        ? <Alert type="info" showIcon message="Sin reaseguro asociado a este movimiento" /> : null}
+      {movementReinsurance && movementReinsurance.loading ? <div className="resumen-reinsurance-loading"><Spin size="small" /> Consultando distribución...</div> : null}
+      {!movementReinsurance || movementReinsurance.loading || movementReinsurance.error || rows.length === 0 ? null : <React.Fragment>
+        <div className="resumen-reinsurance-summary">
+          {summaryItems.map(([label, value]) => <div className="resumen-reinsurance-summary-item" key={label}>
+            <span>{label}</span><strong title={value == null ? undefined : String(value)}>{displayValue(value)}</strong>
+          </div>)}
+        </div>
+        <div className="resumen-reinsurance-context">
+          <span>Reclamo: <strong>{displayValue(first.Payout && first.Payout.claimId)}</strong></span>
+          <span>Contrato: <strong>{displayValue(first.contractId || (first.Cession && first.Cession.contractId))}</strong></span>
+          <span>Línea: <strong>{displayValue(first.lineId || (first.Cession && first.Cession.lineId))}</strong></span>
+          <span>Moneda: <strong>{displayValue(currency)}</strong></span>
+        </div>
+        <A.Tabs defaultActiveKey="distribution" className="resumen-reinsurance-tabs">
+          <A.Tabs.TabPane tab="Distribución" key="distribution">
+            <A.Table rowKey="id" size="small" dataSource={rows} pagination={false}
+              scroll={{ x: 900 }} className="resumen-reinsurance-table"
+              columns={[
+                { title: 'Línea', dataIndex: 'lineId', render: (v, r) => v || (r.Cession && r.Cession.lineId) },
+                { title: 'Contrato', dataIndex: 'contractId' },
+                { title: 'Moneda', dataIndex: 'currency' },
+                { title: 'Reserva retenida', dataIndex: 'retainedReserve', align: 'right', render: (v, r) => reinsuranceMoney(v, r.currency) },
+                { title: 'Reserva cedida', dataIndex: 'cededReserve', align: 'right', render: (v, r) => reinsuranceMoney(v, r.currency) },
+                { title: 'Pérdida retenida', dataIndex: 'retainedLoss', align: 'right', render: (v, r) => reinsuranceMoney(v, r.currency) },
+                { title: 'Pérdida cedida', dataIndex: 'cededLoss', align: 'right', render: (v, r) => reinsuranceMoney(v, r.currency) },
+                { title: 'Ex gratia', dataIndex: 'exGratia', render: (v) => v ? 'Sí' : 'No' }
+              ]}
+              expandable={{ expandedRowRender: reinsuranceDetail, expandRowByClick: true }} />
+          </A.Tabs.TabPane>
+          <A.Tabs.TabPane tab="Participantes" key="participants">
+            {reinsuranceParticipants(rows.reduce((all, row) => all.concat(row.Participants || []), []), false)}
+          </A.Tabs.TabPane>
+        </A.Tabs>
+      </React.Fragment>}
+    </Modal>;
+  };
   const renderFinancialSection = (config) => (
     <section className={'resumen-' + config.key} aria-label={config.ariaLabel}>
       <div className="resumen-coverage-toolbar">
@@ -6494,6 +6522,31 @@ END CATCH;`;
       .resumen-reserve-modal .resumen-reserve-input>.ant-input:focus,.resumen-reserve-modal .resumen-reserve-input>.ant-select-focused .ant-select-selector{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.12)!important}
       .resumen-reserve-modal .resumen-reserve-error{grid-column:1/-1;padding:7px 10px;color:#9f2d2d;background:#fff1f0;border:1px solid #ffccc7;border-radius:5px;font-size:12px}
       .resumen-reserve-modal .resumen-reserve-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;padding-top:4px}
+      .resumen-reinsurance-modal .ant-modal-content{border:1px solid #b8c4d1;border-radius:6px;overflow:hidden}
+      .resumen-reinsurance-modal .ant-modal-header{padding:10px 16px;border-bottom:1px solid #d9e2ec;background:#f8fbff}
+      .resumen-reinsurance-modal .ant-modal-title{color:#183153;font-size:14px;font-weight:600}
+      .resumen-reinsurance-modal .ant-modal-body{padding:12px 16px;background:#fff}
+      .resumen-reinsurance-modal .ant-alert{margin-bottom:10px;border-radius:5px}
+      .resumen-reinsurance-loading{display:flex;align-items:center;justify-content:center;gap:8px;min-height:120px;color:#60708a;font-size:12px}
+      .resumen-reinsurance-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:10px}
+      .resumen-reinsurance-summary-item{display:flex;flex-direction:column;gap:3px;min-width:0;padding:8px 9px;border:1px solid #d9e2ec;border-radius:5px;background:#f8fbff}
+      .resumen-reinsurance-summary-item span{color:#60708a;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .resumen-reinsurance-summary-item strong{color:#183153;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .resumen-reinsurance-context{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:10px;padding:7px 9px;border-left:3px solid #2f6fbd;background:#f5f9ff;color:#60708a;font-size:11px}
+      .resumen-reinsurance-context strong{color:#183153;font-weight:600}
+      .resumen-reinsurance-tabs .ant-tabs-bar{margin-bottom:8px;border-bottom:1px solid #cbd1d8}
+      .resumen-reinsurance-tabs .ant-tabs-tab{padding:7px 10px;color:#60708a;font-size:12px}
+      .resumen-reinsurance-tabs .ant-tabs-tab-active{color:#174a86;font-weight:600}
+      .resumen-reinsurance-table{border:1px solid #cbd1d8;border-radius:5px;overflow:hidden}
+      .resumen-reinsurance-table .ant-table{font-size:12px;color:#183153}
+      .resumen-reinsurance-table .ant-table-thead>tr>th{padding:6px 8px;background:#bfbfbf;color:#262626;border-bottom:1px solid #cbd1d8;font-weight:700;white-space:nowrap}
+      .resumen-reinsurance-table .ant-table-tbody>tr>td{padding:6px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+      .resumen-reinsurance-table .ant-table-tbody>tr:hover>td{background:#f5f9ff}
+      .resumen-reinsurance-modal .ant-table-expanded-row>td{padding:10px!important;background:#f8fbff}
+      .resumen-reinsurance-modal .ant-descriptions-bordered .ant-descriptions-item-label{color:#60708a;background:#f0f2f5;font-size:11px}
+      .resumen-reinsurance-modal .ant-descriptions-bordered .ant-descriptions-item-content{color:#183153;font-size:11px}
+      .resumen-reinsurance-modal .ant-tabs-content{min-height:90px}
+      @media(max-width:767px){.resumen-reinsurance-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.resumen-reinsurance-context{gap:7px 12px}.resumen-reinsurance-modal .ant-modal-body{padding:10px}.resumen-reinsurance-modal .ant-modal-header{padding:9px 12px}}
       .resumen-affected-modal .resumen-custom-form{min-height:120px;padding:2px 4px}
       .resumen-affected-modal .resumen-custom-form .form-group{margin-bottom:12px}
       .resumen-affected-modal .resumen-custom-form label{display:block;margin-bottom:4px;color:#60708a;font-size:12px;font-weight:500}
