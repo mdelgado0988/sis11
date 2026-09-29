@@ -374,6 +374,7 @@
   const [paymentError, setPaymentError] = React.useState('');
   const [paymentReserveModalOpen, setPaymentReserveModalOpen] = React.useState(false);
   const [checkRequestModalOpen, setCheckRequestModalOpen] = React.useState(false);
+  const [paymentRequestDetail, setPaymentRequestDetail] = React.useState(null);
   const [paymentCoverageId, setPaymentCoverageId] = React.useState(null);
   const [paymentAmount, setPaymentAmount] = React.useState('');
   const [paymentConcept, setPaymentConcept] = React.useState('');
@@ -386,6 +387,9 @@
   const [expenseCoverageId, setExpenseCoverageId] = React.useState(null);
   const [expenseAmount, setExpenseAmount] = React.useState('');
   const [expenseConcept, setExpenseConcept] = React.useState('');
+  React.useEffect(() => {
+    setPaymentRequestDetail(null);
+  }, [claimId, activeTab]);
   const [recoveryModalOpen, setRecoveryModalOpen] = React.useState(false);
   const recovery = React.useRef({ types: [], typesLoaded: false, currencies: [], operation: 0,
     write: null, created: null, form: null }).current;
@@ -931,6 +935,7 @@
     setNewClaimModalOpen(false);
     setActiveTab('general');
     setClaimId(null);
+    setLoading(false);
     setError('');
     currentClaimRef.current = newClaim;
     const currency = typeof policy.currency === 'string' ? policy.currency.trim().toUpperCase() : '';
@@ -962,6 +967,8 @@
     setEditable(true);
     setClaimantOptionList([claimantOption(contact, true)].filter(Boolean));
     loadPolicySummaryLabels(newClaim, requestRef.current);
+    loadAdjusters(0);
+    loadCustomForms(newClaim);
     window.location.hash = '#/view/48';
     dirtyRef.current = true;
   };
@@ -1202,19 +1209,77 @@
     return outcome;
   });
 
-  const closeClaimReserves = (confirmed) => {
+  const hasOpenReserveBalance = (claim) => normalizeCoverageRows(claim).some((row) =>
+    row.paymentReserve !== 0 || row.expenseReserve !== 0);
+
+  const finalizeClaimAfterReserveClose = (claimId) => {
+    const operationClaimId = Number(claimId);
     const claim = currentClaimRef.current;
-    const hasBalance = normalizeCoverageRows(claim).some((row) => row.paymentReserve !== 0 || row.expenseReserve !== 0);
-    if (!claim || !canEdit(claim) || !hasBalance) {
+    if (!Number.isSafeInteger(operationClaimId) || operationClaimId <= 0
+      || !claim || Number(claim.id) !== operationClaimId
+      || routeClaimId() !== operationClaimId) return Promise.resolve(false);
+    if (['7', 'F'].includes(String(claimStageCode(claim) || '').trim().toUpperCase())) {
+      return Promise.resolve(true);
+    }
+    const requestId = requestRef.current;
+    stageSavingRef.current = true;
+    setStageSaving(true);
+    return repositoryRequest('SetClaimStage', { claimId: operationClaimId, stageCode: '7' })
+      .then((result) => {
+        if (!mountedRef.current || routeClaimId() !== operationClaimId
+          || requestRef.current !== requestId) return false;
+        if (!result || result.ok !== true) {
+          throw new Error(result && result.msg ? result.msg : 'No fue posible finalizar el reclamo.');
+        }
+        pendingStageConfirmationRef.current = { claimId: operationClaimId, stageCode: '7' };
+        notifyRecordUpdated();
+        return loadClaim(operationClaimId).then(() => true);
+      }).catch((caughtError) => {
+        if (mountedRef.current && routeClaimId() === operationClaimId
+          && requestRef.current === requestId) {
+          setError(caughtError && caughtError.message
+            ? caughtError.message : 'No fue posible finalizar el reclamo.');
+        }
+        return false;
+      }).then((outcome) => {
+        stageSavingRef.current = false;
+        if (mountedRef.current) setStageSaving(false);
+        return outcome;
+      });
+  };
+
+  const closeClaimReserves = (confirmed, finalizeAfterClose) => {
+    const claim = currentClaimRef.current;
+    const hasBalance = hasOpenReserveBalance(claim);
+    if (!claim || (!finalizeAfterClose && !canEdit(claim)) || !hasBalance) {
       setReserveError('No hay saldos de reservas disponibles para cerrar.');
       return Promise.resolve(false);
     }
     if (confirmed !== true) return Promise.resolve(false);
+    const claimId = Number(claim.id);
     return runReserveOperation('ExeChain', {
       chain: 'cmdClaimReserveClosing',
-      context: JSON.stringify({ claimId: Number(claim.id) })
-    }, 'Reservas cerradas');
+      context: JSON.stringify({ claimId: claimId })
+    }, 'Reservas cerradas').then((outcome) => {
+      if (!outcome || !finalizeAfterClose) return outcome;
+      return finalizeClaimAfterReserveClose(claimId);
+    });
   };
+
+  const confirmReserveClosingAfterFinalization = () => new Promise((resolve) => {
+    if (!Modal || typeof Modal.confirm !== 'function') {
+      resolve(false);
+      return;
+    }
+    Modal.confirm({
+      title: 'Cerrar reservas',
+      content: 'El reclamo tiene saldo de reservas. ¿Desea cerrar las reservas antes de continuar?',
+      okText: 'Sí, cerrar reservas',
+      cancelText: 'No',
+      onOk: () => closeClaimReserves(true, true).then(resolve, () => resolve(false)),
+      onCancel: () => resolve(false)
+    });
+  });
 
   const paymentPayoutId = (payment) => {
     const direct = numericValue(payment && payment.payoutId);
@@ -2677,13 +2742,14 @@ END CATCH;`;
     }).catch((caught) => { if (paymentCatalogCurrent(session) && session.version === version) session.error = caught.message; })
     .then(() => { if (paymentCatalogCurrent(session) && session.version === version) { session.loading = false; notifyPaymentCatalog(); } });
   };
-  const openPaymentCatalogs = (coverageId, payoutId) => {
+  const openPaymentCatalogs = (coverageId, payoutId, reserveType) => {
     const claim = currentClaimRef.current;
     if (!claim || !canEdit(claim)) return;
+    const requestedReserveType = String(reserveType || 'IN').trim().toUpperCase() === 'EX' ? 'EX' : 'IN';
     const session = { claim: claim, claimId: Number(claim.id), coverageId: Number(coverageId), version: 0,
       accountVersion: 0, sourceAccountVersion: 0, payoutId: payoutId, settlementError: '', type: 'BEN', beneficiaries: [], accounts: [],
       sourceAccounts: [], paymentTypes: [], methods: [], loading: false, sourceAccountLoading: false, methodsLoading: true,
-      error: '', sourceAccountError: '', methodsError: '', method: claim.paymentMethodCode || null,
+      error: '', sourceAccountError: '', methodsError: '', method: claim.paymentMethodCode || null, reserveType: requestedReserveType,
       paymentType: null, sourceAccountId: null, additionalBeneficiary: '', managementType: 'DIRECT' };
     paymentCatalogRef.current = session;
     notifyPaymentCatalog();
@@ -2716,6 +2782,9 @@ END CATCH;`;
           seen[code] = true;
           return Object.assign({}, row, { code: code });
         });
+        const expectedName = session.reserveType === 'EX' ? 'gastos siniestros' : 'pago siniestro';
+        const defaultPaymentType = session.paymentTypes.find((row) => String(row.name || '').trim().toLowerCase() === expectedName);
+        session.paymentType = defaultPaymentType ? defaultPaymentType.code : null;
       })]);
     }).catch((caught) => { if (paymentCatalogCurrent(session)) session.methodsError = caught.message; })
     .then(() => { if (paymentCatalogCurrent(session)) { session.methodsLoading = false; notifyPaymentCatalog(); } });
@@ -2996,6 +3065,66 @@ END CATCH;`;
     claim, payout, form, 'EX'
   );
 
+  const paymentFieldLiteral = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    const text = String(value == null ? '' : value).trim();
+    return /^-?\d+(\.\d+)?$/.test(text) ? text : "N'" + text.replace(/'/g, "''") + "'";
+  };
+
+  const createdClaimPaymentId = (result) => {
+    const rows = responseRows(result, 'la solicitud de pago');
+    const row = rows[0] || {};
+    return numericValue(row.id || row.paymentId || row.claimPaymentId
+      || (result && result.entity && result.entity.id));
+  };
+
+  const resolveClaimPaymentId = (result, claimId, payoutId) => {
+    const directId = createdClaimPaymentId(result);
+    if (directId !== null && directId > 0) return Promise.resolve(directId);
+    const requestedClaimId = numericValue(claimId), requestedPayoutId = numericValue(payoutId);
+    if (requestedClaimId === null || requestedPayoutId === null) {
+      return Promise.reject(new Error('La solicitud fue creada, pero la respuesta no incluyó su identificador.'));
+    }
+    return repositoryRequest('RepoClaimPayment', {
+      operation: 'GET',
+      filter: 'claimId = ' + requestedClaimId + ' AND payoutId = ' + requestedPayoutId,
+      orderBy: 'id',
+      orderDir: 'DESC',
+      size: 1,
+      page: 0
+    }).then((lookupResult) => {
+      const rows = responseRows(lookupResult, 'la solicitud de pago creada');
+      const paymentId = numericValue(rows[0] && rows[0].id);
+      if (paymentId === null || paymentId <= 0) {
+        throw new Error('La solicitud fue creada, pero no se pudo localizar por la reserva asociada.');
+      }
+      return paymentId;
+    });
+  };
+
+  const persistClaimPaymentFields = (result, form, claimId, payoutId) => {
+    const sourceAccountId = numericValue(form && form.sourceAccountId);
+    const paymentType = form && form.paymentType;
+    if (sourceAccountId === null || sourceAccountId <= 0 || paymentType == null
+      || String(paymentType).trim() === '') {
+      return Promise.reject(new Error('La solicitud fue creada, pero no se pudieron resolver Tipo de pago y Cuenta de origen.'));
+    }
+    return resolveClaimPaymentId(result, claimId, payoutId).then((paymentId) => {
+      return repositoryRequest('SetField', {
+        entity: 'ClaimPayment',
+        entityId: paymentId,
+        fieldValue: 'paymentType = ' + paymentFieldLiteral(paymentType)
+          + ', sourceAccountId = ' + sourceAccountId
+      }).then((updateResult) => {
+        if (!updateResult || updateResult.ok === false) {
+          throw new Error(updateResult && updateResult.msg
+            ? updateResult.msg : 'No fue posible guardar Tipo de pago y Cuenta de origen.');
+        }
+        return paymentId;
+      });
+    });
+  };
+
   const submitClaimPayment = (payoutId, form) => {
     const claim = currentClaimRef.current;
     const payout = claim && Array.isArray(claim.Payouts)
@@ -3013,11 +3142,11 @@ END CATCH;`;
       confirmedCommandResult(result, 'No fue posible ejecutar la solicitud de pago.');
       if (!mountedRef.current || paymentOperationRef.current !== context.operationId
         || routeClaimId() !== context.claimId) return false;
-      setCheckRequestModalOpen(false);
-      setPaymentReference('');
-      return refreshFinancialData(context.claimId).then(() => {
+      return persistClaimPaymentFields(result, form, context.claimId, payoutId).then(() => refreshFinancialData(context.claimId)).then(() => {
         if (!mountedRef.current || paymentOperationRef.current !== context.operationId
           || routeClaimId() !== context.claimId) return false;
+        setCheckRequestModalOpen(false);
+        setPaymentReference('');
         if (A.message && typeof A.message.success === 'function') A.message.success('Solicitud de pago registrada');
         return true;
       });
@@ -3048,11 +3177,11 @@ END CATCH;`;
       confirmedCommandResult(result, 'No fue posible ejecutar la solicitud de pago del gasto.');
       if (!mountedRef.current || paymentOperationRef.current !== context.operationId
         || routeClaimId() !== context.claimId) return false;
-      setExpenseCheckRequestModalOpen(false);
-      setPaymentReference('');
-      return refreshFinancialData(context.claimId).then(() => {
+      return persistClaimPaymentFields(result, form, context.claimId, payoutId).then(() => refreshFinancialData(context.claimId)).then(() => {
         if (!mountedRef.current || paymentOperationRef.current !== context.operationId
           || routeClaimId() !== context.claimId) return false;
+        setExpenseCheckRequestModalOpen(false);
+        setPaymentReference('');
         if (A.message && typeof A.message.success === 'function') A.message.success('Solicitud de gasto registrada');
         return true;
       });
@@ -3071,7 +3200,7 @@ END CATCH;`;
     include: [
       'Contact', 'Claimer', 'Stage', 'Process', 'Process.Pasos', 'Policy', 'Policy.Coverages',
       'Policy.Coverages.Benefits', 'Policy.Coverages.Claims', 'Policy.Exclusions',
-      'Policy.Beneficiaries', 'Policy.Holder', 'Policy.Product', 'Policy.Accounts',
+      'Policy.Beneficiaries', 'Policy.Holder', 'Policy.Payer', 'Policy.Product', 'Policy.Accounts',
       'Policy.Accounts.Movements', 'Payouts', 'Payments', 'InsuredEvent', 'Events',
       'FraudAnalysis', 'Requirements'
     ],
@@ -4509,14 +4638,17 @@ END CATCH;`;
   const loadAdjusters = (requestedClaimId) => {
     const claim = currentClaimRef.current;
     const claimIdValue = Number(requestedClaimId);
+    const isNewClaim = newClaimModeRef.current && claimIdValue === 0;
     if (adjusterLoadingRef.current || savingRef.current || stageSavingRef.current
-      || !mountedRef.current || !Number.isSafeInteger(claimIdValue) || claimIdValue <= 0
-      || !claim || Number(claim.id) !== claimIdValue || routeClaimId() !== claimIdValue) {
+      || !mountedRef.current || !Number.isSafeInteger(claimIdValue) || !isNewClaim && claimIdValue <= 0
+      || !claim || Number(claim.id) !== claimIdValue
+      || !isNewClaim && routeClaimId() !== claimIdValue) {
       return Promise.resolve();
     }
     const requestId = requestRef.current;
     const isCurrent = () => mountedRef.current && requestRef.current === requestId
-      && routeClaimId() === claimIdValue;
+      && (isNewClaim ? newClaimModeRef.current && currentClaimRef.current === claim
+        : routeClaimId() === claimIdValue);
     adjusterLoadingRef.current = true;
     setAdjusterLoading(true); setError('');
     return repositoryRequest('LoadEntities', {
@@ -4557,20 +4689,22 @@ END CATCH;`;
   const changeAdjuster = (contactId, contactName) => {
     const claim = currentClaimRef.current;
     const claimIdValue = claim ? Number(claim.id) : null;
+    const isNewClaim = newClaimModeRef.current && claimIdValue === 0;
     const numericId = Number(contactId);
     const idText = String(numericId);
     const requestedName = typeof contactName === 'string' ? contactName.trim() : '';
     const matches = adjusterOptionsRef.current.filter((option) => option && option.value === idText);
     const nameText = matches.length === 1 && matches[0].label === requestedName ? matches[0].label : '';
     if (adjusterLoadingRef.current || savingRef.current || stageSavingRef.current
-      || !mountedRef.current || !claim || routeClaimId() !== claimIdValue) return Promise.resolve();
+      || !mountedRef.current || !claim || !isNewClaim && routeClaimId() !== claimIdValue) return Promise.resolve();
     if (!Number.isSafeInteger(numericId) || numericId <= 0 || nameText === '') {
       setError('El ajustador no es válido.');
       return Promise.resolve();
     }
     const requestId = requestRef.current;
     const isCurrent = () => mountedRef.current && requestRef.current === requestId
-      && routeClaimId() === claimIdValue;
+      && (isNewClaim ? newClaimModeRef.current && currentClaimRef.current === claim
+        : routeClaimId() === claimIdValue);
     adjusterLoadingRef.current = true;
     setAdjusterLoading(true); setError('');
     return repositoryRequest('LoadEntity', {
@@ -4726,11 +4860,17 @@ END CATCH;`;
 
   const createNewClaim = () => {
     const claim = currentClaimRef.current;
-    const values = draftRef.current;
     const policy = claim && claim.Policy;
-    if (!newClaimModeRef.current || !claim || !values || !policy) return Promise.resolve();
+    if (!newClaimModeRef.current || !claim || !draftRef.current || !policy) return Promise.resolve();
+    if (customFormsStatusRef.current === 'loading' || customFormsStatusRef.current === 'rendering') {
+      setActiveTab('custom');
+      setError('Espere a que terminen de cargar los formularios personalizados antes de crear el reclamo.');
+      return Promise.resolve();
+    }
     let entity;
     try {
+      if (customFormsStatusRef.current === 'ready') collectRenderedCustomForms();
+      const values = draftRef.current;
       const eligibleCoverages = (Array.isArray(policy.Coverages) ? policy.Coverages : [])
         .map((coverage) => Number(coverage && coverage.id))
         .filter((id, index, ids) => Number.isSafeInteger(id) && id > 0 && ids.indexOf(id) === index)
@@ -4764,6 +4904,9 @@ END CATCH;`;
       }
       const notification = notificationDate === occurrenceDate
         ? occurrence : notificationDate + 'T00:00:00Z';
+      let dynamicForms = customFormsRef.current.length
+        ? serializeCustomForms(null, customFormsRef.current) : null;
+      dynamicForms = extraMerge(dynamicForms, claim, values, touchedRef.current);
       entity = buildCreate({
         lifePolicyId: claim.lifePolicyId || policy.id,
         claimerId: claimantId,
@@ -4775,7 +4918,7 @@ END CATCH;`;
         occurrence: occurrence,
         notification: notification,
         description: values.description || '',
-        jCustomForms: null,
+        jCustomForms: dynamicForms,
         elegibleCoverages: eligibleCoverages
       });
     } catch (validationError) {
@@ -4908,6 +5051,11 @@ END CATCH;`;
           period: time.period,
           description: nextClaim.description
         }));
+        const finalizingWithOpenReserves = touched.stageCode
+          && !claimIsFinalized(original)
+          && claimIsFinalized(nextClaim)
+          && hasOpenReserveBalance(nextClaim);
+        if (finalizingWithOpenReserves) return confirmReserveClosingAfterFinalization();
         return true;
       })
       .catch((caughtError) => {
@@ -4930,6 +5078,10 @@ END CATCH;`;
       && Number(currentClaimRef.current.id) === requestedClaimId;
     const preservingNewClaim = newClaimModeRef.current && requestedClaimId === null
       && currentClaimRef.current && Number(currentClaimRef.current.id) === 0;
+    if (preservingNewClaim) {
+      if (mountedRef.current) setLoading(false);
+      return Promise.resolve();
+    }
     if (!preservingNewClaim) changeClaimContext(requestedClaimId);
     cancelClaimantSearch();
     cancelCatalogLoad();
@@ -5385,6 +5537,43 @@ END CATCH;`;
     ['Reservas', 'reserves'], ['Pagos', 'payments'], ['Recuperaciones', 'recoveries'],
     ['Gastos', 'expenses'], ['Saldo', 'balance']
   ];
+  const SearchIcon = () => (
+    <span role="img" aria-label="Ver detalle" className="resumen-search-icon">
+      <svg viewBox="0 0 1024 1024" focusable="false" aria-hidden="true">
+        <path d="M909.6 854.5 704.9 649.8a312.2 312.2 0 1 0-55.1 55.1l204.7 204.7a39 39 0 0 0 55.1-55.1ZM160 448a288 288 0 1 1 576 0 288 288 0 0 1-576 0Z" />
+      </svg>
+    </span>
+  );
+  const policySummaryLink = (field, value) => {
+    const claim = currentClaimRef.current || {};
+    const policy = claim.Policy || {};
+    const targetId = field === 'policyNumber'
+      ? firstValue(policy.id, claim.lifePolicyId)
+      : field === 'insured'
+        ? firstValue(claim.contactId, claim.Contact && claim.Contact.id)
+        : field === 'payer'
+          ? firstValue(policy.payerId, policy.Payer && policy.Payer.id, policy.PayerContact && policy.PayerContact.id)
+          : null;
+    const numericId = Number(targetId);
+    const text = displayValue(value);
+    if (text === EMPTY_VALUE || !Number.isSafeInteger(numericId) || numericId <= 0) return text;
+    const route = field === 'policyNumber' ? 'lifePolicy' : 'contact';
+    return <a className="resumen-summary-link" href={'/#/' + route + '/' + numericId}
+      target="_blank" rel="noopener noreferrer">{text}</a>;
+  };
+  const paymentRequestLink = (value) => {
+    const numericId = Number(value);
+    const text = displayValue(value);
+    if (text === EMPTY_VALUE || !Number.isSafeInteger(numericId) || numericId <= 0) return text;
+    return <a className="resumen-payment-request-link"
+      href={'https://sisos-latest.axxis-systems.net/#/payments/' + numericId}
+      target="_blank" rel="noopener noreferrer"
+      onClick={(event) => event.stopPropagation()}>{text}</a>;
+  };
+  const openPaymentRequestDetail = (row, kind) => {
+    if (!row || row.checkRequestId == null) return;
+    setPaymentRequestDetail({ row: row, kind: kind });
+  };
   const ReloadOutlinedIcon = () => (
     <span role="img" aria-label="reload" className="anticon anticon-reload">
       <svg viewBox="0 0 1024 1024" focusable="false" aria-hidden="true">
@@ -5484,7 +5673,7 @@ END CATCH;`;
       setPaymentError(selectedPayment ? nativePaymentGuidance(selectedPayment.paid, selectedPayment.status) || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
       return;
     }
-    openPaymentCatalogs(selectedPayment.coverageId, selectedPayment.id);
+    openPaymentCatalogs(selectedPayment.coverageId, selectedPayment.id, 'IN');
     setPaymentReference(selectedPayment.concept || '');
     setPaymentError('');
     setCheckRequestModalOpen(true);
@@ -5495,7 +5684,7 @@ END CATCH;`;
       setExpenseError(selectedExpense ? nativePaymentGuidance(selectedExpense.paid, selectedExpense.status) || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
       return;
     }
-    openPaymentCatalogs(selectedExpense.coverageId, selectedExpense.id);
+    openPaymentCatalogs(selectedExpense.coverageId, selectedExpense.id, 'EX');
     setPaymentReference(selectedExpense.concept || '');
     setExpenseError('');
     setExpenseCheckRequestModalOpen(true);
@@ -5706,7 +5895,14 @@ END CATCH;`;
             <td className="resumen-cell-number">{formatGridAmount(row.paid)}</td>
             <td className="resumen-cell-number">{formatGridAmount(row.available)}</td>
             <td>{displayValue(formatDate(row.date))}</td><td>{displayValue(row.beneficiary)}</td>
-            <td className="resumen-financial-check-request">{displayValue(row.checkRequestId)}</td>
+            <td className="resumen-financial-check-request">
+              {paymentRequestLink(row.checkRequestId)}
+              {row.checkRequestId != null ? <Button type="link" size="small"
+                className="resumen-payment-request-detail"
+                onClick={(event) => { event.stopPropagation(); openPaymentRequestDetail(row, config.key); }}>
+                <SearchIcon />
+              </Button> : null}
+            </td>
             <td>{displayValue(row.payment && row.payment.reference)}</td>
             <td>{[0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
             <td><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
@@ -5813,7 +6009,8 @@ END CATCH;`;
           {paymentCatalog && paymentCatalog.settlementError ? <div className="resumen-reserve-error">{paymentCatalog.settlementError}</div> : null}
           {paymentCatalog && (paymentCatalog.error || paymentCatalog.methodsError || paymentCatalog.sourceAccountError) ? <div className="resumen-reserve-error">
             {paymentCatalog.error || paymentCatalog.methodsError || paymentCatalog.sourceAccountError}
-            <Button size="small" disabled={paymentSaving} onClick={() => openPaymentCatalogs(paymentCatalog.coverageId, paymentCatalog.payoutId)}>Reintentar</Button></div> : null}
+            <Button size="small" disabled={paymentSaving} onClick={() => openPaymentCatalogs(paymentCatalog.coverageId,
+              paymentCatalog.payoutId, paymentCatalog.reserveType)}>Reintentar</Button></div> : null}
           <div className="resumen-reserve-input"><label>Referencia</label><Input size="small" maxLength={250}
             disabled={paymentSaving} value={paymentReference}
             onChange={(event) => setPaymentReference(event.target.value)} /></div>
@@ -5830,6 +6027,42 @@ END CATCH;`;
               onClick={config.submitCheck}>Ejecutar solicitud</Button>
           </div>
         </div>
+      </Modal>
+      <Modal title={paymentRequestDetail && paymentRequestDetail.kind === config.key
+        ? 'Detalle de solicitud de cheque ' + displayValue(paymentRequestDetail.row.checkRequestId)
+        : 'Detalle de solicitud de cheque'}
+        visible={!!paymentRequestDetail && paymentRequestDetail.kind === config.key}
+        footer={<div className="resumen-reserve-actions"><Button size="small"
+          onClick={() => setPaymentRequestDetail(null)}>Cerrar</Button></div>}
+        destroyOnClose onCancel={() => setPaymentRequestDetail(null)}>
+        {paymentRequestDetail && paymentRequestDetail.kind === config.key ? (() => {
+          const detail = paymentRequestDetail.row;
+          const payment = detail.payment || {};
+          const beneficiaryType = PAYMENT_TYPES.find((item) => item.value === payment.beneficiaryType);
+          const status = [0, 2].indexOf(Number(detail.status)) !== -1
+            ? 'Pendiente de aprobación' : detail.available > 0 ? 'Aprobado — disponible' : 'Aplicado';
+          return <div className="resumen-payment-request-detail-grid">
+            <div><span>Solicitud</span><strong>{displayValue(detail.checkRequestId)}</strong></div>
+            <div><span>Movimiento</span><strong>{displayValue(detail.id)}</strong></div>
+            <div><span>Tipo</span><strong>{config.key === 'expenses' ? 'Gasto' : 'Pago'}</strong></div>
+            <div><span>Tipo de beneficiario</span><strong>{displayValue(beneficiaryType && beneficiaryType.label || payment.beneficiaryType)}</strong></div>
+            <div><span>Beneficiario</span><strong>{displayValue(detail.beneficiary)}</strong></div>
+            <div><span>Beneficiario adicional</span><strong>{displayValue(payment.additionalBeneficiary)}</strong></div>
+            <div><span>Cobertura</span><strong>{displayValue(detail.coverage)}</strong></div>
+            <div><span>Objeto afectado</span><strong>{displayValue(detail.affectedObject)}</strong></div>
+            <div><span>Monto de la solicitud</span><strong>{formatGridAmount(firstValue(payment.total, payment.amount, detail.paid))}</strong></div>
+            <div><span>Cuenta del beneficiario</span><strong>{displayValue(firstValue(payment.accountNo, payment.accountNumber,
+              payment.accountId != null ? '#' + payment.accountId : null))}</strong></div>
+            <div><span>Cuenta de origen</span><strong>{displayValue(firstValue(payment.sourceAccountNo, payment.sourceAccountNumber,
+              payment.sourceAccountId != null ? '#' + payment.sourceAccountId : null))}</strong></div>
+            <div><span>Método de pago</span><strong>{displayValue(firstValue(payment.paymentMethodName, payment.paymentMethodCode))}</strong></div>
+            <div><span>Tipo de pago</span><strong>{displayValue(firstValue(payment.paymentTypeName, payment.paymentType))}</strong></div>
+            <div><span>Fecha</span><strong>{displayValue(formatDate(detail.date))}</strong></div>
+            <div><span>Referencia</span><strong>{displayValue(payment.reference)}</strong></div>
+            <div><span>Estado</span><strong>{status}</strong></div>
+            <div className="resumen-payment-request-detail-wide"><span>Concepto</span><strong>{displayValue(detail.concept)}</strong></div>
+          </div>;
+        })() : null}
       </Modal>
     </section>
   );
@@ -5887,6 +6120,8 @@ END CATCH;`;
   }, [claimId, newClaimSelectedPolicy]);
 
   React.useEffect(() => {
+    if (newClaimModeRef.current && claimId == null && currentClaimRef.current
+      && Number(currentClaimRef.current.id) === 0) return;
     loadClaim(claimId).then(() => Promise.all([
       loadAdjusters(claimId), loadClaimCatalogs(claimId)
     ]));
@@ -6106,6 +6341,7 @@ END CATCH;`;
        .resumen-shell .resumen-header-icon{width:6px;height:30px;flex:0 0 6px;border-radius:3px;background:var(--rz-brand)}
        .resumen-shell .resumen-header-icon:before,.resumen-shell .resumen-header-icon:after{content:none}
        .resumen-shell .resumen-title{margin:0;color:var(--rz-brand-dark);font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.3}
+       .resumen-shell .resumen-header-claim-number{color:var(--rz-muted);font-size:12px;font-weight:600;white-space:nowrap}
        .resumen-shell .resumen-process-id{color:var(--rz-muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
        .resumen-shell .resumen-status{flex:0 0 auto;margin-bottom:4px}
       .resumen-shell .resumen-loading{display:flex;align-items:center;gap:8px;padding:4px 8px;color:var(--rz-brand-dark);background:var(--rz-brand-soft);border:1px solid #c7d9f2;border-radius:6px}
@@ -6122,6 +6358,8 @@ END CATCH;`;
       .resumen-shell .resumen-valuation .resumen-valuation-row{padding:1px 4px 1px 0;font-size:12.5px;line-height:19px}
       .resumen-shell .resumen-summary-label{flex:0 0 auto;color:var(--rz-muted);font-weight:500;white-space:nowrap}
       .resumen-shell .resumen-summary-value{min-width:0;color:var(--rz-accent);font-weight:600;overflow-wrap:anywhere}
+      .resumen-shell .resumen-summary-link{color:inherit;text-decoration:none}
+      .resumen-shell .resumen-summary-link:hover{text-decoration:underline}
       .resumen-shell .resumen-amount{min-width:0;color:var(--rz-ink);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
       .resumen-shell .resumen-valuation-row{justify-content:space-between;gap:18px;padding:3px 0}
       .resumen-shell .resumen-amount{text-align:right;white-space:nowrap}
@@ -6219,6 +6457,16 @@ END CATCH;`;
       .resumen-shell .resumen-financial-payment-id{width:52px;max-width:52px}
       .resumen-shell .resumen-financial-coverage,.resumen-shell .resumen-financial-affected{width:180px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .resumen-shell .resumen-financial-check-request{text-align:center}
+      .resumen-shell .resumen-payment-request-link{color:var(--rz-accent);font-weight:600;text-decoration:none}
+      .resumen-shell .resumen-payment-request-link:hover{text-decoration:underline}
+      .resumen-shell .resumen-payment-request-detail{height:auto;padding:0 4px;color:var(--rz-accent);font-size:11px}
+      .resumen-shell .resumen-search-icon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;vertical-align:-2px}
+      .resumen-shell .resumen-search-icon svg{width:14px;height:14px;fill:currentColor}
+      .resumen-payment-request-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
+      .resumen-payment-request-detail-grid>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+      .resumen-payment-request-detail-grid span{color:var(--rz-muted);font-size:12px}
+      .resumen-payment-request-detail-grid strong{font-weight:600;overflow-wrap:anywhere}
+      .resumen-payment-request-detail-wide{grid-column:1/-1}
       .resumen-shell .resumen-data-table th{position:sticky;top:0;z-index:1;padding:5px 8px;text-align:left;white-space:nowrap;color:#262626;background:#bfbfbf;border-right:1px solid #cbd1d8;border-bottom:1px solid #cbd1d8;font-weight:700}
       .resumen-shell .resumen-data-table th:last-child{border-right:0}
       .resumen-shell .resumen-data-table td{padding:5px 8px;white-space:nowrap;border:0;border-bottom:1px solid #cbd1d8;font-variant-numeric:tabular-nums}
@@ -6255,19 +6503,26 @@ END CATCH;`;
       .resumen-affected-modal .rendered-form>.row>[class*="col-"]{position:relative;width:100%;min-height:1px;padding-right:8px;padding-left:8px}
       @media(min-width:768px){.resumen-affected-modal .rendered-form>.row>.col-md-4{flex:0 0 33.333333%;max-width:33.333333%}.resumen-affected-modal .rendered-form>.row>.col-md-6{flex:0 0 50%;max-width:50%}.resumen-affected-modal .rendered-form>.row>.col-md-8{flex:0 0 66.666667%;max-width:66.666667%}.resumen-affected-modal .rendered-form>.row>.col-md-12{flex:0 0 100%;max-width:100%}}
       .resumen-shell .resumen-history{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;gap:7px}
-      .resumen-shell .resumen-history .resumen-table-wrap{flex:1 1 auto;min-height:90px}
+      .resumen-shell .resumen-coverage .resumen-coverage-table-wrap{flex:0 1 210px;min-height:0;max-height:210px;overflow:auto}
+      .resumen-shell .resumen-coverage .resumen-history{flex:1 1 auto;min-height:220px}
+      .resumen-shell .resumen-history .resumen-table-wrap{flex:1 1 auto;min-height:220px;max-height:none;overflow:auto}
+      .resumen-shell .resumen-history .resumen-history-table-wrap{min-height:220px}
       .resumen-shell .resumen-history .resumen-data-table{min-width:820px}
        .resumen-shell .resumen-custom{display:flex;flex:1 1 auto;min-height:180px;flex-direction:column}
        .resumen-shell .resumen-custom-preload{display:none}
-      .resumen-shell .resumen-affected{gap:16px}
+      .resumen-shell .resumen-affected{gap:7px}
       .resumen-shell .resumen-affected h3,.resumen-shell .resumen-affected p{margin:0}
-      .resumen-shell .resumen-affected-toolbar{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--rz-line);border-radius:6px;background:#f8fbff}
-      .resumen-shell .resumen-affected-toolbar h3{flex:0 0 auto;color:var(--rz-ink);font-size:14px}
+      .resumen-shell .resumen-affected-toolbar{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--rz-line);border-radius:6px;background:#f8fbff}
+      .resumen-shell .resumen-affected-toolbar h3{flex:0 0 auto;color:var(--rz-ink);font-size:13px}
       .resumen-shell .resumen-affected-toolbar p{flex:1 1 auto;color:var(--rz-muted);font-size:12px}
       .resumen-shell .resumen-affected-toolbar .ant-btn{flex:0 0 auto}
       .resumen-shell .resumen-affected .resumen-reserve-input>label{display:block;margin-bottom:6px;color:var(--rz-muted);font-weight:500}
       .resumen-shell .resumen-affected .resumen-reserve-actions{flex-wrap:wrap;gap:10px}
-      .resumen-shell .resumen-affected-block{display:flex;flex-direction:column;gap:12px;margin-top:8px}
+      .resumen-shell .resumen-affected-block{display:flex;flex-direction:column;gap:5px;margin-top:2px}
+      .resumen-shell .resumen-affected-available-block{flex:0 1 220px;min-height:0;max-height:220px}
+      .resumen-shell .resumen-affected-available-block .resumen-affected-available-table-wrap{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}
+      .resumen-shell .resumen-affected-registered-block{flex:1 1 auto;min-height:180px}
+      .resumen-shell .resumen-affected-registered-block .resumen-affected-registered-table-wrap{flex:1 1 auto;min-height:180px;max-height:none;overflow:auto}
       .resumen-shell .resumen-affected-table{min-width:680px}
       .resumen-shell .resumen-affected-list{display:grid;gap:12px;margin:0;padding:0;list-style:none}
       .resumen-shell .resumen-affected-list>li{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px}
@@ -6313,7 +6568,10 @@ END CATCH;`;
     <div ref={shellRef} className="resumen-shell">
       <header className="resumen-header">
         <span className="resumen-header-icon" aria-hidden="true" />
-        <h2 className="resumen-title">Información Resumen del Reclamo</h2>
+        <h2 className="resumen-title">Información Resumen del Reclamo
+          {!newClaimMode && claimId != null ? ' ' + claimId + '' : ''}</h2>
+        {!newClaimMode && claimId != null && claimDetails.claimNumber
+          ? <span className="resumen-header-claim-number">Nº Reclamo {displayValue(claimDetails.claimNumber)}</span> : null}
         <ClaimWorkflow key={claimId || 'new'} claim={currentClaimRef.current} loading={loading}
           isCurrent={() => mountedRef.current && routeClaimId() === claimId}
           isDirty={() => dirtyRef.current}
@@ -6425,7 +6683,7 @@ END CATCH;`;
                   {fields.map((field) => (
                     <div className="resumen-summary-field" key={field[1]}>
                       <span className="resumen-summary-label">{field[0]}:</span>
-                      <span className="resumen-summary-value">{displayValue(claimSummary.policy[field[1]])}</span>
+                      <span className="resumen-summary-value">{policySummaryLink(field[1], claimSummary.policy[field[1]])}</span>
                     </div>
                   ))}
                 </Col>
@@ -6600,8 +6858,8 @@ END CATCH;`;
               action={<Button size="small" onClick={loadAffectedFormInstances}>Reintentar</Button>} /> : null}
             {affected.saveMessage ? <Alert type="info" message={affected.saveMessage} /> : null}
             {affected.loaded ? <React.Fragment>
-              <div className="resumen-affected-block"><h3>Objetos disponibles</h3>
-                {!Object.keys(affected.rules).length ? <p>No hay formularios de objetos configurados para las coberturas de esta póliza.</p> : <div className="resumen-table-wrap"><table className="resumen-data-table resumen-affected-table">
+              <div className="resumen-affected-block resumen-affected-available-block"><h3>Objetos disponibles</h3>
+                {!Object.keys(affected.rules).length ? <p>No hay formularios de objetos configurados para las coberturas de esta póliza.</p> : <div className="resumen-table-wrap resumen-affected-available-table-wrap"><table className="resumen-data-table resumen-affected-table">
                   <thead><tr><th>Cobertura</th><th>Tipo de objeto</th><th className="resumen-cell-number">Registrados</th><th>Acción</th></tr></thead>
                   <tbody>{coverageRows.filter((coverage) => affected.rules[coverage.id]).reduce((rows, coverage) => rows.concat(
                     affected.rules[coverage.id].map((rule) => {
@@ -6617,8 +6875,8 @@ END CATCH;`;
                   ), [])}</tbody>
                 </table></div>}
               </div>
-              <div className="resumen-affected-block"><h3>Objetos registrados</h3>
-              {!affected.saved.length ? <p>No hay objetos afectados registrados en este reclamo.</p> : <div className="resumen-table-wrap"><table className="resumen-data-table resumen-affected-table">
+              <div className="resumen-affected-block resumen-affected-registered-block"><h3>Objetos registrados</h3>
+              {!affected.saved.length ? <p>No hay objetos afectados registrados en este reclamo.</p> : <div className="resumen-table-wrap resumen-affected-registered-table-wrap"><table className="resumen-data-table resumen-affected-table">
                 <thead><tr><th>Cobertura</th><th>Tipo de objeto</th><th>Referencia</th><th>Información registrada</th><th>Acción</th></tr></thead>
                 <tbody>{affected.saved.map((entry) => <tr key={entry.key}>
                   <td>{(coverageRows.find((row) => row.id === entry.coverageId) || {}).name || 'Cobertura no disponible'}</td>
@@ -6648,7 +6906,7 @@ END CATCH;`;
               <Button size="small" loading={sectionRefreshing} disabled={sectionRefreshing || reserveSaving}
                 onClick={() => refreshSection(() => refreshReserveData(claimId), setReserveError)}><ReloadOutlinedIcon /> Refrescar</Button>
             </div>
-            <div className="resumen-table-wrap">
+            <div className="resumen-table-wrap resumen-coverage-table-wrap">
               <table className="resumen-data-table">
                 <thead><tr>
                   <th>ID</th><th>Cobertura</th><th>Desde</th><th>Hasta</th>
@@ -6694,7 +6952,7 @@ END CATCH;`;
                   okText="Aceptar" cancelText="Cancelar"
                   placement="topRight"
                   disabled={closeReservesDisabled}
-                  onConfirm={() => closeClaimReserves(true)}>
+                  onConfirm={() => closeClaimReserves(true, true)}>
                   <Button size="small" danger loading={reserveSaving}
                     disabled={closeReservesDisabled}>
                     Cerrar reservas
@@ -6755,7 +7013,7 @@ END CATCH;`;
 
             <div className="resumen-history">
               <SectionTitle>Detalle de reservas{selectedCoverage ? ' — ' + selectedCoverage.name : ''}</SectionTitle>
-              <div className="resumen-table-wrap"><table className="resumen-data-table">
+              <div className="resumen-table-wrap resumen-history-table-wrap"><table className="resumen-data-table">
                 <thead><tr><th>No. reserva</th><th>Fecha</th><th>Movimiento</th><th>Tipo</th><th>Objeto afectado</th>
                   <th className="resumen-cell-number">Monto</th><th>Concepto</th><th>Creador</th><th>Estado</th><th>Reaseguro</th></tr></thead>
                 <tbody>{selectedReserveHistory.length ? selectedReserveHistory.map((item, index) => {
