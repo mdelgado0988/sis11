@@ -1062,6 +1062,7 @@
       const deductible = numericValue(coverage.deductible);
       return {
         id: id,
+        code: String(firstValue(coverage.code, coverage.coverageCode, coverage.number, id)),
         name: String(firstValue(coverage.name, coverage.description, coverage.code, 'Cobertura ' + id)),
         start: formatDate(firstValue(coverage.start, policy.start)),
         end: formatDate(firstValue(coverage.end, policy.end)),
@@ -6860,13 +6861,13 @@ END CATCH;`;
             {affected.loaded ? <React.Fragment>
               <div className="resumen-affected-block resumen-affected-available-block"><h3>Objetos disponibles</h3>
                 {!Object.keys(affected.rules).length ? <p>No hay formularios de objetos configurados para las coberturas de esta póliza.</p> : <div className="resumen-table-wrap resumen-affected-available-table-wrap"><table className="resumen-data-table resumen-affected-table">
-                  <thead><tr><th>Cobertura</th><th>Tipo de objeto</th><th className="resumen-cell-number">Registrados</th><th>Acción</th></tr></thead>
+                  <thead><tr><th>Código</th><th>Cobertura</th><th>Tipo de objeto</th><th className="resumen-cell-number">Registrados</th><th>Acción</th></tr></thead>
                   <tbody>{coverageRows.filter((coverage) => affected.rules[coverage.id]).reduce((rows, coverage) => rows.concat(
                     affected.rules[coverage.id].map((rule) => {
                       const count = affected.saved.filter((entry) => entry.coverageId === coverage.id && entry.formId === rule.formId).length;
                       const reachedLimit = rule.max !== null && count >= rule.max;
                       return <tr key={coverage.id + '-' + rule.formId}>
-                        <td>{coverage.name}</td><td>{rule.description}</td>
+                        <td>{coverage.code}</td><td>{coverage.name}</td><td>{rule.description}</td>
                         <td className="resumen-cell-number">{rule.max !== null ? count + ' / ' + rule.max : count}</td>
                         <td><Button size="small" type="primary" disabled={!canEdit(currentClaimRef.current) || !!affected.write || reachedLimit}
                           onClick={() => openAffectedFormModal(coverage.id, null, rule)}>Agregar</Button></td>
@@ -6909,7 +6910,7 @@ END CATCH;`;
             <div className="resumen-table-wrap resumen-coverage-table-wrap">
               <table className="resumen-data-table">
                 <thead><tr>
-                  <th>ID</th><th>Cobertura</th><th>Desde</th><th>Hasta</th>
+                  <th>Código</th><th>Cobertura</th><th>Desde</th><th>Hasta</th>
                   <th className="resumen-cell-number">Monto</th>
                   <th className="resumen-cell-number">Disponible</th>
                   <th className="resumen-cell-number">R. de pago</th>
@@ -6925,7 +6926,7 @@ END CATCH;`;
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') setSelectedCoverageId(row.id);
                     }}>
-                    <td>{row.id}</td><td>{row.name}</td><td>{displayValue(row.start)}</td><td>{displayValue(row.end)}</td>
+                    <td>{row.code}</td><td>{row.name}</td><td>{displayValue(row.start)}</td><td>{displayValue(row.end)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.limit)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.available)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.paymentReserve)}</td>

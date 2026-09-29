@@ -19,7 +19,7 @@ var me = this;
 (function () {
 
   const NS = "__frmOAAseguradoColectivo";
-  const MARK = "colNroFacturaReembolso";   // campo que identifica este formulario en la página
+  const MARK = "colNroPrestamo";   // campo que identifica este formulario en la página
   const STYLE_ID = "frm-oa-asegurado-colectivo-styles";
   const PAIS = "591";                      // Panamá
   const VACIA = "Seleccione…";
@@ -66,8 +66,8 @@ var me = this;
     asegurado: ['colAsegurado', 'colClienteColectivo'], cedula: ['colCedula'], nacimiento: ['colFechaNacimiento'],
     edad: ['colEdad'], notificacion: ['colFechaNotificacion', 'colFNotificacion'], tipoPrestamo: ['colTipoPrestamo'],
     monto: ['colMonto'], letra: ['colLetra'], saldo: ['colSaldo'], noSis: ['colNoSis'], noCobis: ['colNoCobis'],
-    sexo: ['colSexo'], edadIngreso: ['colEdadIngreso'], edadFallecimiento: ['colEdadFallecimiento'],
-    fechaFallecimiento: ['colFechaFallecimiento'], noPrestamo: ['colNoPrestamo', 'colNroFacturaReembolso'],
+    sexo: ['colSexo'], edadIngreso: ['colEdadIngreso'], edadFallecimiento: ['colFallecimiento'],
+    fechaFallecimiento: ['colFechaFallecimiento'], noPrestamo: ['colNoPrestamo', 'colNroPrestamo'],
     fechaInicial: ['colFechaInicialPrestamo', 'colFechaInicioPrestamo'],
     fechaFinal: ['colFechaFinalPrestamo', 'colFechaFinPrestamo'], sucursal: ['colSucursal'],
     provincia: ['colProvincia'], causa: ['colCausaFallecimiento'], razon: ['colRazonFallecimiento', 'colRazon']
@@ -141,7 +141,7 @@ var me = this;
   }
 
   function bloquearCalculados($form) {
-    ['edad', 'edadIngreso', 'edadFallecimiento'].forEach(clave => controles($form, clave)
+    ['edad', 'edadIngreso'].forEach(clave => controles($form, clave)
       .prop('readonly', true).attr('aria-readonly', 'true').addClass('oa-solo-lectura'));
   }
 
@@ -177,6 +177,7 @@ var me = this;
       visible($control, true);
       restaurarEtiqueta($form, clave);
     });
+    requerido(controles($form, 'edadFallecimiento'), false);
     const letra = controles($form, 'letra');
     if (letra.length && !valor($form, 'letra')) asignar($form, 'letra', '0');
   }
