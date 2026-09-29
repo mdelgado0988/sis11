@@ -284,8 +284,13 @@
   const [newClaimValidation, setNewClaimValidation] = React.useState({});
   const newClaimModeRef = React.useRef(false);
   const [newClaimLobOptions, setNewClaimLobOptions] = React.useState([]);
+  const [newClaimProductOptions, setNewClaimProductOptions] = React.useState([]);
+  const [newClaimProductLoading, setNewClaimProductLoading] = React.useState(false);
+  const newClaimProductRequest = React.useRef(0);
+  const [newClaimPolicyPage, setNewClaimPolicyPage] = React.useState(1);
+  const [newClaimPolicyTotal, setNewClaimPolicyTotal] = React.useState(0);
   const [newClaimFilters, setNewClaimFilters] = React.useState({
-    code: '', holderId: null, insuredId: null, lob: '', dates: null
+    code: '', holderId: null, insuredId: null, lob: '', product: '', dates: null
   });
   const newClaimCodeInput = React.useRef(null);
   const [newClaimContactOptions, setNewClaimContactOptions] = React.useState({ holder: [], insured: [] });
@@ -767,17 +772,60 @@
         });
     }, 350);
   };
+  const loadNewClaimProducts = (lobCode) => {
+    const requestId = newClaimProductRequest.current + 1;
+    newClaimProductRequest.current = requestId;
+    const normalizedLob = policySearchText(lobCode);
+    setNewClaimProductOptions([]);
+    setNewClaimFilters((current) => Object.assign({}, current, { product: '' }));
+    if (!normalizedLob) {
+      setNewClaimProductLoading(false);
+      return Promise.resolve();
+    }
+    setNewClaimProductLoading(true);
+    return exe('RepoProduct', {
+      operation: 'GET',
+      filter: "lobCode = '" + normalizedLob.replace(/'/g, "''") + "'"
+    }).then((result) => {
+      if (!mountedRef.current || requestId !== newClaimProductRequest.current) return;
+      if (!result || result.ok === false) throw new Error(result && result.msg
+        ? result.msg : 'No se pudieron cargar los productos.');
+      const seen = {};
+      setNewClaimProductOptions(responseRows(result, 'los productos').map((product) => {
+        const value = String(firstValue(product && product.code, product && product.id, '')).trim();
+        if (!value || seen[value]) return null;
+        seen[value] = true;
+        return { value: value, label: String(firstValue(product && product.name,
+          product && product.description, product && product.code, product && product.id, value)) };
+      }).filter(Boolean));
+    }).catch((caughtError) => {
+      if (mountedRef.current && requestId === newClaimProductRequest.current) {
+        setNewClaimProductOptions([]);
+        setNewClaimError(caughtError && caughtError.message
+          ? caughtError.message : 'No se pudieron cargar los productos.');
+      }
+    }).then(() => {
+      if (mountedRef.current && requestId === newClaimProductRequest.current) setNewClaimProductLoading(false);
+    });
+  };
   const openNewClaimModal = () => {
+    const preservedLob = policySearchText(newClaimFilters.lob);
     setNewClaimError('');
     setNewClaimRows([]);
+    setNewClaimPolicyPage(1);
+    setNewClaimPolicyTotal(0);
     newClaimCodeInput.current = null;
     newClaimContactRequests.current.holder += 1;
     newClaimContactRequests.current.insured += 1;
+    newClaimProductRequest.current += 1;
     setNewClaimContactOptions({ holder: [], insured: [] });
     setNewClaimContactLoading({ holder: false, insured: false });
-    setNewClaimFilters((current) => Object.assign({}, current, { holderId: null, insuredId: null }));
+    setNewClaimProductOptions([]);
+    setNewClaimProductLoading(false);
+    setNewClaimFilters((current) => Object.assign({}, current, { holderId: null, insuredId: null, product: '' }));
     setNewClaimSelectedPolicy(null);
     setNewClaimModalOpen(true);
+    if (preservedLob) loadNewClaimProducts(preservedLob);
     if (!newClaimLobOptions.length) {
       exe('RepoLob', { operation: 'GET' }).then((result) => {
         if (!mountedRef.current || !result || result.ok === false) return;
@@ -788,19 +836,24 @@
       }).catch(() => {});
     }
   };
-  const searchNewClaimPolicies = () => {
+  const searchNewClaimPolicies = (requestedPage) => {
+    const page = Number.isSafeInteger(Number(requestedPage)) && Number(requestedPage) > 0
+      ? Number(requestedPage) : 1;
     const code = policySearchText(newClaimCodeInput.current === null
       ? newClaimFilters.code : newClaimCodeInput.current);
     const holderId = Number(newClaimFilters.holderId);
     const insuredId = Number(newClaimFilters.insuredId);
     const lob = policySearchText(newClaimFilters.lob);
+    const product = policySearchText(newClaimFilters.product);
     const dates = newClaimFilters.dates || [];
     const from = policySearchDate(dates[0]);
     const to = policySearchDate(dates[1]);
     if (!code && !(Number.isSafeInteger(holderId) && holderId > 0)
-      && !(Number.isSafeInteger(insuredId) && insuredId > 0) && !lob && !from && !to) {
+      && !(Number.isSafeInteger(insuredId) && insuredId > 0) && !lob && !product && !from && !to) {
       setNewClaimError('Indique al menos un criterio de búsqueda.');
       setNewClaimRows([]);
+      setNewClaimPolicyPage(1);
+      setNewClaimPolicyTotal(0);
       return Promise.resolve();
     }
     const conditions = ['active = 1'];
@@ -810,6 +863,7 @@
       conditions.push('id IN (SELECT lifePolicyId FROM Insured WHERE contactId = ' + insuredId + ')');
     }
     if (lob) conditions.push("[lob] = '" + lob.replace(/'/g, "''") + "'");
+    if (product) conditions.push("[productCode] = '" + product.replace(/'/g, "''") + "'");
     if (from) conditions.push("[end] >= '" + from + "T00:00:00Z'");
     if (to) conditions.push("[start] <= '" + to + "T23:59:59Z'");
     setNewClaimLoading(true);
@@ -818,11 +872,14 @@
       operation: 'GET',
       filter: conditions.join(' AND '),
       include: ['Holder', 'Insureds.Contact', 'Product', 'Lob', 'Branch', 'Coverages'],
-      orderBy: 'id', orderDir: 'DESC', page: 0, size: 50
+      orderBy: 'id', orderDir: 'DESC', page: page - 1, size: 15
     }).then((result) => {
       if (!mountedRef.current) return;
       const rows = responseRows(result, 'las pólizas');
       const filtered = rows;
+      const total = Number(result && result.total);
+      setNewClaimPolicyPage(page);
+      setNewClaimPolicyTotal(Number.isFinite(total) ? total : filtered.length);
       setNewClaimRows(filtered.map((policy) => Object.assign({}, policy, {
         __insuredLabel: policyContactNames(policy),
         __lobLabel: firstValue(policy && policy.Lob && policy.Lob.name, policy && policy.lobName,
@@ -836,6 +893,7 @@
     }).catch((caughtError) => {
       if (mountedRef.current) {
         setNewClaimRows([]);
+        setNewClaimPolicyTotal(0);
         setNewClaimError(caughtError && caughtError.message ? caughtError.message : 'No se pudieron consultar las pólizas.');
       }
     }).finally(() => {
@@ -2123,7 +2181,11 @@ END CATCH;`;
   const recoverySessionCurrent = (session) => recovery.form === session && recoveryClaimCurrent(session.claim);
   const openRecoveryModal = () => {
     const claim = currentClaimRef.current;
-    if (!claim || !recoveryClaimCurrent(claim) || recovery.write || !recovery.typesLoaded || !recovery.types.length) return Promise.resolve(false);
+    if (!claim || !canEdit(claim) || !recoveryClaimCurrent(claim) || recovery.write
+      || !recovery.typesLoaded || !recovery.types.length) {
+      if (claim && !canEdit(claim)) setRecoveryError('Debe reabrir el reclamo antes de registrar una recuperación.');
+      return Promise.resolve(false);
+    }
     if (recoveryBlocked(claim)) {
       setRecoveryError('Esta configuración requiere el módulo nativo.');
       return Promise.resolve(false);
@@ -2231,9 +2293,12 @@ END CATCH;`;
     const claim = currentClaimRef.current;
     const claimIdValue = claim && Number(claim.id);
     if (recovery.write || !claim || !recoveryClaimCurrent(claim)
+      || !canEdit(claim)
       || recovery.form !== form || form.claim !== claim || !form.currenciesLoaded || !recovery.typesLoaded
       || recoveryBlocked(claim)) {
-      setRecoveryError('La recuperación ya no está disponible para registrar.');
+      setRecoveryError(claim && !canEdit(claim)
+        ? 'Debe reabrir el reclamo antes de registrar una recuperación.'
+        : 'La recuperación ya no está disponible para registrar.');
       return Promise.resolve(false);
     }
     let entity;
@@ -3143,9 +3208,16 @@ END CATCH;`;
     }).catch(() => false);
   };
 
-  const canEdit = (claim) => !!claim && !claim.closed;
   const isValidStageCode = (value) => CLAIM_STAGE_OPTIONS.some((option) => option.value === value);
   const claimStageCode = (claim) => claim && claim.stageCode != null ? String(claim.stageCode) : null;
+  const claimIsFinalized = (claim) => {
+    if (!claim) return false;
+    const stageCode = String(firstValue(claim.stageCode, claim.Stage && claim.Stage.code, '')).trim().toUpperCase();
+    const closed = claim.closed === true || String(claim.closed).trim().toLowerCase() === 'true';
+    return closed || stageCode === '7' || stageCode === 'F';
+  };
+  const canEdit = (claim) => !!claim && !claimIsFinalized(claim);
+  const canSaveClaim = (claim) => !!claim;
 
   const positiveIdText = (value) => {
     if (typeof value !== 'number' && typeof value !== 'string') return null;
@@ -3379,7 +3451,7 @@ END CATCH;`;
   }, [claimId, draft && draft.extra_cmbProvincia]);
   const extraControl = (name) => {
     const f = EXTRA_FIELDS.find((field) => field.name === name);
-    const disabled = !editable || loading || saving || stageSaving || adjusterLoading || !extraDefinitionRef.current || !extraCommon(name) && !extraMotor(currentClaimRef.current);
+    const disabled = !generalEditable || !extraDefinitionRef.current || !extraCommon(name) && !extraMotor(currentClaimRef.current);
     const value = draft ? draft['extra_' + name] : f.type === 'checkbox-group' ? false : '';
     if (f.type === 'checkbox-group') return <Checkbox aria-label={f.label} disabled={disabled} checked={!!value} onChange={(e) => extraChange(name, e.target.checked)}>{f.label}</Checkbox>;
     if (f.type === 'select') {
@@ -3775,9 +3847,14 @@ END CATCH;`;
       if (field.type !== CLAIM_CUSTOM_FIELD_TYPES[field.name]) {
         throw new Error('El campo personalizado ' + field.name + ' no es compatible.');
       }
-      if (field.name === 'descripcion' && (!Array.isArray(field.userData)
-        || field.userData.length !== 1 || typeof field.userData[0] !== 'string')) {
-        throw new Error('El campo personalizado descripcion no tiene un valor editable compatible.');
+      if (field.name === 'descripcion') {
+        if (field.userData === undefined || field.userData === null
+          || Array.isArray(field.userData) && field.userData.length === 0) {
+          field.userData = [''];
+        } else if (!Array.isArray(field.userData)
+          || field.userData.length !== 1 || typeof field.userData[0] !== 'string') {
+          throw new Error('El campo personalizado descripcion no tiene un valor editable compatible.');
+        }
       }
     });
     return { outer: outer, fields: fields, serialized: typeof section === 'string' };
@@ -3789,7 +3866,7 @@ END CATCH;`;
       ? String(field.userData[0]) : '';
   };
 
-  const updateCustomClaimFields = (raw, changes) => {
+  const updateCustomClaimFields = (raw, changes, configuredForms) => {
     const form = readCustomClaimForm(raw);
     const names = Object.keys(changes || {});
     const adjusterNames = ['ajustadorName', 'ajustadorEmail', 'hiddenAjustador'];
@@ -3802,7 +3879,16 @@ END CATCH;`;
       if (name !== 'descripcion' && adjusterNames.indexOf(name) === -1) {
         throw new Error('El campo personalizado ' + name + ' no admite escritura.');
       }
-      const field = form.fields.find((item) => item && item.name === name);
+      let field = form.fields.find((item) => item && item.name === name);
+      if (!field && adjusterNames.indexOf(name) !== -1) {
+        const configuredForm = (configuredForms || []).find((item) => item && item.label === CLAIM_CUSTOM_SECTION);
+        const configuredField = configuredForm && configuredForm.fields
+          && configuredForm.fields.find((item) => item && item.name === name);
+        if (configuredField) {
+          field = Object.assign({}, configuredField, { userData: [changes[name]] });
+          form.fields.push(field);
+        }
+      }
       if (!field) throw new Error('Campo personalizado no compatible: ' + name + '.');
       const value = changes[name];
       if (typeof value !== 'string') {
@@ -3883,7 +3969,9 @@ END CATCH;`;
   };
 
   const buildUpdate = (claim, draftValue, touchedFields, formsSnapshot) => {
-    if (!canEdit(claim)) throw new Error('El reclamo está cerrado.');
+    if (!canSaveClaim(claim, touchedFields)) {
+      throw new Error('Debe reabrir el reclamo antes de modificar sus datos.');
+    }
     if (!draftValue) throw new Error('No hay cambios disponibles para guardar.');
     const entity = serializeEntity(claim);
     const originalDraft = createDraft(claim);
@@ -3957,6 +4045,10 @@ END CATCH;`;
       entity.InsuredEvent = selectedEvent;
       entity.insuredEvent = selectedEvent.code;
     }
+    let customFormsPayload = entity.jCustomForms;
+    if (touchedFields && touchedFields.customForms) {
+      customFormsPayload = serializeCustomForms(customFormsPayload, formsSnapshot || customFormsRef.current);
+    }
     if (observationsTouched || adjusterTouched) {
       const customChanges = {};
       if (observationsTouched) customChanges.descripcion = draftValue.additionalObservations;
@@ -3965,12 +4057,9 @@ END CATCH;`;
         customChanges.ajustadorEmail = draftValue.assignedToEmail;
         customChanges.hiddenAjustador = String(draftValue.assignedToCode);
       }
-      entity.jCustomForms = updateCustomClaimFields(claim.jCustomForms, customChanges);
+      customFormsPayload = updateCustomClaimFields(customFormsPayload, customChanges, formsSnapshot || customFormsRef.current);
     }
-    if (touchedFields && touchedFields.customForms) {
-      entity.jCustomForms = serializeCustomForms(entity.jCustomForms, formsSnapshot || customFormsRef.current);
-    }
-    entity.jCustomForms = extraMerge(entity.jCustomForms, claim, draftValue, touchedFields);
+    entity.jCustomForms = extraMerge(customFormsPayload, claim, draftValue, touchedFields);
     return entity;
   };
 
@@ -4015,7 +4104,7 @@ END CATCH;`;
   };
 
   const changeDraft = (field, value) => {
-    if (!draftRef.current || !canEdit(currentClaimRef.current)
+    if (!draftRef.current || !currentClaimRef.current
       || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current) return;
     const next = Object.assign({}, draftRef.current);
     next[field] = value;
@@ -4037,7 +4126,7 @@ END CATCH;`;
   };
 
   const changeCustomFormValue = (label, name, value) => {
-    if (!draftRef.current || !canEdit(currentClaimRef.current)
+    if (!draftRef.current || !currentClaimRef.current
       || savingRef.current || stageSavingRef.current) return;
     const form = customFormsRef.current.find((item) => item.label === label);
     const field = form && form.fields.find((item) => item && item.name === name);
@@ -4083,7 +4172,13 @@ END CATCH;`;
             const mapped = mappedFields[field.name];
             if (!mapped) return;
             const value = customClaimFieldValue(form, field.name);
-            if (nextDraft[mapped] !== value) {
+            const currentValue = nextDraft[mapped] === null || nextDraft[mapped] === undefined
+              ? '' : String(nextDraft[mapped]);
+            if (!value && currentValue) {
+              field.userData = [currentValue];
+              return;
+            }
+            if (currentValue !== value) {
               nextDraft[mapped] = value;
               touchedRef.current[field.name === 'descripcion' ? 'additionalObservations' : 'assignedTo'] = true;
             }
@@ -4166,7 +4261,7 @@ END CATCH;`;
       setClaimantSearchError('');
       return Promise.resolve();
     }
-    if (!mountedRef.current || !canEdit(claim) || routeClaimId() !== claimIdValue) {
+    if (!mountedRef.current || !claim || routeClaimId() !== claimIdValue) {
       return Promise.resolve();
     }
     cancelClaimantSearch();
@@ -4225,7 +4320,7 @@ END CATCH;`;
     const matches = claimantOptionsRef.current.filter((option) => option
       && option.value === value && option.label === name && !option.disabled);
     if (!value || matches.length !== 1 || !draftRef.current
-      || !mountedRef.current || !canEdit(currentClaimRef.current)
+      || !mountedRef.current || !currentClaimRef.current
       || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
       || routeClaimId() !== Number(currentClaimRef.current.id)) {
       if (mountedRef.current && value && matches.length !== 1) {
@@ -4355,7 +4450,7 @@ END CATCH;`;
       && option.value === code && !option.disabled);
     const catalog = eventCatalogRef.current;
     if (selected.length !== 1 || !catalog || !draftRef.current
-      || !canEdit(currentClaimRef.current) || savingRef.current || stageSavingRef.current
+      || !currentClaimRef.current || savingRef.current || stageSavingRef.current
       || adjusterLoadingRef.current || !newClaimModeRef.current
         && routeClaimId() !== Number(currentClaimRef.current.id)) {
       setError('La razón de evento seleccionada no es válida.');
@@ -4390,7 +4485,7 @@ END CATCH;`;
     const event = catalog && catalog.eventByCode[code];
     if (selected.length !== 1 || !event || event.disabled
       || !newClaimModeRef.current && event.mode !== claimTypeCode(currentClaimRef.current)
-      || !draftRef.current || !canEdit(currentClaimRef.current)
+      || !draftRef.current || !currentClaimRef.current
       || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
       || !newClaimModeRef.current && routeClaimId() !== Number(currentClaimRef.current.id)) {
       setError('El evento asegurado seleccionado no es válido.');
@@ -4468,7 +4563,7 @@ END CATCH;`;
     const matches = adjusterOptionsRef.current.filter((option) => option && option.value === idText);
     const nameText = matches.length === 1 && matches[0].label === requestedName ? matches[0].label : '';
     if (adjusterLoadingRef.current || savingRef.current || stageSavingRef.current
-      || !mountedRef.current || !canEdit(claim) || routeClaimId() !== claimIdValue) return Promise.resolve();
+      || !mountedRef.current || !claim || routeClaimId() !== claimIdValue) return Promise.resolve();
     if (!Number.isSafeInteger(numericId) || numericId <= 0 || nameText === '') {
       setError('El ajustador no es válido.');
       return Promise.resolve();
@@ -4560,7 +4655,7 @@ END CATCH;`;
       return;
     }
     if (!mountedRef.current || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
-      || !canEdit(currentClaimRef.current)) return;
+      || !currentClaimRef.current) return;
     if (!draftRef.current) return;
     const next = Object.assign({}, draftRef.current, { stageCode: stageCode });
     draftRef.current = next;
@@ -4578,7 +4673,7 @@ END CATCH;`;
     const stageCode = stageSelectionRef.current;
     const savingClaimId = claim ? Number(claim.id) : null;
     if (stageSavingRef.current || savingRef.current || adjusterLoadingRef.current || !mountedRef.current
-      || !canEdit(claim) || !Number.isSafeInteger(savingClaimId) || savingClaimId <= 0
+      || !claim || !Number.isSafeInteger(savingClaimId) || savingClaimId <= 0
       || routeClaimId() !== savingClaimId) return Promise.resolve();
     if (!isValidStageCode(stageCode)) {
       setError('El estado seleccionado no es válido.');
@@ -4723,7 +4818,8 @@ END CATCH;`;
     if (newClaimModeRef.current) return createNewClaim();
     if (savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
       || !mountedRef.current || !dirtyRef.current
-      || !canEdit(currentClaimRef.current) || routeClaimId() !== Number(currentClaimRef.current.id)) {
+      || !canSaveClaim(currentClaimRef.current, touchedRef.current)
+      || routeClaimId() !== Number(currentClaimRef.current.id)) {
       return Promise.resolve();
     }
     if (customFormsStatusRef.current !== 'ready') {
@@ -4779,6 +4875,8 @@ END CATCH;`;
         touchedRef.current = {};
         notifyRecordUpdated();
         const nextClaim = Object.assign({}, original, {
+          closed: claimIsFinalized(original) && !['7', 'F'].includes(String(savingDraft.stageCode).trim().toUpperCase())
+            ? false : original.closed,
           description: updatedEntity.description,
           occurrence: updatedEntity.occurrence,
           notification: updatedEntity.notification,
@@ -4792,6 +4890,7 @@ END CATCH;`;
         currentClaimRef.current = nextClaim;
         draftRef.current = savingDraft;
         setDraft(savingDraft);
+        setEditable(canEdit(nextClaim));
         setClaimStageSelection(savingDraft.stageCode);
         const time = occurrenceTime(nextClaim.occurrence);
         const stageLabel = (CLAIM_STAGE_OPTIONS.find((option) => option.value === savingDraft.stageCode) || {}).label
@@ -5150,6 +5249,11 @@ END CATCH;`;
     if (extension && !/\.[a-z0-9]{1,10}$/i.test(name)) name += '.' + extension[1];
     return name;
   };
+  const documentCanPreview = (blob) => {
+    const type = String(blob && blob.type || '').split(';')[0].trim().toLowerCase();
+    return type === 'application/pdf' || type === 'text/plain'
+      || type.indexOf('image/') === 0 || type.indexOf('audio/') === 0 || type.indexOf('video/') === 0;
+  };
   const downloadDocument = (id) => {
     const claim = documentScope();
     const row = documents.rows.find((item) => commentId(item.id) === commentId(id));
@@ -5159,6 +5263,14 @@ END CATCH;`;
     const scopeCurrent = documentGuard(claim, documents.revision);
     const current = () => scopeCurrent() && documents.downloading === operation
       && documents.rows.some((item) => item.id === row.id && item.url === row.url);
+    let documentWindow = null;
+    try { documentWindow = window.open('about:blank', '_blank'); } catch (error) { documentWindow = null; }
+    if (!documentWindow) {
+      documents.error = 'El navegador bloqueó la nueva pestaña. Permita ventanas emergentes para abrir el documento.';
+      notifyDocuments();
+      return Promise.resolve(false);
+    }
+    try { documentWindow.opener = null; } catch (error) { /* The tab may already be navigating. */ }
     documents.downloading = operation; documents.error = ''; notifyDocuments();
     let browserStage = false;
     return Promise.resolve().then(() => {
@@ -5181,20 +5293,19 @@ END CATCH;`;
       if (!blob || typeof blob.size !== 'number' || blob.size <= 0 || typeof blob.slice !== 'function') throw new Error('download-empty');
       browserStage = true;
       const objectUrl = window.URL.createObjectURL(blob);
-      let anchor; let clicked = false;
-      try {
-        anchor = window.document.createElement('a');
+      const fileName = documentDownloadName(row);
+      if (documentCanPreview(blob)) {
+        documentWindow.location.href = objectUrl;
+      } else {
+        const anchor = documentWindow.document.createElement('a');
         anchor.href = objectUrl;
-        anchor.download = documentDownloadName(row);
+        anchor.download = fileName;
         anchor.rel = 'noopener noreferrer';
-        window.document.body.appendChild(anchor);
-        anchor.click(); clicked = true;
-      } finally {
-        try { if (anchor) anchor.remove(); } finally {
-          if (clicked) window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
-          else window.URL.revokeObjectURL(objectUrl);
-        }
+        documentWindow.document.body.appendChild(anchor);
+        documentWindow.document.title = 'Descargando ' + fileName;
+        anchor.click();
       }
+      window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
       return true;
     }).catch((caught) => {
       if (current()) {
@@ -5205,7 +5316,11 @@ END CATCH;`;
           : http ? 'No se pudo descargar el archivo (HTTP ' + http + ').'
           : code === 'download-body' ? 'No se pudo leer el archivo recibido.'
           : code === 'download-empty' ? 'El archivo recibido está vacío o no es válido.'
+          : code === 'document-window' ? 'No se pudo abrir la nueva pestaña del documento.'
           : 'No se pudo conectar con el servicio de archivos.';
+      }
+      if (!browserStage && documentWindow && !documentWindow.closed) {
+        try { documentWindow.close(); } catch (error) { /* Ignore a tab closed by the browser. */ }
       }
       return false;
     }).then((result) => {
@@ -5323,6 +5438,7 @@ END CATCH;`;
     />
   );
   const isAutoClaim = extraMotor(currentClaimRef.current);
+  const generalEditable = !!draft && !loading && !saving && !stageSaving && !adjusterLoading;
   const selectedCoverage = coverageRows.find((row) => row.id === Number(selectedCoverageId)) || null;
   const closeReservesDisabled = !editable || reserveSaving
     || !coverageRows.some((row) => row.paymentReserve !== 0 || row.expenseReserve !== 0);
@@ -5962,21 +6078,25 @@ END CATCH;`;
     document.body.style.overflow = 'hidden';
     style.setAttribute('data-informacion-resumen-reclamo-style', 'true');
     style.innerHTML = `
-      .resumen-documents > .ant-alert { margin-bottom: 14px; }
-      .resumen-documents .resumen-document-heading { margin: 16px 0 8px; color: #595959; font-size: 16px; font-weight: 600; line-height: 1.5; }
-      .resumen-documents .resumen-document-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
-      .resumen-documents .resumen-document-toolbar .ant-btn { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; height: 30px; color: #1890ff; font-size: 14px; }
+      .resumen-documents > .ant-alert { margin-bottom: 4px; }
+      .resumen-documents .resumen-document-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; color: var(--rz-brand-dark); font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+      .resumen-documents .resumen-document-heading:before { content: ""; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 2px; background: var(--rz-accent); }
+      .resumen-documents .resumen-document-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 0 0 4px; padding: 4px; border: 1px solid var(--rz-line); border-radius: 6px; background: #f8fbff; }
+      .resumen-documents .resumen-document-toolbar .ant-btn { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; height: 26px; color: var(--rz-accent); font-size: 12px; border-radius: 5px; }
       .resumen-documents .resumen-document-toolbar .ant-btn[disabled] { color: #bfbfbf; }
       .resumen-documents .resumen-document-icon { width: 15px; height: 15px; flex: none; vertical-align: middle; }
-      .resumen-documents .resumen-document-upload { box-sizing: border-box; width: 366px; max-width: 100%; min-height: 200px; padding: 22px 14px 16px; margin-bottom: 12px; border: 1px dashed #d9d9d9; background: #fafafa; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
+      .resumen-documents .resumen-document-upload { box-sizing: border-box; width: 366px; max-width: 100%; min-height: 120px; padding: 12px 10px; margin-bottom: 4px; border: 1px dashed #b8c4d1; border-radius: 6px; background: #f8fbff; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
       .resumen-documents .resumen-document-upload:hover, .resumen-documents .resumen-document-upload:focus-visible { border-color: #40a9ff; background: #f0faff; outline: 2px solid #91d5ff; outline-offset: 2px; }
       .resumen-documents .resumen-document-upload[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
-      .resumen-documents .resumen-document-upload > .resumen-document-icon { width: 44px; height: 44px; color: #40a9ff; margin-bottom: 12px; }
-      .resumen-documents .resumen-document-upload-title { margin: 8px 0; color: #262626; font-size: 16px; line-height: 1.5; }
-      .resumen-documents .resumen-document-upload-hint { margin: 0; color: #8c8c8c; font-size: 14px; line-height: 1.6; }
-      .resumen-documents .ant-table { margin-top: 10px; }
-      .resumen-documents .ant-table-thead > tr > th { background: #fafafa; font-weight: 500; padding: 16px 12px; }
-      .resumen-documents .ant-table-tbody > tr > td { padding: 18px 12px; line-height: 1.6; vertical-align: middle; overflow-wrap: anywhere; }
+      .resumen-documents .resumen-document-upload > .resumen-document-icon { width: 32px; height: 32px; color: #40a9ff; margin-bottom: 4px; }
+      .resumen-documents .resumen-document-upload-title { margin: 4px 0; color: var(--rz-ink); font-size: 12px; line-height: 1.4; }
+      .resumen-documents .resumen-document-upload-hint { margin: 0; color: var(--rz-muted); font-size: 11px; line-height: 1.4; }
+      .resumen-documents .ant-table { margin-top: 4px; }
+      .resumen-documents .ant-table-container { border: 1px solid #cbd1d8; border-radius: 6px; overflow: hidden; }
+      .resumen-documents .ant-table-thead > tr > th { background: #bfbfbf; border-right: 1px solid #cbd1d8; border-bottom: 1px solid #cbd1d8; font-weight: 700; padding: 5px 8px; }
+      .resumen-documents .ant-table-tbody > tr > td { padding: 5px 8px; line-height: 18px; vertical-align: middle; border-bottom: 1px solid #cbd1d8; }
+      .resumen-documents .ant-table-tbody > tr:last-child > td { border-bottom: 0; }
+      .resumen-documents .resumen-document-cell-ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .resumen-documents .resumen-document-delete { color: #40a9ff; padding: 4px; }
       .resumen-documents .resumen-document-delete[disabled] { color: #bfbfbf; }
 
@@ -6060,6 +6180,7 @@ END CATCH;`;
       .resumen-new-claim-search{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px;margin-bottom:14px}
       .resumen-new-claim-search-field{min-width:0}
       .resumen-new-claim-search-field label{display:block;margin-bottom:4px;color:#60708a;font-size:12px;font-weight:600}
+      .resumen-new-claim-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #d9e2ec}
       .resumen-new-claim-modal .ant-modal-body{padding:16px 20px}
       .resumen-new-claim-modal .ant-input,.resumen-new-claim-modal .ant-picker,.resumen-new-claim-modal .ant-select-selector{height:30px!important;min-height:30px!important;border:1px solid #aebfd4!important;border-radius:5px!important;box-shadow:none!important;background:#fff}
       .resumen-new-claim-modal .ant-input{padding:4px 9px;color:#183153}
@@ -6221,9 +6342,11 @@ END CATCH;`;
       <Modal title="Nuevo reclamo: seleccionar póliza" visible={newClaimModalOpen}
         width={1050} destroyOnClose wrapClassName="resumen-new-claim-modal"
         onCancel={() => setNewClaimModalOpen(false)}
-        footer={<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        footer={null}>
+        <div className="resumen-new-claim-toolbar">
+          <Button size="small" type="primary" loading={newClaimLoading} onClick={searchNewClaimPolicies}>Buscar</Button>
           <Button size="small" onClick={() => setNewClaimModalOpen(false)}>Cancelar</Button>
-        </div>}>
+        </div>
         <div className="resumen-new-claim-search">
           <div className="resumen-new-claim-search-field"><label>Código de póliza</label>
             <Input size="small" defaultValue={newClaimFilters.code} placeholder="Aproximación"
@@ -6251,21 +6374,32 @@ END CATCH;`;
           <div className="resumen-new-claim-search-field"><label>Ramo</label>
             <Select size="small" allowClear showSearch optionFilterProp="label" value={newClaimFilters.lob || undefined}
               placeholder="Seleccione el ramo" options={newClaimLobOptions}
-              onChange={(value) => setNewClaimFilters((current) => Object.assign({}, current, { lob: value || '' }))} />
+              onChange={(value) => {
+                setNewClaimFilters((current) => Object.assign({}, current, { lob: value || '', product: '' }));
+                loadNewClaimProducts(value || '');
+              }} />
+          </div>
+          <div className="resumen-new-claim-search-field"><label>Producto</label>
+            <Select size="small" allowClear showSearch optionFilterProp="label"
+              value={newClaimFilters.product || undefined} loading={newClaimProductLoading}
+              disabled={!newClaimFilters.lob || newClaimProductLoading}
+              placeholder={newClaimFilters.lob ? 'Seleccione el producto' : 'Seleccione primero el ramo'}
+              options={newClaimProductOptions}
+              onChange={(value) => setNewClaimFilters((current) => Object.assign({}, current, { product: value || '' }))} />
           </div>
           <div className="resumen-new-claim-search-field"><label>Vigencia</label>
             <DatePicker.RangePicker size="small" format="DD/MM/YYYY" style={{ width: '100%' }}
               value={newClaimFilters.dates || undefined}
               onChange={(values) => setNewClaimFilters((current) => Object.assign({}, current, { dates: values || null }))} />
           </div>
-          <div className="resumen-new-claim-search-actions">
-            <Button size="small" type="primary" loading={newClaimLoading} onClick={searchNewClaimPolicies}>Buscar</Button>
-          </div>
         </div>
         {newClaimError ? <Alert type="warning" showIcon message={newClaimError} /> : null}
         <div className="resumen-table-wrap resumen-new-claim-results">
           <A.Table size="small" rowKey={(row) => String(row.id)} loading={newClaimLoading}
-            dataSource={newClaimRows} pagination={{ pageSize: 8, hideOnSinglePage: true }}
+            dataSource={newClaimRows}
+            pagination={{ current: newClaimPolicyPage, pageSize: 15, total: newClaimPolicyTotal,
+              hideOnSinglePage: true, showSizeChanger: false,
+              onChange: (page) => searchNewClaimPolicies(page) }}
             locale={{ emptyText: newClaimLoading ? 'Consultando pólizas...' : 'Realice una búsqueda para ver resultados.' }}
             columns={[
               { title: 'Póliza', dataIndex: 'code', render: (value, row) => displayValue(value || row.id) },
@@ -6330,7 +6464,8 @@ END CATCH;`;
       {activeTab === 'general' || activeTab === 'custom' ? (
         <div className="resumen-secondary">
           <div className="resumen-secondary-actions">
-            <Button size="small" disabled={(!newClaimMode && !editable) || !dirtyRef.current || saving}
+            <Button size="small" disabled={(!newClaimMode && !canSaveClaim(currentClaimRef.current, touchedRef.current))
+              || !dirtyRef.current || saving}
               loading={saving} onClick={saveClaim}>▣ Guardar</Button>
             <Button size="small" disabled={loading} loading={loading}
               icon={<ReloadOutlinedIcon />} onClick={refreshClaim}>Refrescar</Button>
@@ -6350,20 +6485,20 @@ END CATCH;`;
               <Col xs={24} lg={12} className="resumen-detail-column">
                 <Field label="Nº Siniestro">{disabledInput('Número del siniestro', draft ? draft.claimNumber : claimDetails.claimNumber)}</Field>
                 <Field label="Asignado a"><Select size="small"
-                  disabled={!editable || saving || stageSaving || adjusterLoading || !draft
+                  disabled={!generalEditable
                     || adjusterOptions.length === 0}
                   loading={adjusterLoading} value={draft && draft.assignedToCode ? String(draft.assignedToCode) : undefined}
                   placeholder="Seleccione un ajustador"
                   options={adjusterOptions}
                   onSelect={(value, option) => changeAdjuster(value, option && option.label)} /></Field>
                 <Field label="Estado" required={newClaimMode} invalid={newClaimValidation.stageCode}><div className="resumen-stage-control">
-                  <Select size="small" disabled={!editable || saving || stageSaving}
+                  <Select size="small" disabled={!generalEditable}
                     value={draft && draft.stageCode ? draft.stageCode : undefined} placeholder={claimDetails.state || 'Seleccione'}
                     options={CLAIM_STAGE_OPTIONS} onChange={changeClaimStage} />
                 </div></Field>
                 <div className="resumen-form-field resumen-claimant-field"><label className="resumen-form-label">Reclamante:</label>
                   <div className="resumen-form-control resumen-claimant-control"><Select size="small" showSearch filterOption={false}
-                  disabled={!editable || saving || stageSaving || adjusterLoading || !draft}
+                  disabled={!generalEditable}
                   loading={claimantSearching}
                   value={draft && draft.claimantId ? String(draft.claimantId) : undefined}
                   placeholder="Escriba para buscar reclamantes"
@@ -6375,13 +6510,13 @@ END CATCH;`;
                   {claimantHasMore ? <div className="resumen-field-note">Mostrando 10 resultados. Refine la búsqueda.</div> : null}
                 </div></div>
                 <Field label="Razón de evento" required={newClaimMode} invalid={newClaimValidation.eventReasonCode}><Select size="small"
-                  disabled={!editable || saving || stageSaving || catalogLoading || reasonOptions.length === 0}
+                  disabled={!generalEditable || catalogLoading || reasonOptions.length === 0}
                   loading={catalogLoading}
                   value={draft && draft.eventReasonCode || undefined}
                   placeholder="Seleccione una razón de evento"
                   options={reasonOptions} onChange={changeEventReason} /></Field>
                 <Field label="Evento asegurado" required={newClaimMode} invalid={newClaimValidation.insuredEventCode}><Select size="small"
-                  disabled={!editable || saving || stageSaving || catalogLoading || eventOptions.length === 0}
+                  disabled={!generalEditable || catalogLoading || eventOptions.length === 0}
                   loading={catalogLoading}
                   value={draft && draft.insuredEventCode || undefined}
                   placeholder="Seleccione un evento asegurado"
@@ -6400,24 +6535,24 @@ END CATCH;`;
                 </React.Fragment> : null}
               </Col>
               <Col xs={24} lg={12} className="resumen-detail-column">
-                <Field label="Fecha del Siniestro" required={newClaimMode} invalid={newClaimValidation.occurrenceDate}><DatePicker size="small" disabled={!editable} allowClear
+                <Field label="Fecha del Siniestro" required={newClaimMode} invalid={newClaimValidation.occurrenceDate}><DatePicker size="small" disabled={!generalEditable} allowClear
                   format="DD/MM/YYYY" style={{ width: '100%' }}
                   value={draft && draft.occurrenceDate ? moment(draft.occurrenceDate, 'DD/MM/YYYY', true) : null}
                   onChange={(_, dateString) => changeDraft('occurrenceDate', dateString || '')} /></Field>
                 <Field label="Hora" required={newClaimMode}
                   invalid={newClaimValidation.occurrenceHour || newClaimValidation.occurrenceMinute
                     || newClaimValidation.occurrencePeriod}><div className="resumen-inline">
-                  <Select size="small" disabled={!editable} value={draft ? draft.occurrenceHour : undefined}
+                  <Select size="small" disabled={!generalEditable} value={draft ? draft.occurrenceHour : undefined}
                     placeholder="Hora" options={Array.from({ length: 12 }, (_, index) => {
                       const value = String(index + 1).padStart(2, '0');
                       return { value: value, label: value };
                     })} onChange={(value) => changeDraft('occurrenceHour', value)} />
-                  <Select size="small" disabled={!editable} value={draft ? draft.occurrenceMinute : undefined}
+                  <Select size="small" disabled={!generalEditable} value={draft ? draft.occurrenceMinute : undefined}
                     placeholder="Minuto" options={Array.from({ length: 60 }, (_, index) => {
                       const value = String(index).padStart(2, '0');
                       return { value: value, label: value };
                     })} onChange={(value) => changeDraft('occurrenceMinute', value)} />
-                  <Select size="small" disabled={!editable} value={draft ? draft.occurrencePeriod : undefined}
+                  <Select size="small" disabled={!generalEditable} value={draft ? draft.occurrencePeriod : undefined}
                     placeholder="am/pm" options={[{ value: 'am', label: 'am' }, { value: 'pm', label: 'pm' }]}
                     onChange={(value) => changeDraft('occurrencePeriod', value)} />
                 </div></Field>
@@ -6429,7 +6564,7 @@ END CATCH;`;
                   <Field label="Fecha de audiencia">{extraControl("fechaAudiencia")}</Field>
                   <Field label="Lugar de audiencia">{extraControl("lugarAudiencia")}</Field>
                 </React.Fragment> : null}
-                <Field label="Fecha de Notificación" required={newClaimMode} invalid={newClaimValidation.notificationDate}><DatePicker size="small" disabled={!editable} allowClear
+                <Field label="Fecha de Notificación" required={newClaimMode} invalid={newClaimValidation.notificationDate}><DatePicker size="small" disabled={!generalEditable} allowClear
                   format="DD/MM/YYYY" style={{ width: '100%' }}
                   value={draft && draft.notificationDate ? moment(draft.notificationDate, 'DD/MM/YYYY', true) : null}
                   onChange={(_, dateString) => changeDraft('notificationDate', dateString || '')} /></Field>
@@ -6442,12 +6577,12 @@ END CATCH;`;
             <div className="resumen-bottom">
               <div className="resumen-bottom-field"><label className="resumen-form-label">Descripción del Siniestro:</label><TextArea
                 rows={3}
-                disabled={!editable} value={draft && draft.description != null ? String(draft.description) : ''}
+                disabled={!generalEditable} value={draft && draft.description != null ? String(draft.description) : ''}
                 onChange={(event) => changeDraft('description', event.target.value)}
                 placeholder="Sin descripción" /></div>
               <div className="resumen-bottom-field"><label className="resumen-form-label">Observaciones Adicionales:</label><TextArea
                 rows={3}
-                disabled={!editable || !draft} value={draft ? draft.additionalObservations : ''}
+                disabled={!generalEditable} value={draft ? draft.additionalObservations : ''}
                 onChange={(event) => changeDraft('additionalObservations', event.target.value)}
                 placeholder="Sin observaciones adicionales" /></div>
             </div>
@@ -6684,7 +6819,7 @@ END CATCH;`;
             <div className="resumen-coverage-toolbar">
               <SectionTitle>Recuperaciones</SectionTitle>
               <div className="resumen-reserve-actions">
-                <Button size="small" type="primary" disabled={recoveryLoading || recoverySaving}
+                <Button size="small" type="primary" disabled={!editable || recoveryLoading || recoverySaving}
                   onClick={openRecoveryModal}>Nueva recuperación</Button>
                 <Button size="small" loading={recoveryLoading} disabled={recoveryLoading || recoverySaving}
                   onClick={() => loadRecoveries(currentClaimRef.current)}><ReloadOutlinedIcon /> Refrescar</Button>
@@ -6779,8 +6914,8 @@ END CATCH;`;
               dataSource={visibleDocuments()} scroll={{ x: 950 }} pagination={{ pageSize: 10, hideOnSinglePage: false }}
               locale={{ emptyText: 'No hay datos' }} columns={[
                 { title: 'Id', dataIndex: 'id', width: 70 },
-                { title: 'Archivo', dataIndex: 'fileName', width: 230 },
-                { title: 'Tipo', dataIndex: 'name', width: 180 },
+                { title: 'Archivo', dataIndex: 'fileName', width: 230, render: (value) => <span className="resumen-document-cell-ellipsis" title={value || undefined}>{displayValue(value)}</span> },
+                { title: 'Tipo', dataIndex: 'name', width: 180, render: (value) => <span className="resumen-document-cell-ellipsis" title={value || undefined}>{displayValue(value)}</span> },
                 { title: 'Creado', dataIndex: 'created', width: 175, render: (value) => formatDocumentCreated(value) },
                 { title: 'Estado', key: 'status', width: 145, render: (value, row) => <Select aria-label={'Estado del documento ' + row.id}
                   placeholder="Ninguno" style={{ width: '100%' }} value={row.status || undefined}
