@@ -314,9 +314,64 @@ function setInsuredObject() {
   if(!oaUserData)
     throw ' No se pudo recuperar el objeto asegurado, verifique que se haya registrado correctamente.';
 
-  oaUserData.cobtar = oaUserData.hiddenCobtar ? JSON.parse(oaUserData.hiddenCobtar) : [];  
-  oaUserData.cobtar = normalizeArray(oaUserData.cobtar);
+  const persistedCobtar = oaUserData.hiddenCobtar
+    ? parseObject(oaUserData.hiddenCobtar)
+    : [];
+  const endorsementCobtar = getEndorsementCobtar();
 
+  // En un endoso los valores digitados en la grilla todavía no existen en
+  // hiddenCobtar. Se usan para la cotización y reemplazan la fila equivalente.
+  oaUserData.cobtar = mergeCobtar(persistedCobtar, endorsementCobtar);
+
+}
+
+function getEndorsementCobtar() {
+  const parsedExtra = parseObject(extra);
+  const parsedExtraData = parseObject(parsedExtra.data);
+  const parsedDto = parseObject(poliza && poliza.jChangeDto);
+  const parsedDtoData = parseObject(parsedDto.data);
+  const candidates = [
+    parsedExtraData.jAdditional,
+    parsedExtra.jAdditional,
+    parsedDtoData.jAdditional,
+    parsedDto.jAdditional,
+    poliza && poliza.jAdditional
+  ];
+
+  for (const candidate of candidates) {
+    const additional = parseObject(candidate);
+    const cobtar = additional.cobtar;
+    if (typeof cobtar === "string") {
+      const parsedCobtar = parseObject(cobtar);
+      if (Array.isArray(parsedCobtar)) return normalizeArray(parsedCobtar);
+    }
+    if (Array.isArray(cobtar)) return normalizeArray(cobtar);
+  }
+
+  return [];
+}
+
+function mergeCobtar(persistedCobtar, endorsementCobtar) {
+  const persisted = normalizeArray(Array.isArray(persistedCobtar) ? persistedCobtar : []);
+  const endorsement = normalizeArray(Array.isArray(endorsementCobtar) ? endorsementCobtar : []);
+
+  if (!endorsement.length) return persisted;
+
+  const endorsementCodes = endorsement.map(row => vEqual(row.COVERAGECODE));
+  return persisted
+    .filter(row => !endorsementCodes.includes(vEqual(row.COVERAGECODE)))
+    .concat(endorsement);
+}
+
+function parseObject(value) {
+  if (value && typeof value === "object") return value;
+  if (typeof value !== "string" || !value.trim()) return {};
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return {};
+  }
 }
 
 function setResultCoverages() {

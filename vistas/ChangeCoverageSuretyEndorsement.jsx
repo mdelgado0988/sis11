@@ -94,6 +94,7 @@
 
   const money = function (v) { return Number(Number(v || 0).toFixed(2)); };
   const txt = function (v) { return String(v === null || v === undefined ? '' : v).trim(); };
+  const up = function (v) { return txt(v).toUpperCase(); };
   const day10 = function (v) { return txt(v).slice(0, 10); };
   const fmt = function (v) {
     const n = Number(v || 0);
@@ -868,11 +869,15 @@
           }
           const list = [];
           const covs = p.Coverages || [];
+          const isTechnicalCar = txt(p.lob) === '96' && up(p.productCode) === 'CAR';
           for (let i = 0; i < covs.length; i++) {
             const c = txt(covs[i].code);
             const row = cfg[c];
             // principal del producto (coberturaPrincipal = -1) y mantenimiento 313 cuando esta contratada
-            if (c === '313' || (row && row.principal === '-1')) {
+            // Para ramo 96 / producto CAR tambien se permite el cambio de
+            // vigencia de las coberturas A (20) y D (23), sin quitar las
+            // coberturas que ya eran elegibles para fianzas.
+            if ((isTechnicalCar && (c === '20' || c === '23')) || c === '313' || (row && row.principal === '-1')) {
               list.push({ code: c, name: covs[i].name, end: covs[i].end, start: covs[i].start, premium: covs[i].premium });
             }
           }
@@ -1686,7 +1691,7 @@
       jNewPayPlan: null,
       newStart: dateAtNoon(calc.rows[0] && calc.rows[0].newStart),
       newEnd: dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
-      effectiveDate: dateAtNoon(calc.rows[0] && calc.rows[0].newEnd),
+      effectiveDate: dateAtNoon(calc.effectiveDate || (policy && (policy.activeDate || policy.start))),
       note: txt(note),
       operation: 'ADD',
       code: null,
@@ -2505,7 +2510,7 @@
   const openedWithPolicy = /[?&]policyId=\d+/.test(String(window.location.href || ''));
 
   return (
-    <DefaultPage title={t('Endoso de vigencia de Fianzas')} subTitle={policy ? policy.code : ''}>
+    <DefaultPage title={t('Endoso de cambio de vigencia por cobertura')} subTitle={policy ? policy.code : ''}>
       <div className="axx299">
         <style>{css}</style>
 

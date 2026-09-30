@@ -11,12 +11,14 @@
 const day = 86400000;
 const money = function (v) { return Number(Number(v).toFixed(2)); };
 const txt = function (v) { return String(v == null ? '' : v).trim(); };
+const up = function (v) { return txt(v).toUpperCase(); };
 const iso = function (v) { return new Date(v).toISOString().slice(0, 23); };
 const errs = [];
 
 const policyId = Number(context.policyId || 0);
 const selCode = txt(context.coverageCode);
 const rawNewEnd = txt(context.newEnd);
+const rawEffectiveDate = txt(context.effectiveDate);
 if (!policyId) errs.push('Falta la poliza');
 if (!selCode) errs.push('Falta la cobertura a endosar');
 if (!rawNewEnd) errs.push('Falta la nueva fecha final');
@@ -59,6 +61,8 @@ const policy = (RepoLifePolicy.outData || [])[0];
 if (!policy) throw '@Poliza ' + policyId + ' no encontrada';
 const covs = policy.Coverages || [];
 if (!covs.length) throw '@La poliza no tiene coberturas';
+const effectiveDateValue = rawEffectiveDate || txt(policy.activeDate) || txt(policy.start);
+const effectiveDateTimestamp = stamp(effectiveDateValue, 'fecha efectiva del endoso');
 
 doCmd({ cmd: 'GetFullTable', data: { table: 'cfgCoberturaProductoReaFianza' } });
 let table = GetFullTable.outData || [];
@@ -70,18 +74,34 @@ for (let i = 1; i < table.length; i++) {
   cfg[txt(r[3])] = { coverageCode: txt(r[3]), isCoverage: txt(r[5]), principal: txt(r[7]), parent: txt(r[8]) };
 }
 
+const isTechnicalCar = txt(policy.lob) === '96' && up(policy.productCode) === 'CAR';
+const technicalCfg = {};
+if (isTechnicalCar) {
+  doCmd({ cmd: 'GetFullTable', data: { table: 'cfgCoberturaProductoReaTecnicos' } });
+  let technicalTable = GetFullTable.outData || [];
+  if (typeof technicalTable === 'string') technicalTable = JSON.parse(technicalTable);
+  for (let i = 1; i < technicalTable.length; i++) {
+    const r = technicalTable[i];
+    if (up(r[1]) !== up(policy.productCode)) continue;
+    technicalCfg[txt(r[3])] = { coverageCode: txt(r[3]), isCoverage: txt(r[5]), principal: txt(r[7]), parent: txt(r[8]) };
+  }
+}
+const coverageCfg = isTechnicalCar ? technicalCfg : cfg;
+
 const eligible = [];
 for (let i = 0; i < covs.length; i++) {
   const c = txt(covs[i].code);
-  const row = cfg[c];
-  if (c === '313' || (row && row.principal === '-1')) eligible.push(c);
+  const row = coverageCfg[c];
+  if ((isTechnicalCar && (c === '20' || c === '23')) || c === '313' || (row && row.principal === '-1')) eligible.push(c);
 }
 if (eligible.indexOf(selCode) < 0) throw 'La cobertura ' + selCode + ' no es endosable en esta poliza. Elegibles: ' + (eligible.join(', ') || 'ninguna');
 let howMany = 0;
 for (let i = 0; i < covs.length; i++) { if (txt(covs[i].code) === selCode) howMany++; }
 if (howMany !== 1) throw '@La cobertura ' + selCode + ' no es univoca en la poliza';
 
+const jOld = JSON.parse(JSON.stringify(covs));
 const jNew = JSON.parse(JSON.stringify(covs));
+
 let target = null;
 for (let i = 0; i < jNew.length; i++) { if (txt(jNew[i].code) === selCode) target = jNew[i]; }
 
@@ -94,6 +114,9 @@ if (newEnd === oldEnd) throw '@La nueva fecha final debe ser distinta de la vige
 
 const durationDays = (oldEnd - start) / day;
 const deltaDays = (newEnd - oldEnd) / day;
+if (!isFinite(durationDays) || durationDays <= 0) {
+  throw '@La cobertura ' + selCode + ' tiene una vigencia de cero dias o invalida; no se puede calcular la prorrata';
+}
 const direction = deltaDays > 0 ? 'EXTENSION' : 'REDUCCION';
 const oldPremium = Number(target.premium == null ? Number(target.basePremium || 0) + Number(target.extraPremium || 0) : target.premium);
 if (!isFinite(oldPremium) || oldPremium < 0) throw '@La prima vigente de la cobertura es invalida';
@@ -117,12 +140,12 @@ const rows = [{
   proratedVariation: rawDelta, deltaDays: deltaDays
 }];
 
-if (cfg[selCode] && cfg[selCode].principal === '-1') {
+if (coverageCfg[selCode] && coverageCfg[selCode].principal === '-1') {
   for (let i = 0; i < jNew.length; i++) {
     const c = jNew[i];
     const code = txt(c.code);
     if (code === selCode) continue;
-    const row = cfg[code];
+    const row = coverageCfg[code];
     if (!row || row.parent !== selCode) continue;
     const ps = stamp(c.start, 'inicio dependiente ' + code);
     const pe = stamp(c.end, 'fin dependiente ' + code);
@@ -140,13 +163,64 @@ if (cfg[selCode] && cfg[selCode].principal === '-1') {
   }
 }
 
+// ChangeCoverage recalcula la poliza completa. Una sola cobertura con inicio y
+// fin iguales hace que el motor nativo intente dividir entre cero, por lo que
+// se valida el conjunto final antes de invocarlo y se devuelve el codigo exacto.
+function validateCoverageValidity(list, label) {
+  for (let i = 0; i < list.length; i++) {
+    const coverage = list[i] || {};
+    const code = txt(coverage.code) || ('en indice ' + i);
+    const coverageStart = stamp(coverage.start, label + ' de la cobertura ' + code);
+    const coverageEnd = stamp(coverage.end, label + ' de la cobertura ' + code);
+    if (coverageEnd <= coverageStart) {
+      throw '@La cobertura ' + code + ' tiene una vigencia invalida (' + iso(coverage.start).slice(0, 10) + ' a ' + iso(coverage.end).slice(0, 10) + '). La fecha final debe ser posterior a la inicial';
+    }
+  }
+}
+
+validateCoverageValidity(jOld, 'vigencia actual');
+validateCoverageValidity(jNew, 'vigencia resultante');
+
+// The native engine exposes only "divide by zero". Keep the original values,
+// but fail earlier with enough context to identify the zero-valued input.
+const nativeInputWarnings = [];
+const policyDuration = Number(policy.duration);
+const paymentDuration = Number(policy.paymentDuration);
+// duration is the number of complete years. A value of 0 is valid for a
+// policy whose term is represented by durationMonths/durationDays.
+if (policy.duration != null && policy.duration !== '' && (!isFinite(policyDuration) || policyDuration < 0)) {
+  nativeInputWarnings.push('policy.duration=' + txt(policy.duration));
+}
+if (policy.paymentDuration != null && policy.paymentDuration !== '' && (!isFinite(paymentDuration) || paymentDuration < 0)) {
+  nativeInputWarnings.push('policy.paymentDuration=' + txt(policy.paymentDuration));
+}
+for (let i = 0; i < jNew.length; i++) {
+  const coverage = jNew[i] || {};
+  const code = txt(coverage.code) || ('indice ' + i);
+  const premium = Number(coverage.premium);
+  const basePremium = Number(coverage.basePremium);
+  const coveragePeriodicity = Number(coverage.periodicity);
+  if (!isFinite(premium) || premium < 0) nativeInputWarnings.push('cobertura ' + code + '.premium=' + txt(coverage.premium));
+  if (!isFinite(basePremium) || basePremium < 0) nativeInputWarnings.push('cobertura ' + code + '.basePremium=' + txt(coverage.basePremium));
+  // Coverage periodicity 0 is retained as-is because payment periodicity is
+  // defined at policy level (for this policy: periodicity "m").
+  if (!isFinite(coveragePeriodicity)) nativeInputWarnings.push('cobertura ' + code + '.periodicity=' + txt(coverage.periodicity));
+}
+if (nativeInputWarnings.length) {
+  throw '@Entradas potencialmente invalidas para ChangeCoverage: ' + nativeInputWarnings.join('; ');
+}
+
 // ---------- motor nativo: impuestos, gastos y total ----------
-const effectiveDate = new Date().toISOString().slice(0, 10) + 'T00:00:00';
+const effectiveDate = iso(effectiveDateTimestamp);
 const quoteData = {
   policyId: policyId,
-  jOldCoverages: JSON.stringify(covs),
+  jOldCoverages: JSON.stringify(jOld),
   jNewCoverages: JSON.stringify(jNew),
-  effectiveDate: effectiveDate
+  effectiveDate: effectiveDate,
+  // This is a quote only. The actual Change with operation ADD is created by
+  // the view after the calculation and confirmation steps.
+  ignore: 1,
+  noTracking: true
 };
 doCmd({ cmd: 'ChangeCoverage', data: quoteData });
 if (!ChangeCoverage.ok) throw '@El motor de calculo nativo rechazo la cotizacion: ' + ChangeCoverage.msg;
