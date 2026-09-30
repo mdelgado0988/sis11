@@ -14,7 +14,11 @@ let policyId = window.location.href.split('/')[5] ?? 3377;
 let contact;
 let polizaConfirmada = false;
 let bloquearCoberturas = false;
-const isEndorsment = window.location.href.includes('tab12');
+function isEndorsment() {
+    // La pestaña del endoso puede activarse después de cargar el formulario.
+    // Evaluar la URL al aplicar las restricciones evita conservar un valor falso inicial.
+    return String(window.location.href || '').toLowerCase().includes('tab12');
+}
 const camposEditablesEnEndoso = new Set([
     'txtCodigoProyecto',
     'txtPeriodoPrueba',
@@ -2485,28 +2489,32 @@ function esPolizaEmitida() {
 }
 
 function aplicarRestriccionesEdicion() {
-    if (!esPolizaEmitida()) return;
-
     const $form = $('#hiddenFormStyle').closest('form');
+    if (esPolizaEmitida()) {
+        $form.find('input, select, textarea').each(function () {
+            const $campo = $(this);
+            if ($campo.attr('type') === 'hidden') return;
+
+            if ($campo.is(':checkbox, :radio')) {
+                $campo.prop('disabled', true);
+            } else if ($campo.is('select')) {
+                $campo.css({
+                    pointerEvents: 'none',
+                    backgroundColor: '#f5f5f5',
+                    color: '#8c8c8c'
+                });
+            } else {
+                $campo.prop('readonly', true);
+            }
+        });
+    }
+
+    if (!isEndorsment()) return;
+
     $form.find('input, select, textarea').each(function () {
         const $campo = $(this);
         const id = $campo.attr('id');
-
-        if ($campo.attr('type') === 'hidden') return;
-
-        if ($campo.is(':checkbox, :radio')) {
-            $campo.prop('disabled', true);
-        } else if ($campo.is('select')) {
-            $campo.css({
-                pointerEvents: 'none',
-                backgroundColor: '#f5f5f5',
-                color: '#8c8c8c'
-            });
-        } else {
-            $campo.prop('readonly', true);
-        }
-
-        if (isEndorsment && id && camposEditablesEnEndoso.has(id)) {
+        if (id && camposEditablesEnEndoso.has(id)) {
             $campo
                 .prop('disabled', false)
                 .prop('readonly', false)
@@ -2514,6 +2522,37 @@ function aplicarRestriccionesEdicion() {
                 .removeClass('disabled readonly-style select-readonly');
         }
     });
+
+    habilitarOrdenProcederEnEndoso();
+}
+
+function habilitarOrdenProcederEnEndoso() {
+    if (!isEndorsment()) return;
+
+    let $campos = $('#ckOrdenProceder, input[name="ckOrdenProceder"]')
+        .add($('input, button').filter(function () {
+            const texto = String($(this).attr('id') || '') + ' ' + String($(this).attr('name') || '');
+            return texto.toLowerCase().replace(/[^a-z0-9]/g, '').includes('ordenproceder');
+        }));
+
+    // Si el motor no conserva el id del control, ubicamos el input asociado
+    // a la etiqueta visible "Orden de Proceder".
+    $('label').filter(function () {
+        return $(this).text().trim().toLowerCase() === 'orden de proceder';
+    }).each(function () {
+        const $label = $(this);
+        const forId = $label.attr('for');
+        if (forId) $campos = $campos.add($('#' + forId));
+        $campos = $campos.add($label.closest('.form-group, .ant-form-item, .field, td, div').find('input, button'));
+    });
+
+    $campos
+        .prop('disabled', false)
+        .prop('readonly', false)
+        .removeAttr('disabled')
+        .removeAttr('aria-disabled')
+        .css({ pointerEvents: '', backgroundColor: '', color: '' })
+        .removeClass('disabled readonly-style select-readonly');
 }
 
 //////////////////////////////////////////////////////
@@ -2565,6 +2604,13 @@ async function initForm() {
 
             await cargarCatalogos();
             aplicarRestriccionesEdicion();
+            if (isEndorsment()) {
+                // Algunos controles base se repintan al finalizar la carga de
+                // catalogos; reaplicar el desbloqueo deja el checkbox editable.
+                setTimeout(habilitarOrdenProcederEnEndoso, 0);
+                setTimeout(habilitarOrdenProcederEnEndoso, 300);
+                setTimeout(habilitarOrdenProcederEnEndoso, 1000);
+            }
 
         });
 

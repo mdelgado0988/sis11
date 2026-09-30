@@ -1,8 +1,16 @@
 /**
- * @name ChangeInsuredSumEndorsement
- * @purpose Endoso de cambio de suma asegurada para Fianzas. ChangePolicyCapital es la
- *          fuente del calculo de prima, impuesto y plan de pagos. La nueva suma recibida
- *          es final, no una diferencia. El reaseguro se versiona antes de ejecutar.
+ * @name  ChangeInsuredSumEndorsement
+ * @issue AXX-1978 / GLOBUAT-261
+ * @purpose Endoso de cambio de suma asegurada POR COBERTURA para Fianzas. El usuario puede editar
+ *          varias coberturas con suma y capturar su nueva suma (por diferencia o suma final). La prima se
+ *          calcula con la configuracion de la cotizacion: prima vigente x (suma nueva / suma
+ *          original), y a esa diferencia se le aplica la prorrata desde la fecha efectiva del
+ *          endoso hasta el fin de la cobertura. Recargo/descuento, impuestos, gasto y total
+ *          salen de la cotizacion nativa de ChangeCoverage. Se simula y confirma el reaseguro
+ *          del movimiento como en ChangeCoverageSuretyEndorsement y se ejecuta con
+ *          ChangeCoverage / GotoStep / ExeChangeCoverage; el endoso actualiza la suma y la
+ *          prima de la cobertura, las cuotas y el reaseguro (cmdApplyReaChangeCoverage).
+ * Se abre con ?policyId=<id>.
  */
 () => {
   const Tabs = A.Tabs;
@@ -18,6 +26,7 @@
   const Spin = A.Spin;
   const Tag = A.Tag;
   const Empty = A.Empty;
+  const Tooltip = A.Tooltip;
 
   const EditableFormattedNumber = function (props) {
     const decimals = props.decimals === undefined ? 2 : props.decimals;
@@ -46,9 +55,15 @@
   };
 
   const [policyId, setPolicyId] = useState(0);
+
+  // AXX-2420 / GLOBUAT-270: consulta de reaseguro (vigente, por movimiento, historial). Solo lectura.
+  const [reaHist, setReaHist] = useState({ policyId: 0, loading: false, rows: [], changes: {}, error: '' });
   const [policy, setPolicy] = useState(null);
-  const [newInsuredSum, setNewInsuredSum] = useState(null);
+  const [eligible, setEligible] = useState([]);
+  const [covCode, setCovCode] = useState(null);
+  const [coverageInputs, setCoverageInputs] = useState({});
   const [effectiveDate, setEffectiveDate] = useState(null);
+  const [payPlanPreview, setPayPlanPreview] = useState([]);
   const [surcharge, setSurcharge] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [calc, setCalc] = useState(null);
@@ -196,12 +211,18 @@
   }
 
   function finalCoveragePremium(group, row) {
+    if (row && row.finalPremium !== undefined && row.finalPremium !== null) {
+      return money(row.finalPremium);
+    }
     const base = getBaseCoverageRows(group, row);
     const persisted = base.reduce(function (sum, cession) { return sum + numberFrom(cession, ['premium']); }, 0);
     return money(persisted + numberFrom(row, ['premiumMovement']));
   }
 
   function finalCoverageSum(group, row) {
+    if (row && row.finalSum !== undefined && row.finalSum !== null) {
+      return money(row.finalSum);
+    }
     const base = getBaseCoverageRows(group, row);
     const persisted = base.reduce(function (sum, cession) { return sum + numberFrom(cession, ['sumInsured']); }, 0);
     return money(persisted + rowSumMovement(row));
@@ -221,6 +242,7 @@
     totals.commission = money(rows.reduce(function (sum, row) { return sum + numberFrom(row, ['commission', 'comissionCedant']); }, 0));
     totals.tax = money(rows.reduce(function (sum, row) { return sum + numberFrom(row, ['tax']); }, 0));
     if (totals.sumMovement === undefined) {
+      // Solo la cobertura endosada trae variacion de suma.
       totals.sumMovement = money(rows.reduce(function (sum, row) {
         return sum + numberFrom(row, ['sumInsuredMovement', 'sumMovement']);
       }, 0));
@@ -666,8 +688,8 @@
 
   function validateReinsuranceDistribution() {
     const errors = [];
-    if (!calc || !sim || !Array.isArray(sim.contracts)) {
-      errors.push(t('La distribución de reaseguro todavía no está cargada.'));
+    if (!calc || !sim || !Array.isArray(sim.contracts) || !sim.contracts.length) {
+      errors.push(t('Cotice el endoso antes de confirmar el reaseguro.'));
       return { ok: false, errors: errors };
     }
 
@@ -720,9 +742,15 @@
         coverageDistribution[code].sum += numberFrom(row, ['sumInsuredCedant']) + numberFrom(row, ['sumInsuredRe']);
       });
 
-      const cededPremium = sumField(rows, ['premiumRe']);
-      const cededSum = sumField(rows, ['sumInsuredRe']);
-      const participants = getLineParticipants(group);
+      const contract = (contractRows || []).find(function (item) {
+        return String(item.contractId) === String(group.contractId);
+      });
+      const lineTotal = contract ? getDistributionRows(contract).find(function (item) {
+        return String(item.groupKey) === String(group.contractId) + '-' + String(group.lineId);
+      }) : null;
+      const cededPremium = lineTotal ? Number(lineTotal.premium || 0) : sumField(rows, ['premiumRe']);
+      const cededSum = lineTotal ? Number(lineTotal.sum || 0) : sumField(rows, ['sumInsuredRe']);
+      const participants = getLineParticipants(group, lineTotal);
       if (cededPremium > 0.01 || cededSum > 0.01) {
         if (!participants.length) {
           errors.push(groupName + ': ' + t('un contrato cedido debe tener aceptantes distribuidos al 100%.'));
@@ -738,10 +766,10 @@
           if (!closeEnough(sumField(participants, ['premium']), cededPremium)) {
             errors.push(groupName + ': ' + t('la prima de aceptantes no coincide con la prima cedida.'));
           }
-          if (!closeEnough(sumField(participants, ['commission']), sumField(rows, ['commission']))) {
+          if (!closeEnough(sumField(participants, ['commission']), lineTotal ? lineTotal.commission : sumField(rows, ['commission']))) {
             errors.push(groupName + ': ' + t('la comision de aceptantes no coincide con la linea.'));
           }
-          if (!closeEnough(sumField(participants, ['tax']), sumField(rows, ['tax']))) {
+          if (!closeEnough(sumField(participants, ['tax']), lineTotal ? lineTotal.tax : sumField(rows, ['tax']))) {
             errors.push(groupName + ': ' + t('el impuesto de aceptantes no coincide con la linea.'));
           }
         }
@@ -771,6 +799,12 @@
       const rows = getDistributionRows(contract);
       const distributedSum = rows.reduce(function (sum, row) { return sum + Number(row.sum || 0); }, 0);
       const distributedPremium = rows.reduce(function (sum, row) { return sum + Number(row.premium || 0); }, 0);
+      const distributedPercentage = rows.filter(function (row) { return !row.isCoinsurance; }).reduce(function (sum, row) {
+        return sum + Number(row.percentage || 0);
+      }, 0);
+      if (Math.abs(distributedPercentage - 100) > 0.01) {
+        errors.push(t('Contrato') + ' ' + contract.contractId + ': ' + t('la distribución debe sumar 100%.'));
+      }
       if (!closeEnough(distributedSum, contract.sum)) {
         errors.push(t('La suma de la distribución más coaseguro del contrato') + ' ' + contract.contractId
           + ' ' + t('no coincide con el total emitido.') + ' ' + fmt(distributedSum) + ' / ' + fmt(contract.sum));
@@ -803,7 +837,21 @@
           setLoading(false); setError(t('No se encontro la poliza') + ' ' + id); return null;
         }
         const p = r.outData[0];
+        const cfgTableByLob = {
+          '96': 'cfgCoberturaProductoReaTecnicos',
+          '20': 'cfgCoberturaProductoReaVidaColectivo',
+          '31': 'cfgCoberturaProductoReaVida',
+          '52': 'cfgCoberturaProductoReaRiesgosVarios',
+          '1': 'cfgCoberturaProductoRea',
+          '6': 'cfgCoberturaProductoReaAuto',
+          '81': 'cfgCoberturaProductoReaFianza',
+          '82': 'cfgCoberturaProductoReaFianza',
+          '83': 'cfgCoberturaProductoReaFianza',
+          '84': 'cfgCoberturaProductoReaFianza'
+        };
+        const cfgTable = cfgTableByLob[txt(p.lob)] || 'cfgCoberturaProductoRea';
         return Promise.all([
+          exe('GetFullTable', { table: cfgTable }),
           exe('RepoCurrency', { operation: 'GET', filter: "code='" + txt(p.currency).replace(/'/g, "''") + "'", size: 1 }),
           exe('RepoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND overwritten=0', size: 0 }),
           exe('RepoCoCession', { operation: 'GET', filter: 'lifePolicyId=' + id + ' AND parentCoCession IS NULL AND overwritten=0', include: ['Contact'], size: 0 })
@@ -824,25 +872,26 @@
             filter: "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'COI')"
           }).catch(function () { return { outData: [] }; })
         ]).then(function (responses) {
-          const currencyResponse = responses[0];
+          const tr = responses[0];
+          const currencyResponse = responses[1];
           const currency = currencyResponse && currencyResponse.outData && currencyResponse.outData[0];
-          setBaseCessions((responses[1] && responses[1].outData) || []);
-          setCoinsuranceCessions((responses[2] && responses[2].outData) || []);
-          const brokerRows = (responses[3] && responses[3].outData) || [];
+          setBaseCessions((responses[2] && responses[2].outData) || []);
+          setCoinsuranceCessions((responses[3] && responses[3].outData) || []);
+          const brokerRows = (responses[4] && responses[4].outData) || [];
           setReinsuranceBrokers(brokerRows.map(function (item) {
             const name = item.isPerson
               ? [item.name, item.middlename || item.middleName, item.surname1, item.surname2].filter(Boolean).join(' ').trim()
               : String(item.surname2 || item.name || '').trim();
             return { id: Number(item.id), name: name };
           }).filter(function (item) { return item.id > 0 && item.name; }));
-          const reinsurerRows = (responses[4] && responses[4].outData) || [];
+          const reinsurerRows = (responses[5] && responses[5].outData) || [];
           setReinsuranceContacts(reinsurerRows.map(function (item) {
             const name = item.isPerson
               ? [item.name, item.middlename || item.middleName, item.surname1, item.surname2].filter(Boolean).join(' ').trim()
               : String(item.surname2 || item.name || '').trim();
             return { id: Number(item.id), name: name };
           }).filter(function (item) { return item.id > 0 && item.name; }));
-          const coinsurerRows = (responses[5] && responses[5].outData) || [];
+          const coinsurerRows = (responses[6] && responses[6].outData) || [];
           setCoinsuranceContacts(coinsurerRows.map(function (item) {
             const name = item.isPerson
               ? [item.name, item.middlename || item.middleName, item.surname1, item.surname2].filter(Boolean).join(' ').trim()
@@ -850,22 +899,145 @@
             return { id: Number(item.id), name: name };
           }).filter(function (item) { return item.id > 0 && item.name; }));
           setPolicy(Object.assign({}, p, { Currency: currency || p.Currency }));
-          setNewInsuredSum(Number(p.insuredSum || 0));
-          setEffectiveDate(moment());
-          setSurcharge(0);
-          setDiscount(0);
+          loadReaHist(p.id);
           setLoading(false);
+          let rows = (tr && tr.outData) || [];
+          if (typeof rows === 'string') rows = JSON.parse(rows);
+          const cfg = {};
+          for (let i = 1; i < rows.length; i++) {
+            if (txt(rows[i][1]) !== txt(p.productCode)) continue;
+            cfg[txt(rows[i][3])] = {
+              principal: txt(rows[i][7]), parent: txt(rows[i][8]),
+              sums: txt(rows[i][5]).toUpperCase() === 'SI'
+            };
+          }
+          // Todas las coberturas de la poliza son endosables; la principal se propone primero.
+          const list = [];
+          const covs = p.Coverages || [];
+          for (let i = 0; i < covs.length; i++) {
+            const c = txt(covs[i].code);
+            const row = cfg[c];
+            list.push({
+              code: c, name: covs[i].name, end: covs[i].end, start: covs[i].start,
+              premium: covs[i].premium, limit: covs[i].limit,
+              principal: !!(row && row.principal === '-1'),
+              sums: !!(row && row.sums)
+            });
+          }
+          list.sort(function (a, b) { return (b.principal ? 1 : 0) - (a.principal ? 1 : 0); });
+          setEligible(list);
+          const sumEligible = list.filter(function (item) { return money(item.limit) > 0; });
+          setCovCode(sumEligible.length ? sumEligible[0].code : null);
+          setCoverageInputs({});
+          setEffectiveDate(moment());
+          setPayPlanPreview([]);
           return null;
         });
       })
       .catch(function (e) { setLoading(false); setError(String(e)); });
   }
 
+  async function loadPayPlanSnapshot(id) {
+    const response = await exe('RepoPayPlan', {
+      operation: 'GET',
+      filter: 'lifePolicyId=' + Number(id) + ' AND cancellationDate IS NULL',
+      include: ['PayPlanDetail'],
+      size: 0
+    });
+    if (!response || !response.ok) {
+      throw new Error((response && response.msg) || t('No se pudo consultar el plan de pagos actual'));
+    }
+    return Array.isArray(response.outData) ? response.outData : [];
+  }
+
+  function buildNativePayPlan(oldPayPlan, difference, effectiveDate, lifePolicyId) {
+    const rows = Array.isArray(oldPayPlan)
+      ? oldPayPlan.map(function (item) { return Object.assign({}, item); })
+      : [];
+    let remainingCents = Math.round(money(difference) * 100);
+    if (!remainingCents) return rows;
+
+    // Una cuota parcialmente pagada sigue participando. Su importe puede
+    // crecer, pero nunca puede quedar por debajo de lo ya pagado.
+    let candidates = rows.map(function (row, index) {
+      const amount = Math.round(Number(row.minimum !== undefined ? row.minimum : row.expected || 0) * 100);
+      const paid = Math.round(Number(row.payed !== undefined ? row.payed : row.paid || 0) * 100);
+      return { row: row, index: index, amount: amount, paid: paid, weight: Math.max(amount, 1) };
+    }).filter(function (item) {
+      return !item.row.cancellationDate && item.amount > item.paid;
+    });
+
+    // Para un descuento, las cuotas que alcanzan su mínimo pagado se sacan
+    // de la distribución y el remanente se reparte entre las demás.
+    while (candidates.length && remainingCents) {
+      const initialRemaining = remainingCents;
+      const totalWeight = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
+      let applied = 0;
+      const nextCandidates = [];
+
+      candidates.forEach(function (item, index) {
+        const portion = index === candidates.length - 1
+          ? initialRemaining - applied
+          : Math.round(initialRemaining * item.weight / totalWeight);
+        const nextAmount = item.amount + portion;
+        const limitedAmount = initialRemaining < 0 ? Math.max(item.paid, nextAmount) : nextAmount;
+        const actualPortion = limitedAmount - item.amount;
+        item.amount = limitedAmount;
+        item.row.minimum = money(limitedAmount / 100);
+        item.row.expected = money(limitedAmount / 100);
+        applied += actualPortion;
+        if (initialRemaining >= 0 || item.amount > item.paid) nextCandidates.push(item);
+      });
+
+      remainingCents -= applied;
+      if (!applied) break;
+      candidates = nextCandidates;
+    }
+
+    // Sin cuotas con saldo pendiente, o si un descuento ya agotó todos los
+    // saldos disponibles, el remanente se registra como cuota de ajuste.
+    if (!remainingCents) return rows;
+
+    const last = rows[rows.length - 1] || {};
+    const lastNumber = rows.reduce(function (max, item) {
+      return Math.max(max, Number(item && item.numberInYear || 0));
+    }, 0);
+    const contractYear = rows.reduce(function (max, item) {
+      return Math.max(max, Number(item && item.contractYear || 0));
+    }, 0) || 1;
+
+    rows.push(Object.assign({}, last, {
+      id: 0,
+      lifePolicyId: Number(lifePolicyId),
+      concept: 'Prima',
+      expected: money(remainingCents / 100),
+      minimum: money(remainingCents / 100),
+      payed: 0,
+      payedDate: null,
+      transferId: null,
+      dueDate: effectiveDate,
+      coveredUntil: effectiveDate,
+      allocationDate: null,
+      contractYear: contractYear,
+      final: false,
+      finalDate: null,
+      numberInYear: lastNumber + 1,
+      allocationId: null,
+      cancellationDate: null,
+      compensationDate: null,
+      created: null,
+      normalDueDate: effectiveDate,
+      changeId: null,
+      PayPlanDetail: null
+    }));
+    return rows;
+  }
+
   // Abierta desde el menu no llega ?policyId=: se busca por numero o por codigo de poliza.
   function buscar() {
     const v = txt(buscarPoliza);
     if (!v) { setError(t('Indique el numero o el codigo de la poliza')); return; }
-    invalidate(); setPolicy(null); setNewInsuredSum(null); setEffectiveDate(null);
+    invalidate(); setPolicy(null); setEligible([]); setCovCode(null); setCoverageInputs({}); setEffectiveDate(null);
     if (/^[0-9]+$/.test(v)) { setPolicyId(Number(v)); loadPolicy(Number(v)); return; }
     setLoading(true); setError(null);
     exe('RepoLifePolicy', { operation: 'GET', filter: "code='" + v.replace(/'/g, "''") + "'", size: 1 })
@@ -899,9 +1071,31 @@
     if (disponible > 120 && Math.abs(disponible - altoGrilla) > 4) setAltoGrilla(Math.round(disponible));
   });
 
+  const sumEditableRows = (eligible || []).filter(function (item) {
+    return money(item.limit) > 0;
+  });
+
+  function updateCoverageInput(code, field, value, currentSum) {
+    setCoverageInputs(function (current) {
+      const next = Object.assign({}, current);
+      const key = txt(code);
+      if (value === null || value === undefined || value === '') {
+        next[key] = { difference: null, final: null };
+        return next;
+      }
+      const amount = Number(value);
+      if (!Number.isFinite(amount)) return current;
+      next[key] = field === 'difference'
+        ? { difference: amount, final: money(Number(currentSum || 0) + amount) }
+        : { difference: money(amount - Number(currentSum || 0)), final: amount };
+      return next;
+    });
+    invalidate();
+  }
+
   // la distribucion en memoria se invalida en cuanto cambia el calculo o la poliza
   function invalidate() {
-    setCalc(null); setSim(null); setResult(null); setKey(null); setSplits([]);
+    setCalc(null); setSim(null); setResult(null); setKey(null); setSplits([]); setPayPlanPreview([]);
     setReinsurersReady(false); setReinsuranceConfirmed(false); setSelectedReinsuranceLineKey(null); setReaDetailTab('distribution');
   }
 
@@ -1048,6 +1242,7 @@
     if (!validation.ok) {
       const message = validation.errors.join(' ');
       setError(message);
+      setTab('rea');
       A.message.error(message);
       return;
     }
@@ -1110,7 +1305,7 @@
     });
   }
 
-  function getLineParticipants(group) {
+  function getLineParticipants(group, lineTotal) {
     const grouped = {};
     (group.participants || []).forEach(function (participant) {
       const participantKey = String(participant.contactId || '') + '|' + String(participant.brokerId || '');
@@ -1177,7 +1372,33 @@
       participant.displayName = contactDirectory[String(participant.contactId)] || participant.name || participant.contactName || participant.contactId;
       participant.brokerDisplayName = contactDirectory[String(participant.brokerId)] || participant.brokerName || participant.brokerId;
     });
-    return Object.keys(grouped).map(function (participantKey) { return grouped[participantKey]; });
+    const result = Object.keys(grouped).map(function (participantKey) { return grouped[participantKey]; });
+    if (!lineTotal || !result.length) return result;
+
+    // Una línea puede contener cesiones espejo por cada cobertura. La pestaña
+    // de aceptantes representa la línea completa, por lo que debe repartir el
+    // importe mostrado una sola vez y no sumar cada cesión espejo.
+    const splitTotal = result.reduce(function (sum, participant) {
+      return sum + Math.max(0, Number(participant.split || 0));
+    }, 0);
+    if (!(splitTotal > 0)) return result;
+    const fields = [
+      { target: Number(lineTotal.sum || 0), name: 'sumInsured' },
+      { target: Number(lineTotal.premium || 0), name: 'premium' },
+      { target: Number(lineTotal.commission || 0), name: 'commission' },
+      { target: Number(lineTotal.tax || 0), name: 'tax' }
+    ];
+    fields.forEach(function (field) {
+      let assigned = 0;
+      result.forEach(function (participant, index) {
+        const value = index === result.length - 1
+          ? money(field.target - assigned)
+          : money(field.target * Math.max(0, Number(participant.split || 0)) / splitTotal);
+        participant[field.name] = value;
+        assigned = money(assigned + value);
+      });
+    });
+    return result;
   }
 
   function getCoverageParticipants(group, coverageCode) {
@@ -1299,201 +1520,482 @@
   }
 
   // ------------------------------------------------------------- pestania 1
-  function quoteWithCapitalAdjustment(initialQuote) {
+  function prepararNuevasCoberturas(result) {
     const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
-    const initialBill = initialQuote.Bill || {};
-    const adjustedPremium = Number(initialBill.coverages === undefined
-      ? initialBill.anualPremium || initialBill.annualPremium || 0
-      : initialBill.coverages) || 0;
-    return Promise.resolve({
-      quote: initialQuote,
-      calculatedPremium: money(adjustedPremium - adjustment)
-    });
-  }
-
-  function reconcileMovementRows(rows, expectedMovement) {
-    if (!rows.length) return;
-
-    const distributedMovement = money(rows.reduce(function (sum, row) {
-      return sum + Number(row.variation || 0);
-    }, 0));
-    const pendingAdjustment = money(expectedMovement - distributedMovement);
-    if (closeEnough(pendingAdjustment, 0)) return;
-
-    let targets = rows.filter(function (row) {
-      return Math.abs(Number(row.variation || 0)) > 0.009;
-    });
-    let weightTotal = targets.reduce(function (sum, row) {
-      return sum + Math.abs(Number(row.variation || 0));
-    }, 0);
-    const useFinalPremium = !targets.length || weightTotal <= 0.009;
-    if (useFinalPremium) {
-      targets = rows.filter(function (row) {
-        return Math.abs(Number(row.newPremium || 0)) > 0.009;
-      });
-      weightTotal = targets.reduce(function (sum, row) {
-        return sum + Math.abs(Number(row.newPremium || 0));
-      }, 0);
+    const quote = result && result.quote;
+    let coverages = [];
+    try {
+      coverages = JSON.parse(quote && quote.jNewCoverages ? quote.jNewCoverages : '[]');
+    } catch (e) {
+      throw new Error(t('El cálculo no devolvió coberturas nuevas válidas'));
     }
-    if (weightTotal <= 0.009) {
-      throw new Error(t('No hay una prima válida para distribuir el movimiento del endoso'));
+    if (!Array.isArray(coverages) || !coverages.length) {
+      throw new Error(t('El cálculo no devolvió coberturas nuevas'));
     }
 
+    const rowsByCode = {};
+    (result.rows || []).forEach(function (row) { rowsByCode[txt(row.code)] = row; });
+    const expectedPremium = Number(result.billing && result.billing.premium ? result.billing.premium.after : 0);
+    const changedCodes = (result.coverageCodes || [result.coverageCode]).map(function (code) { return txt(code); });
+    const adjustmentCode = txt(result.adjustmentCoverageCode || changedCodes[0]);
+    // El recargo/descuento pertenece a la primera cobertura modificada, igual
+    // que antes pertenecía a la única cobertura seleccionable.
+    const adjustmentToAllocate = adjustment;
     let allocated = 0;
-    targets.forEach(function (row, index) {
-      const weight = useFinalPremium
-        ? Math.abs(Number(row.newPremium || 0))
-        : Math.abs(Number(row.variation || 0));
-      const share = index === targets.length - 1
-        ? money(pendingAdjustment - allocated)
-        : money(pendingAdjustment * weight / weightTotal);
-      row.variation = money(Number(row.variation || 0) + share);
-      row.adjustment = share;
+
+    coverages.forEach(function (coverage) {
+      const code = txt(coverage.code);
+      const selected = changedCodes.indexOf(code) >= 0;
+      const share = code === adjustmentCode ? adjustmentToAllocate : 0;
+      if (selected) {
+        // ChangeCoverage calcula la facturacion usando basePremium. No se
+        // debe retirar el ajuste de ese campo, porque el motor ignoraria
+        // extraPremium y registraria una prima sin recargo/descuento.
+        coverage.basePremium = money(coverage.basePremium);
+        coverage.extraPremium = money(Number(coverage.extraPremium || 0) + share);
+        coverage.premium = money(coverage.premium);
+      }
       allocated = money(allocated + share);
+
+      const row = rowsByCode[code];
+      if (row) {
+        row.newPremium = coverage.premium;
+        row.adjustedPremium = coverage.premium;
+        row.variation = money(coverage.premium - Number(row.oldPremium || 0));
+      }
+    });
+
+    const finalPremium = money(coverages.reduce(function (sum, coverage) { return sum + Number(coverage.premium || 0); }, 0));
+    if (!closeEnough(allocated, adjustmentToAllocate) || !closeEnough(finalPremium, expectedPremium)) {
+      throw new Error(t('La distribución del recargo o descuento no coincide con la prima final calculada'));
+    }
+
+    quote.jNewCoverages = JSON.stringify(coverages);
+    result.finalCoverages = coverages;
+    result.coverageAdjustmentApplied = adjustmentToAllocate;
+    return result;
+  }
+
+  // La cotizacion nativa deja una fila de impuesto deshabilitada y sin endoso por cada
+  // simulacion. Se retira antes y despues de cotizar, igual que en el endoso de vigencia.
+  async function limpiarResiduoCotizacion() {
+    const response = await exe('LoadEntities', {
+      entity: 'TaxGenerated',
+      fields: 'id',
+      filter: 'lifePolicyId=' + Number(policyId) + " AND action='ChangeCoverage' AND changeId IS NULL AND disabled=1",
+      noTracking: true
+    });
+    const rows = response && Array.isArray(response.outData) ? response.outData : [];
+    for (let i = 0; i < rows.length; i++) {
+      await exe('RepoTaxGenerated', { operation: 'DELETE', entity: { id: Number(rows[i].id) } });
+    }
+  }
+
+
+  // AXX-2420 / GLOBUAT-270 (3.2, 5.2): el reaseguro vigente y su historial se consultan durante todo el endoso.
+  function reaHistNum(v) { const n = Number(v); return isFinite(n) ? n : 0; }
+  function reaHistMoney(v) { return reaHistNum(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function reaHistDay(v) { return v ? String(v).slice(0, 10) : ''; }
+  function reaHistChangeLabel(change) {
+    if (!change) return 'Emisión';
+    let additional = {};
+    try { additional = JSON.parse(change.jAdditional || '{}') || {}; } catch (e) { additional = {}; }
+    const type = String(additional.endorsementType || '').toUpperCase();
+    const byType = {
+      PROCEEDORDER: 'Orden de proceder',
+      CHANGE_COVERAGE_SURETY: 'Cambio de cobertura de fianza (vigencia)',
+      CHANGE_INSURED_SUM_SURETY: 'Cambio de suma asegurada'
+    };
+    const byDiscriminator = {
+      LoadingChange: 'Recargo / Descuento',
+      CapitalChange: 'Cambio de suma asegurada',
+      InsuredObjectChange: 'Cambio de objeto asegurado',
+      CoverageChange: 'Cambio de cobertura',
+      BeneficiaryChange: 'Cambio de beneficiario',
+      CessionBeneficiaryChange: 'Cambio de acreedor',
+      TermChange: 'Cambio de vigencia'
+    };
+    const label = byType[type] || byDiscriminator[change.discriminator || change.Discriminator] || String(change.discriminator || change.Discriminator || 'Endoso');
+    return 'Endoso ' + (change.code || change.id) + ' — ' + label;
+  }
+  function loadReaHist(pid) {
+    const id = Number(pid || 0);
+    if (!id) return;
+    setReaHist(function (prev) { return Object.assign({}, prev, { policyId: id, loading: true, error: '' }); });
+    Promise.all([
+      exe('RepoCession', { operation: 'GET', filter: 'lifePolicyId=' + id, size: 0 }),
+      exe('LoadEntities', { entity: 'Change', fields: 'id, code, discriminator, effectiveDate, status, jAdditional', filter: 'lifePolicyId=' + id, noTracking: true })
+    ]).then(function (responses) {
+      const cessions = (responses[0] && responses[0].outData) || [];
+      const changes = {};
+      ((responses[1] && responses[1].outData) || []).forEach(function (change) { changes[String(change.id)] = change; });
+      if (responses[0] && responses[0].ok === false) throw new Error(responses[0].msg || 'RepoCession');
+      setReaHist({ policyId: id, loading: false, rows: cessions, changes: changes, error: '' });
+    }).catch(function (e) {
+      setReaHist({ policyId: id, loading: false, rows: [], changes: {}, error: String(e && e.message ? e.message : e) });
     });
   }
-
-  function onAjuste(kind, value) {
-    const amount = value === null || value === undefined ? 0 : Number(value);
-    if (kind === 'surcharge') setSurcharge(amount); else setDiscount(amount);
-    invalidate();
+  function renderReaHist() {
+    const Table = A.Table;
+    const Alert = A.Alert;
+    const Spin = A.Spin;
+    const Tag = A.Tag;
+    const Button = A.Button;
+    const rows = reaHist.rows || [];
+    const moneyCol = function (title, field) {
+      return { title: title, dataIndex: field, key: field, align: 'right', render: function (v) { return reaHistMoney(v); } };
+    };
+    const vigentes = rows.filter(function (r) { return !r.overwritten; });
+    const vigentesTotal = vigentes.reduce(function (acc, r) {
+      acc.premium += reaHistNum(r.premium); acc.premiumCedant += reaHistNum(r.premiumCedant); acc.premiumRe += reaHistNum(r.premiumRe);
+      return acc;
+    }, { premium: 0, premiumCedant: 0, premiumRe: 0 });
+    const vigentesRows = vigentes.map(function (r) {
+      return Object.assign({ key: 'v' + r.id, movement: reaHistChangeLabel(reaHist.changes[String(r.changeId)]) }, r);
+    });
+    vigentesRows.push({ key: 'vtotal', coverageCode: 'TOTAL', contractId: '', lineId: '', movement: '',
+      sumInsured: null, sumInsuredCedant: null, sumInsuredRe: null,
+      premium: vigentesTotal.premium, premiumCedant: vigentesTotal.premiumCedant, premiumRe: vigentesTotal.premiumRe });
+    const groups = {};
+    const order = [];
+    rows.slice().sort(function (a, b) { return reaHistNum(a.id) - reaHistNum(b.id); }).forEach(function (r) {
+      const k = r.changeId ? String(r.changeId) : 'E';
+      if (!groups[k]) { groups[k] = { key: 'm' + k, changeId: r.changeId || null, rows: 0, sumInsured: 0, sumInsuredCedant: 0, sumInsuredRe: 0, premium: 0, premiumCedant: 0, premiumRe: 0, coverages: {} }; order.push(k); }
+      const g = groups[k];
+      g.rows += 1;
+      g.sumInsured += reaHistNum(r.sumInsured); g.sumInsuredCedant += reaHistNum(r.sumInsuredCedant); g.sumInsuredRe += reaHistNum(r.sumInsuredRe);
+      g.premium += reaHistNum(r.premium); g.premiumCedant += reaHistNum(r.premiumCedant); g.premiumRe += reaHistNum(r.premiumRe);
+      g.coverages[String(r.coverageCode)] = true;
+    });
+    const movementRows = order.map(function (k) {
+      const g = groups[k];
+      const change = g.changeId ? reaHist.changes[String(g.changeId)] : null;
+      return Object.assign({}, g, {
+        movement: reaHistChangeLabel(change),
+        effectiveDate: change ? reaHistDay(change.effectiveDate) : '',
+        coverageList: Object.keys(g.coverages).join(', ')
+      });
+    });
+    const historyRows = rows.slice().sort(function (a, b) { return reaHistNum(a.id) - reaHistNum(b.id); }).map(function (r) {
+      return Object.assign({ key: 'h' + r.id, movement: reaHistChangeLabel(reaHist.changes[String(r.changeId)]) }, r);
+    });
+    const colsVigente = [
+      { title: t('Cobertura'), dataIndex: 'coverageCode', key: 'coverageCode', width: 90 },
+      { title: t('Contrato'), dataIndex: 'contractId', key: 'contractId', width: 80 },
+      { title: t('Linea'), dataIndex: 'lineId', key: 'lineId', width: 80 },
+      { title: t('Origen'), dataIndex: 'movement', key: 'movement' },
+      { title: t('Suma asegurada'), dataIndex: 'sumInsured', key: 'sumInsured', align: 'right', render: function (v) { return v === null ? '' : reaHistMoney(v); } },
+      { title: t('Suma retenida'), dataIndex: 'sumInsuredCedant', key: 'sumInsuredCedant', align: 'right', render: function (v) { return v === null ? '' : reaHistMoney(v); } },
+      { title: t('Suma cedida'), dataIndex: 'sumInsuredRe', key: 'sumInsuredRe', align: 'right', render: function (v) { return v === null ? '' : reaHistMoney(v); } },
+      moneyCol(t('Prima'), 'premium'), moneyCol(t('Prima retenida'), 'premiumCedant'), moneyCol(t('Prima cedida'), 'premiumRe')
+    ];
+    const colsMovimiento = [
+      { title: t('Movimiento'), dataIndex: 'movement', key: 'movement' },
+      { title: t('Fecha efectiva'), dataIndex: 'effectiveDate', key: 'effectiveDate', width: 110 },
+      { title: t('Coberturas'), dataIndex: 'coverageList', key: 'coverageList', width: 120 },
+      { title: t('Filas'), dataIndex: 'rows', key: 'rows', width: 60, align: 'right' },
+      moneyCol(t('Suma neta'), 'sumInsured'), moneyCol(t('Retenida neta'), 'sumInsuredCedant'), moneyCol(t('Cedida neta'), 'sumInsuredRe'),
+      moneyCol(t('Prima neta'), 'premium'), moneyCol(t('Prima retenida neta'), 'premiumCedant'), moneyCol(t('Prima cedida neta'), 'premiumRe')
+    ];
+    const colsHistorial = [
+      { title: t('Id'), dataIndex: 'id', key: 'id', width: 80 },
+      { title: t('Movimiento'), dataIndex: 'movement', key: 'movement' },
+      { title: t('Cobertura'), dataIndex: 'coverageCode', key: 'coverageCode', width: 80 },
+      { title: t('Contrato'), dataIndex: 'contractId', key: 'contractId', width: 70 },
+      { title: t('Tipo'), dataIndex: 'premiumType', key: 'premiumType', width: 110 },
+      { title: t('Estado'), dataIndex: 'overwritten', key: 'overwritten', width: 100, render: function (v) { return v ? <Tag>{t('Histórico')}</Tag> : <Tag color="blue">{t('Vigente')}</Tag>; } },
+      moneyCol(t('Suma'), 'sumInsured'), moneyCol(t('Retenida'), 'sumInsuredCedant'), moneyCol(t('Cedida'), 'sumInsuredRe'),
+      moneyCol(t('Prima'), 'premium'), moneyCol(t('Prima ret.'), 'premiumCedant'), moneyCol(t('Prima ced.'), 'premiumRe')
+    ];
+    return (
+      <Spin spinning={!!reaHist.loading}>
+        <div style={{ marginBottom: 8 }}>
+          <Button size="small" onClick={function () { loadReaHist(reaHist.policyId); }} disabled={!reaHist.policyId}>{t('Actualizar consulta')}</Button>
+        </div>
+        {reaHist.error ? <Alert type="error" showIcon message={reaHist.error} /> : null}
+        <Alert type="info" showIcon style={{ marginBottom: 8 }}
+          message={t('Cada cobertura de la fianza tiene su propia cesión con su propia suma: la suma del reaseguro de un movimiento es la de la cobertura endosada, no la suma de todas las coberturas.')} />
+        <h4 style={{ margin: '8px 0 4px' }}>{t('Reaseguro vigente por cobertura')}</h4>
+        <Table size="small" pagination={false} rowKey="key" dataSource={vigentesRows} columns={colsVigente} scroll={{ x: true }} />
+        <h4 style={{ margin: '12px 0 4px' }}>{t('Reaseguro por movimiento (neto de cada endoso)')}</h4>
+        <Table size="small" pagination={false} rowKey="key" dataSource={movementRows} columns={colsMovimiento} scroll={{ x: true }} />
+      </Spin>
+    );
   }
 
-  function calcular() {
+  async function calcular() {
     setError(null); setResult(null);
     setReinsuranceConfirmed(false);
-    const finalSum = Number(newInsuredSum);
-    if (!Number.isFinite(finalSum) || finalSum <= 0) { setError(t('Indique una suma asegurada final válida')); return; }
-    if (money(finalSum) === money(policy && policy.insuredSum)) { setError(t('La nueva suma asegurada debe ser diferente de la actual')); return; }
+    const oldCoverages = Array.isArray(policy && policy.Coverages) ? policy.Coverages : [];
+    const changes = [];
+    for (let i = 0; i < sumEditableRows.length; i++) {
+      const item = sumEditableRows[i];
+      const input = coverageInputs[txt(item.code)] || {};
+      const amount = Number(input.final);
+      if (input.final === null || input.final === undefined || input.final === '') continue;
+      if (!Number.isFinite(amount)) {
+        setError(t('Indique un monto válido para la cobertura') + ' ' + item.code);
+        return;
+      }
+      const oldSum = money(item.limit);
+      const newSum = money(amount);
+      if (!(oldSum > 0)) continue;
+      if (!(newSum > 0)) {
+        setError(t('La nueva suma asegurada de la cobertura debe ser mayor que cero') + ' (' + item.code + ')');
+        return;
+      }
+      if (newSum === oldSum) continue;
+      const policyCoverage = oldCoverages.find(function (coverage) { return txt(coverage.code) === txt(item.code); }) || item;
+      changes.push({ code: txt(item.code), item: item, coverage: policyCoverage, oldSum: oldSum, newSum: newSum });
+    }
+    if (!changes.length) { setError(t('Indique al menos una nueva suma asegurada diferente de la actual')); return; }
     if (!effectiveDate) { setError(t('Indique la fecha efectiva del endoso')); return; }
+    const effective = moment(effectiveDate).format('YYYY-MM-DD');
+    const policyStart = day10(policy && policy.start);
+    if (policyStart && effective < policyStart) { setError(t('La fecha efectiva no puede ser anterior al inicio de la póliza') + ' (' + policyStart + ')'); return; }
+    for (let i = 0; i < changes.length; i++) {
+      const coverageStart = day10(changes[i].coverage.start);
+      const coverageEnd = day10(changes[i].coverage.end);
+      if (effective > coverageEnd) {
+        setError(t('La fecha efectiva no puede ser posterior al fin de la cobertura') + ' (' + changes[i].code + ': ' + coverageEnd + ')');
+        return;
+      }
+      if (effective < coverageStart) {
+        setError(t('La fecha efectiva no puede ser anterior al inicio de la cobertura') + ' (' + changes[i].code + ': ' + coverageStart + ')');
+        return;
+      }
+    }
+
     const calculationVersion = ++requestVersion.calculation;
+    // Invalida tambien cualquier simulacion iniciada con el calculo anterior.
     ++requestVersion.simulation;
     setLoading(true);
     setCalc(null);
     setSim(null);
     setSimLoading(false);
-    const quotePayload = {
-      id: 0,
-      lifePolicyId: policyId,
-      policyId: policyId,
-      oldCapital: Number(policy.insuredSum || 0),
-      newCapital: finalSum,
-      effectiveDate: moment(effectiveDate).format('YYYY-MM-DD') + 'T12:00:00',
-      creationDate: moment().format('YYYY-MM-DD') + 'T00:00:00',
-      contractYear: Number(policy.contractYear || 0),
-      anniversary: 0,
-      processId: null,
-      note: null,
-      operation: null,
-      surcharge: Number(surcharge || 0),
-      discount: Number(discount || 0)
-    };
-    exe('ChangePolicyCapital', quotePayload)
-      .then(function (r) {
-        if (calculationVersion !== requestVersion.calculation) return null;
-        if (!r || !r.ok || !r.outData) {
-          setLoading(false);
-          setError(String((r && r.msg) || t('Error de calculo')).replace(/formula ->[\s\S]*/, '').trim());
-          return null;
-        }
-        const initialQuote = Array.isArray(r.outData) ? r.outData[0] : r.outData;
-        return quoteWithCapitalAdjustment(initialQuote);
-      })
-      .then(function (adjustedResult) {
-        if (!adjustedResult || calculationVersion !== requestVersion.calculation) return null;
-        const quote = adjustedResult.quote;
-        const detail = typeof quote.jDetail === 'string' ? JSON.parse(quote.jDetail || '{}') : (quote.jDetail || {});
-        const detailRows = Array.isArray(detail.Coverages) ? detail.Coverages : [];
-        let nativeCoverages = typeof quote.jNewCoverages === 'string'
-          ? JSON.parse(quote.jNewCoverages || '[]')
-          : (quote.jNewCoverages || []);
-        const currentCoverages = policy && Array.isArray(policy.Coverages) ? policy.Coverages : [];
-        nativeCoverages = nativeCoverages.map(function (coverage) {
-          const current = currentCoverages.find(function (item) { return txt(item.code) === txt(coverage.code); }) || {};
-          const currentLimit = Number(current.limit === undefined ? current.startLimit : current.limit) || 0;
-          const nativeLimit = Number(coverage.limit);
-          const followsPolicyCapital = Math.abs(currentLimit - Number(quotePayload.oldCapital || 0)) <= 0.009;
-          const resolvedLimit = followsPolicyCapital
-            ? finalSum
-            : (Number.isFinite(nativeLimit) ? nativeLimit : currentLimit);
-          return Object.assign({}, coverage, {
-            limit: resolvedLimit,
-            startLimit: followsPolicyCapital
-              ? finalSum
-              : (coverage.startLimit === undefined ? current.startLimit : coverage.startLimit),
-            start: current.start || coverage.start,
-            end: current.end || coverage.end
-          });
+    setPayPlanPreview([]);
+    try {
+      const utc = function (value) { return Date.parse(value + 'T00:00:00Z'); };
+      await limpiarResiduoCotizacion();
+      const newCoverages = JSON.parse(JSON.stringify(oldCoverages));
+      const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
+      const provisionalRows = [];
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i];
+        const target = newCoverages.find(function (coverage) { return txt(coverage.code) === change.code; });
+        if (!target) throw new Error(t('La cobertura seleccionada no está en la póliza') + ' (' + change.code + ')');
+        const covStart = day10(change.coverage.start);
+        const covEnd = day10(change.coverage.end);
+        const durationDays = Math.round((utc(covEnd) - utc(covStart)) / 86400000);
+        if (!(durationDays > 0)) throw new Error(t('La vigencia actual de la cobertura es inválida') + ' (' + change.code + ')');
+        const fromDate = effective > covStart ? effective : covStart;
+        const remainingDays = Math.max(0, Math.round((utc(covEnd) - utc(fromDate)) / 86400000));
+        const prorate = Math.min(1, remainingDays / durationDays);
+        const oldPremium = money(change.coverage.premium === null || change.coverage.premium === undefined
+          ? Number(change.coverage.basePremium || 0) + Number(change.coverage.extraPremium || 0)
+          : change.coverage.premium);
+        const proportionalPremium = money(oldPremium * change.newSum / change.oldSum);
+        const rawDelta = money((proportionalPremium - oldPremium) * prorate);
+        const share = i === 0 ? adjustment : 0;
+        const proratedPremium = money(oldPremium + rawDelta);
+        const newPremium = money(proratedPremium + share);
+        if (newPremium < 0) throw new Error(t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + change.code + ')');
+        target.limit = change.newSum;
+        target.startLimit = change.newSum;
+        target.premium = newPremium;
+        target.basePremium = money(Number(target.basePremium === null || target.basePremium === undefined ? oldPremium : target.basePremium) + rawDelta + share);
+        provisionalRows.push({
+          code: change.code, name: target.name, reason: 'SELECTED', oldSum: change.oldSum, newSum: change.newSum,
+          sumInsuredMovement: money(change.newSum - change.oldSum), oldStart: change.coverage.start, newStart: change.coverage.start,
+          oldEnd: change.coverage.end, newEnd: change.coverage.end, oldPremium: oldPremium,
+          proportionalPremium: proportionalPremium, proratedPremium: proratedPremium, newPremium: newPremium,
+          adjustedPremium: newPremium, variation: money(rawDelta + share), proratedVariation: rawDelta,
+          remainingDays: remainingDays, durationDays: durationDays, prorate: prorate,
+          surcharge: i === 0 ? Number(surcharge || 0) : 0, discount: i === 0 ? Number(discount || 0) : 0,
+          adjustment: share
         });
-        quote.jNewCoverages = JSON.stringify(nativeCoverages);
-        const rows = detailRows.map(function (detailRow) {
-          const current = currentCoverages.find(function (item) { return txt(item.code) === txt(detailRow.code); }) || {};
-          const coverage = nativeCoverages.find(function (item) { return txt(item.code) === txt(detailRow.code); }) || current;
-          const oldSum = Number(current.limit === undefined ? policy.insuredSum : current.limit) || 0;
-          const calculatedSum = Number(coverage.limit === undefined ? oldSum : coverage.limit) || 0;
-          return {
-            code: txt(detailRow.code),
-            name: current.name || coverage.name || txt(detailRow.code),
-            reason: 'CAPITAL_CHANGE',
-            oldPremium: Number(detailRow.oldPremium || 0),
-            newPremium: Number(detailRow.newPremium || 0),
-            variation: money(detailRow.premiumCost === undefined ? detailRow.premiumDif : detailRow.premiumCost),
-            prorated: money(detailRow.premiumCost === undefined ? detailRow.premiumDif : detailRow.premiumCost),
-            oldSum: oldSum,
-            newSum: calculatedSum,
-            sumInsuredMovement: money(calculatedSum - oldSum),
-            oldStart: current.start,
-            oldEnd: current.end,
-            newStart: current.start,
-            newEnd: current.end
-          };
-        });
-        const bill = quote.Bill || {};
-        const diff = quote.BillDiff || {};
-        const beforePremium = Number(detail.oldCoverages === undefined ? policy.coverages : detail.oldCoverages) || 0;
-        const afterPremium = Number(bill.coverages === undefined ? detail.newCoverages : bill.coverages) || 0;
-        reconcileMovementRows(rows, money(afterPremium - beforePremium));
-        const beforeTax = Number(detail.oldTax === undefined ? policy.tax : detail.oldTax) || 0;
-        const afterTax = Number(bill.tax === undefined ? beforeTax + Number(diff.tax || 0) : bill.tax) || 0;
-        const beforeTotal = Number(detail.oldAnnualPremium === undefined ? policy.annualTotal || policy.anualTotal : detail.oldAnnualPremium) || 0;
-        const nativeAfterTotal = bill.annualTotal === undefined ? bill.anualTotal : bill.annualTotal;
-        const afterTotal = Number(nativeAfterTotal === undefined
-          ? beforeTotal + Number(diff.annualTotal || 0)
-          : nativeAfterTotal) || 0;
-        const calculation = {
-          quote: quote,
-          rows: rows,
-          finalCoverages: nativeCoverages,
-          effectiveDate: quote.effectiveDate || quotePayload.effectiveDate,
-          direction: finalSum > Number(policy.insuredSum || 0) ? 'INCREASE' : 'DECREASE',
-          billing: {
-            currency: policy.currency,
-            premium: { before: beforePremium, calculated: adjustedResult.calculatedPremium, after: afterPremium },
-            adjustments: {
-              before: Number(policy.surcharges || 0) - Number(policy.discounts || 0),
-              after: money(Number(policy.surcharges || 0) - Number(policy.discounts || 0) + Number(surcharge || 0) - Number(discount || 0))
-            },
-            fee: { before: Number(policy.fee || 0), after: Number(bill.fee || 0) },
-            tax: { before: beforeTax, after: afterTax },
-            total: { before: beforeTotal, after: afterTotal },
-            movement: {
-              premium: Number(diff.coverages || 0),
-              tax: Number(diff.tax || 0),
-              total: Number(diff.annualTotal || 0),
-              sum: rows.reduce(function (sum, row) { return sum + Number(row.sumInsuredMovement || 0); }, 0)
-            }
-          }
-        };
-        setCalc(calculation);
-        setKey('CAPITAL-' + policyId + '-' + moment().format('YYYYMMDDHHmmss'));
-        setLoading(false);
-        return null;
-      })
-      .catch(function (e) {
-        if (calculationVersion !== requestVersion.calculation) return;
-        setLoading(false);
-        setError(String(e));
+      }
+      const quoteInput = {
+        policyId: policyId,
+        jOldCoverages: JSON.stringify(oldCoverages),
+        jNewCoverages: JSON.stringify(newCoverages),
+        effectiveDate: effective + 'T12:00:00'
+      };
+      const response = await exe('ChangeCoverage', quoteInput);
+      if (calculationVersion !== requestVersion.calculation) return;
+      if (!response || !response.ok || !response.outData) {
+        throw new Error(t('El motor de cálculo nativo rechazó la cotización') + ': ' + String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim());
+      }
+      await limpiarResiduoCotizacion();
+      const quoted = Array.isArray(response.outData) ? response.outData[0] : response.outData;
+      const bill = quoted.Bill || {};
+      const diff = quoted.BillDiff || {};
+      let quotedCovs = JSON.parse(quoted.jNewCoverages || '[]');
+      // Algunos motores devuelven únicamente las coberturas recalculadas.
+      // Completamos la respuesta con las vigentes para que toda la vista
+      // trabaje siempre sobre el estado final íntegro de la póliza.
+      const quotedByCode = {};
+      quotedCovs.forEach(function (coverage) { quotedByCode[txt(coverage.code)] = coverage; });
+      quotedCovs = oldCoverages.map(function (coverage) {
+        return Object.assign({}, coverage, quotedByCode[txt(coverage.code)] || {});
       });
+      for (let i = 0; i < quotedCovs.length; i++) {
+        const changed = changes.find(function (item) { return item.code === txt(quotedCovs[i].code); });
+        if (changed) {
+          quotedCovs[i].limit = changed.newSum;
+          quotedCovs[i].startLimit = changed.newSum;
+        }
+      }
+      quoted.jNewCoverages = JSON.stringify(quotedCovs);
+
+      const prevPremium = money(policy.anualPremium === null || policy.anualPremium === undefined ? policy.annualPremium : policy.anualPremium);
+      const prevTax = money(policy.tax);
+      const prevFee = money(policy.fee);
+      const prevTotal = money(policy.anualTotal === null || policy.anualTotal === undefined ? policy.annualTotal : policy.anualTotal);
+      // El Bill nativo YA lleva los ajustes dentro, porque viajaron en la prima de la cobertura.
+      const finalPremium = money(bill.anualPremium === null || bill.anualPremium === undefined ? bill.annualPremium : bill.anualPremium);
+      const finalTax = money(bill.tax);
+      const finalFee = money(bill.fee);
+      const finalTotal = money(bill.annualTotal === null || bill.annualTotal === undefined ? bill.anualTotal : bill.annualTotal);
+      const taxRate = finalPremium === 0 ? 0 : finalTax / finalPremium;
+      const calcPremium = money(finalPremium - adjustment);
+      const calcTax = money(calcPremium * taxRate);
+      const detail = JSON.parse(quoted.jDetail || '{}');
+      const detailCovs = Array.isArray(detail.Coverages) ? detail.Coverages : [];
+      const proratedCosts = {};
+      for (let k = 0; k < detailCovs.length; k++) {
+        proratedCosts[txt(detailCovs[k].code)] = money(detailCovs[k].premiumCost);
+      }
+      const changedRows = provisionalRows.map(function (row) {
+        const quotedCoverage = quotedCovs.find(function (coverage) { return txt(coverage.code) === row.code; });
+        if (quotedCoverage) {
+          row.newPremium = money(quotedCoverage.premium);
+          row.adjustedPremium = row.newPremium;
+          row.variation = money(row.newPremium - row.oldPremium);
+        }
+        row.prorated = proratedCosts[row.code] || 0;
+        return row;
+      });
+      // El motor cotiza el conjunto completo de coberturas. Conservamos las
+      // filas modificadas para ejecutar el endoso, pero mostramos y simulamos
+      // el estado final de todas, incluso las que no tienen suma o prima.
+      const changedByCode = {};
+      changedRows.forEach(function (row) { changedByCode[txt(row.code)] = row; });
+      const sumsByCode = {};
+      (eligible || []).forEach(function (coverage) { sumsByCode[txt(coverage.code)] = coverage.sums === true; });
+      const rows = quotedCovs.map(function (coverage) {
+        const code = txt(coverage.code);
+        const changed = changedByCode[code];
+        if (changed) {
+          changed.sums = sumsByCode[code] === true;
+          return changed;
+        }
+        const previous = oldCoverages.find(function (item) { return txt(item.code) === code; }) || {};
+        const oldSum = money(previous.limit === undefined ? previous.sumInsured : previous.limit);
+        const oldPremium = money(previous.premium === null || previous.premium === undefined
+          ? Number(previous.basePremium || 0) + Number(previous.extraPremium || 0)
+          : previous.premium);
+        const newSum = money(coverage.limit === undefined ? coverage.sumInsured : coverage.limit);
+        const newPremium = money(coverage.premium === null || coverage.premium === undefined
+          ? Number(coverage.basePremium || 0) + Number(coverage.extraPremium || 0)
+          : coverage.premium);
+        return {
+          code: code, name: coverage.name || previous.name || code, reason: 'UNCHANGED', sums: sumsByCode[code] === true,
+          oldSum: oldSum, newSum: newSum, sumInsuredMovement: 0,
+          oldStart: previous.start, newStart: coverage.start || previous.start,
+          oldEnd: previous.end, newEnd: coverage.end || previous.end,
+          oldPremium: oldPremium, proportionalPremium: newPremium,
+          proratedPremium: 0, prorated: 0, newPremium: newPremium,
+          adjustedPremium: newPremium, variation: 0,
+          remainingDays: 0, durationDays: 0, prorate: 0
+        };
+      });
+      let result = {
+        ok: true,
+        persisted: false,
+        policyId: policyId,
+        policyCode: policy.code,
+        currency: policy.currency,
+        coverageCode: changes.map(function (item) { return item.code; }).join(', '),
+        coverageCodes: changes.map(function (item) { return item.code; }),
+        adjustmentCoverageCode: changes[0].code,
+        sumMode: 'FINAL_OR_DIFFERENCE',
+        direction: changes.reduce(function (sum, item) { return sum + item.newSum - item.oldSum; }, 0) >= 0 ? 'INCREASE' : 'DECREASE',
+        effectiveDate: effective + 'T12:00:00',
+        rows: rows,
+        changedRows: changedRows,
+        billing: {
+          premium: { before: prevPremium, calculated: calcPremium, after: finalPremium },
+          adjustments: { before: 0, calculated: 0, after: adjustment },
+          fee: { before: prevFee, calculated: finalFee, after: finalFee },
+          tax: { before: prevTax, calculated: calcTax, after: finalTax },
+          total: { before: prevTotal, calculated: money(calcPremium + calcTax + finalFee), after: finalTotal },
+          movement: {
+            premium: money(diff.annualPremium === null || diff.annualPremium === undefined ? diff.coverages : diff.annualPremium),
+            tax: money(diff.tax),
+            fee: money(diff.fee),
+            total: money(diff.annualTotal),
+            prorated: money(detail.coveragesCost),
+            sum: money(changes.reduce(function (sum, item) { return sum + item.newSum - item.oldSum; }, 0))
+          },
+          currency: policy.currency,
+          adjustmentUnit: 'CURRENCY_AMOUNT'
+        },
+        quote: quoted,
+        quoteInput: quoteInput
+      };
+      result = prepararNuevasCoberturas(result);
+
+      // Vista previa de cuotas: el plan vigente mas la cuota del endoso, como se enviara al ejecutar.
+      const oldPayPlan = await loadPayPlanSnapshot(policyId);
+      if (calculationVersion !== requestVersion.calculation) return;
+      const oldPayPlanTotal = oldPayPlan.reduce(function (total, item) {
+        return total + Number(item && (item.minimum !== undefined ? item.minimum : item.expected) || 0);
+      }, 0);
+      const newPayPlan = buildNativePayPlan(oldPayPlan, finalTotal - oldPayPlanTotal, effective + 'T12:00:00', policyId);
+      const oldAmountsById = {};
+      oldPayPlan.forEach(function (item) {
+        oldAmountsById[String(item.id)] = money(item.minimum !== undefined ? item.minimum : item.expected);
+      });
+      setPayPlanPreview(newPayPlan.map(function (item, index) {
+        const amount = money(item.minimum !== undefined ? item.minimum : item.expected);
+        const currentAmount = Number(item.id || 0) ? oldAmountsById[String(item.id)] : 0;
+        return {
+          key: String(item.id || 'new') + '-' + index,
+          number: item.numberInYear || index + 1,
+          currentAmount: currentAmount,
+          amount: amount,
+          difference: money(amount - Number(currentAmount || 0)),
+          paid: item.payed !== undefined ? item.payed : item.paid,
+          dueDate: item.dueDate || item.normalDueDate,
+          isNew: !Number(item.id || 0)
+        };
+      }));
+      setCalc(result);
+      setKey('AXX1978-' + policyId + '-' + changes.map(function (item) { return item.code; }).join('-') + '-' + moment().format('YYYYMMDDHHmmss'));
+      setLoading(false);
+    } catch (e) {
+      if (calculationVersion !== requestVersion.calculation) return;
+      setLoading(false);
+      setError(String(e && e.message ? e.message : e));
+    }
+  }
+
+  // Recargo y descuento invalidan el calculo, pero conservan los aceptantes capturados.
+  function onAjuste(kind, value) {
+    const v = value === null || value === undefined ? 0 : Number(value);
+    if (kind === 'surcharge') setSurcharge(v); else setDiscount(v);
+    // El resultado vigente fue calculado con otro ajuste. Limpiarlo impide que
+    // el efecto de reaseguro simule nuevamente con esa prima anterior.
+    ++requestVersion.calculation;
+    ++requestVersion.simulation;
+    setCalc(null);
+    setSim(null);
+    setLoading(false);
+    setSimLoading(false);
+    setReinsurersReady(false);
+    setSelectedReinsuranceLineKey(null);
+    setReinsuranceConfirmed(false);
   }
 
   // ------------------------------------------------------------- pestania 2
@@ -1508,16 +2010,20 @@
     setSimLoading(true); setError(null);
     const rows = [];
     for (let i = 0; i < calculationSnapshot.rows.length; i++) {
+      // variation contiene la prima final del movimiento, incluyendo recargos
+      // o descuentos. El prorrateado se conserva solo como referencia.
       rows.push({
         code: calculationSnapshot.rows[i].code,
         variation: calculationSnapshot.rows[i].variation,
         prorated: calculationSnapshot.rows[i].prorated,
-        sumInsuredMovement: calculationSnapshot.rows[i].sumInsuredMovement
+        sumInsuredMovement: calculationSnapshot.rows[i].sumInsuredMovement || 0,
+        finalPremium: calculationSnapshot.rows[i].adjustedPremium,
+        finalSum: calculationSnapshot.rows[i].newSum
       });
     }
     exe('ExeChain', {
       chain: 'cmdSimReaChangeCoverage',
-      context: JSON.stringify({ policyId: policyId, rows: rows, participants: splits })
+      context: JSON.stringify({ policyId: policyId, rows: rows, participants: splits, finalStateOnly: true })
     })
       .then(function (r) {
         if (simulationVersion !== requestVersion.simulation) return;
@@ -1585,6 +2091,7 @@
     if (!validation.ok) {
       const message = validation.errors.join(' ');
       setError(message);
+      setTab('rea');
       A.message.error(message);
       setReinsuranceConfirmed(false);
       return;
@@ -1673,32 +2180,37 @@
         });
       });
     });
-    const payload = Object.assign({}, calc.quote || {}, {
-      id: 0,
-      lifePolicyId: policyId,
+    const payload = {
       policyId: policyId,
-      oldCapital: Number(policy.insuredSum || 0),
-      newCapital: Number(newInsuredSum || 0),
-      surcharge: Number(surcharge || 0),
-      discount: Number(discount || 0),
       jOldCoverages: JSON.stringify(oldCoverages),
       jNewCoverages: JSON.stringify(newCoverages),
-      effectiveDate: moment(effectiveDate).format('YYYY-MM-DD') + 'T12:00:00',
+      jOldPayPlan: null,
+      jNewPayPlan: null,
+      newStart: dateAtNoon((calc.changedRows || calc.rows)[0] && (calc.changedRows || calc.rows)[0].newStart),
+      newEnd: dateAtNoon((calc.changedRows || calc.rows)[0] && (calc.changedRows || calc.rows)[0].newEnd),
+      effectiveDate: dateAtNoon(calc.effectiveDate),
       note: txt(note),
       operation: 'ADD',
       code: null,
       jAdditional: JSON.stringify({
         endorsementType: 'CHANGE_INSURED_SUM_SURETY',
-        oldInsuredSum: Number(policy.insuredSum || 0),
-        newInsuredSum: Number(newInsuredSum || 0),
+        endorsementSubtype: 'CHANGE_COVERAGE_SUM',
+        coverageCode: calc.coverageCode,
+        oldSum: (calc.changedRows || calc.rows).reduce(function (sum, row) { return sum + Number(row.oldSum || 0); }, 0),
+        newSum: (calc.changedRows || calc.rows).reduce(function (sum, row) { return sum + Number(row.newSum || 0); }, 0),
+        changes: (calc.changedRows || calc.rows).map(function (row) {
+          return { code: row.code, oldSum: row.oldSum, newSum: row.newSum, variation: row.variation };
+        }),
+        sumMode: calc.sumMode,
         surcharge: Number(surcharge || 0),
         discount: Number(discount || 0),
         premium: calc.billing && calc.billing.premium ? calc.billing.premium.after : 0,
         tax: calc.billing && calc.billing.tax ? calc.billing.tax.after : 0,
         total: calc.billing && calc.billing.total ? calc.billing.total.after : 0,
+        reinsuranceFinalStateOnly: true,
         reinsuranceSnapshot: reinsuranceSnapshot
       })
-    });
+    };
 
     const generateEndorsementDocument = async function (endorsementChangeId) {
       const response = await exe('ExeChain', {
@@ -1731,13 +2243,25 @@
     let reinsurancePrepared = false;
     let reinsuranceExecuted = false;
     try {
-      const createdResponse = await exe('ChangePolicyCapital', payload);
-      const created = createdResponse && Array.isArray(createdResponse.outData)
-        ? createdResponse.outData[0]
-        : createdResponse && createdResponse.outData;
-      if (!createdResponse || !createdResponse.ok || !created || !created.id) {
+      const oldPayPlan = await loadPayPlanSnapshot(policyId);
+      payload.jOldPayPlan = JSON.stringify(oldPayPlan);
+      const oldTotal = oldPayPlan.reduce(function (total, item) {
+        return total + Number(item && (item.minimum !== undefined ? item.minimum : item.expected) || 0);
+      }, 0);
+      const newTotal = calc && calc.billing && calc.billing.total
+        ? Number(calc.billing.total.after || 0)
+        : oldTotal;
+      payload.jNewPayPlan = JSON.stringify(buildNativePayPlan(
+        oldPayPlan,
+        newTotal - oldTotal,
+        dateAtNoon(calc.effectiveDate),
+        policyId
+      ));
+      const createdResponse = await exe('ChangeCoverage', payload);
+      if (!createdResponse || !createdResponse.ok || !createdResponse.outData || !createdResponse.outData.id) {
         throw new Error(t('El endoso no pudo ser creado') + ': ' + cleanMessage(createdResponse));
       }
+      const created = Array.isArray(createdResponse.outData) ? createdResponse.outData[0] : createdResponse.outData;
       changeId = Number(created.id || 0);
       setKey(String(changeId));
       let processId = Number(created.processId || 0);
@@ -1756,23 +2280,91 @@
         await runReinsuranceMode(changeId, 'PREPARE_EXECUTION');
       }
 
-      const executed = await exe('ExeChangePolicyCapital', { changeId: changeId, exeNow: true, operation: 'EXECUTE', noTracking: true });
+      const executed = await exe('ExeChangeCoverage', { changeId: changeId, exeNow: true, operation: 'EXECUTE', noTracking: true });
       if (!executed || !executed.ok) {
         throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(executed));
       }
       reinsuranceExecuted = true;
 
+      // ExeChangeCoverage con exeNow no sincroniza las cuotas. Se actualizan
+      // las existentes distribuidas y, solo si queda un remanente, se agrega
+      // una cuota de ajuste.
       try {
-        const updateSum = await exe('ExeChain', {
-          chain: 'cmdUpdateAfterChangeSum',
-          context: JSON.stringify({ lifePolicyId: policyId, newInsuredSum: Number(newInsuredSum || 0) })
-        });
-        const updateData = updateSum && updateSum.outData;
-        if (!updateSum || updateSum.ok === false || (updateData && updateData.ok === false)) {
-          failures.push(t('actualización de la suma asegurada') + ': ' + ((updateData && updateData.msg) || cleanMessage(updateSum)));
+        const plannedRows = JSON.parse(payload.jNewPayPlan || '[]');
+        const oldRowsById = {};
+        oldPayPlan.forEach(function (item) { oldRowsById[String(item.id)] = item; });
+        for (let i = 0; i < plannedRows.length; i++) {
+          const planned = plannedRows[i];
+          const current = oldRowsById[String(planned && planned.id)];
+          if (!current || !Number(current.id) || current.cancellationDate) continue;
+          const before = money(current.minimum !== undefined ? current.minimum : current.expected);
+          const after = money(planned.minimum !== undefined ? planned.minimum : planned.expected);
+          const paid = money(current.payed !== undefined ? current.payed : current.paid);
+          if (after < paid) {
+            throw new Error(t('La distribución intentó reducir una cuota por debajo de lo ya pagado'));
+          }
+          if (before === after) continue;
+          const update = await exe('SetField', {
+            entity: 'PayPlan',
+            entityId: Number(current.id),
+            fieldValue: 'expected=' + after.toFixed(2) + ',minimum=' + after.toFixed(2),
+            raw: true
+          });
+          if (!update || !update.ok) {
+            throw new Error((update && update.msg) || t('No se pudo actualizar una cuota distribuida'));
+          }
         }
-      } catch (updateError) {
-        failures.push(t('actualización de la suma asegurada') + ': ' + String(updateError && updateError.message ? updateError.message : updateError));
+
+        const endorsementInstallments = plannedRows.filter(function (item) {
+          return !Number(item && item.id || 0);
+        }).map(function (item) {
+          // Un remanente no distribuible conserva el detalle de prima e impuesto.
+          const installmentAmount = money(item.minimum !== undefined ? item.minimum : item.expected);
+          const movementTax = calc && calc.billing && calc.billing.tax ? money(calc.billing.tax.after - calc.billing.tax.before) : 0;
+          const detailTax = Math.abs(movementTax) <= Math.abs(installmentAmount) ? movementTax : 0;
+          const detailConcept = 'Detalle de cuota #' + (item.numberInYear || '');
+          return Object.assign({}, item, { changeId: changeId, PayPlanDetail: [
+            { amount: money(installmentAmount - detailTax), concept: detailConcept, detail: 'Prima Cobertura', order: 1, paid: 0 },
+            { amount: detailTax, concept: detailConcept, detail: 'Impuesto de Seguros', order: 2, paid: 0 }
+          ] });
+        });
+        if (endorsementInstallments.length) {
+          const payPlanResponse = await exe('MakePayPlan', {
+            policyId: policyId,
+            Change: {
+              id: changeId,
+              lifePolicyId: policyId,
+              effectiveDate: payload.effectiveDate,
+              jNewPayPlan: JSON.stringify(endorsementInstallments)
+            },
+            policy: {
+              id: policyId,
+              payerId: policy.payerId,
+              holderId: policy.holderId,
+              contractYear: policy.contractYear,
+              currency: policy.currency
+            }
+          });
+          if (!payPlanResponse || !payPlanResponse.ok) {
+            failures.push(t('cuota del endoso') + ': ' + cleanMessage(payPlanResponse));
+          }
+        }
+      } catch (payPlanError) {
+        failures.push(t('cuota del endoso') + ': ' + String(payPlanError && payPlanError.message ? payPlanError.message : payPlanError));
+      }
+
+      // El cambio de suma no modifica la vigencia de la poliza.
+
+      // AXX-2420 (4, 7): la grilla de tarifas del objeto asegurado (SA de la cobertura), la suma afianzada y la suma
+      // asegurada de la poliza (cobertura principal) quedan iguales al limite que el endoso dejo en la cobertura.
+      try {
+        const synced = await exe('ExeChain', { chain: 'cmdUpdateInsuredObjectData', context: JSON.stringify({ policyId: policyId, syncSums: true }) });
+        const syncData = synced && synced.outData;
+        if (!synced || !synced.ok || !syncData || syncData.ok === false) {
+          failures.push(t('sincronizacion del objeto asegurado') + ': ' + String((syncData && syncData.msg) || (synced && synced.msg) || ''));
+        }
+      } catch (syncError) {
+        failures.push(t('sincronizacion del objeto asegurado') + ': ' + String(syncError && syncError.message ? syncError.message : syncError));
       }
 
       try {
@@ -1811,15 +2403,34 @@
 
   // ------------------------------------------------------------- columnas
   const colsGrid = [
-    { title: t('Codigo'), dataIndex: 'code', width: 80 },
-    { title: t('Nombre'), dataIndex: 'name' },
-    { title: t('Suma anterior'), dataIndex: 'oldSum', align: 'right', width: 130, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
-    { title: t('Nueva suma'), dataIndex: 'newSum', align: 'right', width: 130, render: function (v) { return <span className="axx-nuevo">{fmt(v)}</span>; } },
-    { title: t('Prima anterior'), dataIndex: 'oldPremium', align: 'right', width: 120, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
-    { title: t('Nueva prima'), dataIndex: 'newPremium', align: 'right', width: 120, render: function (v) { return <span className="axx-nuevo">{fmt(v)}</span>; } },
-    { title: t('Movimiento de prima'), dataIndex: 'variation', align: 'right', width: 140, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
-    { title: t('Vigencia inicial'), dataIndex: 'newStart', width: 140, render: function (v) { return day10(v); } },
-    { title: t('Vigencia final'), dataIndex: 'newEnd', width: 140, render: function (v) { return day10(v); } }
+    { title: t('Codigo'), dataIndex: 'code', width: 55 },
+    { title: t('Nombre'), dataIndex: 'name', width: 170, ellipsis: true, render: function (value) {
+      const name = txt(value);
+      return <Tooltip title={name}><span className="axx-ellipsis-cell">{name}</span></Tooltip>;
+    } },
+    { title: t('Suma'), dataIndex: 'sums', align: 'center', width: 50, render: function (value) {
+      return value ? <Tag color="green">{t('Sí')}</Tag> : <Tag>{t('No')}</Tag>;
+    } },
+    { title: t('Estado'), dataIndex: 'reason', width: 95, render: function (v) { return v === 'SELECTED' ? <Tag color="blue">{t('Modificada')}</Tag> : <Tag color="green">{t('Sin modificación')}</Tag>; } },
+    { title: t('Suma anterior'), dataIndex: 'oldSum', align: 'right', width: 95, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
+    { title: t('Nueva suma'), dataIndex: 'newSum', align: 'right', width: 95, render: function (v) { return <span className="axx-nuevo">{fmt(v)}</span>; } },
+    { title: t('Prima anterior'), dataIndex: 'oldPremium', align: 'right', width: 80, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
+    { title: t('Prima proporcional'), dataIndex: 'proportionalPremium', align: 'right', width: 95, render: function (v) { return fmt(v); } },
+    { title: t('Prorrata'), dataIndex: 'prorate', align: 'right', width: 80, render: function (v, row) { return row.reason === 'UNCHANGED' ? '-' : row.remainingDays + ' / ' + row.durationDays + ' ' + t('dias'); } },
+    { title: t('Nueva prima'), dataIndex: 'newPremium', align: 'right', width: 80, render: function (v) { return <span className="axx-nuevo">{fmt(v)}</span>; } },
+    { title: t('Variacion'), dataIndex: 'variation', align: 'right', width: 70, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
+    { title: t('Vigencia inicial'), dataIndex: 'oldStart', width: 85, render: function (v) { return day10(v); } },
+    { title: t('Vigencia final'), dataIndex: 'oldEnd', width: 85, render: function (v) { return day10(v); } }
+  ];
+
+  const colsCuotas = [
+    { title: t('No. cuota'), dataIndex: 'number', width: 110, align: 'center' },
+    { title: t('Importe actual'), dataIndex: 'currentAmount', width: 150, align: 'right', render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
+    { title: t('Importe con endoso'), dataIndex: 'amount', width: 170, align: 'right', render: function (v, row) { return <span className={row.isNew ? 'axx-nuevo' : ''}>{fmt(v)}</span>; } },
+    { title: t('Diferencia'), dataIndex: 'difference', width: 140, align: 'right', render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
+    { title: t('Pagado'), dataIndex: 'paid', width: 130, align: 'right', render: function (v) { return fmt(v); } },
+    { title: t('Fecha de vencimiento'), dataIndex: 'dueDate', width: 170, align: 'center', render: function (v, row) { return <span className={row.isNew ? 'axx-nuevo' : ''}>{day10(v)}</span>; } },
+    { title: t('Movimiento'), dataIndex: 'isNew', width: 150, render: function (v) { return v ? <Tag color="blue">{t('Cuota del endoso')}</Tag> : <Tag>{t('Vigente')}</Tag>; } }
   ];
 
   const colsResumen = [
@@ -2037,19 +2648,24 @@
         row.commission += numberFrom(cession, ['comissionCedant', 'commission']);
         row.tax += numberFrom(cession, ['tax']);
       });
-      // Las lineas nuevas de distribucion se crean en memoria y pueden traer
-      // nuevamente el movimiento del endoso. El movimiento final del contrato
-      // debe sumar la cartera vigente mas la variacion una sola vez.
-      const basePremium = currentRows.reduce(function (sum, cession) {
-        return sum + numberFrom(cession, ['premium']);
+      // El encabezado debe representar el estado final completo. Se toma una
+      // sola vez cada cobertura del contrato y se usa el resultado cotizado;
+      // sumar cesiones duplicaría una cobertura presente en varias líneas.
+      const finalByCoverage = {};
+      (row.groups || []).forEach(function (group) {
+        (group.rows || []).forEach(function (coverage) {
+          const code = txt(coverage.coverageCode);
+          if (!code || finalByCoverage[code]) return;
+          finalByCoverage[code] = coverage;
+        });
+      });
+      row.movement = Object.keys(finalByCoverage).reduce(function (sum, code) {
+        return sum + finalCoveragePremium(row.groups[0] || {}, finalByCoverage[code]);
       }, 0);
-      const baseSum = currentRows.reduce(function (sum, cession) {
-        return sum + numberFrom(cession, ['sumInsured']);
+      row.sum = Object.keys(finalByCoverage).reduce(function (sum, code) {
+        const coverage = finalByCoverage[code];
+        return sum + (coverage.counts ? finalCoverageSum(row.groups[0] || {}, coverage) : 0);
       }, 0);
-      const endorsementMovement = numberFrom(calc && calc.billing && calc.billing.movement, ['premium']);
-      const endorsementSumMovement = numberFrom(calc && calc.billing && calc.billing.movement, ['sum']);
-      row.movement = basePremium + endorsementMovement;
-      row.sum = baseSum + endorsementSumMovement;
       // El encabezado debe reflejar la misma distribucion que se muestra
       // debajo, incluyendo las lineas creadas en memoria.
       const distributionRows = getDistributionRows(row);
@@ -2319,7 +2935,10 @@
       const groupRows = (g.rows || []).map(function (row) {
         return Object.assign({}, row, { _groupKey: groupKey });
       });
-      const lineParticipants = getLineParticipants(g);
+      const lineTotal = getDistributionRows(contract).find(function (item) {
+        return String(item.groupKey) === groupKey;
+      });
+      const lineParticipants = getLineParticipants(g, lineTotal);
       return (
         <div key={mode + groupKey} className="axx-rea-line-detail">
           <div className="axx-rea-toolbar">
@@ -2415,6 +3034,52 @@
 .axx299 .axx-filtros { display:flex; flex-wrap:wrap; align-items:flex-end; gap:10px; padding:6px 4px; }
 .axx299 .axx-campo { display:flex; flex-direction:column; }
 .axx299 .axx-campo label { font-size:12px; color:#5a6572; margin-bottom:2px; }
+.axx299 .axx-ellipsis-cell { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.axx299 .axx-sum-input-grid .ant-table-thead > tr > th,
+.axx299 .axx-sum-input-grid .ant-table-tbody > tr > td { padding:3px 7px !important; }
+.axx299 .axx-coverage-result-grid .ant-table-body {
+  overflow-x:scroll !important;
+  overflow-y:scroll !important;
+  scrollbar-gutter:stable;
+}
+.axx299 .axx-coverage-result-grid .ant-table-thead > tr > th,
+.axx299 .axx-coverage-result-grid .ant-table-tbody > tr > td,
+.axx299 .axx-coverage-result-grid .ant-table-summary > tr > td { padding:3px 5px !important; font-size:11px; }
+.axx299 .axx-coverage-result-grid .ant-table-summary .axx-coverage-total-row > td {
+  background:#86b4ff !important;
+  color:#0b1f3a;
+  font-weight:700;
+}
+/* Misma jerarquía visual de campos que el formulario de Ramos Técnicos. */
+.axx299 .ant-input,
+.axx299 .ant-input-affix-wrapper,
+.axx299 .ant-input-number,
+.axx299 .ant-picker,
+.axx299 .ant-select:not(.ant-select-customize-input) .ant-select-selector {
+  border:1px solid #b8c4d1 !important;
+  border-radius:6px !important;
+  transition:border-color .2s, box-shadow .2s;
+}
+.axx299 .ant-input:hover,
+.axx299 .ant-input-affix-wrapper:hover,
+.axx299 .ant-input-number:hover,
+.axx299 .ant-picker:hover,
+.axx299 .ant-select:not(.ant-select-customize-input):hover .ant-select-selector { border-color:#8da9c2 !important; }
+.axx299 .ant-input:focus,
+.axx299 .ant-input-affix-wrapper-focused,
+.axx299 .ant-input-number-focused,
+.axx299 .ant-picker-focused,
+.axx299 .ant-select-focused:not(.ant-select-customize-input) .ant-select-selector {
+  border-color:#1677ff !important;
+  box-shadow:0 0 0 2px rgba(22,119,255,.2) !important;
+}
+.axx299 .ant-input[disabled],
+.axx299 .ant-input-number-disabled,
+.axx299 .ant-picker-disabled,
+.axx299 .ant-select-disabled:not(.ant-select-customize-input) .ant-select-selector {
+  border-color:#d9d9d9 !important;
+  background:#f5f5f5 !important;
+}
 .axx299-modal .ant-modal-body { font-size:13px; }
 .axx299 .axx-aceptantes-barra { display:flex; align-items:center; gap:8px; }
 .axx299 .axx-rea-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 8px; margin-bottom:4px; background:#e6f4ff; border:1px solid #91caff; border-radius:4px; color:#1f1f1f; }
@@ -2438,14 +3103,14 @@
 .axx299 .axx-execution-mask > div { display:flex; align-items:center; gap:10px; padding:14px 18px; background:#fff; border:1px solid #91caff; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.16); color:#1677ff; font-weight:600; }
 `;
 
-  const puedeEjecutar = !!(calc && calc.rows && calc.rows.length && !running && reinsuranceConfirmed);
+  const puedeEjecutar = !!(calc && (calc.changedRows || calc.rows || []).length && !running && reinsuranceConfirmed);
   const reinsuranceValidation = calc && sim
     ? validateReinsuranceDistribution()
     : { ok: false, errors: [t('La distribución de reaseguro todavía no está cargada.')] };
   const openedWithPolicy = /[?&]policyId=\d+/.test(String(window.location.href || ''));
 
   return (
-    <DefaultPage title={t('Endoso de cambio de suma asegurada')} subTitle={policy ? policy.code : ''}>
+    <DefaultPage title={t('Endoso de cambio de suma asegurada por cobertura')} subTitle={policy ? policy.code : ''}>
       <div className="axx299">
         <style>{css}</style>
 
@@ -2458,8 +3123,7 @@
         <div className="axx-status">
           <b>{t('Poliza')}:</b> {policy ? policy.code + ' — ' + ((policy.Product && (policy.Product.name || policy.Product.description)) || policy.productCode) + ' — ' + ((policy.Currency && (policy.Currency.name || policy.Currency.description)) || policy.currency) : t('sin cargar')}
           {policy ? <span>{' | '}<b>{t('Estado')}:</b> {policy.entityState === 'ACTIVE' ? t('Activo') : (policy.entityState === 'INACTIVE' ? t('Inactivo') : t(policy.entityState))}</span> : null}
-          {calc ? <span>{' | '}<b>{t('Movimiento')}:</b> {calc.direction === 'INCREASE' ? t('Aumento') : t('Disminución')}
-            {' | '}<b>{t('Suma final')}:</b> {fmt(newInsuredSum)}</span> : null}
+          {calc ? <span>{' | '}<b>{t('Movimiento')}:</b> {calc.direction === 'INCREASE' ? t('Aumento') : t('Disminucion')}{' | '}<b>{t('Coberturas')}:</b> {calc.coverageCode}{' | '}<b>{t('Suma final')}:</b> {fmt((calc.rows || []).reduce(function (sum, row) { return sum + Number(row.newSum || 0); }, 0))}</span> : null}
         </div>
 
         <div className="axx-topbar">
@@ -2513,17 +3177,6 @@
                   <Card bordered={false}>
                     <div className="axx-filtros">
                       <div className="axx-campo">
-                        <label>{t('Suma asegurada actual')}</label>
-                        <Input id="txtSumaActual" readOnly style={{ width: 160 }} value={policy ? fmt(policy.insuredSum) : ''} />
-                      </div>
-                      <div className="axx-campo">
-                        <label>{t('Nueva suma asegurada final')}</label>
-                        <InputNumber id="numNuevaSuma" min={0.01} step={1000} style={{ width: 180 }} value={newInsuredSum}
-                          formatter={function (value) { return String(value === undefined ? '' : value).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
-                          parser={function (value) { return String(value || '').replace(/,/g, ''); }}
-                          onChange={function (v) { setNewInsuredSum(v); invalidate(); }} />
-                      </div>
-                      <div className="axx-campo">
                         <label>{t('Fecha efectiva')}</label>
                         <DatePicker id="dtpFechaEfectiva" style={{ width: 150 }} value={effectiveDate}
                           onChange={function (v) { setEffectiveDate(v); invalidate(); }} />
@@ -2539,14 +3192,64 @@
                           onChange={function (v) { onAjuste('discount', v); }} />
                       </div>
                       <Button id="btnCalcular" type="primary" loading={loading}
-                        disabled={!policy || !newInsuredSum || !effectiveDate} onClick={calcular}>{t('Calcular endoso')}</Button>
+                        disabled={!effectiveDate || !sumEditableRows.some(function (row) {
+                          const value = coverageInputs[txt(row.code)];
+                          return value && value.final !== null && value.final !== undefined && value.final !== '' && Number.isFinite(Number(value.final));
+                        })} onClick={calcular}>{t('Calcular endoso')}</Button>
                     </div>
+
+                    <Table className="axx-grilla axx-sum-input-grid" size="small" pagination={false} rowKey="code"
+                      dataSource={sumEditableRows} scroll={{ x: true }} columns={[
+                        { title: t('Código'), dataIndex: 'code', key: 'code', width: 70 },
+                        { title: t('Cobertura'), dataIndex: 'name', key: 'name', width: 260 },
+                        { title: t('Suma actual'), dataIndex: 'limit', key: 'limit', align: 'right', width: 120, render: function (value) { return fmt(value); } },
+                        { title: t('Diferencia (+/-)'), key: 'difference', width: 160,
+                          render: function (value, row) {
+                            const input = coverageInputs[txt(row.code)] || {};
+                            return <InputNumber id={'numDiferencia-' + row.code} step={1000} style={{ width: 140 }} value={input.difference}
+                              formatter={function (v) { return v === undefined || v === null || v === '' ? '' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
+                              parser={function (v) { return String(v || '').replace(/,/g, ''); }}
+                              onChange={function (v) { updateCoverageInput(row.code, 'difference', v, row.limit); }} />;
+                          } },
+                        { title: t('Nueva suma final'), key: 'final', width: 160,
+                          render: function (value, row) {
+                            const input = coverageInputs[txt(row.code)] || {};
+                            return <InputNumber id={'numSumaFinal-' + row.code} step={1000} style={{ width: 140 }} value={input.final}
+                              formatter={function (v) { return v === undefined || v === null || v === '' ? '' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
+                              parser={function (v) { return String(v || '').replace(/,/g, ''); }}
+                              onChange={function (v) { updateCoverageInput(row.code, 'final', v, row.limit); }} />;
+                          } },
+                        { title: t('Suma resultante'), key: 'newSum', align: 'right', width: 130,
+                          render: function (value, row) {
+                            const input = coverageInputs[txt(row.code)] || {};
+                            if (input.final === null || input.final === undefined || input.final === '' || !Number.isFinite(Number(input.final))) return '';
+                            return fmt(input.final);
+                          } }
+                      ]} />
 
                     <Spin spinning={loading}>
                       {calc ? (
                         <div>
-                          <Table className="axx-grilla" size="small" pagination={false} rowKey="code"
-                            dataSource={calc.rows} columns={colsGrid} scroll={{ y: altoGrilla }} />
+                          <Table className="axx-grilla axx-coverage-result-grid" size="small" pagination={false} rowKey="code"
+                            dataSource={calc.rows} columns={colsGrid} scroll={{ x: 1200, y: altoGrilla }}
+                            summary={function (pageData) {
+                              const total = function (field) {
+                                return money(pageData.reduce(function (sum, row) { return sum + Number(row[field] || 0); }, 0));
+                              };
+                              return <Table.Summary>
+                                <Table.Summary.Row className="axx-coverage-total-row">
+                                  <Table.Summary.Cell index={0} colSpan={4}><b>{t('Totales')}</b></Table.Summary.Cell>
+                                  <Table.Summary.Cell index={4} align="right">{fmt(total('oldSum'))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={5} align="right">{fmt(total('newSum'))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={6} align="right">{fmt(total('oldPremium'))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={7} align="right">{fmt(total('proportionalPremium'))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={8}></Table.Summary.Cell>
+                                  <Table.Summary.Cell index={9} align="right">{fmt(total('newPremium'))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={10} align="right"><span className={signo(total('variation'))}>{conSigno(total('variation'))}</span></Table.Summary.Cell>
+                                  <Table.Summary.Cell index={11} colSpan={2}></Table.Summary.Cell>
+                                </Table.Summary.Row>
+                              </Table.Summary>;
+                            }} />
                           <div style={{ height: 8 }} />
                           <Table className="axx-resumen" size="small" pagination={false} rowKey="key"
                             dataSource={filasResumen} columns={colsResumen}
@@ -2559,7 +3262,7 @@
                             {' | '}{t('Fecha efectiva')}: {day10(calc.effectiveDate)}
                           </div>
                         </div>
-                      ) : <Empty description={t('Indique la nueva suma asegurada final y pulse Calcular endoso')} />}
+                      ) : <Empty description={t('Indique una nueva suma para una o más coberturas y pulse Calcular endoso')} />}
                     </Spin>
                   </Card>
                 </div>
@@ -2586,7 +3289,7 @@
                             onRow={function (row) { return { onClick: function () { setSelectedReinsuranceKey(row.key); } }; }} />
                           {contractRows.filter(function (row) { return row.key === selectedReinsuranceKey; }).map(function (contract) {
                             return (
-                              <Tabs key={contract.key} className="axx-rea-detail-tabs" type="card" activeKey={reaDetailTab} onChange={setReaDetailTab}>
+                              <Tabs className="axx-rea-detail-tabs" type="card" activeKey={reaDetailTab} onChange={setReaDetailTab}>
                                 <Tabs.TabPane tab={t('Distribucion')} key="distribution">
                                   <div className="axx-rea-actions">
                                     <Button type="primary" onClick={guardarDistribucionMemoria}>{t('Guardar')}</Button>
@@ -2625,6 +3328,21 @@
                   </Card>
                 </div>
               )
+            },
+            {
+              key: 'cuotas', label: t('Vista previa de cuotas'), children: (
+                <div className="axx-panel">
+                  <Card bordered={false}>
+                    {!calc ? (
+                      <Alert type="info" showIcon style={{ marginBottom: 8 }}
+                        message={t('Calcule el endoso para ver la vista previa de las cuotas.')} />
+                    ) : null}
+                    <Table className="axx-grilla" size="small" bordered pagination={false} rowKey="key"
+                      dataSource={calc ? payPlanPreview : []} columns={colsCuotas}
+                      locale={{ emptyText: t('Calcule el endoso para ver la vista previa de las cuotas.') }} />
+                  </Card>
+                </div>
+              )
             }
           ]} />
 
@@ -2636,9 +3354,10 @@
           <div>
             {calc ? (
               <div style={{ marginBottom: 8 }}>
-                {t('Suma asegurada')} {fmt(policy && policy.insuredSum)} → <b>{fmt(newInsuredSum)}</b><br />
-                {t('Fecha efectiva')}: <b>{day10(calc.effectiveDate)}</b><br />
-                {t('Movimiento de prima')}: <b>{conSigno(calc.billing.movement.premium)}</b> {calc.billing.currency}<br />
+                {t('Coberturas')}: <b>{calc.coverageCode}</b><br />
+                {(calc.rows || []).map(function (row) {
+                  return <span key={row.code}>{row.code}: {t('suma')} {fmt(row.oldSum)} → <b>{fmt(row.newSum)}</b>, {t('prima')} {fmt(row.oldPremium)} → <b>{fmt(row.adjustedPremium)}</b> ({conSigno(row.variation)})<br /></span>;
+                })}
                 {t('Total de la poliza')} {fmt(calc.billing.total.before)} → <b>{fmt(calc.billing.total.after)}</b>
               </div>
             ) : null}

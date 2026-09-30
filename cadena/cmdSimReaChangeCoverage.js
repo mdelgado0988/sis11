@@ -8,14 +8,14 @@
  * Incluye todas las coberturas activas de cada contrato y linea afectados para que los
  * porcentajes editados se apliquen a la distribucion completa, aunque una cobertura no
  * tenga movimiento de prima en el endoso, respetando si la cobertura suma o no para
- * el contrato (cfgCoberturaProductoReaFianza),
+ * el contrato (la tabla cfgCoberturaProductoRea correspondiente al ramo),
  * y proyectando los aceptantes de cada linea por su participacion.
  *
  * La prima de reaseguro se reparte sobre la variacion FINAL de la cobertura
  * (incluye recargos y descuentos). El importe prorateado se conserva como dato
  * informativo, pero no puede ser la base porque omite esos ajustes manuales.
  *
- * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement}], participants:[{cessionId, contactId, split}]}
+ * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement, finalPremium, finalSum}], participants:[{cessionId, contactId, split}]}
  */
 const money = function (v) { return Number(Number(v).toFixed(2)); };
 const txt = function (v) { return String(v == null ? '' : v).trim(); };
@@ -25,10 +25,15 @@ const policyId = Number(context.policyId || 0);
 if (!policyId) throw 'Falta la poliza';
 const rows = context.rows || [];
 if (!rows.length) throw 'No hay resultado de calculo que distribuir: ejecute primero Calcular endoso';
+// Cambio de suma entrega el estado final completo. Los demás movimientos
+// conservan sus cesiones vigentes, incluso sin movimiento de cobertura.
+const finalStateOnly = context.finalStateOnly === true;
 
 const delta = {};
 const prorated = {};
 const sumDelta = {};
+const finalPremium = {};
+const finalSum = {};
 let movement = 0;
 let proratedMovement = 0;
 let sumMovement = 0;
@@ -40,6 +45,8 @@ for (let i = 0; i < rows.length; i++) {
   delta[c] = v;
   prorated[c] = pr;
   sumDelta[c] = sv;
+  finalPremium[c] = rows[i].finalPremium === undefined || rows[i].finalPremium === null ? null : money(rows[i].finalPremium);
+  finalSum[c] = rows[i].finalSum === undefined || rows[i].finalSum === null ? null : money(rows[i].finalSum);
   movement = money(movement + v);
   proratedMovement = money(proratedMovement + pr);
   sumMovement = money(sumMovement + sv);
@@ -49,7 +56,22 @@ doCmd({ cmd: 'RepoLifePolicy', data: { operation: 'GET', filter: 'id=' + policyI
 const policy = (RepoLifePolicy.outData || [])[0];
 if (!policy) throw 'Poliza ' + policyId + ' no encontrada';
 
-doCmd({ cmd: 'GetFullTable', data: { table: 'cfgCoberturaProductoReaFianza' } });
+// La marca isCoverage pertenece a una tabla distinta por ramo. Usar siempre
+// la de Fianza deja sin marca las coberturas de Técnicos (por ejemplo CAR).
+const cfgTableByLob = {
+  '96': 'cfgCoberturaProductoReaTecnicos',
+  '20': 'cfgCoberturaProductoReaVidaColectivo',
+  '31': 'cfgCoberturaProductoReaVida',
+  '52': 'cfgCoberturaProductoReaRiesgosVarios',
+  '1': 'cfgCoberturaProductoRea',
+  '6': 'cfgCoberturaProductoReaAuto',
+  '81': 'cfgCoberturaProductoReaFianza',
+  '82': 'cfgCoberturaProductoReaFianza',
+  '83': 'cfgCoberturaProductoReaFianza',
+  '84': 'cfgCoberturaProductoReaFianza'
+};
+const cfgTable = cfgTableByLob[txt(policy.lob)] || 'cfgCoberturaProductoRea';
+doCmd({ cmd: 'GetFullTable', data: { table: cfgTable } });
 let table = GetFullTable.outData || [];
 if (typeof table === 'string') table = JSON.parse(table);
 const sums = {};
@@ -120,6 +142,9 @@ for (let i = 0; i < base.length; i++) {
   const lineUp = up(line);
   const key = txt(c.contractId) + '|' + line;
   if (!affectedContractLines[key]) continue;
+  // Una cesión puede sobrevivir a una cobertura retirada en la póliza. Solo
+  // proyectamos las coberturas que llegaron en el estado final cotizado.
+  if (finalStateOnly && delta[code] === undefined) continue;
   if (!byContract[key]) {
     byContract[key] = {
       contractId: Number(c.contractId), lineId: line,
@@ -147,6 +172,9 @@ for (let i = 0; i < base.length; i++) {
   grp.rows.push({
     coverageCode: code, cover: txt(c.cover), counts: counts,
     premiumMovement: dv, proratedMovement: pv, sumInsuredMovement: sv,
+    // El estado final viene de la cotización de la póliza, no de sumar
+    // cesiones, porque una misma cobertura puede estar en varias líneas.
+    finalPremium: finalPremium[code], finalSum: finalSum[code],
     proportionCed: pCed, proportionRe: pRe,
     premiumCedant: cedant, premiumRe: re, nonTechnicalPremium: nonTechnical,
     sumInsured: Number(c.sumInsured || 0), sumInsuredCounted: counts ? Number(c.sumInsured || 0) : 0,

@@ -448,30 +448,58 @@ function hasEndorsementPremium(billDiff, change) {
   return premiumValues.some(value => Math.abs(numericValue(value)) > 0.000001);
 }
 
+function tipoCambioCobertura(change) {
+  const discriminator = String(change?.Discriminator || '').trim().toUpperCase();
+  const additional = safeJson(change?.jAdditional, {}) || {};
+  const endorsementType = String(additional?.endorsementType || '').trim().toUpperCase();
+  return { discriminator, endorsementType };
+}
+
+function esCambioCobertura(change) {
+  const type = tipoCambioCobertura(change);
+  return type.discriminator === 'ADDCOVERAGECHANGE'
+    || type.discriminator === 'REMOVECOVERAGECHANGE'
+    || type.discriminator === 'CHANGEADDCOVERAGE'
+    || type.discriminator === 'CHANGEREMOVECOVERAGE'
+    || type.endorsementType === 'INCLUSIONCOBERTURA'
+    || type.endorsementType === 'EXCLUSIONCOBERTURA';
+}
+
+function esExclusionCobertura(change) {
+  const type = tipoCambioCobertura(change);
+  return type.discriminator === 'REMOVECOVERAGECHANGE'
+    || type.discriminator === 'CHANGEREMOVECOVERAGE'
+    || type.endorsementType === 'EXCLUSIONCOBERTURA';
+}
+
 function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   if (esEndosoTarjetaProtegida(change)) {
     return reportes.vidaTarjetaProtegida;
   }
 
+  // Los cambios de coberturas deben usar siempre el formato con la seccion
+  // de coberturas, aunque el movimiento no genere prima.
+  const esCambioCoberturaActual = esCambioCobertura(change);
+
   if (isLifePolicyLob(policy?.lob)) {
-    return hasEndorsementPremium(billDiff, change)
+    return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
       ? reportes.vida.conPrima
       : reportes.vida.sinPrima;
   }
 
   if (isTechnicalPolicy(policy)) {
-    return hasEndorsementPremium(billDiff, change)
+    return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
       ? reportes.ramoTecnico.conPrima
       : reportes.ramoTecnico.sinPrima;
   }
 
   if (!isSuretyPolicy(policy)) {
-    return change.Discriminator === "LoadingChange"
+    return change.Discriminator === "LoadingChange" && !esCambioCoberturaActual
       ? reportes.incendio.sinPrima
       : reportes.incendio.conPrima;
   }
 
-  return hasEndorsementPremium(billDiff, change)
+  return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
     ? reportes.fianza.conPrima
     : reportes.fianza.sinPrima;
 }
@@ -814,6 +842,8 @@ function getEndorsmentTitle(discriminator) {
     PolicySurchargeChange: "Cambio de Recargos/Descuentos",
     AddCoverageChange: "Inclusión de Cobertura",
     RemoveCoverageChange: "Exclusión de Cobertura",
+    ChangeAddCoverage: "Inclusión de Cobertura",
+    ChangeRemoveCoverage: "Exclusión de Cobertura",
     BeneficiaryChange: "Cambio de Beneficiario",
     PayPlanChange: "Cambio de Plan de Pago",
     CoverageChangeTechData: "Cambio de Cobertura Técnica",
@@ -1073,28 +1103,73 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     const changeCoveragesDetails = details.Coverages ?? [];
     const endosoSinPrima = endosoNoGeneraPrima(change);
 
-    //custom.Endoso.details = details;
-    custom.Endoso.Coberturas = policy.Coverages.map(polCov => {
-      const changeCov = changeCoverages.find(c => c.code == polCov.code);
-      const oldChangeCov = oldCoverages.find(c => c.code == polCov.code);
-      const changeCovDetail = changeCoveragesDetails.find(c => c.code == polCov.code);
+    // Para inclusion/exclusion el documento solo debe recibir las coberturas
+    // involucradas en el movimiento, no el inventario completo de la poliza.
+    const additional = safeJson(change.jAdditional, {}) || {};
+    const additionalCoverages = Array.isArray(additional.coverages) ? additional.coverages : [];
+    const codeOf = coverage => String(coverage?.code ?? '').trim();
+    const isCoverageSetChange = esCambioCobertura(change);
+    const isCoverageRemoval = esExclusionCobertura(change);
+    const additionalCodes = additionalCoverages.map(codeOf).filter(Boolean);
+    const oldCodes = oldCoverages.map(codeOf).filter(Boolean);
+    const newCodes = changeCoverages.map(codeOf).filter(Boolean);
+    let affectedCodes = additionalCodes;
 
-      const oldLimit = oldChangeCov?.limit ?? (polCov?.limit ?? 0);
-      let newLimit = changeCov?.limit ?? oldLimit;
+    if (!affectedCodes.length && isCoverageSetChange && !isCoverageRemoval) {
+      affectedCodes = newCodes.filter(code => !oldCodes.includes(code));
+    }
+    if (!affectedCodes.length && isCoverageRemoval) {
+      affectedCodes = oldCodes.filter(code => !newCodes.includes(code));
+    }
+    if (!affectedCodes.length && isCoverageSetChange) {
+      affectedCodes = changeCoveragesDetails.map(codeOf).filter(Boolean);
+    }
+    if (!isCoverageSetChange) {
+      affectedCodes = (policy.Coverages || []).map(codeOf).filter(Boolean);
+    }
 
-      let primaDiff = (changeCovDetail ? n(changeCovDetail.premiumDif) : 0);
-      /*if(changeName == 'CancellationChange'){
-        primaDiff = (changeCovDetail ? n(changeCovDetail.premiumCost) : 0);
-        newLimit = 0;
-      }*/
+    const coverageSource = code => {
+      const fromAdditional = additionalCoverages.find(item => codeOf(item) === code);
+      const fromChange = changeCoverages.find(item => codeOf(item) === code);
+      const fromOld = oldCoverages.find(item => codeOf(item) === code);
+      const fromPolicy = (policy.Coverages || []).find(item => codeOf(item) === code);
+      return Object.assign({}, fromPolicy || {}, fromOld || {}, fromChange || {}, fromAdditional || {}, { code });
+    };
 
-      //Michael Delgado. GLOBUAT-66. Los endosos que no generan prima no deben mostrar nada, ni lo de la póliza      
+    custom.Endoso.Coberturas = affectedCodes.map(code => {
+      const source = coverageSource(code);
+      const oldChangeCov = oldCoverages.find(c => codeOf(c) === code);
+      const changeCov = changeCoverages.find(c => codeOf(c) === code);
+      const changeCovDetail = changeCoveragesDetails.find(c => codeOf(c) === code);
+
+      if (!isCoverageSetChange) {
+        const polCov = (policy.Coverages || []).find(c => codeOf(c) === code) || source;
+        const oldLimit = oldChangeCov?.limit ?? (polCov?.limit ?? 0);
+        const newLimit = changeCov?.limit ?? oldLimit;
+        const primaDiff = changeCovDetail ? n(changeCovDetail.premiumDif) : 0;
+        return {
+          ...polCov,
+          premiumDif: endosoSinPrima ? n(0) : primaDiff,
+          limitDif: endosoSinPrima ? n(0) : n(newLimit - oldLimit)
+        };
+      }
+
+      const oldLimit = oldChangeCov?.limit ?? source?.limit ?? 0;
+      const newLimit = isCoverageRemoval
+        ? 0
+        : (changeCov?.limit ?? source?.limit ?? oldLimit);
+      const defaultPremiumDif = isCoverageRemoval
+        ? -n(oldChangeCov?.premium ?? source?.premium ?? 0)
+        : n(changeCov?.premium ?? source?.premium ?? 0);
+      const primaDiff = changeCovDetail
+        ? n(changeCovDetail.premiumDif ?? changeCovDetail.premiumCost ?? defaultPremiumDif)
+        : defaultPremiumDif;
+
       return {
-        ...polCov,
+        ...source,
         premiumDif: endosoSinPrima ? n(0) : primaDiff,
         limitDif: endosoSinPrima ? n(0) : n(newLimit - oldLimit)
       };
-      
     });
 
     //Primas del cambio billDiff
@@ -1233,6 +1308,8 @@ function mapChangeName(name) {
     case "TermChange": return { ...base, nombreEndoso: "Período" };
     case "AddCoverageChange": return { ...base, nombreEndoso: "Incluir cobertura" };
     case "RemoveCoverageChange": return { ...base, nombreEndoso: "Excluir Cobertura" };
+    case "ChangeAddCoverage": return { ...base, nombreEndoso: "Incluir cobertura" };
+    case "ChangeRemoveCoverage": return { ...base, nombreEndoso: "Excluir Cobertura" };
     default: return base;
   }
 }

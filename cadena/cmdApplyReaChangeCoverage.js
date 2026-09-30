@@ -91,6 +91,10 @@ try {
 }
 const snapshot = additional.reinsuranceSnapshot || {};
 const preserveActiveReinsurance = additional.preserveActiveReinsurance === true;
+// Solo el cambio de suma por cobertura persiste una fotografía limitada a
+// las coberturas que sobreviven en jNewCoverages. Los demás endosos siguen
+// versionando todas las cesiones vigentes.
+const reinsuranceFinalStateOnly = additional.reinsuranceFinalStateOnly === true;
 
 if (mode === 'ROLLBACK') {
   const sourceCessionIds = (Array.isArray(snapshot.sourceCessionIds) ? snapshot.sourceCessionIds : [])
@@ -573,10 +577,18 @@ const baseCessions = preserveActiveReinsurance
   ? aggregateActiveCessions(sourceCessions)
   : Object.keys(currentByKey).map(function (key) { return currentByKey[key]; });
 
+// La cancelación conserva siempre el universo anterior para auditoría. Este
+// filtro solo determina las nuevas filas positivas que quedarán vigentes.
+const positiveBaseCessions = reinsuranceFinalStateOnly
+  ? baseCessions.filter(function (source) {
+    return !!(coverageByCode[txt(source.coverageCode)] || coverageById[Number(source.coverageId || 0)]);
+  })
+  : baseCessions;
+
 // Construye el estado final completo. Para una fila afectada, premium es el
 // total vigente mas el movimiento del endoso; los importes cedente/cedido,
 // comision e impuesto son los valores finales confirmados en la vista.
-const finalCessions = baseCessions.map(function (source) {
+const finalCessions = positiveBaseCessions.map(function (source) {
   const result = clone(source);
   result._sourceId = Number(source.id || 0);
   const requested = preserveActiveReinsurance ? null : rowsByKey[keyOf(source)];
@@ -657,6 +669,7 @@ const cancellationCessions = baseCessions.map(function (source) {
 // Soporta nuevas combinaciones de contrato/linea/cobertura.
 requestedRows.forEach(function (requested) {
   if (preserveActiveReinsurance) return;
+  if (reinsuranceFinalStateOnly && !coverageByCode[txt(requested.coverageCode)]) return;
   const key = keyOf(requested);
   if (currentByKey[key]) return;
   let template = sourceCessions.find(function (cession) {
