@@ -2,7 +2,7 @@
 //noreplace
 
 /*
-  *@name: cmdDocumentoVidaDTO
+  *@name: cmdDocumentoRamoTecnicoDTO
   *@Purpose: Recupera el DTO para generación de documento de ramos técnicos (general)
   *@Autor: Michael Delgado
   *@Email: michael.delgado@axxis-systems.com
@@ -12,7 +12,7 @@
 */
 
 /*
-  *@name: cmdDocumentoVidaDTO
+  *@name: cmdDocumentoRamoTecnicoDTO
   *@Purpose: Add insured data
   *@Autor: Felix Ramirez
   *@Email: felix.ramirez@axxis-systems.com
@@ -200,6 +200,7 @@ resultado.SumaDT = n(oaUserData?.txtSA ?? 0);
 resultado.PaisDT = getCatalogValue("RepoCountryCatalog", `code = '${oaUserData.cmbPais ?? "0"}'`, "name") ?? "";
 resultado.Comentarios = oaUserData?.txtDescripcion ?? "";
 resultado.userData = oaUserData;
+agregarAdendosAlResultado();
 
 //Fecha actual
 resultado.DiaFecha = dia;
@@ -220,6 +221,35 @@ resultado.TituloEncargado = "";
 //n_acto_publico
 
 return resultado;
+
+function agregarAdendosAlResultado() {
+  const raw = oaUserData?.hiddenAdendos;
+  if (!raw) return;
+
+  let adendos;
+  try {
+    adendos = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch (error) {
+    return;
+  }
+
+  if (!Array.isArray(adendos)) return;
+
+  adendos.forEach(adendo => {
+    const codigoAnexo = String(adendo?.idAnexo ?? adendo?.codigoAnexo ?? "").trim();
+    const codigoCobertura = String(adendo?.coverageCode ?? adendo?.codigoCobertura ?? "").trim();
+    if (!codigoAnexo || !codigoCobertura) return;
+
+    Object.keys(adendo)
+      .filter(key => /^Parametro\d+$/i.test(key))
+      .sort((a, b) => Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")))
+      .forEach(key => {
+        const numeroParametro = key.replace(/\D/g, "");
+        const nombreAtributo = `${codigoAnexo}_${codigoCobertura}_${numeroParametro}`;
+        resultado[nombreAtributo] = adendo[key] ?? "";
+      });
+  });
+}
 
 function setPolicy() {
   doCmd({cmd: "RepoLifePolicy", data: { operation: "GET", include: ["Insureds", "Coverages", "PayPlan"], filter: `id = ${policyId}`, noTracking: true }});

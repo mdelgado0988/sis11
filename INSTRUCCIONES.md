@@ -74,3 +74,10 @@
 - En vistas, mantener las etiquetas fuente en ingles y traducir con `t()` de acuerdo con el estandar de las vistas existentes.
 - Documentar reglas especiales de negocio en comentarios claros y breves.
 - No usar `Intl` en comandos ni vistas; para conversiones o formatos regionales usar las utilidades manuales definidas por el proyecto.
+
+## Plantillas DOCX
+
+- Antes de diagnosticar campos dinamicos o contenido de un reporte `.docx`, validar que el archivo sea un paquete OOXML valido.
+- Las rutas internas del ZIP deben usar `/` como separador, por ejemplo `word/document.xml`, nunca `\`.
+- Si una plantilla fue generada en Windows y contiene rutas internas con `\`, reconstruir el paquete normalizando esas rutas a `/` sin modificar el contenido XML.
+- Verificar tambien que las relaciones internas (`word/_rels/document.xml.rels`) apunten a rutas compatibles.

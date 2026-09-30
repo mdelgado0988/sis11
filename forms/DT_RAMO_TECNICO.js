@@ -13,6 +13,19 @@ let policy;
 let policyId = window.location.href.split('/')[5] ?? 3377;
 let contact;
 let polizaConfirmada = false;
+let bloquearCoberturas = false;
+const isEndorsment = window.location.href.includes('tab12');
+const camposEditablesEnEndoso = new Set([
+    'txtCodigoProyecto',
+    'txtPeriodoPrueba',
+    'txtPeriodoMantenimiento',
+    'ckOrdenProceder',
+    'txtDescripcion',
+    'txtLocalizacion',
+    'txtProyecto',
+    'cmbRenovacion',
+    'txtMotivoRenovacion'
+]);
 
 const requiredData = [
     { productCode: "MQ", fields: ["cmbCategoria"] }
@@ -25,12 +38,14 @@ const cobtarVida = [{ lob: 96, cobtar: "cfgCobtarRamoTecnico"  }, { lob: 52, cob
 //////////////////////////////////////////////
 
 async function cargarCatalogos() {
-    await loadTableQuery({reference:'#cmbPais',tableCommand:'RepoCountryCatalog',filter:`[code]='591'`});
-    await loadDataTable({reference:'#cmbActividadEconomica',tableName:'actividad',indexCode:0,indexDisplay:1, filterFunction: item => item[3] == "3"});
-    await loadDataTable({reference:'#cmbZonaCresta',tableName:'ZonaCresta',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbUsoBien',tableName:'TablaUsoBien',indexCode:0,indexDisplay:1});
-    await loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2, filterFunction: item => item[3] == "1", sortFunction: (a, b) => a[2].localeCompare(b[2])});
-    await loadDataTable({reference:'#cmbCategoria',tableName:'tbCategoriaMaquinaria',indexCode:0,indexDisplay:1});
+    await Promise.all([
+        loadTableQuery({reference:'#cmbPais',tableCommand:'RepoCountryCatalog',filter:`[code]='591'`}),
+        loadDataTable({reference:'#cmbActividadEconomica',tableName:'actividad',indexCode:0,indexDisplay:1, filterFunction: item => item[3] == "3"}),
+        loadDataTable({reference:'#cmbZonaCresta',tableName:'ZonaCresta',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#cmbUsoBien',tableName:'TablaUsoBien',indexCode:0,indexDisplay:1}),
+        loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2, filterFunction: item => item[3] == "1", sortFunction: (a, b) => a[2].localeCompare(b[2])}),
+        loadDataTable({reference:'#cmbCategoria',tableName:'tbCategoriaMaquinaria',indexCode:0,indexDisplay:1})
+    ]);
     $("#cmbProvincia").empty().append('<option value="" selected disabled>Seleccione una opción</option>');
     $("#cmbProvincia").prop("selectedIndex", 0);
     loadEventField();
@@ -214,6 +229,14 @@ function prepareContainer(){
         const $hidden = $('#hiddenFormStyle');
         const $form = $hidden.closest('form');
 
+        if (!$form.find('#hiddenAdendos').length) {
+            $('<input>', {
+                type: 'hidden',
+                id: 'hiddenAdendos',
+                name: 'hiddenAdendos'
+            }).appendTo($form);
+        }
+
         // Contenedor único
         let $contenedor = $form.find("#contenedorCobtar");
         if ($contenedor.length === 0) {
@@ -241,12 +264,16 @@ function inicializarTabs(containerSelector = "#contenedorCobtar") {
                 <div class="tabs-header">
                 <div class="tab-link active" data-tab="tab1">Datos Generales</div>
                 <div class="tab-link" data-tab="tab3">Datos Adicionales</div>
+                <div class="tab-link" data-tab="tabRenovacion">Datos Renovación</div>
                 <div class="tab-link" data-tab="tab2">Tarifas de Entrada</div>
+                <div class="tab-link" data-tab="tab4">Adendos</div>
                 </div>
 
                 <div id="tab1" class="tab-content active"></div>
                 <div id="tab3" class="tab-content"></div>
-                <div id="tab2" class="tab-content"></div>                
+                <div id="tabRenovacion" class="tab-content"></div>
+                <div id="tab2" class="tab-content"></div>
+                <div id="tab4" class="tab-content"></div>
             `);
 
         $container.empty().append($tabs);
@@ -273,8 +300,10 @@ function moverCamposATabGeneral() {
     
         const $tab1 = $("#tab1");
         const $tabAdicionales = $("#tab3");
+        const $tabRenovacion = $("#tabRenovacion");
 
         const movedRows = new Set();
+        const movedRowsRenovacion = new Set();
 
         $(".ptab").each(function () {
             const $row = $(this).closest(".row");
@@ -294,9 +323,231 @@ function moverCamposATabGeneral() {
             }
         });
 
+        $(".rtab").each(function () {
+            const $row = $(this).closest(".row");
+
+            if ($row.length && !movedRowsRenovacion.has($row[0])) {
+                movedRowsRenovacion.add($row[0]);
+                $tabRenovacion.append($row);
+            }
+        });
+
     }catch(error){
         console.error(error);
     }
+}
+
+let configAdendos = [];
+
+async function cargarAdendos() {
+    try {
+        const response = await me.exe("GetFullTable", { table: "cfgAnexoAdendoCobertura" });
+        configAdendos = mapearTablaConfig(response.outData ?? []);
+        renderTablaAdendos(configAdendos);
+        cargarAdendosDesdeHidden();
+        bindEventosAdendos();
+        setDefaultAdendos();
+    } catch (error) {
+        configAdendos = [];
+        console.error(`Error leyendo configuración de adendos: ${error.toString()}`);
+        renderTablaAdendos([]);
+        cargarAdendosDesdeHidden();
+        bindEventosAdendos();
+        setDefaultAdendos();
+    }
+}
+
+function getAdendoValue(row, names) {
+    const keys = Object.keys(row || {});
+    const key = keys.find(item => names.includes(String(item).trim().toLowerCase()));
+    return key ? row[key] : '';
+}
+
+function renderTablaAdendos(configuracion) {
+    const $container = $("#tab4");
+    $container.empty();
+
+    const coverageCodes = new Set((policy?.Coverages || [])
+        .map(coverage => String(coverage?.code ?? '').trim().toUpperCase())
+        .filter(Boolean));
+    const lob = String(policy?.lob ?? '').trim();
+    const productCode = String(policy?.productCode ?? '').trim().toUpperCase();
+    const grouped = new Map();
+
+    (configuracion || [])
+        .filter(row => String(getAdendoValue(row, ['cramo'])).trim() === lob)
+        .filter(row => {
+            const coverageCode = String(getAdendoValue(row, ['ccober'])).trim().toUpperCase();
+            return coverageCodes.has(coverageCode);
+        })
+        .filter(row => {
+            const product = String(getAdendoValue(row, ['oplan'])).trim().toUpperCase();
+            return !product || product === '0' || product === productCode;
+        })
+        .forEach(row => {
+            const coverageCode = String(getAdendoValue(row, ['ccober'])).trim();
+            const coverage = (policy.Coverages || []).find(item =>
+                String(item?.code ?? '').trim().toUpperCase() === coverageCode.toUpperCase()
+            );
+            if (!coverage) return;
+
+            if (!grouped.has(coverageCode.toUpperCase())) {
+                grouped.set(coverageCode.toUpperCase(), {
+                    code: coverageCode,
+                    name: coverage.name || coverage.commercialName || '',
+                    idAnexo: String(getAdendoValue(row, ['idanexo'])).trim(),
+                    description: String(getAdendoValue(row, ['xdescripcion'])).trim(),
+                    parameters: []
+                });
+            }
+
+            const parameter = String(getAdendoValue(row, ['parametro'])).trim();
+            const current = grouped.get(coverageCode.toUpperCase());
+            if (parameter && !current.parameters.includes(parameter)) {
+                current.parameters.push(parameter);
+            }
+        });
+
+    const rows = Array.from(grouped.values());
+    if (!rows.length) {
+        $("<div>", {
+            class: "adendos-empty",
+            text: "No existen adendos configurados para las coberturas agregadas."
+        }).appendTo($container);
+        return;
+    }
+
+    const parameterCount = rows.reduce(
+        (max, row) => Math.max(max, row.parameters.length),
+        0
+    );
+    const $table = $("<table>", { class: "tabla-ant tabla-adendos" });
+    const $thead = $("<thead>").appendTo($table);
+    const $header = $("<tr>").appendTo($thead);
+
+    ["Código", "Nombre de cobertura", "Código del adendo", "Descripción del adendo"]
+        .forEach(title => $("<th>", { text: title }).appendTo($header));
+    for (let index = 1; index <= parameterCount; index++) {
+        $("<th>", { text: `Parametro${index}` }).appendTo($header);
+    }
+
+    const $tbody = $("<tbody>").appendTo($table);
+    rows.forEach(row => {
+        const $tr = $("<tr>").appendTo($tbody);
+        [row.code, row.name, row.idAnexo, row.description]
+            .forEach(value => $("<td>", { text: value }).appendTo($tr));
+
+        for (let index = 0; index < parameterCount; index++) {
+            const parameter = row.parameters[index] || '';
+            const $cell = $("<td>").appendTo($tr);
+            if (!parameter) continue;
+
+            const $wrapper = $("<div>", {
+                class: "adendo-input-wrapper"
+            }).appendTo($cell);
+
+            const $input = $("<input>", {
+                type: "text",
+                name: `adendo_${row.code}_Parametro${index + 1}`,
+                placeholder: parameter,
+                required: true
+            })
+                .addClass("ant-input-custom")
+                .attr({
+                    "data-adendo-cobertura": row.code,
+                    "data-adendo-parametro": parameter,
+                    "data-adendo-index": index + 1
+                })
+                .appendTo($wrapper);
+
+            $("<span>", {
+                class: "adendo-parametro-ayuda",
+                text: parameter,
+                "aria-hidden": "true"
+            }).appendTo($wrapper);
+
+            $wrapper
+                .on("mouseenter", function () {
+                    $(this).toggleClass("has-value-hover", Boolean($input.val().trim()));
+                })
+                .on("mouseleave", function () {
+                    $(this).removeClass("has-value-hover");
+                });
+
+            $input.on("input", function () {
+                if ($wrapper.is(":hover")) {
+                    $wrapper.toggleClass("has-value-hover", Boolean($(this).val().trim()));
+                }
+            });
+        }
+    });
+
+    $container.append($table);
+}
+
+function cargarAdendosDesdeHidden() {
+    const raw = $("#hiddenAdendos").val();
+    if (!raw) return;
+
+    let data = [];
+    try {
+        data = JSON.parse(raw);
+    } catch (error) {
+        console.error("JSON inválido en hiddenAdendos");
+        return;
+    }
+
+    (Array.isArray(data) ? data : []).forEach(item => {
+        const coverage = String(item?.coverageCode ?? '').trim();
+        if (!coverage) return;
+
+        Object.keys(item).forEach(key => {
+            const match = /^Parametro(\d+)$/i.exec(key);
+            if (!match) return;
+
+            const $input = $(`#tab4 [data-adendo-cobertura="${coverage}"][data-adendo-index="${match[1]}"]`);
+            if ($input.length) {
+                $input.val(item[key] ?? '');
+            }
+        });
+    });
+}
+
+function construirAdendos() {
+    const resultado = {};
+
+    $("#tab4 input[data-adendo-cobertura]").each(function () {
+        const $input = $(this);
+        const coverage = String($input.attr("data-adendo-cobertura") ?? '').trim();
+        const index = $input.attr("data-adendo-index");
+        if (!coverage || !index) return;
+
+        if (!resultado[coverage]) {
+            resultado[coverage] = {
+                coverageCode: coverage,
+                coverageName: $input.closest("tr").children().eq(1).text().trim(),
+                idAnexo: $input.closest("tr").children().eq(2).text().trim(),
+                description: $input.closest("tr").children().eq(3).text().trim()
+            };
+        }
+
+        resultado[coverage][`Parametro${index}`] = $input.val() ?? '';
+    });
+
+    return Object.values(resultado);
+}
+
+function bindEventosAdendos() {
+    $("#tab4")
+        .off("input.adendos change.adendos", "input[data-adendo-cobertura]")
+        .on("input.adendos change.adendos", "input[data-adendo-cobertura]", function () {
+            $("#hiddenAdendos").val(JSON.stringify(construirAdendos()));
+        });
+}
+
+function setDefaultAdendos() {
+    const $hidden = $("#hiddenAdendos");
+    $hidden.val(JSON.stringify(construirAdendos()));
 }
 
 //Logica de Cobtar
@@ -425,7 +676,7 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
         const columnas = Array.from(camposSet);
         
         // ===== tabla =====
-        const $table = $("<table>").addClass("tabla-ant");
+        const $table = $("<table>", { id: "tablaCobtar" }).addClass("tabla-ant");
 
         // ===== header =====
         const $thead = $("<thead>");
@@ -445,7 +696,13 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
 
         grupos.forEach(g => {
 
-            const $tr = $("<tr>");
+            const covPolicy = (policy.Coverages || []).find(x => x.code == g.coverageCode);
+            const fechaInicialDefault = formatearFecha(policy?.start);
+            const fechaFinalDefault = formatearFecha(covPolicy?.end ? covPolicy.end : policy?.end);
+            const $tr = $("<tr>")
+                .attr("data-coverage-row", g.coverageCode)
+                .attr("data-base-start", fechaInicialDefault)
+                .attr("data-base-end", fechaFinalDefault);
 
             // columna fija
             $("<td>")
@@ -482,9 +739,12 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
                 // ===== tipo =====
                 if (type === "number") {
                     $input = $("<input>", { 
-                      type: "number",
+                      type: "text",
+                      inputmode: "decimal",
                       step: "0.01"
-                    }).addClass("ant-input-custom");
+                    }).addClass("ant-input-custom")
+                      .attr("autocomplete", "off");
+                    $input.attr("data-numeric-format", "true");
 
                 } else if (type === "select") {
 
@@ -532,6 +792,21 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
                 "data-coverage": g.coverageCode,
                 "data-field": name
                 });
+
+                // ===== vigencia de la cobertura =====
+                if (name.toLowerCase().includes("f. inicial")) {
+                    $input.val(fechaInicialDefault);
+                }
+
+                if (name.toLowerCase().includes("f. final")) {
+                    $input.val(fechaFinalDefault);
+                }
+
+                if (name.toLowerCase().includes("duración")) {
+                    $input.on("change", function () {
+                        recalcularVigenciasTecnico($container);
+                    });
+                }
             
                 // ===== disabled =====
                 if (isDisabled) {
@@ -566,9 +841,97 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
 
         $table.append($tbody);
         $container.append($table);
+        recalcularVigenciasTecnico($container);
 
     }catch(error){
         console.error(error);
+    }
+}
+
+function recalcularVigenciasTecnico($container = $("#tab2")) {
+    try {
+        const rows = {};
+        $container.find("tr[data-coverage-row]").each(function () {
+            const $row = $(this);
+            const code = String($row.attr("data-coverage-row") || "").trim();
+            if (code) rows[code.toUpperCase()] = $row;
+        });
+
+        const configByCode = {};
+        (configCoverages || []).forEach(config => {
+            const code = String(config.coverageCode || "").trim().toUpperCase();
+            if (code) configByCode[code] = config;
+        });
+
+        const calculated = {};
+        const calculating = new Set();
+        const resolvingRoot = new Set();
+        const getField = ($row, text) => $row.find("input[data-field]").filter(function () {
+            return String($(this).attr("data-field") || "").toLowerCase().includes(text);
+        }).first();
+
+        const getRootCoverageCode = code => {
+            const normalizedCode = String(code || "").trim().toUpperCase();
+            if (!normalizedCode || resolvingRoot.has(normalizedCode)) return normalizedCode;
+
+            const config = configByCode[normalizedCode];
+            const principal = String(config?.coberturaPrincipal ?? config?.coverageCodeDep ?? "").trim();
+            if (!principal || principal === "0" || principal === "-1" || principal.toUpperCase() === "NULL"
+                || principal.toUpperCase() === normalizedCode) return normalizedCode;
+
+            resolvingRoot.add(normalizedCode);
+            const root = getRootCoverageCode(principal);
+            resolvingRoot.delete(normalizedCode);
+            return root || normalizedCode;
+        };
+
+        const calculate = code => {
+            const normalizedCode = String(code || "").trim().toUpperCase();
+            if (!normalizedCode || calculated[normalizedCode]) return calculated[normalizedCode];
+
+            const $row = rows[normalizedCode];
+            if (!$row || !$row.length) return null;
+            if (calculating.has(normalizedCode)) {
+                console.warn(`Dependencia circular de vigencia en cobertura ${normalizedCode}`);
+                return null;
+            }
+
+            calculating.add(normalizedCode);
+            const config = configByCode[normalizedCode];
+            const principal = String(config?.coberturaPrincipal ?? config?.coverageCodeDep ?? "").trim();
+            const $duration = getField($row, "duración");
+            const duration = Number($duration.val()) || 0;
+            const $start = getField($row, "f. inicial");
+            const $end = getField($row, "f. final");
+            if (!$start.length || !$end.length) {
+                calculated[normalizedCode] = null;
+                calculating.delete(normalizedCode);
+                return null;
+            }
+
+            const policyStart = formatearFecha(policy?.start);
+            let start = String(policyStart || $row.attr("data-base-start") || $start.val() || "");
+            let end = String($row.attr("data-base-end") || $end.val() || "");
+
+            if (principal && principal !== "0" && principal !== "-1" && principal.toUpperCase() !== "NULL") {
+                const rootCode = getRootCoverageCode(normalizedCode);
+                const principalResult = calculate(rootCode);
+                if (principalResult?.end) start = principalResult.end;
+            }
+
+            if (start) $start.val(start).prop("disabled", true);
+            if (duration > 0 && start) end = sumarDiasTecnico(start, duration);
+            if (end) $end.val(end).prop("disabled", true);
+
+            const result = { start, end };
+            calculated[normalizedCode] = result;
+            calculating.delete(normalizedCode);
+            return result;
+        };
+
+        Object.keys(rows).forEach(calculate);
+    } catch (error) {
+        console.error(`Error calculando vigencias de coberturas: ${error.toString()}`);
     }
 }
 
@@ -606,8 +969,8 @@ function cargarCobtarDesdeHidden(
       // ===== SET VALUE SEGÚN TIPO =====
       if ($input.is("select")) {
         $input.val(value);
-      } else if ($input.attr("type") === "number") {
-        $input.val(value != null ? Number(value) : "");
+      } else if ($input.attr("data-numeric-format") === "true") {
+        $input.val(value != null ? formatNumericInputValue(value) : "");
       } else {
         $input.val(value ?? "");
       }
@@ -644,8 +1007,8 @@ function construirCobtar(containerSelector = "#tab2") {
             let value = $el.val();
 
             // normalizar valores
-            if ($el.attr("type") === "number") {
-                value = value === "" ? null : Number(value);
+            if ($el.attr("data-numeric-format") === "true") {
+                value = parseNumericInputValue(value);
             }
 
             resultado[coverage][field] = value;
@@ -659,12 +1022,69 @@ function construirCobtar(containerSelector = "#tab2") {
 }
 
 function bindEventosCobtar() {
-  $("#tab2").on("input change", "input, select", function () {
+  $("#tab2")
+    .off("input change", "input, select")
+    .on("input change", "input, select", function (event) {
+    if ($(this).attr("data-numeric-format") === "true") {
+      formatNumericInput(this, event.type === "input");
+    }
     const data = construirCobtar("#tab2");
     $("#hiddenCobtar").val(JSON.stringify(data));
     // debug opcional
     console.log(data);
   });
+}
+
+function normalizeNumericInputValue(value) {
+  let text = String(value ?? "").replace(/,/g, "").replace(/[^0-9.\-]/g, "");
+  const negative = text.startsWith("-");
+  text = text.replace(/-/g, "");
+  const dotIndex = text.indexOf(".");
+  let integer = dotIndex >= 0 ? text.slice(0, dotIndex) : text;
+  let decimals = dotIndex >= 0 ? text.slice(dotIndex + 1).replace(/\./g, "") : "";
+  integer = integer.replace(/^0+(?=\d)/, "");
+  if (!integer && (dotIndex >= 0 || decimals)) integer = "0";
+  return (negative ? "-" : "") + integer + (dotIndex >= 0 ? "." + decimals.slice(0, 2) : "");
+}
+
+function formatNumericInputValue(value) {
+  const normalized = normalizeNumericInputValue(value);
+  if (!normalized || normalized === "-") return normalized;
+  const negative = normalized.startsWith("-");
+  const unsigned = negative ? normalized.slice(1) : normalized;
+  const dotIndex = unsigned.indexOf(".");
+  const integer = dotIndex >= 0 ? unsigned.slice(0, dotIndex) : unsigned;
+  const decimals = dotIndex >= 0 ? unsigned.slice(dotIndex + 1) : "";
+  const grouped = (integer || "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (negative ? "-" : "") + grouped + (dotIndex >= 0 ? "." + decimals : "");
+}
+
+function parseNumericInputValue(value) {
+  const normalized = String(value ?? "").replace(/,/g, "").trim();
+  return normalized === "" || normalized === "-" || normalized === "." ? null : Number(normalized);
+}
+
+function formatNumericInput(input, preserveCaret) {
+  if (!input) return;
+  const original = String(input.value ?? "");
+  const start = typeof input.selectionStart === "number" ? input.selectionStart : original.length;
+  const before = original.slice(0, start);
+  const normalizedBefore = normalizeNumericInputValue(before);
+  const formatted = formatNumericInputValue(original);
+  input.value = formatted;
+
+  if (preserveCaret && document.activeElement === input) {
+    let meaningful = 0;
+    let caret = formatted.length;
+    for (let index = 0; index < formatted.length; index += 1) {
+      if (formatted[index] !== ",") meaningful += 1;
+      if (meaningful >= normalizedBefore.length) {
+        caret = index + 1;
+        break;
+      }
+    }
+    input.setSelectionRange(caret, caret);
+  }
 }
 
 function setDefaultCobtar(){
@@ -685,9 +1105,21 @@ function formatearFecha(fecha) {
     return `${yyyy}-${mm}-${dd}`;
 }
 
+function sumarDiasTecnico(fechaStr, dias) {
+    if (!fechaStr || !dias) return "";
+
+    const fecha = new Date(fechaStr);
+    if (isNaN(fecha)) return "";
+
+    fecha.setDate(fecha.getDate() + Number(dias));
+    return formatearFecha(fecha);
+}
+
 //Estilos
 function inyectarEstilosAntdCobtar() {
   const STYLE_ID = "antd-cobtar-styles";
+
+  $("#hiddenFormStyle").closest("form").addClass("dt-ramo-tecnico-form");
 
   // elimina estilos anteriores si existen
   $("#" + STYLE_ID).remove();
@@ -773,6 +1205,113 @@ function inyectarEstilosAntdCobtar() {
     background: #fafafa;
   }
 
+  /* ===== ADENDOS ===== */
+  #tab4 {
+    overflow: visible;
+  }
+
+  #tab4 .tabla-adendos {
+    width: 100%;
+    border: 1px solid #cbd1d8;
+    border-collapse: collapse;
+    table-layout: auto;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  #tab4 .tabla-adendos th {
+    background: #bfbfbf;
+    color: #262626;
+    font-weight: 600;
+    border: 1px solid #cbd1d8;
+    padding: 5px 8px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  #tab4 .tabla-adendos td {
+    border-top: 1px solid #cbd1d8;
+    border-bottom: 1px solid #cbd1d8;
+    border-left: 0;
+    border-right: 0;
+    padding: 5px 8px;
+    vertical-align: middle;
+  }
+
+  #tab4 .tabla-adendos tbody tr:hover td {
+    background: #b7d7ff;
+  }
+
+  #tab4 .tabla-adendos td:first-child {
+    font-weight: 500;
+    background: #fafafa;
+  }
+
+  #tab4 .tabla-adendos tbody tr:hover td:first-child {
+    background: #b7d7ff;
+  }
+
+  #tab4 .adendo-input-wrapper {
+    position: relative;
+    min-width: 140px;
+  }
+
+  #tab4 .adendo-input-wrapper .ant-input-custom {
+    width: 100%;
+    height: 32px;
+    padding: 4px 11px;
+    color: #262626;
+    background: #fff;
+    border: 1px solid #b8c4d1;
+    border-radius: 6px;
+    box-sizing: border-box;
+  }
+
+  #tab4 .adendo-input-wrapper .ant-input-custom::placeholder {
+    color: #3f4b57 !important;
+    opacity: 1 !important;
+  }
+
+  #tab4 .adendo-input-wrapper .ant-input-custom:hover {
+    border-color: #8da9c2;
+  }
+
+  #tab4 .adendo-input-wrapper .ant-input-custom:focus {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22,119,255,0.2);
+    outline: none;
+  }
+
+  #tab4 .adendo-parametro-ayuda {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    display: block;
+    width: max-content;
+    max-width: 240px;
+    padding: 4px 8px;
+    color: #262626;
+    background: #fff;
+    border: 1px solid #b8c4d1;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    font-size: 11px;
+    line-height: 16px;
+    white-space: normal;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-2px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  }
+
+  #tab4 .adendo-input-wrapper.has-value-hover .adendo-parametro-ayuda {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
   /* ===== INPUTS ===== */
   #contenedorCobtar .ant-input-custom,
   #contenedorCobtar .ant-select-custom {
@@ -825,6 +1364,36 @@ function inyectarEstilosAntdCobtar() {
     .required-label::after{
         content: " *";
         color: red;
+    }
+
+    /* ===== INPUTS DEL FORMULARIO ===== */
+    .dt-ramo-tecnico-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+    .dt-ramo-tecnico-form select,
+    .dt-ramo-tecnico-form textarea {
+        border: 1px solid #b8c4d1 !important;
+        border-radius: 6px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .dt-ramo-tecnico-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):hover,
+    .dt-ramo-tecnico-form select:hover,
+    .dt-ramo-tecnico-form textarea:hover {
+        border-color: #8da9c2 !important;
+    }
+
+    .dt-ramo-tecnico-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):focus,
+    .dt-ramo-tecnico-form select:focus,
+    .dt-ramo-tecnico-form textarea:focus {
+        border-color: #1677ff !important;
+        box-shadow: 0 0 0 2px rgba(22,119,255,0.2);
+        outline: none;
+    }
+
+    .dt-ramo-tecnico-form input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):disabled,
+    .dt-ramo-tecnico-form select:disabled,
+    .dt-ramo-tecnico-form textarea:disabled {
+        border-color: #b8c4d1 !important;
+        background: #f5f5f5;
     }
 
     /* ===================================================================================== */
@@ -1174,6 +1743,8 @@ function renderToolbarCoberturas() {
 
     // evita duplicados por rerender
     $("#toolbarCoberturas").remove();
+    polizaConfirmada = esPolizaEmitida();
+    bloquearCoberturas = polizaConfirmada;
 
     const toolbarHtml = `
       <div id="toolbarCoberturas">
@@ -1182,6 +1753,7 @@ function renderToolbarCoberturas() {
           type="button"
           id="btnGestionarCoberturas"
           class="ant-btn ant-btn-primary btn-gestionar-cob"
+          ${bloquearCoberturas ? 'disabled' : ''}
         >
 
           <span class="btn-gestionar-icon">
@@ -1217,7 +1789,6 @@ function renderToolbarCoberturas() {
     // insertar siempre arriba
     $tab.prepend(toolbarHtml);
 
-    polizaConfirmada = policy.active;
     // if(polizaConfirmada){      
     //   $("#btnCotizarCoberturas").prop("disabled", true);
     // }
@@ -1285,7 +1856,7 @@ function renderModalCoberturas() {
             data-mandatory="${c.mandatory}"
             data-incluido="${c.incluido}"
             ${c.mandatory || c.incluido ? 'checked' : ''}
-            ${c.mandatory || polizaConfirmada ? 'disabled' : ''}
+            ${c.mandatory || bloquearCoberturas ? 'disabled' : ''}
           />
         </td>
 
@@ -1402,7 +1973,7 @@ function renderModalCoberturas() {
                     <input
                       type="checkbox"
                       id="chkAllCoberturas"
-                      ${polizaConfirmada ? 'disabled': ''}
+                      ${bloquearCoberturas ? 'disabled': ''}
                     />
 
                   </th>
@@ -1485,7 +2056,7 @@ function renderModalCoberturas() {
 
     $("body").append(modalHtml);
 
-    if(polizaConfirmada){      
+    if(bloquearCoberturas){
       $("#btnGuardarCoberturas").prop("disabled", true);
     }
 
@@ -1573,6 +2144,7 @@ async function bindEventosCoberturas() {
           debugger;
           policy = await getPolicy();
           await cargarCobtarDinamico();
+          await cargarAdendos();
           await setProductCoverages();
           renderModalCoberturas();
 
@@ -1872,6 +2444,52 @@ function setDefaultData(){
 
 }
 
+function esPolizaEmitida() {
+    const active = policy?.active;
+    const activeDate = policy?.activeDate;
+    const tieneFechaEmision = activeDate !== null
+        && activeDate !== undefined
+        && String(activeDate).trim() !== '';
+
+    return tieneFechaEmision
+        || active === true
+        || active === 1
+        || String(active).toLowerCase() === 'true'
+        || String(active) === '1';
+}
+
+function aplicarRestriccionesEdicion() {
+    if (!esPolizaEmitida()) return;
+
+    const $form = $('#hiddenFormStyle').closest('form');
+    $form.find('input, select, textarea').each(function () {
+        const $campo = $(this);
+        const id = $campo.attr('id');
+
+        if ($campo.attr('type') === 'hidden') return;
+
+        if ($campo.is(':checkbox, :radio')) {
+            $campo.prop('disabled', true);
+        } else if ($campo.is('select')) {
+            $campo.css({
+                pointerEvents: 'none',
+                backgroundColor: '#f5f5f5',
+                color: '#8c8c8c'
+            });
+        } else {
+            $campo.prop('readonly', true);
+        }
+
+        if (isEndorsment && id && camposEditablesEnEndoso.has(id)) {
+            $campo
+                .prop('disabled', false)
+                .prop('readonly', false)
+                .css({ pointerEvents: '', backgroundColor: '', color: '' })
+                .removeClass('disabled readonly-style select-readonly');
+        }
+    });
+}
+
 //////////////////////////////////////////////////////
 // Inicialización
 //////////////////////////////////////////////////////
@@ -1905,6 +2523,7 @@ async function initForm() {
             prepareContainer();        
             inicializarTabs("#contenedorCobtar");    
             moverCamposATabGeneral();   
+            aplicarRestriccionesEdicion();
 
             setDefaultData();
 
@@ -1914,9 +2533,12 @@ async function initForm() {
             await bindEventosCoberturas();
 
             await cargarCobtarDinamico();
+            await cargarAdendos();
+            aplicarRestriccionesEdicion();
             validaInputs();
 
             await cargarCatalogos();
+            aplicarRestriccionesEdicion();
 
         });
 

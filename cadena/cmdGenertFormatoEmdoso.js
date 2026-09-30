@@ -43,6 +43,10 @@ const reportesEndoso = {
     conPrima: 'FormatoEndososVida.docx',
     sinPrima: 'FormatoEndososSinCoberturaVida.docx'
   },
+  ramoTecnico: {
+    conPrima: 'FormatoEndososRT.docx',
+    sinPrima: 'FormatoEndososSinCoberturaRT.docx'
+  },
   vidaTarjetaProtegida: 'FormatoEndososVidaTarjetaProtegida.docx'
   
 };
@@ -265,7 +269,9 @@ function getInsuredObjects(change) {
 
   const lob = String(policy?.lob ?? '').trim();
   const isSurety = ['81', '82', '83', '84'].includes(lob);
-  const objectDefinitionCode = isLifePolicyLob(lob)
+  const objectDefinitionCode = isTechnicalPolicy(policy)
+    ? 'DT_RAMO_TECNICO'
+    : isLifePolicyLob(lob)
     ? 'DT_ACCIDENTES_V1'
     : isSurety
     ? 'OBJFIANZA'
@@ -348,6 +354,19 @@ function normalizeInsuredObject(insuredObject) {
 
 function isSuretyPolicy(policy) {
   return ['81', '82', '83', '84'].includes(String(policy?.lob ?? '').trim());
+}
+
+function isTechnicalPolicy(policy) {
+  return ['96', '52'].includes(String(policy?.lob ?? '').trim());
+}
+
+function getTipoAsegurado(policy) {
+  const lob = String(policy?.lob ?? '').trim();
+  const productCode = String(policy?.productCode ?? '').trim().toUpperCase();
+
+  return lob === '96' && productCode === 'MQ'
+    ? 'Operado por:'
+    : 'Asegurado:';
 }
 
 function getSuretyEndorsementFields(policy) {
@@ -440,6 +459,12 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
       : reportes.vida.sinPrima;
   }
 
+  if (isTechnicalPolicy(policy)) {
+    return hasEndorsementPremium(billDiff, change)
+      ? reportes.ramoTecnico.conPrima
+      : reportes.ramoTecnico.sinPrima;
+  }
+
   if (!isSuretyPolicy(policy)) {
     return change.Discriminator === "LoadingChange"
       ? reportes.incendio.sinPrima
@@ -489,6 +514,14 @@ function catalogText(rows, value, valueIndex, textIndex) {
   return row?.[textIndex] ?? code;
 }
 
+function repoCatalogText(rows, value) {
+  const code = String(value ?? '').trim();
+  if (!code || !Array.isArray(rows)) return code;
+
+  const row = rows.find(item => String(item?.code ?? item?.id ?? '').trim() === code);
+  return row?.name ?? code;
+}
+
 function loadSuretyCatalogs() {
   return {
     claseRiesgo: loadSuretyCatalog('actividadfianza'),
@@ -504,6 +537,17 @@ function loadLifeCatalogs() {
     actividad: loadSuretyCatalog('actividad'),
     tipoPrestamo: loadSuretyCatalog('tbTipoPrestamo'),
     producto: loadSuretyCatalog('tbProductoVida')
+  };
+}
+
+function loadTechnicalCatalogs() {
+  return {
+    actividad: loadSuretyCatalog('actividad'),
+    zonaCresta: loadSuretyCatalog('ZonaCresta'),
+    usoBien: loadSuretyCatalog('TablaUsoBien'),
+    marcas: loadSuretyCatalog('tbMarcas'),
+    categorias: loadSuretyCatalog('tbCategoriaMaquinaria'),
+    modelos: loadSuretyCatalog('tbModelos')
   };
 }
 
@@ -554,6 +598,63 @@ function buildLifeRisk(userData, catalogs) {
     EstadoRenovacion: renovaciones[suretyValue(data, ['cmbRenovacion'])]
       || suretyValue(data, ['cmbRenovacion']),
     MotivoRenovacion: suretyValue(data, ['txtMotivoRenovacion'])
+  };
+}
+
+function buildTechnicalRisk(userData, catalogs, countries, provinces) {
+  const data = userData || {};
+  const lookup = catalogs || {};
+  const value = name => suretyValue(data, [name]);
+  const countryCode = value('cmbPais');
+  const provinceCode = value('cmbProvincia');
+
+  return {
+    // Conserva todos los datos originales del objeto para que las plantillas
+    // puedan consumir cualquier campo adicional sin perder información.
+    ...data,
+
+    Actividad: catalogText(lookup.actividad, value('cmbActividadEconomica'), 0, 1),
+    CodigoActividadEconomica: value('cmbActividadEconomica'),
+    CodigoProyecto: value('txtCodigoProyecto'),
+    NumeroProyecto: value('txtCodigoProyecto'),
+    PeriodoPrueba: value('txtPeriodoPrueba'),
+    SumaAsegurada: value('txtSA'),
+    SumaAfianzada: value('txtSA'),
+    UsoBien: catalogText(lookup.usoBien, value('cmbUsoBien'), 0, 1),
+    CodigoUsoBien: value('cmbUsoBien'),
+    PeriodoMantenimiento: value('txtPeriodoMantenimiento'),
+    Pais: repoCatalogText(countries, countryCode),
+    CodigoPais: countryCode,
+    Provincia: repoCatalogText(provinces, provinceCode),
+    CodigoProvincia: provinceCode,
+    ZonaCresta: catalogText(lookup.zonaCresta, value('cmbZonaCresta'), 0, 1),
+    CodigoZonaCresta: value('cmbZonaCresta'),
+    OrdenProceder: value('ckOrdenProceder'),
+    Descripcion: value('txtDescripcion'),
+    DescripcionObjeto: value('txtDescripcion'),
+    Localizacion: value('txtLocalizacion'),
+    Proyecto: value('txtProyecto'),
+    Categoria: catalogText(lookup.categorias, value('cmbCategoria'), 0, 1),
+    CodigoCategoria: value('cmbCategoria'),
+    Marca: catalogText(lookup.marcas, value('cmbMarca'), 1, 2),
+    CodigoMarca: value('cmbMarca'),
+    Modelo: catalogText(lookup.modelos, value('cmbModelo'), 2, 3),
+    CodigoModelo: value('cmbModelo'),
+    Anio: value('txAnio'),
+    Serie: value('txtSerie'),
+    Tipo: value('txtTipo'),
+    PropiedadEquipo: value('txtPropietario'),
+    Cantidad: value('txtCantidad'),
+    EstadoRenovacion: value('cmbRenovacion'),
+    MotivoRenovacion: value('txtMotivoRenovacion'),
+
+    // Alias utilizados por las plantillas RT actuales.
+    NombreAFavor: value('txtPropietario'),
+    ClaseRiesgo: catalogText(lookup.zonaCresta, value('cmbZonaCresta'), 0, 1),
+    FechaActoPublico: value('txtPeriodoPrueba'),
+    NumeroLicitacion: value('txtPeriodoMantenimiento'),
+    NumeroContrato: value('txtSerie'),
+    ActoPublico: value('ckOrdenProceder')
   };
 }
 
@@ -791,8 +892,11 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const suretyCatalogs = isSuretyPolicy(policy) ? loadSuretyCatalogs() : null;
   const isLife = isLifePolicyLob(policy?.lob);
   const lifeCatalogs = isLife ? loadLifeCatalogs() : null;
-  const riesgo = isSuretyPolicy(policy)
-    ? buildSuretyRisk(insuredData, suretyCatalogs)
+  const technicalCatalogs = isTechnicalPolicy(policy) ? loadTechnicalCatalogs() : null;
+  const riesgo = isTechnicalPolicy(policy)
+    ? buildTechnicalRisk(insuredData, technicalCatalogs, countries, procincias)
+    : isSuretyPolicy(policy)
+      ? buildSuretyRisk(insuredData, suretyCatalogs)
     : isLife
       ? buildLifeRisk(insuredData, lifeCatalogs)
       : buildFireRisk(insuredData, countries, sectors, procincias, Municipios);
@@ -863,6 +967,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const custom = {
     Aseguradora: { NombreSocial: "GLOBAL ASEGURADORA S.A." },
     code: policy?.code || "",
+    TipAseg: getTipoAsegurado(policy),
     NombreRamo: row.NombreRamo || "",
     NombreProducto: row.NombreProducto || "",
 

@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 31
+declare @ramoXY int = 96
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -65,7 +65,7 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 20
+declare @ramo int = 96
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -125,8 +125,8 @@ WHERE cramo = 81  and itiporec = 'P'
 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 20
-declare @cplan varchar(15) = 'FIAGCCOG';
+declare @cramo int = 96
+declare @cplan varchar(15) = 'CAR';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
 		cross apply (select count(1)  cobs
@@ -182,7 +182,8 @@ select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END 
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
 where cramo in (96)
-and xnombrep not like '%endoso%'
+and xnombrep like '%endoso%'
+--AND xdpto <> 'SINIESTROS'
 --AND xformula1 <> '0'
 --AND xformula1 is not null and xformula1 <> '0'
 order by 1,2
@@ -226,5 +227,3 @@ select cramo, ccausa, xcausa from macausasin where cramo = 20
 
 	
 
-quiero que busques estos reportes, guiate por la columna xnombrep, quiero que busques los reportes en la carpeta de: Reportes\Global, ubica el reporte de crystal, actualiza la cadena de conexión según la BD y genera el word, quiero que hagamos el cruce de los campos dinámicos según un DTO que te daré, primero genera los word con el objetivo de buscar la info dinámica y mapear con los datos que tengo en el DTO.
-Puedes usar la columna 

@@ -23,7 +23,11 @@ try {
   }
 
   const lob = String(policy.lob ?? '').trim();
-  if (!["81", "82", "83", "84"].includes(lob)) {
+  const productCode = String(policy.productCode ?? '').trim().toUpperCase();
+  const isSuretyBond = ["81", "82", "83", "84"].includes(lob);
+  const isTechnicalCar = lob === "96" && productCode === "CAR";
+
+  if (!isSuretyBond && !isTechnicalCar) {
     return {
       ok: true,
       msg: 'Nada que actualizar'
@@ -46,6 +50,7 @@ try {
     outData: {
       policyId,
       lob,
+      productCode,
       start: formatDate(validity.start),
       end: formatDate(validity.end),
       duration: duration.years,
@@ -65,7 +70,7 @@ function loadPolicy(policyId) {
     cmd: 'LoadEntities',
     data: {
       entity: 'LifePolicy',
-      fields: 'id,lob,[start],[end],duration,durationMonths,durationDays',
+      fields: 'id,lob,productCode,[start],[end],duration,durationMonths,durationDays',
       filter: `id = ${policyId}`,
       noTracking: true
     }
