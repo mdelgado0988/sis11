@@ -282,6 +282,8 @@
   const [newClaimSelectedPolicy, setNewClaimSelectedPolicy] = React.useState(null);
   const [newClaimMode, setNewClaimMode] = React.useState(false);
   const [newClaimValidation, setNewClaimValidation] = React.useState({});
+  // Bumped on every policy selection so the event catalogs reload even when the same policy row is selected again.
+  const [newClaimCatalogSeq, setNewClaimCatalogSeq] = React.useState(0);
   const newClaimModeRef = React.useRef(false);
   const [newClaimLobOptions, setNewClaimLobOptions] = React.useState([]);
   const [newClaimProductOptions, setNewClaimProductOptions] = React.useState([]);
@@ -932,6 +934,7 @@
     setNewClaimMode(true);
     setNewClaimValidation({});
     setNewClaimSelectedPolicy(policy);
+    setNewClaimCatalogSeq((value) => value + 1);
     setNewClaimModalOpen(false);
     setActiveTab('general');
     setClaimId(null);
@@ -961,7 +964,8 @@
     draftRef.current = createDraft(newClaim);
     draftRef.current.stageCode = '1';
     draftRef.current.claimantId = String(contactId);
-    draftRef.current.claimantLabel = personName(contact) || '';
+    draftRef.current.claimantLabel = '';
+    draftRef.current.claimantType = '';
     setDraft(draftRef.current);
     setClaimStageSelection('1');
     setEditable(true);
@@ -3502,6 +3506,7 @@ END CATCH;`;
   const EXTRA_SECTION = 'InformacionResumenDelReclamo';
   const EXTRA_FIELDS = [{"name":"culpable","type":"checkbox-group","label":"Culpable","required":false,"className":"form-control","values":[{"label":"Culpable","value":"true","selected":false}]},{"name":"posibleRecupero","type":"checkbox-group","label":"Posible Recupero","required":false,"className":"form-control","values":[{"label":"Posible Recupero","value":"true","selected":false}]},{"name":"perdidaTotal","type":"checkbox-group","label":"Pérdida Total","required":false,"className":"form-control","values":[{"label":"Pérdida Total","value":"true","selected":false}]},{"name":"formatoTransito","type":"text","label":"Formato Tránsito","required":false,"className":"form-control"},{"name":"conductor","type":"text","label":"Conductor","required":false,"className":"form-control"},{"name":"asegurador","type":"checkbox-group","label":"Asegurador","required":false,"className":"form-control","values":[{"label":"Asegurador","value":"true","selected":false}]},{"name":"pagador","type":"checkbox-group","label":"Pagador","required":false,"className":"form-control","values":[{"label":"Pagador","value":"true","selected":false}]},{"name":"otro","type":"checkbox-group","label":"Otro","required":false,"className":"form-control","values":[{"label":"Otro","value":"true","selected":false}]},{"name":"edadConductor","type":"text","label":"Edad del Conductor","required":false,"className":"form-control"},{"name":"cmbProvincia","type":"select","label":"Provincia","required":false,"className":"form-control","values":[]},{"name":"cmbMunicipio","type":"select","label":"Ciudad","required":false,"className":"form-control","values":[]},{"name":"lugar","type":"text","label":"Lugar","required":false,"className":"form-control"},{"name":"fechaAudiencia","type":"date","label":"Fecha de audiencia","required":false,"className":"form-control"},{"name":"lugarAudiencia","type":"text","label":"Lugar de audiencia","required":false,"className":"form-control"},{"name":"fechaVencimientoLicencia","type":"date","label":"Fecha Vencimiento Licencia","required":false,"className":"form-control"},{"name":"numeroLicencia","type":"text","label":"Número de Licencia","required":false,"className":"form-control"}];
   const extraDefinitionRef = React.useRef(null);
+  const [, setExtraDefinitionRevision] = React.useState(0);
   const [extraGeo, setExtraGeo] = React.useState({ provinces: [], cities: [], loading: false, error: '' });
   const extraGeoOperation = React.useRef(0);
   const extraMotor = (claim) => !!claim && !!claim.Policy && String(claim.Policy.lob).trim() === '6';
@@ -3578,7 +3583,7 @@ END CATCH;`;
       setExtraGeo({ provinces: options(results[0], 'Provincias'), cities: options(results[1], 'Ciudades'), loading: false, error: '' });
     }).catch(() => { if (current()) setExtraGeo({ provinces: [], cities: [], loading: false, error: 'No se pudieron cargar Provincia/Ciudad. Recargue antes de editarlas.' }); });
     return () => { extraGeoOperation.current += 1; };
-  }, [claimId, draft && draft.extra_cmbProvincia]);
+  }, [claimId, newClaimCatalogSeq, draft && draft.extra_cmbProvincia]);
   const extraControl = (name) => {
     const f = EXTRA_FIELDS.find((field) => field.name === name);
     const disabled = !generalEditable || !extraDefinitionRef.current || !extraCommon(name) && !extraMotor(currentClaimRef.current);
@@ -3748,6 +3753,7 @@ END CATCH;`;
     customFormsOperationRef.current = operationId;
     customFormsStatusRef.current = 'loading';
     extraDefinitionRef.current = null;
+    setExtraDefinitionRevision((value) => value + 1);
     customFormsRef.current = [];
     if (mountedRef.current) {
       setCustomForms([]);
@@ -3759,8 +3765,9 @@ END CATCH;`;
       if (!profile || operationId !== customFormsOperationRef.current
         || !mountedRef.current || currentClaimRef.current !== claim) return null;
       const metadata = parseCustomFormConfig(profile, claim);
-      const persistence = (profile.Claim.customForms || []).filter((entry) => entry.name === EXTRA_SECTION);
-      if (persistence.length !== 1 || persistence[0].condition !== 'false') throw new Error('No se encontró la asociación oculta de información adicional.');
+      const persistence = (profile.Claim.customForms || []).filter((entry) => entry && typeof entry.name === 'string'
+        && entry.name.trim() === EXTRA_SECTION && !evaluateCustomFormCondition(entry.condition, claim));
+      if (persistence.length !== 1) throw new Error('No se encontró la asociación oculta de información adicional.');
       return repositoryRequest('GetForms', { filter: 'id=' + Number(persistence[0].formId) }).then((result) => {
         if (operationId !== customFormsOperationRef.current || currentClaimRef.current !== claim) return null;
         const rows = strictOutData(result, 'Formulario adicional');
@@ -3768,6 +3775,9 @@ END CATCH;`;
         const definition = JSON.parse(rows[0].json);
         if (!Array.isArray(definition) || definition.length !== EXTRA_FIELDS.length || EXTRA_FIELDS.some((field) => definition.filter((f) => f.name === field.name && f.type === field.type).length !== 1)) throw new Error('La definición de los 16 campos adicionales no es compatible.');
         extraDefinitionRef.current = definition;
+        // El ref no genera render por sí solo: reevalúa los campos de ubicación
+        // tan pronto se valida la definición adicional.
+        setExtraDefinitionRevision((value) => value + 1);
         return Promise.all(metadata.map((entry, index) => repositoryRequest('GetForms', {
         filter: 'id=' + entry.formId
       }).then((result) => {
@@ -4036,6 +4046,23 @@ END CATCH;`;
     return JSON.stringify(form.outer);
   };
 
+  const CLAIMANT_TYPES = ['Afectado', 'Asegurado', 'Tercera Persona'];
+  const readClaimantType = (raw) => {
+    const value = customClaimFieldValue(readCustomClaimForm(raw), 'tipoReclamante');
+    return CLAIMANT_TYPES.includes(value) ? value : '';
+  };
+  const writeClaimantType = (raw, value) => {
+    if (!CLAIMANT_TYPES.includes(value)) throw new Error('Seleccione Afectado, Asegurado o Tercera Persona.');
+    const form = readCustomClaimForm(raw);
+    const matches = form.fields.filter((item) => item && item.name === 'tipoReclamante');
+    if (matches.length > 1) throw new Error('El campo Reclamante está duplicado.');
+    const field = matches[0] || { type: 'hidden', name: 'tipoReclamante', label: 'Reclamante', access: false };
+    field.userData = [value];
+    if (!matches.length) form.fields.push(field);
+    form.outer[CLAIM_CUSTOM_SECTION] = form.serialized ? JSON.stringify(form.fields) : form.fields;
+    return JSON.stringify(form.outer);
+  };
+
   const createDraft = (claim) => {
     const time = occurrenceTime(claim && claim.occurrence);
     const customForm = readCustomClaimForm(claim && claim.jCustomForms);
@@ -4047,7 +4074,8 @@ END CATCH;`;
       stageCode: claimStageCode(claim) || '',
       description: claim ? claim.description : null,
       claimantId: claim && positiveIdText(claim.claimerId) || '',
-      claimantLabel: claim ? (personName(claim.Claimer) || '') : '',
+      claimantType: readClaimantType(claim && claim.jCustomForms),
+      claimantLabel: readClaimantType(claim && claim.jCustomForms),
       eventReasonCode: claim && typeof claim.eventReason === 'string' ? claim.eventReason : '',
       insuredEventCode: claim ? String(firstValue(claim.insuredEvent,
         insuredEvent && insuredEvent.code) || '') : '',
@@ -4123,7 +4151,7 @@ END CATCH;`;
       : ['Name', 'Email', 'Code'].some((suffix) =>
         draftValue['assignedTo' + suffix] !== originalDraft['assignedTo' + suffix]);
     const claimantTouched = touchedFields ? !!touchedFields.claimant
-      : draftValue.claimantId !== originalDraft.claimantId;
+      : draftValue.claimantType !== originalDraft.claimantType;
     const eventReasonTouched = touchedFields ? !!touchedFields.eventReason
       : draftValue.eventReasonCode !== originalDraft.eventReasonCode;
     const insuredEventTouched = touchedFields ? !!touchedFields.insuredEvent
@@ -4156,10 +4184,8 @@ END CATCH;`;
       if (!isValidStageCode(draftValue.stageCode)) throw new Error('El estado seleccionado no es válido.');
       entity.stageCode = draftValue.stageCode;
     }
-    if (claimantTouched) {
-      const claimantId = positiveIdText(draftValue.claimantId);
-      if (!claimantId) throw new Error('El reclamante seleccionado no es válido.');
-      entity.claimerId = Number(claimantId);
+    if (claimantTouched && !CLAIMANT_TYPES.includes(draftValue.claimantType)) {
+      throw new Error('Seleccione Afectado, Asegurado o Tercera Persona.');
     }
     if (eventReasonTouched) {
       const reasonCode = typeof draftValue.eventReasonCode === 'string'
@@ -4188,6 +4214,11 @@ END CATCH;`;
         customChanges.hiddenAjustador = String(draftValue.assignedToCode);
       }
       customFormsPayload = updateCustomClaimFields(customFormsPayload, customChanges, formsSnapshot || customFormsRef.current);
+    }
+    if (claimantTouched) {
+      customFormsPayload = writeClaimantType(customFormsPayload, draftValue.claimantType);
+    } else if (touchedFields && touchedFields.customForms && readClaimantType(claim.jCustomForms)) {
+      customFormsPayload = writeClaimantType(customFormsPayload, readClaimantType(claim.jCustomForms));
     }
     entity.jCustomForms = extraMerge(customFormsPayload, claim, draftValue, touchedFields);
     return entity;
@@ -4342,7 +4373,7 @@ END CATCH;`;
         id: customClaimFieldValue(form, 'hiddenAjustador')
       };
     }
-    if (field === 'claimant') return claim.claimerId;
+    if (field === 'claimant') return readClaimantType(claim.jCustomForms);
     if (field === 'eventReason') return claim.eventReason;
     if (field === 'insuredEvent') {
       return {
@@ -4444,26 +4475,19 @@ END CATCH;`;
     }, 300);
   };
 
-  const changeClaimant = (contactId, contactName) => {
-    const value = positiveIdText(contactId);
-    const name = typeof contactName === 'string' ? contactName.trim() : '';
-    const matches = claimantOptionsRef.current.filter((option) => option
-      && option.value === value && option.label === name && !option.disabled);
-    if (!value || matches.length !== 1 || !draftRef.current
+  const changeClaimant = (value) => {
+    if (!CLAIMANT_TYPES.includes(value) || !draftRef.current
       || !mountedRef.current || !currentClaimRef.current
       || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
-      || routeClaimId() !== Number(currentClaimRef.current.id)) {
-      if (mountedRef.current && value && matches.length !== 1) {
-        setError('El reclamante seleccionado no es válido.');
-      }
-      return;
-    }
+      || routeClaimId() !== Number(currentClaimRef.current.id)) return;
     cancelClaimantSearch();
-    setClaimantOptionList([matches[0]].concat(claimantOptionsRef.current.filter((option) =>
-      option && option.value !== value)));
-    const next = Object.assign({}, draftRef.current, {
-      claimantId: value, claimantLabel: matches[0].label
-    });
+    const next = Object.assign({}, draftRef.current, { claimantType: value, claimantLabel: value });
+    const detail = customFormsRef.current.find((form) => form.label === CLAIM_CUSTOM_SECTION);
+    const stored = detail && detail.fields.find((item) => item && item.name === 'tipoReclamante');
+    if (stored) stored.userData = [value];
+    const instance = detail && customFormInstancesRef.current[detail.key];
+    const input = instance && instance.container && instance.container.querySelector('[name="tipoReclamante"]');
+    if (input) input.value = value;
     draftRef.current = next;
     touchedRef.current.claimant = true;
     dirtyRef.current = true;
@@ -4908,6 +4932,7 @@ END CATCH;`;
       let dynamicForms = customFormsRef.current.length
         ? serializeCustomForms(null, customFormsRef.current) : null;
       dynamicForms = extraMerge(dynamicForms, claim, values, touchedRef.current);
+      if (values.claimantType) dynamicForms = writeClaimantType(dynamicForms, values.claimantType);
       entity = buildCreate({
         lifePolicyId: claim.lifePolicyId || policy.id,
         claimerId: claimantId,
@@ -4915,7 +4940,8 @@ END CATCH;`;
         eventReason: values.eventReasonCode,
         insuredEvent: values.insuredEvent,
         stageCode: values.stageCode,
-        claimType: claim.claimType,
+        // Native claim screen: the claim type is the mode of the selected insured event.
+        claimType: values.insuredEvent && values.insuredEvent.mode || claim.claimType,
         occurrence: occurrence,
         notification: notification,
         description: values.description || '',
@@ -5250,7 +5276,7 @@ END CATCH;`;
           claimNumber: firstValue(claim.code, claim.id),
           state: firstValue(stage.name, (CLAIM_STAGE_OPTIONS.find((option) => option.value === nextStage) || {}).label,
             claim.stageCode, process.entityState, stage.code),
-          claimant: personName(claim.Claimer),
+          claimant: readClaimantType(claim.jCustomForms),
           cause: firstValue(claim.EventReason && claim.EventReason.name, claim.eventReason),
           occurrence: formatDate(claim.occurrence),
           notification: formatDate(claim.notification),
@@ -6145,7 +6171,9 @@ END CATCH;`;
     newClaimModeRef.current = true;
     setNewClaimMode(true);
     setActiveTab('general');
-    setNewClaimModalOpen(true);
+    // La entrada directa no debe omitir la carga de ramos y productos que
+    // realiza el inicializador normal del modal de nuevo reclamo.
+    openNewClaimModal();
   }, [claimId, newClaimSelectedPolicy]);
 
   React.useEffect(() => {
@@ -6161,7 +6189,7 @@ END CATCH;`;
       && Number(currentClaimRef.current.id) === 0) {
       loadClaimCatalogs(0);
     }
-  }, [newClaimMode, newClaimSelectedPolicy, claimId]);
+  }, [newClaimMode, newClaimSelectedPolicy, claimId, newClaimCatalogSeq]);
 
   React.useEffect(() => {
     if (customFormCleanupRef.current) customFormCleanupRef.current();
@@ -6181,7 +6209,7 @@ END CATCH;`;
       customForms.forEach((form) => {
         const container = document.getElementById(form.key);
         if (!container) throw new Error('No se encontró el contenedor de ' + form.label + '.');
-        const runtime = createScopedFormRuntime(container, operationId, window, document, $);
+        const runtime = createScopedFormRuntime(container, operationId, window, document, $, form.nativeName === 'frmCanalesSiniestroAXX2417' ? { claim: currentClaimRef.current, policy: currentClaimRef.current && currentClaimRef.current.Policy, fields: form.fields, editable: editable } : undefined);
         const renderer = $(container).formRender({ formData: form.fields });
         customFormInstancesRef.current[form.key] = { renderer: renderer, container: container, runtime: runtime };
         let syncTimer = null;
@@ -6297,8 +6325,17 @@ END CATCH;`;
       container.addEventListener('input', onValueChange);
       container.addEventListener('change', onValueChange);
       container.addEventListener('click', onClick);
+      let readOnlyObserver = null;
+      if (!editable && typeof window.MutationObserver === 'function') {
+        const lockControls = () => Array.prototype.forEach.call(container.querySelectorAll('input,select,textarea,button'), (control) => {
+          if (!control.disabled) control.disabled = true;
+        });
+        readOnlyObserver = new window.MutationObserver(lockControls);
+        readOnlyObserver.observe(container, { childList: true, subtree: true });
+      }
       executeCustomFormLogic(modal.logic, runtime);
       cleanup = () => {
+        if (readOnlyObserver) readOnlyObserver.disconnect();
         if (syncTimer !== null) runtime.clearTimeout(syncTimer);
         container.removeEventListener('input', onValueChange);
         container.removeEventListener('change', onValueChange);
@@ -6809,17 +6846,13 @@ END CATCH;`;
                     options={CLAIM_STAGE_OPTIONS} onChange={changeClaimStage} />
                 </div></Field>
                 <div className="resumen-form-field resumen-claimant-field"><label className="resumen-form-label">Reclamante:</label>
-                  <div className="resumen-form-control resumen-claimant-control"><Select size="small" showSearch filterOption={false}
+                  <div className="resumen-form-control resumen-claimant-control"><Select size="small" aria-label="Reclamante" showSearch={false}
                   disabled={!generalEditable}
-                  loading={claimantSearching}
-                  value={draft && draft.claimantId ? String(draft.claimantId) : undefined}
-                  placeholder="Escriba para buscar reclamantes"
+                  value={draft && draft.claimantType || undefined}
+                  placeholder="Seleccione un reclamante"
                   dropdownClassName="resumen-claimant-dropdown"
-                  options={claimantOptions}
-                  notFoundContent={claimantSearching ? 'Buscando...' : claimantSearchError || 'Escriba para buscar'}
-                  onSearch={scheduleClaimantSearch}
-                  onSelect={(value, option) => changeClaimant(value, option && option.label)} />
-                  {claimantHasMore ? <div className="resumen-field-note">Mostrando 10 resultados. Refine la búsqueda.</div> : null}
+                  options={CLAIMANT_TYPES.map((value) => ({ value: value, label: value }))}
+                  onChange={changeClaimant} />
                 </div></div>
                 <Field label="Razón de evento" required={newClaimMode} invalid={newClaimValidation.eventReasonCode}><Select size="small"
                   disabled={!generalEditable || catalogLoading || reasonOptions.length === 0}
@@ -6935,8 +6968,8 @@ END CATCH;`;
                 <tbody>{affected.saved.map((entry) => <tr key={entry.key}>
                   <td>{(coverageRows.find((row) => row.id === entry.coverageId) || {}).name || 'Cobertura no disponible'}</td>
                   <td>{entry.description}</td><td>{entry.key}</td><td>{affectedFormSummary(entry.fields)}</td>
-                  <td><Button size="small" disabled={!!affected.write || !canEdit(currentClaimRef.current)}
-                    onClick={() => openAffectedFormModal(entry.coverageId, entry)}>Editar</Button></td>
+                  <td><Button size="small" disabled={!!affected.write}
+                    onClick={() => openAffectedFormModal(entry.coverageId, entry)}>{canEdit(currentClaimRef.current) ? 'Editar' : 'Consultar'}</Button></td>
                 </tr>)}</tbody>
               </table></div>}
               </div>
