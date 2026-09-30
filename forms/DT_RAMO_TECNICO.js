@@ -363,6 +363,21 @@ function getAdendoValue(row, names) {
     return key ? row[key] : '';
 }
 
+function tipoControlAdendo(tipo, parametro) {
+    const normalizedType = String(tipo || '').trim().toLowerCase();
+    const normalizedName = String(parametro || '').trim().toLowerCase();
+
+    if (normalizedType === 'fecha' || normalizedType === 'date') return 'date';
+    if (normalizedType === 'numero' || normalizedType === 'número' || normalizedType === 'number') return 'number';
+    if (normalizedType === 'porcentaje' || normalizedType === 'percent' || normalizedType === '%') return 'percentage';
+    if (normalizedType === 'texto' || normalizedType === 'text' || normalizedType === 'string') return 'text';
+
+    if (/fecha|desde|hasta|inicio|final/.test(normalizedName)) return 'date';
+    if (/%|porcentaje/.test(normalizedName)) return 'percentage';
+    if (/monto|limite|límite|suma|indemn|deducible|valor|semanas|longitud|unidad/.test(normalizedName)) return 'number';
+    return 'text';
+}
+
 function renderTablaAdendos(configuracion) {
     const $container = $("#tab4");
     $container.empty();
@@ -402,9 +417,10 @@ function renderTablaAdendos(configuracion) {
             }
 
             const parameter = String(getAdendoValue(row, ['parametro'])).trim();
+            const parameterType = String(getAdendoValue(row, ['ctipo', 'tipo'])).trim();
             const current = grouped.get(coverageCode.toUpperCase());
-            if (parameter && !current.parameters.includes(parameter)) {
-                current.parameters.push(parameter);
+            if (parameter && !current.parameters.some(item => item.name.toUpperCase() === parameter.toUpperCase())) {
+                current.parameters.push({ name: parameter, type: parameterType });
             }
         });
 
@@ -438,31 +454,41 @@ function renderTablaAdendos(configuracion) {
             .forEach(value => $("<td>", { text: value }).appendTo($tr));
 
         for (let index = 0; index < parameterCount; index++) {
-            const parameter = row.parameters[index] || '';
+            const parameter = row.parameters[index] || null;
             const $cell = $("<td>").appendTo($tr);
             if (!parameter) continue;
+
+            const controlType = tipoControlAdendo(parameter.type, parameter.name);
+            const inputType = controlType === 'date' ? 'date' : controlType === 'number' || controlType === 'percentage' ? 'number' : 'text';
 
             const $wrapper = $("<div>", {
                 class: "adendo-input-wrapper"
             }).appendTo($cell);
 
             const $input = $("<input>", {
-                type: "text",
+                type: inputType,
                 name: `adendo_${row.code}_Parametro${index + 1}`,
-                placeholder: parameter,
+                placeholder: parameter.name,
                 required: true
             })
                 .addClass("ant-input-custom")
                 .attr({
                     "data-adendo-cobertura": row.code,
-                    "data-adendo-parametro": parameter,
+                    "data-adendo-parametro": parameter.name,
+                    "data-adendo-tipo": parameter.type,
                     "data-adendo-index": index + 1
                 })
                 .appendTo($wrapper);
 
+            if (inputType === 'number') {
+                const isPercentage = controlType === 'percentage';
+                $input.attr({ step: isPercentage ? '0.01' : 'any' });
+                if (isPercentage) $input.attr({ min: '0', max: '100' });
+            }
+
             $("<span>", {
                 class: "adendo-parametro-ayuda",
-                text: parameter,
+                text: parameter.name,
                 "aria-hidden": "true"
             }).appendTo($wrapper);
 

@@ -140,13 +140,18 @@ const rows = [{
   proratedVariation: rawDelta, deltaDays: deltaDays
 }];
 
-if (coverageCfg[selCode] && coverageCfg[selCode].principal === '-1') {
+// En CAR, ramo 96, la cobertura 20 es la principal de mantenimiento aunque
+// algunas instalaciones antiguas no tengan marcada la relacion en la tabla.
+const selectedIsTechnicalCarPrincipal = isTechnicalCar && selCode === '20';
+if ((coverageCfg[selCode] && coverageCfg[selCode].principal === '-1') || selectedIsTechnicalCarPrincipal) {
   for (let i = 0; i < jNew.length; i++) {
     const c = jNew[i];
     const code = txt(c.code);
     if (code === selCode) continue;
     const row = coverageCfg[code];
-    if (!row || row.parent !== selCode) continue;
+    const isConfiguredDependent = row && row.parent === selCode;
+    const isTechnicalCarMaintenance = selectedIsTechnicalCarPrincipal && code === '23';
+    if (!isConfiguredDependent && !isTechnicalCarMaintenance) continue;
     const ps = stamp(c.start, 'inicio dependiente ' + code);
     const pe = stamp(c.end, 'fin dependiente ' + code);
     if (pe <= ps) throw '@La vigencia de la cobertura dependiente ' + code + ' es invalida';
@@ -161,6 +166,33 @@ if (coverageCfg[selCode] && coverageCfg[selCode].principal === '-1') {
       oldPremium: money(c.premium), newPremium: money(c.premium), variation: 0, deltaDays: 0
     });
   }
+}
+
+// La grilla debe mostrar el estado completo de la poliza: ademas de la
+// cobertura seleccionada y sus dependientes, se muestran las demas coberturas
+// sin cambio para que el usuario pueda distinguirlas en el endoso.
+const displayedCodes = {};
+for (let i = 0; i < rows.length; i++) displayedCodes[rows[i].code] = true;
+for (let i = 0; i < jNew.length; i++) {
+  const coverage = jNew[i];
+  const code = txt(coverage.code);
+  if (!code || displayedCodes[code]) continue;
+  const coverageStart = stamp(coverage.start, 'inicio cobertura ' + code);
+  const coverageEnd = stamp(coverage.end, 'fin cobertura ' + code);
+  rows.push({
+    code: code,
+    name: coverage.name,
+    reason: 'UNCHANGED',
+    oldStart: iso(coverageStart),
+    newStart: iso(coverageStart),
+    oldEnd: iso(coverageEnd),
+    newEnd: iso(coverageEnd),
+    oldPremium: money(coverage.premium),
+    newPremium: money(coverage.premium),
+    variation: 0,
+    proratedVariation: 0,
+    deltaDays: 0
+  });
 }
 
 // ChangeCoverage recalcula la poliza completa. Una sola cobertura con inicio y

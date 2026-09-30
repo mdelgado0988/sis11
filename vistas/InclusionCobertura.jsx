@@ -23,6 +23,7 @@
   const Alert = A.Alert;
   const Spin = A.Spin;
   const Tag = A.Tag;
+  const Tooltip = A.Tooltip;
   const Empty = A.Empty;
   const Checkbox = A.Checkbox;
 
@@ -367,6 +368,18 @@
     const key = keys.find(function (item) { return names.indexOf(txt(item).toLowerCase()) >= 0; });
     return key ? row[key] : '';
   };
+  const tipoControlAdendo = function (tipo, parametro) {
+    const normalizedType = txt(tipo).toLowerCase();
+    const normalizedName = txt(parametro).toLowerCase();
+    if (normalizedType === 'fecha' || normalizedType === 'date') return 'date';
+    if (normalizedType === 'numero' || normalizedType === 'número' || normalizedType === 'number') return 'number';
+    if (normalizedType === 'porcentaje' || normalizedType === 'percent' || normalizedType === '%') return 'percentage';
+    if (normalizedType === 'texto' || normalizedType === 'text' || normalizedType === 'string') return 'text';
+    if (/fecha|desde|hasta|inicio|final/.test(normalizedName)) return 'date';
+    if (/%|porcentaje/.test(normalizedName)) return 'percentage';
+    if (/monto|limite|límite|suma|indemn|deducible|valor|semanas|longitud|unidad/.test(normalizedName)) return 'number';
+    return 'text';
+  };
   const adendoRows = (function () {
     const codes = selected.map(up);
     const grouped = {};
@@ -388,7 +401,10 @@
           grouped[key] = { code: code, name: txt(info.name || info.commercialName || info.description), idAnexo: txt(getAdendoValue(row, ['idanexo'])), description: txt(getAdendoValue(row, ['xdescripcion'])), parameters: [] };
         }
         const parameter = txt(getAdendoValue(row, ['parametro']));
-        if (parameter && grouped[key].parameters.indexOf(parameter) < 0) grouped[key].parameters.push(parameter);
+        const parameterType = txt(getAdendoValue(row, ['ctipo', 'tipo']));
+        if (parameter && !grouped[key].parameters.some(function (item) { return up(item.name) === up(parameter); })) {
+          grouped[key].parameters.push({ name: parameter, type: parameterType });
+        }
       });
     return Object.keys(grouped).map(function (key) { return grouped[key]; });
   })();
@@ -408,7 +424,7 @@
     return adendoRows.map(function (row) {
       const values = adendoValues[up(row.code)] || {};
       const out = { coverageCode: row.code, coverageName: row.name, idAnexo: row.idAnexo, description: row.description };
-      row.parameters.forEach(function (name, index) { out['Parametro' + (index + 1)] = txt(values[name]); });
+      row.parameters.forEach(function (parameter, index) { out['Parametro' + (index + 1)] = txt(values[parameter.name]); });
       return out;
     });
   };
@@ -416,8 +432,8 @@
     const errors = [];
     adendoRows.forEach(function (row) {
       const values = adendoValues[up(row.code)] || {};
-      row.parameters.forEach(function (name) {
-        if (!txt(values[name])) errors.push(t('Cobertura') + ' ' + row.code + ': ' + t('falta') + ' «' + name + '».');
+      row.parameters.forEach(function (parameter) {
+        if (!txt(values[parameter.name])) errors.push(t('Cobertura') + ' ' + row.code + ': ' + t('falta') + ' «' + parameter.name + '».');
       });
     });
     return errors;
@@ -1608,21 +1624,45 @@
     }}>{t('Quitar')}</Button>;
   } }]);
   const adendoParameterCount = adendoRows.reduce(function (max, row) { return Math.max(max, row.parameters.length); }, 0);
+  const renderWrappedAdendoText = function (value) {
+    const text = txt(value);
+    return <Tooltip title={text} placement="topLeft">
+      <div className="axx-adendo-text-wrap">{text}</div>
+    </Tooltip>;
+  };
   const colsAdendos = [
-    { title: t('Código'), dataIndex: 'code', width: 80 },
-    { title: t('Nombre de cobertura'), dataIndex: 'name', width: 220, ellipsis: true },
-    { title: t('Código del adendo'), dataIndex: 'idAnexo', width: 130 },
-    { title: t('Descripción del adendo'), dataIndex: 'description', width: 220, ellipsis: true }
+    { title: t('Código'), dataIndex: 'code', width: 68 },
+    { title: t('Nombre de cobertura'), dataIndex: 'name', width: 200, render: renderWrappedAdendoText },
+    { title: t('Código del adendo'), dataIndex: 'idAnexo', width: 112 },
+    { title: t('Descripción del adendo'), dataIndex: 'description', width: 200, render: renderWrappedAdendoText }
   ].concat(Array.from({ length: adendoParameterCount }).map(function (_, index) {
     const position = index + 1;
-    return { title: t('Parametro') + position, key: 'parameter-' + position, width: 190, render: function (_, row) {
-      const name = row.parameters[index];
-      if (!name) return null;
+    return { title: t('Parametro') + position, key: 'parameter-' + position, width: 155, render: function (_, row) {
+      const parameter = row.parameters[index];
+      if (!parameter) return null;
+      const name = parameter.name;
+      const controlType = tipoControlAdendo(parameter.type, name);
       const values = adendoValues[up(row.code)] || {};
       const missing = showErrors && !txt(values[name]);
-      return <Input size="small" value={txt(values[name])} status={missing ? 'error' : undefined}
-        placeholder={name} disabled={running || (result && result.ok)}
-        onChange={function (event) { setAdendoValue(row.code, name, event.target.value); }} />;
+      const common = {
+        size: 'small', value: txt(values[name]), status: missing ? 'error' : undefined,
+        placeholder: name, disabled: running || (result && result.ok),
+        onChange: function (event) { setAdendoValue(row.code, name, event.target.value); }
+      };
+      let control;
+      if (controlType === 'date') control = <Input {...common} type="date" />;
+      if (controlType === 'number' || controlType === 'percentage') {
+        control = <Input {...common} type="number" step="any"
+          min={controlType === 'percentage' ? 0 : undefined}
+          max={controlType === 'percentage' ? 100 : undefined} />;
+      }
+      if (!control) control = <Input {...common} type="text" />;
+      return <div className="axx-adendo-input-wrap">
+        {control}
+        <Tooltip title={name} placement="topLeft">
+          <span className="axx-adendo-param-help" aria-hidden="true">{name}</span>
+        </Tooltip>
+      </div>;
     } };
   }));
 
@@ -1634,6 +1674,15 @@
 .axx299 .axx-topbar-label { color:#334155; white-space:nowrap; }
 .axx299 .axx-topbar-summary { color:#5a6572; white-space:nowrap; font-size:12px; }
 .axx299 .axx-topbar .axx-return-btn { margin-left:auto; }
+.axx299 .axx-adendo-text-wrap { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.axx299 .axx-adendo-input-wrap { position:relative; min-width:0; }
+.axx299 .axx-adendo-input-wrap .ant-input { width:100%; }
+.axx299 .axx-adendo-param-help { position:absolute; top:calc(100% + 3px); left:0; z-index:20;
+          display:block; width:max-content; max-width:240px; padding:3px 7px; color:#262626;
+          background:#fff; border:1px solid #b8c4d1; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.12);
+          font-size:11px; line-height:16px; white-space:normal; pointer-events:none; opacity:0; visibility:hidden;
+          transform:translateY(-2px); transition:opacity .15s ease, transform .15s ease, visibility .15s ease; }
+.axx299 .axx-adendo-input-wrap:hover .axx-adendo-param-help { opacity:1; visibility:visible; transform:translateY(0); }
 .axx299 .axx-status { background:#1677ff; color:#fff;
           padding:4px 10px; border-radius:4px; margin:0 4px 4px 4px; font-size:13px; }
 .axx299 .axx-status b { color:#fff; }

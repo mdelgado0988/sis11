@@ -1780,8 +1780,9 @@
       }
       reinsuranceExecuted = true;
 
-      // ChangeCoverage actualiza las coberturas, pero la duracion de la
-      // poliza debe quedar sincronizada con la vigencia final resultante.
+      // El flujo anterior fijaba las vigencias en un segundo paso despues del
+      // ADD. Repetimos ese paso explicitamente para la cobertura seleccionada
+      // y sus dependientes antes de sincronizar la poliza.
       try {
         const parseAtNoon = function (value) {
           const raw = String(value || '').trim();
@@ -1790,6 +1791,41 @@
           const date = new Date(normalized);
           return Number.isNaN(date.getTime()) ? null : date;
         };
+        const sameCalendarDate = function (left, right) {
+          const a = parseAtNoon(left);
+          const b = parseAtNoon(right);
+          return a && b && a.getTime() === b.getTime();
+        };
+        const coverageUpdates = [];
+        newCoverages.forEach(function (coverage) {
+          const coverageId = Number(coverage && coverage.id || 0);
+          const previous = oldCoverages.find(function (item) {
+            return Number(item && item.id || 0) === coverageId;
+          });
+          if (coverageId <= 0 || !previous || !coverage.start || !coverage.end) return;
+          if (sameCalendarDate(previous.start, coverage.start)
+            && sameCalendarDate(previous.end, coverage.end)) return;
+          coverageUpdates.push({
+            id: coverageId,
+            start: dateAtNoon(coverage.start),
+            end: dateAtNoon(coverage.end)
+          });
+        });
+
+        for (let i = 0; i < coverageUpdates.length; i++) {
+          const update = coverageUpdates[i];
+          const coverageResponse = await exe('SetField', {
+            entity: 'LifeCoverage',
+            entityId: update.id,
+            fieldValue: "start='" + update.start + "', [end]='" + update.end + "'",
+            raw: true
+          });
+          if (!coverageResponse || !coverageResponse.ok) {
+            throw new Error(t('No se pudo actualizar la vigencia de la cobertura') + ' ' + update.id
+              + ': ' + cleanMessage(coverageResponse));
+          }
+        }
+
         const addYears = function (date, years) {
           const result = new Date(date.getTime());
           const month = result.getUTCMonth();
@@ -1877,7 +1913,11 @@
   const colsGrid = [
     { title: t('Codigo'), dataIndex: 'code', width: 80 },
     { title: t('Nombre'), dataIndex: 'name' },
-    { title: t('Tipo'), dataIndex: 'reason', width: 110, render: function (v) { return v === 'SELECTED' ? <Tag color="blue">{t('Seleccionada')}</Tag> : <Tag>{t('Recalculada')}</Tag>; } },
+    { title: t('Tipo'), dataIndex: 'reason', width: 110, render: function (v) {
+      if (v === 'SELECTED') return <Tag color="blue">{t('Seleccionada')}</Tag>;
+      if (v === 'DEPENDENT') return <Tag color="gold">{t('Dependiente recalculada')}</Tag>;
+      return <Tag>{t('Sin cambio')}</Tag>;
+    } },
     { title: t('Prima anterior'), dataIndex: 'oldPremium', align: 'right', width: 120, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
     { title: t('Vigencia inicial anterior'), dataIndex: 'oldStart', width: 140, render: function (v) { return <span className="axx-antes">{day10(v)}</span>; } },
     { title: t('Vigencia final anterior'), dataIndex: 'oldEnd', width: 140, render: function (v) { return <span className="axx-antes">{day10(v)}</span>; } },

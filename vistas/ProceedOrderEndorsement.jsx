@@ -3,9 +3,11 @@
  * @email michael.delgado@axxis-systems.com
  * @created 2026/09/07
  * @name ProceedOrderEndorsement
- * @version 1.0
+ * @version 1.1
  * @purpose: Manage proceed-order endorsements by calculating coverage validity changes,
  * executing the ChangeCoverage endorsement, and synchronizing insured-object data.
+ * AXX-1978 / GLOBUAT-261: coverage durations come from the insured-object tariff grid
+ * (hiddenCobtar "Duración Días"); the endorsement shows no premium information.
  */
 () => {
   const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, Spin, Tabs, message } = A;
@@ -101,6 +103,24 @@
       return field ? field.userData : null;
     }
     return values && typeof values === 'object' ? values[fieldName] : null;
+  };
+  // AXX-1978: the insured-object tariff tab (hiddenCobtar) stores the configured
+  // duration of every coverage. Those days are the source of truth for the view.
+  const getTariffDaysByCoverage = (insuredObject) => {
+    const raw = getInsuredObjectValue(insuredObject, 'hiddenCobtar');
+    const text = Array.isArray(raw) ? raw[0] : raw;
+    const rows = parseJson(text, []);
+    const byCode = {};
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      if (!row || row.coverageCode === undefined || row.coverageCode === null) return;
+      const days = Number(row['Duración Días']);
+      byCode[txt(row.coverageCode)] = {
+        days: Number.isFinite(days) && days > 0 ? Math.round(days) : null,
+        start: toLocalDate(row['F. Inicial']),
+        end: toLocalDate(row['F. Final'])
+      };
+    });
+    return byCode;
   };
   const isCheckedValue = (value) => {
     const values = Array.isArray(value) ? value : [value];
@@ -202,6 +222,7 @@
   const [calculation, setCalculation] = useState(null);
   const [premiumValidationError, setPremiumValidationError] = useState('');
   const [proceedOrderEnabled, setProceedOrderEnabled] = useState(false);
+  const [tariffDays, setTariffDays] = useState({});
 
   const getPolicyId = () => {
     try {
@@ -214,17 +235,28 @@
   };
   const policyId = getPolicyId();
 
-  const loadProceedOrderFlag = async function () {
+  const isTechnicalPolicy = function (currentPolicy) {
+    return ['96', '52'].indexOf(txt(currentPolicy && currentPolicy.lob)) >= 0;
+  };
+  const proceedOrderDefinitionCode = function (currentPolicy) {
+    return isTechnicalPolicy(currentPolicy) ? 'DT_RAMO_TECNICO' : 'OBJFIANZA';
+  };
+  const proceedOrderFieldName = function (currentPolicy) {
+    return isTechnicalPolicy(currentPolicy) ? 'ckOrdenProceder' : 'orden_de_proceder';
+  };
+
+  const loadProceedOrderInsuredObject = async function (currentPolicy) {
+    const definitionCode = proceedOrderDefinitionCode(currentPolicy);
     const definitionResponse = await exe('RepoObjectDefinition', {
       operation: 'GET',
-      filter: "code = 'OBJFIANZA'"
+      filter: "code = '" + definitionCode + "'"
     });
     if (!definitionResponse || !definitionResponse.ok) {
       throw new Error(translatedMessage(definitionResponse && definitionResponse.msg, 'The insured-object definition could not be loaded.'));
     }
     const definition = (definitionResponse.outData || [])[0];
     if (!definition || !definition.id) {
-      throw new Error(t('The OBJFIANZA insured-object definition was not found.'));
+      throw new Error(t('The ' + definitionCode + ' insured-object definition was not found.'));
     }
 
     const insuredResponse = await exe('RepoInsuredObject', {
@@ -235,8 +267,12 @@
     if (!insuredResponse || !insuredResponse.ok) {
       throw new Error(translatedMessage(insuredResponse && insuredResponse.msg, 'The insured-object data could not be loaded.'));
     }
-    const insuredObject = (insuredResponse.outData || [])[0];
-    return isCheckedValue(getInsuredObjectValue(insuredObject, 'orden_de_proceder'));
+    return (insuredResponse.outData || [])[0] || null;
+  };
+
+  const loadProceedOrderFlag = async function () {
+    const insuredObject = await loadProceedOrderInsuredObject(policy);
+    return isCheckedValue(getInsuredObjectValue(insuredObject, proceedOrderFieldName(policy)));
   };
 
   // ---------------------------------------------------------------- data load
@@ -256,32 +292,64 @@
         const pol = (polRes.outData || [])[0];
         if (!pol) throw new Error(t('Policy not found: ') + policyId);
 
-        const hasProceedOrder = await loadProceedOrderFlag();
+        const proceedOrderInsuredObject = await loadProceedOrderInsuredObject(pol);
+        const proceedOrderField = proceedOrderFieldName(pol);
+        const hasProceedOrder = isCheckedValue(getInsuredObjectValue(proceedOrderInsuredObject, proceedOrderField));
+        const configuredDays = getTariffDaysByCoverage(proceedOrderInsuredObject);
 
-        const cfgRes = await exe('GetFullTable', { table: 'cfgCoberturaProductoReaFianza' });
+        const cfgTableByLob = {
+          '96': 'cfgCoberturaProductoReaTecnicos',
+          '52': 'cfgCoberturaProductoReaRiesgosVarios',
+          '81': 'cfgCoberturaProductoReaFianza',
+          '82': 'cfgCoberturaProductoReaFianza',
+          '83': 'cfgCoberturaProductoReaFianza',
+          '84': 'cfgCoberturaProductoReaFianza'
+        };
+        const cfgTable = cfgTableByLob[txt(pol.lob)] || 'cfgCoberturaProductoRea';
+        const cfgRes = await exe('GetFullTable', { table: cfgTable });
         if (!cfgRes || !cfgRes.ok) {
           throw new Error(translatedMessage(cfgRes && cfgRes.msg, 'The coverage configuration table could not be loaded.'));
         }
         const table = Array.isArray(cfgRes.outData) ? cfgRes.outData : [];
-        if (table.length < 2) throw new Error(t('cfgCoberturaProductoReaFianza returned no configuration rows.'));
+        if (table.length < 2) throw new Error(t(cfgTable + ' returned no configuration rows.'));
 
         const header = table[0].map((h) => txt(h));
         const idx = {};
         header.forEach((h, i) => { if (idx[h] === undefined) idx[h] = i; });
         const iLob = idx.lobCode, iProd = idx.productCode, iCov = idx.coverageCode;
         const iDep = header.indexOf('coverageCodeDep');
-        if (iLob === undefined || iProd === undefined || iCov === undefined || iDep < 0) {
-          throw new Error(t('cfgCoberturaProductoReaFianza does not have the expected columns.'));
+        const iParent = header.indexOf('coberturaPrincipal');
+        if (iLob === undefined || iProd === undefined || iCov === undefined) {
+          throw new Error(t(cfgTable + ' does not have the expected columns.'));
         }
         const rows = table.slice(1)
           .filter((r) => txt(r[iLob]) === txt(pol.lob) && txt(r[iProd]) === txt(pol.productCode))
-          .map((r) => ({ lobCode: txt(r[iLob]), productCode: txt(r[iProd]), coverageCode: txt(r[iCov]), coverageCodeDep: txt(r[iDep]) }));
+          .map((r) => {
+            const parent = iParent >= 0 ? txt(r[iParent]) : '';
+            const dependency = iParent >= 0
+              ? (parent && parent !== '-1' && parent.toUpperCase() !== 'NULL' ? parent : '')
+              : (iDep >= 0 ? txt(r[iDep]) : '');
+            return { lobCode: txt(r[iLob]), productCode: txt(r[iProd]), coverageCode: txt(r[iCov]), coverageCodeDep: dependency };
+          });
+
+        // In technical catalogs the parent column points from the dependent
+        // coverage to the main one. Mark that referenced row as the main row;
+        // coverageCodeDep on the technical row itself is not a parent marker.
+        if (iParent >= 0) {
+          const referencedParents = rows
+            .filter((row) => row.coverageCodeDep !== '')
+            .map((row) => row.coverageCodeDep);
+          rows.forEach((row) => {
+            if (referencedParents.indexOf(row.coverageCode) >= 0) row.coverageCodeDep = row.coverageCode;
+          });
+        }
 
         if (!cancelled) {
           setPolicy(pol);
           setCoverages(Array.isArray(pol.Coverages) ? pol.Coverages : []);
           setCfgRows(rows);
           setProceedOrderEnabled(hasProceedOrder);
+          setTariffDays(configuredDays);
         }
       } catch (err) {
         if (!cancelled) setLoadError(translatedMessage(err && err.message ? err.message : String(err), 'The view could not be loaded.'));
@@ -520,9 +588,24 @@
       return { error: t('The main coverage has no usable start/end dates.') };
     }
 
+    // AXX-1978: a coverage lasts exactly the days registered in the tariff tab
+    // (inclusive count: end = start + days - 1). Without a registered value the
+    // current calendar span of the coverage is kept.
+    const configuredDaysOf = (code) => {
+      const item = tariffDays[txt(code)];
+      return item && item.days ? item.days : null;
+    };
+    const endFromDays = (start, days, fallbackOffset) => {
+      if (!start) return null;
+      if (days) return addDays(start, days - 1);
+      return fallbackOffset == null ? null : addDays(start, fallbackOffset);
+    };
+    const mainTariff = hasRelationship ? tariffDays[mainCode] : null;
     const mainDateOffset = hasRelationship ? daysBetween(curMainStart, curMainEnd) : null;
     const newMainStart = toLocalDate(effectiveDate);
-    const newMainEnd = newMainStart ? addDays(newMainStart, mainDateOffset) : null;
+    const newMainEnd = newMainStart
+      ? endFromDays(newMainStart, hasRelationship ? configuredDaysOf(mainCode) : null, mainDateOffset)
+      : null;
 
     const rows = coverages.map((c) => {
       const code = txt(c.code);
@@ -530,10 +613,12 @@
       const curStart = toPolicyLocalDate(c.start);
       const curEnd = toPolicyLocalDate(c.end);
       const dateOffset = daysBetween(curStart, curEnd);
-      const duration = inclusiveDaysBetween(curStart, curEnd);
+      const configuredDays = configuredDaysOf(code);
+      const duration = configuredDays || inclusiveDaysBetween(curStart, curEnd);
       const isMain = hasRelationship && code === mainCode;
       // Configured as taking part in the relationship, and not the main one.
       const isDependent = hasRelationship && !!cfg && cfg.coverageCodeDep !== '' && !isMain;
+      const isStandalonePrincipal = !isDependent && !isMain;
 
       let newStart = null, newEnd = null, note = '';
       if (!newMainStart) {
@@ -542,20 +627,27 @@
         // Without a configured relationship, each coverage is its own main
         // coverage and keeps its current duration.
         newStart = newMainStart;
-        newEnd = dateOffset == null ? null : addDays(newStart, dateOffset);
+        newEnd = endFromDays(newStart, configuredDays, dateOffset);
       } else if (isMain) {
         newStart = newMainStart;
         newEnd = newMainEnd;
       } else if (isDependent) {
         // Assumption 13: keep the CURRENT offset of this dependent relative to the
         // CURRENT main end, read from the policy. No contiguity rule is invented.
-        const offset = daysBetween(curMainEnd, curStart);
+        // AXX-1978: the offset is read from the tariff tab when both coverages
+        // have their dates registered there.
+        const depTariff = tariffDays[code];
+        const offset = mainTariff && mainTariff.end && depTariff && depTariff.start
+          ? daysBetween(mainTariff.end, depTariff.start)
+          : daysBetween(curMainEnd, curStart);
         newStart = addDays(newMainEnd, offset);
-        newEnd = dateOffset == null ? null : addDays(newStart, dateOffset);
+        newEnd = endFromDays(newStart, configuredDays, dateOffset);
       } else {
-        newStart = curStart;
-        newEnd = curEnd;
-        note = cfg ? t('not part of the relationship') : t('not configured');
+        // A coverage outside the configured dependency chain is its own
+        // principal coverage: move it to the effective date and preserve its
+        // own duration, just like the configured main coverage.
+        newStart = newMainStart;
+        newEnd = endFromDays(newStart, configuredDays, dateOffset);
       }
 
       return {
@@ -563,11 +655,11 @@
         coverageId: c.id,
         code: code,
         name: c.name,
-        premium: c.basePremium,
         curStart: curStart, curEnd: curEnd, duration: duration,
+        configuredDays: configuredDays,
         newStart: newStart, newEnd: newEnd,
-        newDuration: inclusiveDaysBetween(newStart, newEnd),
-        isMain: isMain, isDependent: isDependent, note: note,
+        newDuration: newStart && newEnd ? (configuredDays || inclusiveDaysBetween(newStart, newEnd)) : null,
+        isMain: isMain || isStandalonePrincipal, isDependent: isDependent, note: note,
       };
     });
 
@@ -1124,13 +1216,6 @@
         return;
       }
 
-      try {
-        await generateEndorsementDocument(cid);
-      } catch (documentError) {
-        pushStep(t('Generate the endorsement document'), false, String(documentError && documentError.message ? documentError.message : documentError));
-        message.warning(t('The endorsement was applied, but its document could not be generated.') + ' ' + String(documentError && documentError.message ? documentError.message : documentError));
-      }
-
       // ChangeCoverage updates the coverages but does not necessarily update the
       // LifePolicy validity. Persist the dates represented by the endorsement.
       const executedData = executed.outData && Array.isArray(executed.outData)
@@ -1198,10 +1283,28 @@
       }
       pushStep(t('Update policy validity'), true, policyStart + ' -> ' + policyEnd);
 
+      // AXX-1978: generated after the validity update so the document shows the new validity.
+      try {
+        await generateEndorsementDocument(cid);
+      } catch (documentError) {
+        pushStep(t('Generate the endorsement document'), false, String(documentError && documentError.message ? documentError.message : documentError));
+        message.warning(t('The endorsement was applied, but its document could not be generated.') + ' ' + String(documentError && documentError.message ? documentError.message : documentError));
+      }
+
       // --- synchronise the insured object (§3.3)
-      const synced = await exe('ExeChain', { chain: 'cmdUpdateInsuredObjectData', context: JSON.stringify({ policyId: policyId }) });
-      const syncData = synced && synced.outData;
-      const syncOk = !!(synced && synced.ok && syncData && syncData.ok);
+      const synced = await exe('ExeChain', {
+        chain: 'cmdUpdateInsuredObjectData',
+        context: JSON.stringify({
+          policyId: policyId,
+          jNewCoverages: addPayload.jNewCoverages
+        })
+      });
+      let syncData = synced && synced.outData;
+      if (typeof syncData === 'string') {
+        try { syncData = JSON.parse(syncData); } catch (parseError) { syncData = null; }
+      }
+      if (!syncData || typeof syncData !== 'object') syncData = synced;
+      const syncOk = !!(syncData && syncData.ok === true);
       const syncMsg = translatedMessage((syncData && syncData.msg) || (synced && synced.msg), 'no response');
       pushStep(t('Synchronise the insured object'), syncOk, syncMsg);
 
@@ -1215,7 +1318,7 @@
       } else {
         // §3.4: never hide a partial failure behind a generic success message.
         setResult({ kind: 'partial', msg: t('PARTIAL: endorsement ') + cid + t(' WAS applied to the policy, but the insured-object synchronisation failed — ') + syncMsg });
-        message.warning(t('Partial failure: the endorsement was applied but the insured-object data was not synchronised.'));
+        message.warning(t('Partial failure: the endorsement was applied but the insured-object data was not synchronised.') + ' ' + syncMsg);
       }
     } catch (err) {
       if (reinsurancePrepared && !reinsuranceFinalized && executionChangeId) {
@@ -1252,7 +1355,7 @@
       render: (v, r) => <span>{v} {r.isMain ? <Tag color="blue">{t('Main')}</Tag> : (r.isDependent ? <Tag>{t('Dependent')}</Tag> : null)}</span> },
     { title: t('Code'), dataIndex: 'code', key: 'code' },
     { title: t('Coverage name'), dataIndex: 'name', key: 'name' },
-    { title: t('Premium'), dataIndex: 'premium', key: 'premium', align: 'right', render: value => amountCell(value) },
+    { title: t('Días (objeto asegurado)'), dataIndex: 'configuredDays', key: 'configuredDays', align: 'right', render: value => (value ? value : '—') },
     { title: t('Start date (before)'), key: 'cs', render: (v, r) => dateCell(r.curStart) },
     { title: t('End date (before)'), key: 'ce', render: (v, r) => dateCell(r.curEnd, r.duration) },
     { title: t('Start date (after)'), key: 'ns', render: (v, r) => dateCell(r.newStart) },
@@ -1283,28 +1386,6 @@
     { title: t('Previous due date'), dataIndex: 'oldDueDate', key: 'oldDueDate', width: 170, align: 'center', render: value => value ? <span style={{ color: '#d32f2f' }}>{fmt(toPolicyLocalDate(value))}</span> : '—' },
     { title: t('New due date'), dataIndex: 'newDueDate', key: 'newDueDate', width: 170, align: 'center', render: value => value ? <span style={{ color: '#1677ff' }}>{fmt(toPolicyLocalDate(value))}</span> : '—' }
   ];
-  const accrualPremium = (() => {
-    if (!model || !model.curBondStart || !model.curBondEnd || !effectiveDateValue) return null;
-    const premiumCandidates = [
-      policy && policy.anualPremium,
-      policy && policy.annualPremium,
-      policy && policy.grossValue,
-      model.rows.reduce((total, row) => total + Number(row.premium || 0), 0)
-    ];
-    const premium = premiumCandidates
-      .map(value => Number(value))
-      .find(value => Number.isFinite(value));
-    if (!Number.isFinite(premium)) return null;
-
-    const totalDays = Math.max(1, daysBetween(model.curBondStart, model.curBondEnd) || 0);
-    const elapsedDays = Math.min(
-      totalDays,
-      Math.max(0, daysBetween(model.curBondStart, effectiveDateValue) || 0)
-    );
-    const earned = Math.max(0, premium) * (elapsedDays / totalDays);
-    return { earned: earned, deferred: Math.max(0, premium) - earned };
-  })();
-
   if (loading) return <Card title={t('Proceed Order endorsement')}><Skeleton active /></Card>;
 
   if (loadError) {
@@ -1466,12 +1547,6 @@
               <Descriptions.Item label={t('Main coverage (from configuration)')}>{model.mainCode}</Descriptions.Item>
               <Descriptions.Item label={t('Main coverage duration (days)')}>
                 {model.mainRow ? model.mainRow.duration + ' → ' + (model.mainRow.newDuration == null ? '—' : model.mainRow.newDuration) : ''}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('Earned premium')}>
-                {accrualPremium ? amountCell(accrualPremium.earned, '—') : '—'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('Unearned premium')}>
-                {accrualPremium ? amountCell(accrualPremium.deferred, '—') : '—'}
               </Descriptions.Item>
             </Descriptions>
           </TabPane>
