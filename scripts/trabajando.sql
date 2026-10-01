@@ -15,8 +15,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 84
-and t.cplan = 'FIAMIS1' 
+where t.cramo = 71
+and t.cplan = 'TAR_PRO' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 96
+declare @ramoXY int = 71
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -65,7 +65,7 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 52
+declare @ramo int = 71
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,

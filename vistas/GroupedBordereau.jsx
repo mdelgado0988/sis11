@@ -1,3 +1,10 @@
+/*
+ * Name: GroupedBordereau
+ * Purpose: Consulta, agrupa y exporta la información de bordereaux de reaseguro.
+ * Author: Noel Obando
+ * CreatedDate: 2026-07-08
+ * LastModified: 2026-10-01
+ */
 ()=>{
   const { useState, useEffect, useRef, createContext, useContext } = React;
   const { Table, Select, Button, DatePicker, Skeleton, Space, Row, Col, Drawer, Form, Tabs, message, Input, InputNumber, Checkbox, Badge, Empty, Tooltip } = A;
@@ -13,6 +20,7 @@
     { name: "cfgCoberturaProductoReaTecnicos" },
     { name: "cfgCoberturaProductoReaVidaColectivo" },
     { name: "cfgCoberturaProductoReaVida" },
+    { name: "cfgCoberturaProductoReaVidaIndividual" },
     { name: "cfgCoberturaProductoReaRiesgosVarios" },
     { name: "cfgCoberturaProductoReaAuto" },
     { name: "cfgCoberturaProductoRea" }
