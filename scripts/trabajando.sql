@@ -61,11 +61,11 @@ order by cpregunta
 --select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
 --SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'PORCENTAJE_PAGO'
---select * from tarifasvar where variable = 'porcDeduAutoChino'
+--select * from tarifasvar where variable = 'TASAEG'
 
 return;
 
-declare @ramo int = 96
+declare @ramo int = 52
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -76,6 +76,7 @@ select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
 		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
 		, CASE WHEN EXISTS(SELECT 1 FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) THEN 'Si' ELSE 'No' end TienePolizas
 		, (SELECT TOP (1) cnpoliza FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) Ejemplo
+		, (SELECT MAX (cproces) cproces FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) EjemploOferta
 from maplanes pl
 where cramo = @ramo 
 --AND pl.istatplan = 'V'
@@ -125,8 +126,8 @@ WHERE cramo = 81  and itiporec = 'P'
 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 96
-declare @cplan varchar(15) = 'CAR';
+declare @cramo int = 52
+declare @cplan varchar(15) = 'RD';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
 		cross apply (select count(1)  cobs
@@ -181,8 +182,8 @@ WHERE c.cramo IN (81,82,83,84)
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
-where cramo in (96)
-and xnombrep like '%endoso%'
+where cramo in (52)
+and xnombrep not like '%endoso%'
 --AND xdpto <> 'SINIESTROS'
 --AND xformula1 <> '0'
 --AND xformula1 is not null and xformula1 <> '0'
@@ -204,7 +205,7 @@ select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.
 	inner join adpolcob c on c.crecibo = rec.crecibo and c.isuma = 'S' ) AS oferta2
 
 from marepteccia r
-where r.cramo in (96)
+where r.cramo in (52)
 and r.xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 AND (r.xformula1 is not null and r.xformula1 <> '0' and isnumeric(r.xformula1) = 1)
@@ -215,15 +216,15 @@ order by 1,2
 
 SELECT
     RTRIM(pl.xplan) AS Producto, STRING_AGG(CONVERT(varchar(max), c.ccobertura), ',') WITHIN GROUP (ORDER BY c.ccobertura) AS Coberturas,
-    RTRIM(pl.cplan) AS cplan, 'CL-EVR-CV1' AS Evento, 'CL-EV-CV11,CL-EV-CV12,CL-EV-CV13,CL-EV-CV14,CL-EV-CV15,CL-EV-CV16' AS EventoAsegurado
+    RTRIM(pl.cplan) AS cplan, 'CL-EVR-RD' AS Evento, 'CL-EV-RD1,CL-EV-RD2,CL-EV-RD3,CL-EV-RD4,CL-EV-RD5,CL-EV-RD6,L-EV-RD7,CL-EV-RD8,CL-EV-RD9' AS EventoAsegurado
 FROM (SELECT DISTINCT cramo, cplan, ccobertura
     FROM maplancob
-    WHERE cramo = 20 ) c
+    WHERE cramo = 52 ) c
 INNER JOIN maplanes pl ON pl.cramo = c.cramo AND pl.cplan = c.cplan
 GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 
 
-select cramo, ccausa, xcausa from macausasin where cramo = 20
+select cramo, ccausa, xcausa from macausasin where cramo = 52
 
 	
 

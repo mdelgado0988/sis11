@@ -11,16 +11,6 @@
   *@Output: [{ resultado }]
 */
 
-/*
-  *@name: cmdDocumentoRamoTecnicoDTO
-  *@Purpose: Add insured data
-  *@Autor: Felix Ramirez
-  *@Email: felix.ramirez@axxis-systems.com
-  *@Created: 21/05/2026
-  *@Input: {policyId}
-  *@Output: [{ resultado }]
-*/
-
 const policyId = context.policyId;
 const paramPolicyCode = context.policyCode;
 const paramAnualPremium = context.premium;
@@ -37,13 +27,13 @@ let oaUserData;
 let limites;
 const objectDefinitionCode = 'DT_RAMO_TECNICO';
 const hoy = new Date();
-const dia = hoy.getDate();
+const dia = hoy.getUTCDate();
 const meses = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
-const mes = meses[hoy.getMonth()];
-const anio = hoy.getFullYear();
+const mes = meses[hoy.getUTCMonth()];
+const anio = hoy.getUTCFullYear();
 const celPhoneType = "PHONETYPE2";
 const faxPhoneType = "PHONETYPE4";
 const telPhoneType = "PHONETYPE1";
@@ -69,14 +59,14 @@ setAcreedor();
 setCurrency(policy.currency);
 
 const dateIni = new Date(policy.start);
-const diaIni = dateIni.getDate();
-const mesIni = meses[dateIni.getMonth()];
-const anioIni = dateIni.getFullYear();
+const diaIni = dateIni.getUTCDate();
+const mesIni = meses[dateIni.getUTCMonth()];
+const anioIni = dateIni.getUTCFullYear();
 
 const dateFin = new Date(policy.end);
-const diaFin = dateFin.getDate();
-const mesFin = meses[dateFin.getMonth()];
-const anioFin = dateFin.getFullYear();
+const diaFin = dateFin.getUTCDate();
+const mesFin = meses[dateFin.getUTCMonth()];
+const anioFin = dateFin.getUTCFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
@@ -95,9 +85,9 @@ resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${holder.Add
 
 //Datos del asegurado
 const fnacimiento = new Date(insured.birth);
-resultado.DiaNac = fnacimiento.getDate();
-resultado.MesNac = fnacimiento.getMonth();
-resultado.AnioNac = fnacimiento.getFullYear();
+resultado.DiaNac = fnacimiento.getUTCDate();
+resultado.MesNac = fnacimiento.getUTCMonth();
+resultado.AnioNac = fnacimiento.getUTCFullYear();
 resultado.Asegurado = getNombreCompleto(insured);
 resultado.FNacimiento = toFecha(insured.birth);
 resultado.IdentificacionAseg = insured.isPerson == true ? insured.cnp : insured.nif;
@@ -168,8 +158,8 @@ resultado.Coberturas = policy.Coverages
       Limite: n(limit),
       Prima: n(premium),
       Moneda: policy.currency,
-      DeductibleCov: deductible,
-      Evento: limites.find(x => vEqual(x.Producto) == vEqual(policy.productCode) && vEqual(x.Cobertura) == vEqual(code))?.Limite ?? "",
+      DeductibleCov: montoODefault(deductible),
+      Evento: montoODefault(limites.find(x => vEqual(x.Producto) == vEqual(policy.productCode) && vEqual(x.Cobertura) == vEqual(code))?.Limite),
       Deducible: deducibles.find(x => x.productCode == policy.productCode)?.text ?? "",
       DeducibleText: "",
       Porcentaje: findCoverage && findCoverage.Porcentaje ? findCoverage.Porcentaje : 0,
@@ -246,7 +236,7 @@ function agregarAdendosAlResultado() {
       .forEach(key => {
         const numeroParametro = key.replace(/\D/g, "");
         const nombreAtributo = `${codigoAnexo}_${codigoCobertura}_${numeroParametro}`;
-        resultado[nombreAtributo] = adendo[key] ?? "";
+        resultado[nombreAtributo] = fechaDocumento(adendo[key]);
       });
   });
 }
@@ -398,25 +388,31 @@ function toFecha(value) {
   // Validar fecha inválida
   if (isNaN(date.getTime())) return "";
 
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0'); // meses 0-11
-  const year = date.getFullYear();
+  // Las fechas se persisten en UTC. El documento presenta la fecha de
+  // calendario UTC para no moverla por la zona horaria del servidor.
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0'); // meses 0-11
+  const year = date.getUTCFullYear();
 
   return `${day}/${month}/${year}`;
 }
 
+function fechaDocumento(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (value instanceof Date) return toFecha(value);
+
+  const text = String(value).trim();
+  // Los parámetros de adendos pueden llegar como input date o ISO UTC. Solo
+  // esos patrones se convierten; texto, porcentajes y números quedan intactos.
+  if (/^\d{4}-\d{2}-\d{2}(?:T|\s|$)/.test(text)) return toFecha(text);
+  const local = /^(\d{2})[/-](\d{2})[/-](\d{4})(?:\s|T|$)/.exec(text);
+  return local ? local[1] + "/" + local[2] + "/" + local[3] : value;
+}
+
 function getHora(fecha) {
-  const date = new Date(fecha);
-
-  if (isNaN(date)) return "";
-
-  let horas = date.getHours();
-  const minutos = String(date.getMinutes()).padStart(2, "0");
-  const periodo = horas >= 12 ? "pm" : "am";
-
-  horas = horas % 12 || 12;
-
-  return `${String(horas).padStart(2, "0")}:${minutos} ${periodo}`;
+  // El formato de Ramo Técnico maneja la vigencia como fecha de negocio;
+  // no debe mostrar la hora convertida desde UTC.
+  return "12:00 AM";
 }
 
 function n(value) {
@@ -467,6 +463,10 @@ function n(value) {
     intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
     return (isNegative ? '-' : '') + intPart + '.' + decPart;
+}
+
+function montoODefault(value) {
+  return value === null || value === undefined || String(value).trim() === "" ? "" : n(value);
 }
 
 function numeroALetras(num) {
