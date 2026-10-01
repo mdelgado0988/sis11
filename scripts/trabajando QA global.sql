@@ -4,7 +4,7 @@ GO
 SELECT id, contractId, changeId, cover, sumInsured, premium, premiumType, lineId, sumInsuredCedant, premiumCedant, comissionCedant, sumInsuredRe, premiumRe, tax
 		, overwritten
 FROM Cession
-WHERE lifePolicyId = 1441
+WHERE lifePolicyId = 4092
 ORDER BY overwritten desc, id
 
 select id, code, originalPolicyId, version, policyVersion, originalPolicyId, originalStart from LifePolicy where code = 'IN-GL-000722'

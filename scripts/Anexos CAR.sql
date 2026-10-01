@@ -29,6 +29,5 @@ FROM macoberturas
 INNER JOIN maplancob ON macoberturas.ccobertura = maplancob.ccobertura AND macoberturas.cramo = maplancob.cramo
 LEFT JOIN #reportes rt ON rt.lob = maplancob.cramo and rt.CoverageCode = macoberturas.ccobertura
 INNER JOIN conf_datos_endoso cde ON cde.cramo = maplancob.cramo AND cde.cplan = maplancob.cplan AND cde.ccober = maplancob.ccobertura
-WHERE maplancob.iestado = 'V'
-  AND maplancob.IndDatsoAdic = 1
+WHERE maplancob.iestado = 'V' AND maplancob.IndDatsoAdic = 1
 ORDER BY 1,2,3,4,5

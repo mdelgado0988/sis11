@@ -224,6 +224,12 @@ INNER JOIN maplanes pl ON pl.cramo = c.cramo AND pl.cplan = c.cplan
 GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 
 
-select cramo, ccausa, xcausa from macausasin where cramo = 52
+select cramo, ccausa, xcausa from macausasin where cramo = 96
 
-	
+
+declare @cuenta varchar(9) = '640.01.01.02.00.20.04.00.000'
+select * 
+from SisGlobal_AG01..catalogonic
+where cdgocont like '%'+@cuenta+'%'
+and tipocuen = '2'
+AND desccont like '%VARIOS%'

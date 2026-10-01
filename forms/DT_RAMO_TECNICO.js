@@ -41,15 +41,39 @@ const cobtarVida = [{ lob: 96, cobtar: "cfgCobtarRamoTecnico"  }, { lob: 52, cob
 // Catalogos
 //////////////////////////////////////////////
 
+function filtrarActividadEconomica(item) {
+    const lob = String(policy?.lob ?? '').trim();
+    const productCode = String(policy?.productCode ?? '').trim().toUpperCase();
+    // CAR de ramos tecnicos usa exclusivamente las actividades de categoria 3.
+    return lob !== '96' || productCode !== 'CAR' || String(item[3] ?? '').trim() === '3';
+}
+
+function configurarActividadEconomicaRequerida() {
+    if (String(policy?.lob ?? '').trim() !== '52') return;
+    $('#cmbActividadEconomica')
+        .prop('required', false)
+        .removeAttr('required aria-required data-required');
+    $('label[for="cmbActividadEconomica"]').each(function () {
+        const $label = $(this);
+        $label.removeClass('required required-label ant-form-item-required').removeAttr('required aria-required');
+        // Algunos renderizadores escriben el asterisco directamente en el texto de la etiqueta.
+        $label.contents().filter(function () { return this.nodeType === Node.TEXT_NODE; }).each(function () {
+            this.nodeValue = this.nodeValue.replace(/\s*\*\s*$/, '');
+        });
+        $label.find('.required, .required-label, .ant-form-item-required').remove();
+    });
+}
+
 async function cargarCatalogos() {
     await Promise.all([
         loadTableQuery({reference:'#cmbPais',tableCommand:'RepoCountryCatalog',filter:`[code]='591'`}),
-        loadDataTable({reference:'#cmbActividadEconomica',tableName:'actividad',indexCode:0,indexDisplay:1, filterFunction: item => item[3] == "3"}),
+        loadDataTable({reference:'#cmbActividadEconomica',tableName:'actividad',indexCode:0,indexDisplay:1, filterFunction: filtrarActividadEconomica}),
         loadDataTable({reference:'#cmbZonaCresta',tableName:'ZonaCresta',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#cmbUsoBien',tableName:'TablaUsoBien',indexCode:0,indexDisplay:1}),
         loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2, filterFunction: item => item[3] == "1", sortFunction: (a, b) => a[2].localeCompare(b[2])}),
         loadDataTable({reference:'#cmbCategoria',tableName:'tbCategoriaMaquinaria',indexCode:0,indexDisplay:1})
     ]);
+    configurarActividadEconomicaRequerida();
     $("#cmbProvincia").empty().append('<option value="" selected disabled>Seleccione una opción</option>');
     $("#cmbProvincia").prop("selectedIndex", 0);
     loadEventField();

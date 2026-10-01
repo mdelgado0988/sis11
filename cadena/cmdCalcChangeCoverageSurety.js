@@ -217,14 +217,10 @@ validateCoverageValidity(jNew, 'vigencia resultante');
 // but fail earlier with enough context to identify the zero-valued input.
 const nativeInputWarnings = [];
 const policyDuration = Number(policy.duration);
-const paymentDuration = Number(policy.paymentDuration);
 // duration is the number of complete years. A value of 0 is valid for a
 // policy whose term is represented by durationMonths/durationDays.
 if (policy.duration != null && policy.duration !== '' && (!isFinite(policyDuration) || policyDuration < 0)) {
   nativeInputWarnings.push('policy.duration=' + txt(policy.duration));
-}
-if (policy.paymentDuration != null && policy.paymentDuration !== '' && (!isFinite(paymentDuration) || paymentDuration < 0)) {
-  nativeInputWarnings.push('policy.paymentDuration=' + txt(policy.paymentDuration));
 }
 for (let i = 0; i < jNew.length; i++) {
   const coverage = jNew[i] || {};

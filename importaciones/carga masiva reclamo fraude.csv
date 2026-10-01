@@ -1,0 +1,5 @@
+﻿Ajustador;Reclamante;Causa;FSiniestro;Provincia;Ciudad;Lugar;FNotificacionS;DescripSiniestro;ObserAdicional;IdPoliza;Poliza;casegurado;Cedula;TipoTrajeta;CantSiniestro;Monto;NombreComercio;TarjetaHabitante;TipoTransaccion;LugarSiniestro;cob_40;cob_401;cob_41;cob_43;cob_109;cob_110
+7;6;CL-EVR-RD;20/09/2026 10:30;8;802;Centro comercial Albrook;21/09/2026;Prueba MSN-000072 fraude tarjeta;Observación de prueba;3673;RV-FR-000001;102;19-5578-57990;VISA;3;450.75;"Amazon; Temu";PRINCIPAL;COMPRA ON LINE;EXTRANJERO;40;;;;;
+MARIA PEREZ;JOSEFA MAIMONE;Generales;15/09/2026;Panama;balboa;Cajero automático;16/09/2026;;;3673;RV-FR-000001;103;64-8753-35487;master card;1;200;Banco X;extension;tarjeta presente;panama;40;;;;;
+16;6;CL-EVR-RD;1/10/2026;8;802;Otro lugar;1/10/2026;Duplicado de la fila 1;;3673;RV-FR-000001;104;98-5698-63068;VISA;1;10;X;PRINCIPAL;COMPRA ON LINE;PANAMÁ;40;;;;;
+29;26;CL-EVR-RD;15/09/2026;8;802;Oficina;16/09/2026;Cobertura no contratada;;3673;RV-FR-000001;105;39-2837-69830;VISA;1;10;X;PRINCIPAL;COMPRA ON LINE;PANAMÁ;40;;;;;
