@@ -112,7 +112,11 @@ function buildBatchErrorList(batchId, errorRows, processType) {
     const policyReference = processType === 'issuance'
       ? (errorRow && (errorRow[0] || errorRow[1] || ''))
       : (errorRow && (errorRow[1] || errorRow[0] || ''));
-    const message = errorRow && (errorRow[6] || '');
+    // Los lotes de emisión guardan el mensaje en la quinta columna; cotización
+    // conserva el formato histórico donde se encuentra en la séptima.
+    const message = processType === 'issuance'
+      ? (errorRow && (errorRow[4] || ''))
+      : (errorRow && (errorRow[6] || ''));
 
     return {
       IdProceso: batchId,

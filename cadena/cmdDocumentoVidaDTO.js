@@ -76,7 +76,7 @@ const anioFin = dateFin.getFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
-resultado.Direccion = holder.Addresses?.[0]?.address2 ?? "";
+resultado.Direccion = axxDireccionCompleta(holder.Addresses?.[0]); //AXX-2418
 resultado.Telefono = holder.phone ?? "";
 
 //return holder.Phones
@@ -633,4 +633,24 @@ function numeroALetras(num) {
   const decimal = partes[1] ? partes[1].substring(0, 2).padEnd(2, "0") : "00";
 
   return `${convertir(entero)} CON ${decimal}/100`;
+}
+
+//AXX-2418 (GLOBUAT-268): dirección completa del contacto en los documentos (Barriada, Ubicación y Corregimiento), sin perder ni sustituir componentes.
+function axxDireccionCompleta(addr, extras) {
+  var a = addr || {};
+  var partes = [a.address1, a.address2, axxNombreCorregimiento(a.sector)].concat(extras || []);
+  var salida = [];
+  partes.forEach(function (p) {
+    var v = String(p == null ? "" : p).trim();
+    var repetido = salida.some(function (x) { return x.toUpperCase() == v.toUpperCase(); });
+    if (v && !repetido) salida.push(v);
+  });
+  return salida.join(", ");
+}
+function axxNombreCorregimiento(sector) {
+  var id = Number(sector || 0);
+  if (!(id > 0)) return "";
+  doCmd({cmd:"RepoSectorCatalog",data:{operation:"GET",filter:"id=" + id,size:1}});
+  var fila = RepoSectorCatalog && RepoSectorCatalog.outData && RepoSectorCatalog.outData[0];
+  return fila && fila.name ? String(fila.name) : "";
 }
