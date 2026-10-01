@@ -971,9 +971,12 @@ function renderTablaAgrupada(data, containerSelector = "#tabTarifas") {
                 // ===== tipo =====
                 if (type === "number") {
                   $input = $("<input>", { 
-                      type: "number",
+                      type: "text",
+                      inputmode: "decimal",
                       step: "0.01"
-                  }).addClass("ant-input-custom");
+                  }).addClass("ant-input-custom")
+                    .attr("autocomplete", "off")
+                    .attr("data-numeric-format", "true");
 
                 } else if (type === "select") {
 
@@ -1095,8 +1098,8 @@ function cargarCobtarDesdeHidden(
       // ===== SET VALUE SEGÚN TIPO =====
       if ($input.is("select")) {
         $input.val(value);
-      } else if ($input.attr("type") === "number") {
-        $input.val(value != null ? Number(value) : "");
+      } else if ($input.attr("data-numeric-format") === "true") {
+        $input.val(value != null ? formatNumericInputValue(value) : "");
       } else {
         $input.val(value ?? "");
       }
@@ -1133,8 +1136,8 @@ function construirCobtar(containerSelector = "#tabTarifas") {
             let value = $el.val();
 
             // normalizar valores
-            if ($el.attr("type") === "number") {
-                value = value === "" ? null : Number(value);
+            if ($el.attr("data-numeric-format") === "true") {
+                value = parseNumericInputValue(value);
             }
 
             resultado[coverage][field] = value;
@@ -1148,12 +1151,61 @@ function construirCobtar(containerSelector = "#tabTarifas") {
 }
 
 function bindEventosCobtar() {
-  $("#tabTarifas").on("input change", "input, select", function () {
+  $("#tabTarifas").off("input change.cobtar").on("input change.cobtar", "input, select", function (event) {
+    if ($(this).attr("data-numeric-format") === "true") {
+      formatNumericInput(this, event.type === "input");
+    }
     const data = construirCobtar("#tabTarifas");
     $("#hiddenCobtar").val(JSON.stringify(data));
     // debug opcional
     console.log(data);
   });
+}
+
+function normalizeNumericInputValue(value) {
+  let text = String(value ?? "").replace(/,/g, "").replace(/[^0-9.\-]/g, "");
+  const negative = text.startsWith("-");
+  text = text.replace(/-/g, "");
+  const dotIndex = text.indexOf(".");
+  let integer = dotIndex >= 0 ? text.slice(0, dotIndex) : text;
+  let decimals = dotIndex >= 0 ? text.slice(dotIndex + 1).replace(/\./g, "") : "";
+  integer = integer.replace(/^0+(?=\d)/, "");
+  if (!integer && (dotIndex >= 0 || decimals)) integer = "0";
+  return (negative ? "-" : "") + integer + (dotIndex >= 0 ? "." + decimals.slice(0, 2) : "");
+}
+
+function formatNumericInputValue(value) {
+  const normalized = normalizeNumericInputValue(value);
+  if (!normalized || normalized === "-") return normalized;
+  const negative = normalized.startsWith("-");
+  const unsigned = negative ? normalized.slice(1) : normalized;
+  const dotIndex = unsigned.indexOf(".");
+  const integer = dotIndex >= 0 ? unsigned.slice(0, dotIndex) : unsigned;
+  const decimals = dotIndex >= 0 ? unsigned.slice(dotIndex + 1) : "";
+  const grouped = (integer || "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (negative ? "-" : "") + grouped + (dotIndex >= 0 ? "." + decimals : "");
+}
+
+function parseNumericInputValue(value) {
+  const normalized = String(value ?? "").replace(/,/g, "").trim();
+  return normalized === "" || normalized === "-" || normalized === "." ? null : Number(normalized);
+}
+
+function formatNumericInput(input, preserveCaret) {
+  const original = String(input.value ?? "");
+  const start = typeof input.selectionStart === "number" ? input.selectionStart : original.length;
+  const normalizedBefore = normalizeNumericInputValue(original.slice(0, start));
+  const formatted = formatNumericInputValue(original);
+  input.value = formatted;
+  if (preserveCaret && document.activeElement === input) {
+    let meaningful = 0;
+    let caret = formatted.length;
+    for (let index = 0; index < formatted.length; index += 1) {
+      if (formatted[index] !== ",") meaningful += 1;
+      if (meaningful >= normalizedBefore.length) { caret = index + 1; break; }
+    }
+    input.setSelectionRange(caret, caret);
+  }
 }
 
 function setDefaultCobtar(){

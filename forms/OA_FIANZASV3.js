@@ -783,9 +783,12 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
                 // ===== tipo =====
                 if (type === "number") {
                     $input = $("<input>", {
-                        type: "number",
+                        type: "text",
+                        inputmode: "decimal",
                         step: "0.01"
-                    }).addClass("ant-input-custom");
+                    }).addClass("ant-input-custom")
+                      .attr("autocomplete", "off")
+                      .attr("data-numeric-format", "true");
 
                 } else if (type === "select") {
 
@@ -1025,11 +1028,8 @@ function cargarCobtarDesdeHidden(
       // ===== SET VALUE SEGÚN TIPO =====
       if ($input.is("select")) {
         $input.val(value);
-      } else if ($input.attr("type") === "number") {
-        const numericValue = value === null || value === undefined || value === ''
-          ? ''
-          : Number(String(value).replace(/[^0-9.-]/g, '').trim());
-        $input.val(Number.isFinite(numericValue) ? numericValue : '');
+      } else if ($input.attr("data-numeric-format") === "true") {
+        $input.val(value != null ? formatNumericInputValue(value) : "");
       } else {
         $input.val(value ?? "");
       }
@@ -1066,8 +1066,8 @@ function construirCobtar(containerSelector = "#tab2") {
             let value = $el.val();
 
             // normalizar valores
-            if ($el.attr("type") === "number") {
-                value = value === "" ? null : Number(value);
+            if ($el.attr("data-numeric-format") === "true") {
+                value = parseNumericInputValue(value);
             }
 
             resultado[coverage][field] = value;
@@ -1081,12 +1081,61 @@ function construirCobtar(containerSelector = "#tab2") {
 }
 
 function bindEventosCobtar() {
-  $("#tab2").off("input change.cobtar").on("input change.cobtar", "input, select", function () {
+  $("#tab2").off("input change.cobtar").on("input change.cobtar", "input, select", function (event) {
+    if ($(this).attr("data-numeric-format") === "true") {
+      formatNumericInput(this, event.type === "input");
+    }
     const data = construirCobtar("#tab2");
     $("#hiddenCobtar").val(JSON.stringify(data));
     // debug opcional
     console.log(data);
   });
+}
+
+function normalizeNumericInputValue(value) {
+  let text = String(value ?? "").replace(/,/g, "").replace(/[^0-9.\-]/g, "");
+  const negative = text.startsWith("-");
+  text = text.replace(/-/g, "");
+  const dotIndex = text.indexOf(".");
+  let integer = dotIndex >= 0 ? text.slice(0, dotIndex) : text;
+  let decimals = dotIndex >= 0 ? text.slice(dotIndex + 1).replace(/\./g, "") : "";
+  integer = integer.replace(/^0+(?=\d)/, "");
+  if (!integer && (dotIndex >= 0 || decimals)) integer = "0";
+  return (negative ? "-" : "") + integer + (dotIndex >= 0 ? "." + decimals.slice(0, 2) : "");
+}
+
+function formatNumericInputValue(value) {
+  const normalized = normalizeNumericInputValue(value);
+  if (!normalized || normalized === "-") return normalized;
+  const negative = normalized.startsWith("-");
+  const unsigned = negative ? normalized.slice(1) : normalized;
+  const dotIndex = unsigned.indexOf(".");
+  const integer = dotIndex >= 0 ? unsigned.slice(0, dotIndex) : unsigned;
+  const decimals = dotIndex >= 0 ? unsigned.slice(dotIndex + 1) : "";
+  const grouped = (integer || "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (negative ? "-" : "") + grouped + (dotIndex >= 0 ? "." + decimals : "");
+}
+
+function parseNumericInputValue(value) {
+  const normalized = String(value ?? "").replace(/,/g, "").trim();
+  return normalized === "" || normalized === "-" || normalized === "." ? null : Number(normalized);
+}
+
+function formatNumericInput(input, preserveCaret) {
+  const original = String(input.value ?? "");
+  const start = typeof input.selectionStart === "number" ? input.selectionStart : original.length;
+  const normalizedBefore = normalizeNumericInputValue(original.slice(0, start));
+  const formatted = formatNumericInputValue(original);
+  input.value = formatted;
+  if (preserveCaret && document.activeElement === input) {
+    let meaningful = 0;
+    let caret = formatted.length;
+    for (let index = 0; index < formatted.length; index += 1) {
+      if (formatted[index] !== ",") meaningful += 1;
+      if (meaningful >= normalizedBefore.length) { caret = index + 1; break; }
+    }
+    input.setSelectionRange(caret, caret);
+  }
 }
 
 function setDefaultCobtar(){
@@ -1306,6 +1355,9 @@ function aplicarRestriccionesEndosoFianza() {
         '#cmbEstadoFianza'
     ];
     if (permiteFechaActo) camposEditables.push('#f_acto_publico');
+    // AXX-2420 / GLOBUAT-270 (8): en la Fianza de Construcción el endoso de objeto asegurado permite cambiar el
+    // beneficiario («A favor de»): nombre (autocompletado) y código SIS; el contacto se completa solo.
+    if (producto === '81FIAGCCOG') camposEditables.push('#nombre', '#rut');
 
     camposEditables.forEach(selector => {
         $(selector).prop('disabled', false).prop('readonly', false)
@@ -1634,7 +1686,11 @@ function inyectarEstilosAntdCobtar() {
 function sumarDias(fechaStr, dias) {
     if (!fechaStr || !dias) return "";
 
-    const fecha = new Date(fechaStr);
+    // AXX-2419 r2 (GLOBUAT-269): un texto de sólo fecha es un día calendario LOCAL; new Date('aaaa-mm-dd')
+    // lo leía como medianoche UTC (el día anterior en Panamá) y 365 días daban una vigencia de 364.
+    const texto = String(fechaStr).trim();
+    const partes = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const fecha = partes ? new Date(Number(partes[1]), Number(partes[2]) - 1, Number(partes[3])) : new Date(fechaStr);
     if (isNaN(fecha)) return "";
 
     fecha.setDate(fecha.getDate() + Number(dias));
@@ -1642,7 +1698,15 @@ function sumarDias(fechaStr, dias) {
 }
 
 function formatearFecha(fecha) {
-    const f = new Date(fecha);
+    // AXX-2419 (GLOBUAT-269 #4): el servidor guarda las fechas en UTC sin zona; leerlas como UTC y
+    // devolver el día calendario local. Un texto de sólo fecha ya es un día calendario.
+    let valor = fecha;
+    if (typeof valor === "string") {
+        const texto = valor.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(texto)) valor = texto + "Z";
+    }
+    const f = new Date(valor);
     if (isNaN(f)) return "";
 
     const yyyy = f.getFullYear();
@@ -1654,7 +1718,8 @@ function formatearFecha(fecha) {
 
 function formatearFechaHoraFija(fecha) {
     const raw = String(fecha ?? '').trim();
-    const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/);
+    // AXX-2419: sólo un texto de fecha pura se toma tal cual; una fecha-hora pasa por formatearFecha.
+    const datePart = raw.match(/^\d{4}-\d{2}-\d{2}$/);
     if (datePart) return `${datePart[0]}T12:00:00`;
     const fechaCalendario = formatearFecha(fecha);
     return fechaCalendario ? `${fechaCalendario}T12:00:00` : "";
