@@ -251,6 +251,8 @@
   const ADJUSTER_CATALOG_FILTER = "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'ADJ')";
   const REPOSITORY_CATALOG_GET = {
     operation: 'GET', showColumnsIfEmpty: true, entity: null, bulkJson: null,
+    // El repositorio usa size: 0 para devolver el catálogo completo; los eventos
+    // RT de CAR quedan fuera de la primera página predeterminada.
     filter: null, include: null, size: 0, page: 0
   };
 
@@ -4574,7 +4576,8 @@ END CATCH;`;
         mappings[code].forEach((eventCode) => {
           const event = eventByCode[eventCode];
           if (!event) {
-            throw new Error('La tabla contiene un evento asegurado incompatible.');
+            throw new Error('La tabla contiene un evento asegurado incompatible: '
+              + eventCode + ' para el producto ' + productCode + '.');
           }
         });
         return reason.disabled ? null : { value: reason.code, label: reason.name };
@@ -6592,7 +6595,7 @@ END CATCH;`;
       .resumen-affected-modal .resumen-custom-form .resumen-field-invalid label{color:#cf1322!important}
       .resumen-affected-modal .rendered-form>.row{display:flex;flex-wrap:wrap;margin-right:-8px;margin-left:-8px}
       .resumen-affected-modal .rendered-form>.row>[class*="col-"]{position:relative;width:100%;min-height:1px;padding-right:8px;padding-left:8px}
-      @media(min-width:768px){.resumen-affected-modal .rendered-form>.row>.col-md-4{flex:0 0 33.333333%;max-width:33.333333%}.resumen-affected-modal .rendered-form>.row>.col-md-6{flex:0 0 50%;max-width:50%}.resumen-affected-modal .rendered-form>.row>.col-md-8{flex:0 0 66.666667%;max-width:66.666667%}.resumen-affected-modal .rendered-form>.row>.col-md-12{flex:0 0 100%;max-width:100%}}
+      @media(min-width:768px){.resumen-affected-modal .rendered-form>.row>.col-md-3{flex:0 0 25%;max-width:25%}.resumen-affected-modal .rendered-form>.row>.col-md-4{flex:0 0 33.333333%;max-width:33.333333%}.resumen-affected-modal .rendered-form>.row>.col-md-6{flex:0 0 50%;max-width:50%}.resumen-affected-modal .rendered-form>.row>.col-md-8{flex:0 0 66.666667%;max-width:66.666667%}.resumen-affected-modal .rendered-form>.row>.col-md-12{flex:0 0 100%;max-width:100%}}
       .resumen-shell .resumen-history{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;gap:7px}
       .resumen-shell .resumen-coverage .resumen-coverage-table-wrap{flex:0 1 210px;min-height:0;max-height:210px;overflow:auto}
       .resumen-shell .resumen-coverage .resumen-history{flex:1 1 auto;min-height:220px}

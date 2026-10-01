@@ -182,7 +182,7 @@ WHERE c.cramo IN (81,82,83,84)
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
-where cramo in (52)
+where cramo in (71)
 and xnombrep not like '%endoso%'
 --AND xdpto <> 'SINIESTROS'
 --AND xformula1 <> '0'
@@ -219,7 +219,7 @@ SELECT
     RTRIM(pl.cplan) AS cplan, 'CL-EVR-RD' AS Evento, 'CL-EV-RD1,CL-EV-RD2,CL-EV-RD3,CL-EV-RD4,CL-EV-RD5,CL-EV-RD6,L-EV-RD7,CL-EV-RD8,CL-EV-RD9' AS EventoAsegurado
 FROM (SELECT DISTINCT cramo, cplan, ccobertura
     FROM maplancob
-    WHERE cramo = 52 ) c
+    WHERE cramo = 71 ) c
 INNER JOIN maplanes pl ON pl.cramo = c.cramo AND pl.cplan = c.cplan
 GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 
@@ -227,4 +227,3 @@ GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 select cramo, ccausa, xcausa from macausasin where cramo = 52
 
 	
-
