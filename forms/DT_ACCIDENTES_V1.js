@@ -16,6 +16,7 @@ let polizaConfirmada = false;
 const isEndorsment = window.location.href.includes('tab12');
 const camposEditablesEnEndoso = new Set([
     'txtNoPrestamo',
+    'txtNoCobis',
     'txtPolizaCobis',
     'txtObservaciones',
     'cmbRenovacion',
@@ -1766,7 +1767,10 @@ async function getContact(contactId) {
 }
 
 function setDefaultData(){
-    $("#txtEdadSuscripcion").val(calcularEdad(contact.birth));
+    $("#txtEdadSuscripcion")
+        .val(calcularEdad(contact.birth))
+        .prop("readonly", true)
+        .addClass("readonly-style");
     $("#txtSumaAsegurada").val(n2(policy.insuredSum));    
     $("#txtSumaAsegurada").addClass("readonly-style");
     $("#CodigoCategoriaActividad").addClass("readonly-style");
