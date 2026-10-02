@@ -83,6 +83,10 @@ if (!processId) {
 doCmd({ "cmd": "GetCurrentUser"});
 const dataContex = RepoClaimPayment.outData[0];
 dataContex.usuario = GetCurrentUser.outData.nombre;
+const additionalBeneficiary = getAdditionalBeneficiary(dataContex, payment);
+if (additionalBeneficiary) {
+  dataContex.beneficiaryName = additionalBeneficiary;
+}
 // dataContex.transaccion = catPayment.filter(x=>x.code == dataContex.paymentType)[0].name;
 const isMerged = isMergedPayment(dataContex) || isMergedPayment(payment);
 dataContex.transaccion = payment.payoutId || (isMerged ? dataContex.processId || processId : null);
@@ -131,6 +135,29 @@ return dataContex
 /* =========================
    Resultado final
 ========================= */
+
+function getAdditionalBeneficiary(...payments) {
+  for (const payment of payments) {
+    const directValue = String(payment?.additionalBeneficiary ?? '').trim();
+    if (directValue) return directValue;
+
+    const detail = payment?.jDetail;
+    if (!detail) continue;
+
+    try {
+      const rows = Array.isArray(detail) ? detail : JSON.parse(detail);
+      const items = Array.isArray(rows) ? rows : [rows];
+      const value = items
+        .map(item => String(item?.additionalBeneficiary ?? '').trim())
+        .find(Boolean);
+      if (value) return value;
+    } catch (error) {
+      // Un jDetail inválido no debe impedir la generación del recibo.
+    }
+  }
+
+  return '';
+}
 
 function formatOutputAmounts(output) {
   const amountFields = [

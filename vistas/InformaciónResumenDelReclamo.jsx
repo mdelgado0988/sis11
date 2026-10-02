@@ -379,6 +379,7 @@
   const [paymentReserveModalOpen, setPaymentReserveModalOpen] = React.useState(false);
   const [checkRequestModalOpen, setCheckRequestModalOpen] = React.useState(false);
   const [paymentRequestDetail, setPaymentRequestDetail] = React.useState(null);
+  const [paymentRequestCatalogs, setPaymentRequestCatalogs] = React.useState({ methods: [], types: [] });
   const [paymentCoverageId, setPaymentCoverageId] = React.useState(null);
   const [paymentAmount, setPaymentAmount] = React.useState('');
   const [paymentConcept, setPaymentConcept] = React.useState('');
@@ -393,6 +394,7 @@
   const [expenseConcept, setExpenseConcept] = React.useState('');
   React.useEffect(() => {
     setPaymentRequestDetail(null);
+    setPaymentRequestCatalogs({ methods: [], types: [] });
   }, [claimId, activeTab]);
   const [recoveryModalOpen, setRecoveryModalOpen] = React.useState(false);
   const recovery = React.useRef({ types: [], typesLoaded: false, currencies: [], operation: 0,
@@ -1288,6 +1290,21 @@
     });
   });
 
+  const paymentAdditionalBeneficiary = (payment, payoutId) => {
+    const directValue = String(payment && payment.additionalBeneficiary || '').trim();
+    if (directValue) return directValue;
+    if (!payment || !payment.jDetail) return '';
+    try {
+      const parsed = typeof payment.jDetail === 'string' ? JSON.parse(payment.jDetail) : payment.jDetail;
+      const details = Array.isArray(parsed) ? parsed : [parsed];
+      const matchingDetail = details.find((item) => Number(item && item.payoutId) === Number(payoutId))
+        || details.find((item) => String(item && item.additionalBeneficiary || '').trim());
+      return String(matchingDetail && matchingDetail.additionalBeneficiary || '').trim();
+    } catch (failure) {
+      return '';
+    }
+  };
+
   const paymentPayoutId = (payment) => {
     const direct = numericValue(payment && payment.payoutId);
     if (direct !== null) return direct;
@@ -1356,6 +1373,7 @@
         affectedObject: (() => { try { const object = JSON.parse(payout.jAffectedObjects || 'null');
           return object && !Array.isArray(object) ? financialObjectLabel(object) : null; } catch (error) { return null; } })(),
         checkRequestId: payment && payment.id != null ? payment.id : null,
+        additionalBeneficiary: paymentAdditionalBeneficiary(payment, payoutId),
         payment: payment
       };
     });
@@ -3207,8 +3225,8 @@ END CATCH;`;
     include: [
       'Contact', 'Claimer', 'Stage', 'Process', 'Process.Pasos', 'Policy', 'Policy.Coverages',
       'Policy.Coverages.Benefits', 'Policy.Coverages.Claims', 'Policy.Exclusions',
-      'Policy.Beneficiaries', 'Policy.Holder', 'Policy.Payer', 'Policy.Product', 'Policy.Accounts',
-      'Policy.Accounts.Movements', 'Payouts', 'Payments', 'InsuredEvent', 'Events',
+      'Policy.Beneficiaries', 'Policy.Beneficiaries.Contact', 'Policy.Holder', 'Policy.Payer', 'Policy.Product', 'Policy.Accounts',
+      'Policy.Accounts.Movements', 'Payouts', 'Payments', 'Payments.Beneficiary', 'InsuredEvent', 'Events',
       'FraudAnalysis', 'Requirements'
     ],
     filter: 'id=' + requestedClaimId,
@@ -3310,7 +3328,7 @@ END CATCH;`;
     if (!claim || Number(claim.id) !== Number(requestedClaimId)
       || routeClaimId() !== Number(requestedClaimId)) return Promise.resolve(false);
     return repositoryRequest('RepoClaim', {
-      operation: 'GET', include: ['Payouts', 'Payments'],
+      operation: 'GET', include: ['Payouts', 'Payments', 'Payments.Beneficiary'],
       filter: 'id=' + Number(requestedClaimId), page: 0, size: 1
     }).then((result) => {
       if (!mountedRef.current || currentClaimRef.current !== claim
@@ -5600,9 +5618,22 @@ END CATCH;`;
       target="_blank" rel="noopener noreferrer"
       onClick={(event) => event.stopPropagation()}>{text}</a>;
   };
+  const loadPaymentRequestCatalogs = () => Promise.all([
+    repositoryRequest('RepoPaymentMethodCatalog', { operation: 'GET' }),
+    repositoryRequest('RepoPaymentTypeCatalog', { operation: 'GET' })
+  ]).then(([methodsResult, typesResult]) => {
+    if (!mountedRef.current) return;
+    const methods = Array.isArray(methodsResult && methodsResult.outData) ? methodsResult.outData : [];
+    const types = Array.isArray(typesResult && typesResult.outData) ? typesResult.outData : [];
+    setPaymentRequestCatalogs({ methods: methods, types: types });
+  }).catch(() => {
+    // El detalle sigue disponible aunque un catálogo no pueda cargarse temporalmente.
+  });
+
   const openPaymentRequestDetail = (row, kind) => {
     if (!row || row.checkRequestId == null) return;
     setPaymentRequestDetail({ row: row, kind: kind });
+    loadPaymentRequestCatalogs();
   };
   const ReloadOutlinedIcon = () => (
     <span role="img" aria-label="reload" className="anticon anticon-reload">
@@ -6097,6 +6128,10 @@ END CATCH;`;
           const detail = paymentRequestDetail.row;
           const payment = detail.payment || {};
           const beneficiaryType = PAYMENT_TYPES.find((item) => item.value === payment.beneficiaryType);
+          const paymentMethod = paymentRequestCatalogs.methods.find((item) =>
+            String(item && item.code || '').trim() === String(payment.paymentMethodCode || '').trim());
+          const paymentType = paymentRequestCatalogs.types.find((item) =>
+            String(item && item.code || '').trim() === String(payment.paymentType || '').trim());
           const status = [0, 2].indexOf(Number(detail.status)) !== -1
             ? 'Pendiente de aprobación' : detail.available > 0 ? 'Aprobado — disponible' : 'Aplicado';
           return <div className="resumen-payment-request-detail-grid">
@@ -6105,7 +6140,7 @@ END CATCH;`;
             <div><span>Tipo</span><strong>{config.key === 'expenses' ? 'Gasto' : 'Pago'}</strong></div>
             <div><span>Tipo de beneficiario</span><strong>{displayValue(beneficiaryType && beneficiaryType.label || payment.beneficiaryType)}</strong></div>
             <div><span>Beneficiario</span><strong>{displayValue(detail.beneficiary)}</strong></div>
-            <div><span>Beneficiario adicional</span><strong>{displayValue(payment.additionalBeneficiary)}</strong></div>
+            <div><span>Beneficiario adicional</span><strong>{displayValue(detail.additionalBeneficiary)}</strong></div>
             <div><span>Cobertura</span><strong>{displayValue(detail.coverage)}</strong></div>
             <div><span>Objeto afectado</span><strong>{displayValue(detail.affectedObject)}</strong></div>
             <div><span>Monto de la solicitud</span><strong>{formatGridAmount(firstValue(payment.total, payment.amount, detail.paid))}</strong></div>
@@ -6113,8 +6148,8 @@ END CATCH;`;
               payment.accountId != null ? '#' + payment.accountId : null))}</strong></div>
             <div><span>Cuenta de origen</span><strong>{displayValue(firstValue(payment.sourceAccountNo, payment.sourceAccountNumber,
               payment.sourceAccountId != null ? '#' + payment.sourceAccountId : null))}</strong></div>
-            <div><span>Método de pago</span><strong>{displayValue(firstValue(payment.paymentMethodName, payment.paymentMethodCode))}</strong></div>
-            <div><span>Tipo de pago</span><strong>{displayValue(firstValue(payment.paymentTypeName, payment.paymentType))}</strong></div>
+            <div><span>Método de pago</span><strong>{displayValue(firstValue(payment.paymentMethodName, paymentMethod && paymentMethod.name, payment.paymentMethodCode))}</strong></div>
+            <div><span>Tipo de pago</span><strong>{displayValue(firstValue(payment.paymentTypeName, paymentType && paymentType.name, payment.paymentType))}</strong></div>
             <div><span>Fecha</span><strong>{displayValue(formatDate(detail.date))}</strong></div>
             <div><span>Referencia</span><strong>{displayValue(payment.reference)}</strong></div>
             <div><span>Estado</span><strong>{status}</strong></div>
