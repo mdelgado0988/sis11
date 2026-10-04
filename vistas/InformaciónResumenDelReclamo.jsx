@@ -3523,6 +3523,11 @@ END CATCH;`;
     return parts.year + '-' + pad(parts.month) + '-' + pad(parts.day);
   };
 
+  const localMidnightIso = (value, label) => {
+    const parts = validDateParts(value, label);
+    return new Date(parts.year, parts.month - 1, parts.day, 0, 0, 0).toISOString();
+  };
+
   const EXTRA_SECTION = 'InformacionResumenDelReclamo';
   const EXTRA_FIELDS = [{"name":"culpable","type":"checkbox-group","label":"Culpable","required":false,"className":"form-control","values":[{"label":"Culpable","value":"true","selected":false}]},{"name":"posibleRecupero","type":"checkbox-group","label":"Posible Recupero","required":false,"className":"form-control","values":[{"label":"Posible Recupero","value":"true","selected":false}]},{"name":"perdidaTotal","type":"checkbox-group","label":"Pérdida Total","required":false,"className":"form-control","values":[{"label":"Pérdida Total","value":"true","selected":false}]},{"name":"formatoTransito","type":"text","label":"Formato Tránsito","required":false,"className":"form-control"},{"name":"conductor","type":"text","label":"Conductor","required":false,"className":"form-control"},{"name":"asegurador","type":"checkbox-group","label":"Asegurador","required":false,"className":"form-control","values":[{"label":"Asegurador","value":"true","selected":false}]},{"name":"pagador","type":"checkbox-group","label":"Pagador","required":false,"className":"form-control","values":[{"label":"Pagador","value":"true","selected":false}]},{"name":"otro","type":"checkbox-group","label":"Otro","required":false,"className":"form-control","values":[{"label":"Otro","value":"true","selected":false}]},{"name":"edadConductor","type":"text","label":"Edad del Conductor","required":false,"className":"form-control"},{"name":"cmbProvincia","type":"select","label":"Provincia","required":false,"className":"form-control","values":[]},{"name":"cmbMunicipio","type":"select","label":"Ciudad","required":false,"className":"form-control","values":[]},{"name":"lugar","type":"text","label":"Lugar","required":false,"className":"form-control"},{"name":"fechaAudiencia","type":"date","label":"Fecha de audiencia","required":false,"className":"form-control"},{"name":"lugarAudiencia","type":"text","label":"Lugar de audiencia","required":false,"className":"form-control"},{"name":"fechaVencimientoLicencia","type":"date","label":"Fecha Vencimiento Licencia","required":false,"className":"form-control"},{"name":"numeroLicencia","type":"text","label":"Número de Licencia","required":false,"className":"form-control"}];
   const extraDefinitionRef = React.useRef(null);
@@ -4113,7 +4118,7 @@ END CATCH;`;
   };
 
   const occurrenceIso = (draftValue) => {
-    const date = toUtcDate(draftValue.occurrenceDate, 'Fecha del Siniestro');
+    const date = validDateParts(draftValue.occurrenceDate, 'Fecha del Siniestro');
     const hour = Number(draftValue.occurrenceHour);
     const minute = Number(draftValue.occurrenceMinute);
     if (!/^\d{1,2}$/.test(String(draftValue.occurrenceHour || ''))
@@ -4129,8 +4134,8 @@ END CATCH;`;
     }
     const hour24 = draftValue.occurrencePeriod === 'pm'
       ? (hour % 12) + 12 : hour % 12;
-    return date + 'T' + String(hour24).padStart(2, '0') + ':'
-      + String(minute).padStart(2, '0') + ':00Z';
+    // The form captures browser-local time; persist its equivalent UTC instant.
+    return new Date(date.year, date.month - 1, date.day, hour24, minute, 0).toISOString();
   };
 
   const serializeEntity = (claim) => {
@@ -4196,7 +4201,8 @@ END CATCH;`;
         throw new Error('La fecha de notificación no puede ser anterior a la fecha de ocurrencia.');
       }
       entity.notification = notificationDate === occurrenceDate
-        ? occurrenceValue : notificationTouched ? notificationDate + 'T00:00:00Z' : claim.notification;
+        ? occurrenceValue : notificationTouched
+          ? localMidnightIso(draftValue.notificationDate, 'Fecha de Notificación') : claim.notification;
     } else {
       entity.notification = claim.notification;
     }
@@ -4949,7 +4955,7 @@ END CATCH;`;
         throw new Error('La fecha de notificación no puede ser anterior a la fecha de ocurrencia.');
       }
       const notification = notificationDate === occurrenceDate
-        ? occurrence : notificationDate + 'T00:00:00Z';
+        ? occurrence : localMidnightIso(values.notificationDate, 'Fecha de Notificación');
       let dynamicForms = customFormsRef.current.length
         ? serializeCustomForms(null, customFormsRef.current) : null;
       dynamicForms = extraMerge(dynamicForms, claim, values, touchedRef.current);

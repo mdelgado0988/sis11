@@ -68,6 +68,7 @@ if(!policy.productCode === "1_9"){
 
 if (!policy) throw `La póliza [${change.lifePolicyId}] no ha sido encontrada.`;
 
+const beneficiaryDocumentPlan = getBeneficiaryDocumentPlan(change);
 const template = seleccionarReporteEndoso(policy, change, billDiff, reportesEndoso);
 
 const nombreRamo = getNombreRamo(policy);
@@ -158,8 +159,16 @@ if(isTest){
   //return billDiff;
   const arrayResult = [{ outdata: row }];
   const custom = buildCustomForTemplate({ row, policy, change, arrayResult, billDiff });
-  //return custom
   calculateEndorsmentNote(change, changeName, custom, policy);
+  if (beneficiaryDocumentPlan.hasBeneficiary) {
+    const beneficiaryData = buildBeneficiaryTemplateData(policy.id, beneficiaryDocumentPlan.beneficiaryUserData);
+    return beneficiaryDocumentPlan.hasOtherObjects
+      ? {
+        normal: { template, data: custom },
+        beneficiaries: { template: 'Sub_Beneficiarios.docx', data: beneficiaryData }
+      }
+      : { template: 'Sub_Beneficiarios.docx', data: beneficiaryData };
+  }
   return custom;
   //fin test mad
 }
@@ -307,16 +316,15 @@ function parseChangeInsuredObjects(rawObjects) {
   return list.map(object => {
     if (!object || typeof object !== 'object') return { userData: {} };
 
-    const data = safeJson(object.jValues, object.userData || []);
-    const fields = Array.isArray(data) ? data : [];
-    const userData = Object.fromEntries(
-      fields
+    const data = safeJson(object.jValues || object.userData, {});
+    const userData = Array.isArray(data)
+      ? Object.fromEntries(data
         .filter(field => field && field.name)
         .map(field => [
           field.name,
           Array.isArray(field.userData) ? field.userData[0] : field.userData
-        ])
-    );
+        ]))
+      : data && typeof data === 'object' ? data : {};
 
     return { ...object, userData };
   });
@@ -328,6 +336,44 @@ function getChangeInsuredObjectValues(change, propertyName) {
     || objects[0]
     || {};
   return object.userData || {};
+}
+
+function getBeneficiaryDocumentPlan(change) {
+  if (changeName !== 'InsuredObjectChange') {
+    return { hasBeneficiary: false, hasOtherObjects: false };
+  }
+
+  const newObjects = parseChangeInsuredObjects(change?.jNewInsuredObjects)
+    .filter(item => item && Object.keys(item).length);
+  const objects = newObjects.length ? newObjects : parseChangeInsuredObjects(change?.jOldInsuredObjects)
+    .filter(item => item && Object.keys(item).length);
+
+  if (!objects.length) {
+    return { hasBeneficiary: false, hasOtherObjects: false };
+  }
+
+  doCmd({
+    cmd: 'RepoObjectDefinition',
+    data: { operation: 'GET', filter: "code = 'BENEFICIARIOS_VIDA'" }
+  });
+
+  const beneficiaryDefinitionId = String(RepoObjectDefinition.outData?.[0]?.id ?? '');
+  const beneficiaryCode = 'BENEFICIARIOS_VIDA';
+  const definitionCode = object => String(
+    object?.ObjectDefinition?.code ?? object?.objectDefinitionCode ?? object?.definitionCode ?? ''
+  ).trim().toUpperCase();
+  const definitionId = object => String(
+    object?.objectDefinitionId ?? object?.ObjectDefinitionId ?? ''
+  ).trim();
+  const isBeneficiary = object => definitionCode(object) === beneficiaryCode
+    || (!!beneficiaryDefinitionId && definitionId(object) === beneficiaryDefinitionId);
+  const beneficiaryObject = objects.find(isBeneficiary);
+
+  return {
+    hasBeneficiary: !!beneficiaryObject,
+    hasOtherObjects: objects.some(object => !isBeneficiary(object)),
+    beneficiaryUserData: beneficiaryObject?.userData || {}
+  };
 }
 
 function normalizeInsuredObject(insuredObject) {
@@ -870,24 +916,91 @@ function generateDocWithCustom({ row, policy, change, billDiff }) {
 
   calculateEndorsmentNote(change, changeName, custom, policy);
 
-  // return custom
-  doCmd({ "cmd": "RepoDocument", "data": { "operation": "ADD", "entity": { "fileName": template, "LifePolicyid": policy.id } } });
-  doCmd({ "cmd": "GenerateDoc", "data": { "template": template, "data": custom, "async": false } });
+  const templates = beneficiaryDocumentPlan.hasBeneficiary
+    ? (beneficiaryDocumentPlan.hasOtherObjects
+      ? [template, 'Sub_Beneficiarios.docx']
+      : ['Sub_Beneficiarios.docx'])
+    : [template];
 
-  const docId = RepoDocument.outData[0].id;
-  const fileName = `${GenerateDoc.outData.fileName}_${row.Changeid}`;
-  const name = `${GenerateDoc.outData.fileName}_${row.Changeid}`;
-  const url = GenerateDoc.outData.url;
-  
-  //setDocField(docId, `fileName='${change.Discriminator}_${fileName}'`);
-  //setDocField(docId, `name='Recibo Endoso ${change.Discriminator}-${row.Changeid}'`);
-  setDocField(docId, `fileName='Endoso de ${custom.TituloEndosoCan}'`);
-  setDocField(docId, `name='Documento de Endoso'`);
-  setDocField(docId, `url='${url}'`);
-  setDocField(docId, "created=GETDATE()");
+  const messages = templates.map(templateName => {
+    const isBeneficiaryTemplate = templateName === 'Sub_Beneficiarios.docx';
+    const documentData = isBeneficiaryTemplate
+      ? buildBeneficiaryTemplateData(policy.id, beneficiaryDocumentPlan.beneficiaryUserData)
+      : custom;
+    const documentTitle = isBeneficiaryTemplate
+      ? 'Endoso de Beneficiarios'
+      : 'Endoso de ' + custom.TituloEndosoCan;
+    return generateEndorsementDocument(templateName, documentData, policy.id, documentTitle,
+      isBeneficiaryTemplate ? 'Documento de Endoso de Beneficiarios' : 'Documento de Endoso');
+  });
 
+  return messages.filter(Boolean).join(' | ') || 'OK';
+}
 
-  return GenerateDoc.msg || "OK";
+function buildBeneficiaryTemplateData(policyId, beneficiariesUserData) {
+  doCmd({
+    cmd: 'ExeChain',
+    data: {
+      chain: 'cmdDocumentoVidaDTO',
+      context: JSON.stringify({ policyId, beneficiariesUserData: beneficiariesUserData || {} })
+    }
+  });
+
+  if (!ExeChain.ok || !ExeChain.outData) {
+    throw new Error(ExeChain.msg || 'No fue posible obtener los datos de beneficiarios.');
+  }
+
+  return {
+    custom: applyChangedBeneficiaries(ExeChain.outData, beneficiariesUserData)
+  };
+}
+
+function applyChangedBeneficiaries(documentData, beneficiariesUserData) {
+  const custom = { ...(documentData || {}) };
+  const raw = beneficiariesUserData?.hiddenBeneficiarios;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = safeJson(value, []);
+  const beneficiaries = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.beneficiarios) ? parsed.beneficiarios : [];
+
+  custom.Beneficiarios = beneficiaries.map((beneficiary, index) => {
+    const item = beneficiary && typeof beneficiary === 'object' ? beneficiary : {};
+    const identification = String(item.identificacion ?? '').trim();
+    return {
+      ...item,
+      Numero: index + 1,
+      identificacion: identification,
+      nombreCompleto: item.nombreCompleto ?? '',
+      parentesco: item.parentesco ?? '',
+      menorEdad: identification ? 'No' : 'Si',
+      porcentaje: n(item.porcentaje ?? 0)
+    };
+  });
+  custom.TotalPorcentajeBeneficiarios = n(custom.Beneficiarios.reduce(
+    (total, beneficiary) => total + numericValue(beneficiary.porcentaje), 0
+  ));
+  return custom;
+}
+
+function generateEndorsementDocument(templateName, documentData, policyId, documentTitle, documentName) {
+  doCmd({
+    cmd: 'RepoDocument',
+    data: { operation: 'ADD', entity: { fileName: templateName, LifePolicyid: policyId } }
+  });
+  const docId = RepoDocument.outData?.[0]?.id;
+  if (!docId) throw new Error(`No fue posible crear el registro del documento ${templateName}.`);
+
+  doCmd({ cmd: 'GenerateDoc', data: { template: templateName, data: documentData, async: false } });
+  if (!GenerateDoc.ok || !GenerateDoc.outData?.url) {
+    throw new Error(GenerateDoc.msg || `No fue posible generar el documento ${templateName}.`);
+  }
+
+  setDocField(docId, `fileName='${documentTitle.replace(/'/g, "''")}'`);
+  setDocField(docId, `name='${documentName.replace(/'/g, "''")}'`);
+  setDocField(docId, `url='${String(GenerateDoc.outData.url).replace(/'/g, "''")}'`);
+  setDocField(docId, 'created=GETDATE()');
+  return GenerateDoc.msg || 'OK';
 }
 
 function buildCustomForTemplate({ policy, row, change, coverages, primas, billDiff }) {

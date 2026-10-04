@@ -12,6 +12,7 @@
 */
 
 const policyId = context.policyId;
+const beneficiariesOverride = context?.beneficiariesUserData;
 let policy;
 let holder;
 let seller;
@@ -160,11 +161,26 @@ resultado.Coberturas = policy.Coverages.map(({ code, name, limit, premium }) => 
     Prima: n(premium),
     Moneda: policy.currency,
     Evento: typeof evento === "string"
-      ? evento.replace(/\{limite\}/gi, n(limit))
+      ? resolveCoverageEvent(evento, limit, oaUserData)
       : evento,
     Asegurados: resultado.Cobtar.find(x => x.coverageCode == code)?.Asegurados ?? ""
   };
 });
+
+function resolveCoverageEvent(evento, limit, insuredData) {
+  return evento.replace(/\{([^{}]+)\}/g, (placeholder, fieldName) => {
+    const field = String(fieldName || '').trim();
+    if (field.toLowerCase() === 'limite') return n(limit);
+
+    const key = Object.keys(insuredData || {}).find(name => name.toLowerCase() === field.toLowerCase());
+    if (!key) return placeholder;
+
+    const rawValue = Array.isArray(insuredData[key]) ? insuredData[key][0] : insuredData[key];
+    if (rawValue === null || rawValue === undefined || String(rawValue).trim() === '') return '';
+    const text = String(rawValue).trim();
+    return /^[+-]?[\d.,]+$/.test(text) ? n(text) : text;
+  });
+}
 
 //Fecha actual
 resultado.DiaFecha = dia;
@@ -223,7 +239,10 @@ function setInsured() {
 
 function setInsuredObject() {
   oaUserData = loadInsuredObjectData(objectDefinitionCode, true);
-  beneficiariesUserData = loadInsuredObjectData(beneficiariesObjectDefinitionCode, false);
+  beneficiariesUserData = beneficiariesOverride && typeof beneficiariesOverride === 'object'
+    && Object.keys(beneficiariesOverride).length
+    ? beneficiariesOverride
+    : loadInsuredObjectData(beneficiariesObjectDefinitionCode, false);
 
   if(!oaUserData)
     throw new Error('No se pudo recuperar el objeto asegurado de accidentes personales');

@@ -65,7 +65,7 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 71
+declare @ramo int = 31
 SELECT * 
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
@@ -75,7 +75,8 @@ select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
 		, (SELECT COUNT(1) FROM maplancob c where c.cramo = pl.cramo and c.cplan = pl.cplan) Coberturas
 		, (SELECT COUNT(1) FROM tarifas t where t.cramo = pl.cramo and t.cplan = pl.cplan and t.cendoso = 36) Tarifas
 		, CASE WHEN EXISTS(SELECT 1 FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) THEN 'Si' ELSE 'No' end TienePolizas
-		, (SELECT TOP (1) cnpoliza FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) Ejemplo
+		, (SELECT TOP (1) cnpoliza FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan order by cproces desc) Ejemplo
+		--, (SELECT TOP (1) csinies_ref FROM MSiniestros t where t.cdgoramo = pl.cramo and t.cplan = pl.cplan order by NSiniestro desc) EjemploSini
 		, (SELECT MAX (cproces) cproces FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) EjemploOferta
 from maplanes pl
 where cramo = @ramo 
@@ -121,12 +122,13 @@ AND xnombrep not like 'recibo%'
 --,'CondGen_337','CondGen_340','FC_GarantiaC_OP321')
 GROUP BY cramo, xnombrep
 
-SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos FROM adrecibos
-WHERE cramo = 81  and itiporec = 'P'
+SELECT TOP 10 cpoliza, fanopol, fmespol, cproces, cnpoliza, mgastos
+FROM adrecibos
+WHERE cramo = 71  and cplan = 'TAR_PRO'
 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 52
+declare @cramo int = 31
 declare @cplan varchar(15) = 'RD';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
@@ -216,7 +218,7 @@ order by 1,2
 
 SELECT
     RTRIM(pl.xplan) AS Producto, STRING_AGG(CONVERT(varchar(max), c.ccobertura), ',') WITHIN GROUP (ORDER BY c.ccobertura) AS Coberturas,
-    RTRIM(pl.cplan) AS cplan, 'CL-EVR-RD' AS Evento, 'CL-EV-RD1,CL-EV-RD2,CL-EV-RD3,CL-EV-RD4,CL-EV-RD5,CL-EV-RD6,L-EV-RD7,CL-EV-RD8,CL-EV-RD9' AS EventoAsegurado
+    RTRIM(pl.cplan) AS cplan, 'CL-EVR-VI' AS Evento, 'CL-EV-VI1,CL-EV-VI2,CL-EV-VI3,CL-EV-VI4,CL-EV-VI5,CL-EV-VI6' AS EventoAsegurado
 FROM (SELECT DISTINCT cramo, cplan, ccobertura
     FROM maplancob
     WHERE cramo = 71 ) c
@@ -224,12 +226,12 @@ INNER JOIN maplanes pl ON pl.cramo = c.cramo AND pl.cplan = c.cplan
 GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 
 
-select cramo, ccausa, xcausa from macausasin where cramo = 96
+select cramo, ccausa, xcausa from macausasin where cramo = 71
 
 
-declare @cuenta varchar(9) = '640.01.01.02.00.20.04.00.000'
+declare @cuenta varchar(9) = '640.01.01.01.00.03.01.00.000'
 select * 
 from SisGlobal_AG01..catalogonic
 where cdgocont like '%'+@cuenta+'%'
 and tipocuen = '2'
-AND desccont like '%VARIOS%'
+AND desccont like '%tradicion%'
