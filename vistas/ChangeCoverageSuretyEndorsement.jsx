@@ -81,6 +81,7 @@
   const [buscarPoliza, setBuscarPoliza] = useState('');
   const [splits, setSplits] = useState([]);
   const [baseCessions, setBaseCessions] = useState([]);
+  const [coverageReinsuranceConfig, setCoverageReinsuranceConfig] = useState({});
   const [reinsuranceBrokers, setReinsuranceBrokers] = useState([]);
   const [reinsuranceContacts, setReinsuranceContacts] = useState([]);
   const [coinsuranceCessions, setCoinsuranceCessions] = useState([]);
@@ -119,7 +120,7 @@
   function finalCoinsuranceBase() {
     return (Array.isArray(calc && calc.finalCoverages) ? calc.finalCoverages : [])
       .reduce(function (total, coverage) {
-        total.sum += coinsuranceNumber(coverage.limit || coverage.sumInsured);
+        total.sum += reinsuranceCoverageSum(coverage.code, coinsuranceNumber(coverage.limit || coverage.sumInsured));
         total.premium += coinsuranceNumber(coverage.premium || coverage.newPremium);
         return total;
       }, { sum: 0, premium: 0 });
@@ -185,6 +186,30 @@
     return numberFrom(row, ['sumInsuredMovement', 'sumMovement', 'sumInsured', 'sa']);
   };
 
+  // Keep the same insured-sum rule as frmDistribucionReaseguro: only rows
+  // explicitly marked as "isCoverage = Si" are included in reinsurance sums.
+  function configuredCoverageCode(coverage) {
+    if (coverage && typeof coverage === 'object') {
+      const direct = coverage.coverageCode || coverage.code || coverage.coverageId;
+      const directCode = String(direct === undefined || direct === null ? '' : direct);
+      if (directCode && (coverageReinsuranceConfig[directCode]
+        || ((policy && policy.Coverages) || []).some(function (item) { return String(item.code) === directCode; }))) {
+        return directCode;
+      }
+      const coverName = up(coverage.cover || coverage.name || coverage.description);
+      const policyCoverage = ((policy && policy.Coverages) || []).find(function (item) {
+        return up(item.name || item.description || item.commercialName) === coverName;
+      });
+      return policyCoverage ? String(policyCoverage.code) : directCode;
+    }
+    return String(coverage || '');
+  }
+
+  function reinsuranceCoverageSum(coverage, amount) {
+    const config = coverageReinsuranceConfig[configuredCoverageCode(coverage)];
+    return config && config.isCoverage ? Number(amount || 0) : 0;
+  }
+
   function getBaseCoverageRows(group, row) {
     // Todas las lineas complementarias deben partir del mismo estado final de
     // la cobertura. Buscar por linea producia bases distintas entre CP y FAC.
@@ -212,7 +237,7 @@
   function finalCoverageSum(group, row) {
     const base = getBaseCoverageRows(group, row);
     const persisted = base.reduce(function (sum, cession) { return sum + numberFrom(cession, ['sumInsured']); }, 0);
-    return money(persisted || rowSumMovement(row));
+    return money(reinsuranceCoverageSum(row, persisted || rowSumMovement(row)));
   }
 
   function recalculateReinsuranceTotals(group) {
@@ -865,8 +890,13 @@
           const cfg = {};
           for (let i = 1; i < rows.length; i++) {
             if (txt(rows[i][1]) !== txt(p.productCode)) continue;
-            cfg[txt(rows[i][3])] = { principal: txt(rows[i][7]), parent: txt(rows[i][8]) };
+            cfg[txt(rows[i][3])] = {
+              principal: txt(rows[i][7]),
+              parent: txt(rows[i][8]),
+              isCoverage: up(rows[i][5]) === 'SI'
+            };
           }
+          setCoverageReinsuranceConfig(cfg);
           const list = [];
           const covs = p.Coverages || [];
           const isTechnicalCar = txt(p.lob) === '96' && up(p.productCode) === 'CAR';
@@ -2007,7 +2037,7 @@
     if (!calc) return <Empty description={t('Calcule el endoso para visualizar el coaseguro')} />;
     const finalCoverages = Array.isArray(calc.finalCoverages) ? calc.finalCoverages : [];
     const base = finalCoverages.reduce(function (total, coverage) {
-      total.sum += coinsuranceNumber(coverage.limit || coverage.sumInsured);
+      total.sum += reinsuranceCoverageSum(coverage.code, coinsuranceNumber(coverage.limit || coverage.sumInsured));
       total.premium += coinsuranceNumber(coverage.premium || coverage.newPremium);
       return total;
     }, { sum: 0, premium: 0 });
@@ -2136,9 +2166,9 @@
         row.sum += numberFrom(cession, ['sumInsured']);
         row.movement += numberFrom(cession, ['premium']);
         row.cedant += numberFrom(cession, ['premiumCedant']);
-        row.sumCedant += numberFrom(cession, ['sumInsuredCedant']);
+        row.sumCedant += reinsuranceCoverageSum(cession, numberFrom(cession, ['sumInsuredCedant']));
         row.re += numberFrom(cession, ['premiumRe']);
-        row.sumRe += numberFrom(cession, ['sumInsuredRe']);
+        row.sumRe += reinsuranceCoverageSum(cession, numberFrom(cession, ['sumInsuredRe']));
         row.commission += numberFrom(cession, ['comissionCedant', 'commission']);
         row.tax += numberFrom(cession, ['tax']);
       });
@@ -2149,7 +2179,7 @@
         return sum + numberFrom(cession, ['premium']);
       }, 0);
       const baseSum = currentRows.reduce(function (sum, cession) {
-        return sum + numberFrom(cession, ['sumInsured']);
+        return sum + reinsuranceCoverageSum(cession, numberFrom(cession, ['sumInsured']));
       }, 0);
       const endorsementMovement = numberFrom(calc && calc.billing && calc.billing.movement, ['premium']);
       const endorsementSumMovement = numberFrom(calc && calc.billing && calc.billing.movement, ['sum']);

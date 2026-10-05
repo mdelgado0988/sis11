@@ -7,11 +7,16 @@
   *@Autor: Michael Delgado
   *@Email: michael.delgado@axxis-systems.com
   *@Created: 18/04/2026
-  *@Input: {poliza:_pol,action:_action,extra:_pol.jChangeDto}
+  *@Input: {poliza:_pol,action:_action,extra:_pol.jChangeDto,coverageSumOverrides?}
   *@Output: [{ code, limit, premium, dedutible, description }]
 */
 
-const { poliza, action, extra } = context;
+// The quote chain provides the policy as `pol`, while direct callers use
+// `poliza`. Support both contracts and derive sum changes from Change.jChangeDto.
+const poliza = context.poliza || context.pol || {};
+const action = context.action || poliza.action;
+const extra = context.extra || poliza.jChangeDto;
+const coverageSumOverrides = context.coverageSumOverrides;
 const objectDefinitionCode = "OBJFIANZA";
 let tarifas;
 let oaUserData;
@@ -19,12 +24,25 @@ let resultCoverages = [];
 
 try {
 
-  const endorsementType = getEndorsementType();
-  const endorsementAction = String(action || poliza.action || "").toLowerCase();
-  const isProceedOrder = (endorsementAction === "changeterm" || endorsementAction === "changecoverage")
-    && endorsementType === "PROCEEDORDER";
   const changeData = getChangeData();
   const additionalData = parseChangeObject(changeData.jAdditional || poliza.jAdditional);
+  const endorsementType = getEndorsementType();
+  const endorsementAction = String(action || poliza.action || "").toLowerCase();
+  const changeCoverageSumOverrides = getChangedCoverageSums();
+  const additionalCoverageSumOverrides = getAdditionalCoverageSumOverrides(additionalData);
+  const resolvedCoverageSumOverrides = Object.assign(
+    {},
+    changeCoverageSumOverrides,
+    additionalCoverageSumOverrides,
+    coverageSumOverrides && typeof coverageSumOverrides === "object" ? coverageSumOverrides : {}
+  );
+  const isProceedOrder = (endorsementAction === "changeterm" || endorsementAction === "changecoverage")
+    && endorsementType === "PROCEEDORDER";
+  // A ChangeCoverage with a different limit for an existing coverage is the
+  // sum-change endorsement. Date-only changes retain the legacy shortcut.
+  const isInsuredSumSurety = endorsementType === "CHANGE_INSURED_SUM_SURETY"
+    || Object.keys(changeCoverageSumOverrides).length > 0
+    || Object.keys(additionalCoverageSumOverrides).length > 0;
   const newCapital = n(changeData.newCapital);
   const oldCapital = n(changeData.oldCapital !== undefined ? changeData.oldCapital : poliza.insuredSum);
   const capitalAdjustment = n(changeData.surcharge !== undefined ? changeData.surcharge : additionalData.surcharge)
@@ -42,9 +60,10 @@ try {
     return resultCoverages;
   }
 
-  // ChangeCoverage must use the premium originally issued, not a new tariff.
-  // The endorsement variation is prorated only by calendar dates.
-  if (endorsementAction === "changecoverage") {
+  // Ordinary ChangeCoverage endorsements use the originally issued premium.
+  // CHANGE_INSURED_SUM_SURETY is the exception: it must resolve tariff sums,
+  // while its caller still prorates premiums from the issued values.
+  if (endorsementAction === "changecoverage" && !isInsuredSumSurety) {
     setChangeCoveragePremiums();
     return resultCoverages;
   }
@@ -54,6 +73,15 @@ try {
 
   log("Calculando objeto asegurado");
   setInsuredObject();
+
+  if (isInsuredSumSurety) {
+    applyCoverageSumOverrides(resolvedCoverageSumOverrides);
+  }
+
+  // Make every configured coverage sum available to tariff formulas. Covers
+  // that are optional in the policy start at zero and overwrite this value
+  // only when they are actually quoted below.
+  setCoverageFormulaDefaults();
 
   if (isCapitalChange) {
     if (newCapital <= 0) {
@@ -71,12 +99,24 @@ try {
 
   log("Iterando coberturas para cálculos");
   
-  for (let cov of poliza.Coverages) {
+  // 312 and 314 can depend on values calculated by the other surety
+  // coverages. Quote them last without changing the policy/output order.
+  const coveragesForQuotation = (poliza.Coverages || []).slice().sort((left, right) => {
+    const priority = { "312": 1, "314": 2 };
+    return (priority[String(left.code)] || 0) - (priority[String(right.code)] || 0);
+  });
+
+  for (let cov of coveragesForQuotation) {
 
     const resultCoverage = resultCoverages.find(x => x.code == cov.code);
+    const overrideKey = Object.keys(resolvedCoverageSumOverrides)
+      .find(code => String(code) === String(cov.code));
+    const insuredSumOverride = overrideKey === undefined
+      ? (isCapitalChange ? newCapital : null)
+      : resolvedCoverageSumOverrides[overrideKey];
     const obj = getQuotationObject(
       cov.code,
-      isCapitalChange ? newCapital : null
+      insuredSumOverride
     );
 
     //log(`obj: $${JSON.stringify(obj)}`);
@@ -98,6 +138,7 @@ try {
         log(`Evaluando suma: ${tarifa.sumaasegurada}`);
         resultCoverage.limit = evalConfig(obj, tarifa.sumaasegurada);    
         resultCoverage.limit = n(resultCoverage.limit);   // a dos decimales
+        resultCoverage.tariffApplied = true;
         oaUserData[`SUMA${cov.code}`] = resultCoverage.limit;
 
         log(`Evaluando prima: ${tarifa.prima}`);
@@ -122,8 +163,9 @@ try {
 
         //Calculamos la fecha inicial
         const cobtar = oaUserData.cobtar.find(x => x.COVERAGECODE == tarifa.ccobertura);
-        resultCoverage.fini = parseFechaUTCMedioDia(cobtar?.["FINICIAL"]);
-        resultCoverage.ffin = parseFechaUTCMedioDia(cobtar?.["FFINAL"]);
+        const tariffDates = getTariffCoverageDates(cobtar);
+        resultCoverage.fini = tariffDates.start;
+        resultCoverage.ffin = tariffDates.end;
         
         break;
       }
@@ -217,6 +259,38 @@ function setTarifas() {
   tarifas = mapearTablaConfig(GetFullTable.outData ?? []);
   tarifas = tarifas.filter(x => x.cramo == poliza.lob && x.codigoplan == poliza.productCode);
   
+}
+
+function setCoverageFormulaDefaults() {
+  const coverageCodes = [...new Set((tarifas || []).map(item => String(item.ccobertura ?? '').trim()))]
+    .filter(code => /^[A-Za-z_][A-Za-z0-9_]*$/.test(`SUMA${code}`));
+
+  coverageCodes.forEach(code => {
+    oaUserData[`SUMA${code}`] = 0;
+  });
+}
+
+function applyCoverageSumOverrides(overrides) {
+  if (!overrides || typeof overrides !== "object") return;
+
+  const normalize = value => String(value ?? "").trim().toUpperCase().replace(/[.\s_]/g, "");
+  const isSumField = key => ["SA", "SUMA", "SUMAASEGURADA"].includes(normalize(key));
+
+  Object.keys(overrides).forEach(code => {
+    const amount = n(overrides[code]);
+    const item = (oaUserData.cobtar || []).find(row => String(row.COVERAGECODE ?? "") === String(code));
+    if (!item) return;
+
+    const sumFields = Object.keys(item).filter(isSumField);
+    if (sumFields.length) {
+      sumFields.forEach(field => { item[field] = amount; });
+    } else {
+      // SA is the conventional tariff field when the row has no explicit sum column.
+      item.SA = amount;
+    }
+  });
+
+  oaUserData.hiddenCobtar = JSON.stringify(oaUserData.cobtar || []);
 }
 
 function setInsuredObject() {
@@ -441,6 +515,71 @@ function getOldCoverageRows() {
   }
 
   return [];
+}
+
+function getChangedCoverageSums() {
+  const oldRows = getOldCoverageRows();
+  const newRows = getChangeCoverageRows();
+  const oldRowsByCode = {};
+  const changes = {};
+
+  oldRows.forEach(row => {
+    const code = String(row?.code ?? row?.coverageCode ?? "").trim();
+    if (code) oldRowsByCode[code] = row;
+  });
+
+  newRows.forEach(row => {
+    const code = String(row?.code ?? row?.coverageCode ?? "").trim();
+    const oldRow = oldRowsByCode[code];
+    // Only existing coverage rows identify a change of insured sum. This
+    // avoids treating inclusion/exclusion endorsements as sum changes.
+    if (!code || !oldRow) return;
+
+    const oldLimit = n(oldRow.limit ?? oldRow.startLimit);
+    const newLimit = n(row?.limit ?? row?.startLimit);
+    if (Math.abs(newLimit - oldLimit) > 0.009) {
+      changes[code] = newLimit;
+    }
+  });
+
+  return changes;
+}
+
+function getAdditionalCoverageSumOverrides(additional) {
+  const overrides = {};
+  if (!additional || typeof additional !== "object") return overrides;
+
+  const assign = function (code, value) {
+    const normalizedCode = String(code ?? "").trim();
+    if (!normalizedCode || value === undefined || value === null || value === "") return;
+    overrides[normalizedCode] = n(value);
+  };
+  const readMap = function (value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    Object.keys(value).forEach(function (code) {
+      const row = value[code];
+      assign(code, row && typeof row === "object"
+        ? (row.newSum ?? row.limit ?? row.startLimit ?? row.sumInsured)
+        : row);
+    });
+  };
+  const readRows = function (rows) {
+    if (!Array.isArray(rows)) return;
+    rows.forEach(function (row) {
+      if (!row || typeof row !== "object") return;
+      assign(row.code ?? row.coverageCode, row.newSum ?? row.limit ?? row.startLimit ?? row.sumInsured);
+    });
+  };
+
+  // `coverageSumOverrides` is the canonical payload. The alternatives keep
+  // compatibility with existing endorsement configurations.
+  readMap(additional.coverageSumOverrides);
+  readMap(additional.coverageSums);
+  readMap(additional.changedCoverageSums);
+  readRows(additional.coverages);
+  assign(additional.coverageCode, additional.newSum);
+
+  return overrides;
 }
 
 function getChangeCoverageNewEnd(changeRows) {
@@ -681,6 +820,25 @@ function getCoverageDuration(item) {
 
   const value = Number(String(item[key]).replace(",", "."));
   return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function getTariffCoverageDates(item) {
+  const start = parseFechaUTCMedioDia(item?.["FINICIAL"]);
+  const configuredEnd = parseFechaUTCMedioDia(item?.["FFINAL"]);
+  const duration = getCoverageDuration(item);
+
+  // Duracion Dias is the tariff source of truth. Old policies can contain an
+  // obsolete final date in hiddenCobtar, which otherwise shortens proration.
+  if (start && duration > 0) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(start);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      date.setDate(date.getDate() + duration);
+      return { start: start, end: formatDateAtNoon(date) };
+    }
+  }
+
+  return { start: start, end: configuredEnd };
 }
 
 //////////////////////////////////////////////////////////////////////

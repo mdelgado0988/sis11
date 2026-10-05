@@ -904,11 +904,18 @@
           let rows = (tr && tr.outData) || [];
           if (typeof rows === 'string') rows = JSON.parse(rows);
           const cfg = {};
+          const headers = Array.isArray(rows[0]) ? rows[0] : [];
+          const changeableIndex = headers.findIndex(function (header) {
+            return txt(header).toLowerCase() === 'changeable';
+          });
           for (let i = 1; i < rows.length; i++) {
             if (txt(rows[i][1]) !== txt(p.productCode)) continue;
+            const changeableValue = changeableIndex >= 0 ? rows[i][changeableIndex] : true;
             cfg[txt(rows[i][3])] = {
               principal: txt(rows[i][7]), parent: txt(rows[i][8]),
-              sums: txt(rows[i][5]).toUpperCase() === 'SI'
+              sums: txt(rows[i][5]).toUpperCase() === 'SI',
+              // Legacy tables without the column remain editable by default.
+              changeable: String(changeableValue).trim().toLowerCase() !== 'false'
             };
           }
           // Todas las coberturas de la poliza son endosables; la principal se propone primero.
@@ -921,12 +928,13 @@
               code: c, name: covs[i].name, end: covs[i].end, start: covs[i].start,
               premium: covs[i].premium, limit: covs[i].limit,
               principal: !!(row && row.principal === '-1'),
-              sums: !!(row && row.sums)
+              sums: !!(row && row.sums),
+              changeable: !row || row.changeable !== false
             });
           }
           list.sort(function (a, b) { return (b.principal ? 1 : 0) - (a.principal ? 1 : 0); });
           setEligible(list);
-          const sumEligible = list.filter(function (item) { return money(item.limit) > 0; });
+          const sumEligible = list.filter(function (item) { return money(item.limit) > 0 && item.changeable !== false; });
           setCovCode(sumEligible.length ? sumEligible[0].code : null);
           setCoverageInputs({});
           setEffectiveDate(moment());
@@ -1072,7 +1080,7 @@
   });
 
   const sumEditableRows = (eligible || []).filter(function (item) {
-    return money(item.limit) > 0;
+    return money(item.limit) > 0 && item.changeable !== false;
   });
 
   function updateCoverageInput(code, field, value, currentSum) {
@@ -1727,7 +1735,7 @@
     setError(null); setResult(null);
     setReinsuranceConfirmed(false);
     const oldCoverages = Array.isArray(policy && policy.Coverages) ? policy.Coverages : [];
-    const changes = [];
+    let changes = [];
     for (let i = 0; i < sumEditableRows.length; i++) {
       const item = sumEditableRows[i];
       const input = coverageInputs[txt(item.code)] || {};
@@ -1779,6 +1787,67 @@
       await limpiarResiduoCotizacion();
       const newCoverages = JSON.parse(JSON.stringify(oldCoverages));
       const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
+
+      // This endorsement uses surety tariffs only to resolve the final insured
+      // sums. Premiums remain calculated below from the issued premium and
+      // each coverage's own proration.
+      const directChangesByCode = {};
+      const coverageSumOverrides = {};
+      changes.forEach(function (change) {
+        directChangesByCode[change.code] = change;
+        coverageSumOverrides[change.code] = change.newSum;
+      });
+      const tariffPolicy = JSON.parse(JSON.stringify(policy));
+      tariffPolicy.action = 'ChangeCoverage';
+      (tariffPolicy.Coverages || []).forEach(function (coverage) {
+        const direct = directChangesByCode[txt(coverage.code)];
+        if (direct) {
+          coverage.limit = direct.newSum;
+          coverage.startLimit = direct.newSum;
+        }
+      });
+      const tariffResponse = await exe('ExeChain', {
+        chain: 'cmdCalculatePremiumSuretyBond',
+        context: JSON.stringify({
+          poliza: tariffPolicy,
+          action: 'ChangeCoverage',
+          extra: { jAdditional: JSON.stringify({ endorsementType: 'CHANGE_INSURED_SUM_SURETY' }) },
+          coverageSumOverrides: coverageSumOverrides
+        })
+      });
+      if (!tariffResponse || tariffResponse.ok === false) {
+        throw new Error(t('No se pudo cotizar las sumas de las coberturas de fianza') + ': ' + cleanMessage(tariffResponse));
+      }
+      let tariffRows = tariffResponse.outData;
+      if (typeof tariffRows === 'string') {
+        try { tariffRows = JSON.parse(tariffRows); } catch (e) { tariffRows = []; }
+      }
+      if (!Array.isArray(tariffRows) && tariffRows && Array.isArray(tariffRows.data)) tariffRows = tariffRows.data;
+      if (Array.isArray(tariffRows) && tariffRows.length === 1 && Array.isArray(tariffRows[0])) tariffRows = tariffRows[0];
+      if (!Array.isArray(tariffRows)) {
+        throw new Error(t('La cotización de fianza no devolvió las coberturas calculadas'));
+      }
+      tariffRows.forEach(function (tariffRow) {
+        if (!tariffRow || tariffRow.tariffApplied !== true) return;
+        const code = txt(tariffRow.code);
+        const coverage = oldCoverages.find(function (item) { return txt(item.code) === code; });
+        const newSum = money(tariffRow.limit);
+        if (!coverage || !(newSum > 0)) return;
+        const oldSum = money(coverage.limit === undefined ? coverage.sumInsured : coverage.limit);
+        if (!(oldSum > 0)) return;
+        const tariffStart = day10(tariffRow.fini);
+        const tariffEnd = day10(tariffRow.ffin);
+        const coverageDates = tariffStart && tariffEnd && utc(tariffEnd) > utc(tariffStart)
+          ? Object.assign({}, coverage, { start: tariffRow.fini, end: tariffRow.ffin })
+          : coverage;
+        if (directChangesByCode[code]) {
+          directChangesByCode[code].newSum = newSum;
+          directChangesByCode[code].coverage = coverageDates;
+        } else if (newSum !== oldSum) {
+          changes.push({ code: code, item: coverage, coverage: coverageDates, oldSum: oldSum, newSum: newSum, derivedByTariff: true });
+        }
+      });
+
       const provisionalRows = [];
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
@@ -1802,6 +1871,8 @@
         if (newPremium < 0) throw new Error(t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + change.code + ')');
         target.limit = change.newSum;
         target.startLimit = change.newSum;
+        target.start = change.coverage.start;
+        target.end = change.coverage.end;
         target.premium = newPremium;
         target.basePremium = money(Number(target.basePremium === null || target.basePremium === undefined ? oldPremium : target.basePremium) + rawDelta + share);
         provisionalRows.push({
@@ -1819,7 +1890,13 @@
         policyId: policyId,
         jOldCoverages: JSON.stringify(oldCoverages),
         jNewCoverages: JSON.stringify(newCoverages),
-        effectiveDate: effective + 'T12:00:00'
+        effectiveDate: effective + 'T12:00:00',
+        // The policy calculation chain receives this through pol.jChangeDto.
+        // It needs the edited sums to evaluate dependent surety tariffs.
+        jAdditional: JSON.stringify({
+          endorsementType: 'CHANGE_INSURED_SUM_SURETY',
+          coverageSumOverrides: coverageSumOverrides
+        })
       };
       const response = await exe('ChangeCoverage', quoteInput);
       if (calculationVersion !== requestVersion.calculation) return;
@@ -1844,6 +1921,8 @@
         if (changed) {
           quotedCovs[i].limit = changed.newSum;
           quotedCovs[i].startLimit = changed.newSum;
+          quotedCovs[i].start = changed.coverage.start;
+          quotedCovs[i].end = changed.coverage.end;
         }
       }
       quoted.jNewCoverages = JSON.stringify(quotedCovs);
@@ -3354,11 +3433,18 @@
           <div>
             {calc ? (
               <div style={{ marginBottom: 8 }}>
-                {t('Coberturas')}: <b>{calc.coverageCode}</b><br />
-                {(calc.rows || []).map(function (row) {
-                  return <span key={row.code}>{row.code}: {t('suma')} {fmt(row.oldSum)} → <b>{fmt(row.newSum)}</b>, {t('prima')} {fmt(row.oldPremium)} → <b>{fmt(row.adjustedPremium)}</b> ({conSigno(row.variation)})<br /></span>;
+                {t('Coberturas modificadas')}: <b>{calc.coverageCode}</b><br />
+                {(calc.changedRows || []).map(function (row) {
+                  const sumMovement = row.sumInsuredMovement === undefined
+                    ? money(Number(row.newSum || 0) - Number(row.oldSum || 0))
+                    : money(row.sumInsuredMovement);
+                  const premiumMovement = row.variation === undefined
+                    ? money(Number(row.adjustedPremium || 0) - Number(row.oldPremium || 0))
+                    : money(row.variation);
+                  return <span key={row.code}>{row.code}: {t('suma')} <b>{conSigno(sumMovement)}</b>, {t('prima')} <b>{conSigno(premiumMovement)}</b><br /></span>;
                 })}
-                {t('Total de la poliza')} {fmt(calc.billing.total.before)} → <b>{fmt(calc.billing.total.after)}</b>
+                {t('Prima del endoso')}: <b>{conSigno(calc.billing.movement && calc.billing.movement.premium)}</b><br />
+                {t('Total del endoso')}: <b>{conSigno(calc.billing.movement && calc.billing.movement.total)}</b>
               </div>
             ) : null}
             <label>{t('Observacion')} *</label>

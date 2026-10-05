@@ -746,26 +746,12 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
             columnas.forEach(col => {
             const campo = g.mapa[col];
             const $td = $("<td>");
-            const esColumnaSuma = esColumnaSumaAseguradaFianza(col);
             const tieneConfiguracionValida = campo
                 && String(campo.type || '').toLowerCase() !== 'none'
                 && String(campo.description || '').toLowerCase() !== 'none'
                 && String(campo.description || '').trim() !== '';
 
-            if (esColumnaSuma && !tieneConfiguracionValida) {
-                const $input = $('<input>', {
-                    type: 'text',
-                    value: formatMoneyFianza(policy?.insuredSum)
-                })
-                    .addClass('ant-input-custom')
-                    .attr({
-                        'data-coverage': g.coverageCode,
-                        'data-field': col,
-                        'data-policy-default-sum': 'true'
-                    })
-                    .prop('disabled', true);
-                $td.append($input);
-            } else if (campo) {
+            if (campo && tieneConfiguracionValida) {
                 const type = (campo.type || "").toLowerCase();
                 const name = campo.name || "";
                 const desc = campo.description && campo.description !== "none"
@@ -865,6 +851,13 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
                 // ===== readonly =====
                 if (isReadOnly) {
                     $input.prop("readonly", true);
+                }
+
+                // A read-only tariff sum mirrors the editable bond amount.
+                // Mark it so hiddenCobtar does not restore an obsolete value.
+                if (esColumnaSumaAseguradaFianza(name) && isReadOnly) {
+                    $input.val(formatMoneyFianza(valorSumaAfianzadaActual()))
+                        .attr('data-policy-default-sum', 'true');
                 }
 
                 // ===== required =====
@@ -1038,6 +1031,11 @@ function cargarCobtarDesdeHidden(
       $input.trigger("change");
     });
   });
+
+  // Some old records have a duration that does not match F. Final. Rebuild
+  // the dates from the configured duration and keep hiddenCobtar synchronized.
+  recalcularVigenciasFianza($(containerSelector));
+  $(hiddenSelector).val(JSON.stringify(construirCobtar(containerSelector)));
 }
 
 function construirCobtar(containerSelector = "#tab2") {
@@ -1161,14 +1159,6 @@ function formatMoneyFianza(value) {
     });
 }
 
-function primaNetaCoberturaFianza(cobertura) {
-    if (!cobertura) return 0;
-    if (cobertura.premium !== undefined && cobertura.premium !== null) {
-        return Number(cobertura.premium) || 0;
-    }
-    return (Number(cobertura.basePremium) || 0) + (Number(cobertura.extraPremium) || 0);
-}
-
 function esColumnaSumaAseguradaFianza(nombre) {
     const normalizado = String(nombre || '')
         .trim()
@@ -1176,6 +1166,36 @@ function esColumnaSumaAseguradaFianza(nombre) {
         .replace(/[.]/g, '')
         .replace(/\s+/g, ' ');
     return ['sa', 'suma', 'suma asegurada'].includes(normalizado);
+}
+
+function valorSumaAfianzadaActual() {
+    const raw = String($('#suma_afianzada').val() ?? '').trim().replace(/,/g, '');
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : 0;
+}
+
+function refrescarSumasTarifaSoloLectura() {
+    const $tariffSums = $('#tab2 [data-policy-default-sum="true"]');
+    if (!$tariffSums.length) return;
+
+    $tariffSums.val(formatMoneyFianza(valorSumaAfianzadaActual()));
+    // Keep the hidden tariff data aligned with the displayed automatic values.
+    $('#hiddenCobtar').val(JSON.stringify(construirCobtar('#tab2')));
+}
+
+function bindSumaAfianzadaTarifas() {
+    $('#suma_afianzada')
+        .off('input.tarifasSuma change.tarifasSuma blur.tarifasSuma')
+        .on('input.tarifasSuma change.tarifasSuma blur.tarifasSuma', refrescarSumasTarifaSoloLectura);
+    refrescarSumasTarifaSoloLectura();
+}
+
+function primaNetaCoberturaFianza(cobertura) {
+    if (!cobertura) return 0;
+    if (cobertura.premium !== undefined && cobertura.premium !== null) {
+        return Number(cobertura.premium) || 0;
+    }
+    return (Number(cobertura.basePremium) || 0) + (Number(cobertura.extraPremium) || 0);
 }
 
 async function setProductCoveragesFianza() {
@@ -1449,6 +1469,7 @@ async function guardarCoberturasFianza() {
         cargarCobtarDesdeHidden('#hiddenCobtar', '#tab2');
         bindEventosCobtar();
         setDefaultCobtar();
+        bindSumaAfianzadaTarifas();
         renderToolbarCoberturasFianza();
         renderFooterCoberturasFianza();
         actualizarResumenCoberturasFianza();
@@ -2079,8 +2100,13 @@ const onDocumentReady = async () => {
     
     $('#policyStart').val(policy.Start);
     $('#policyEnd').val(policy.End);
-    $('#suma_afianzada').prop("readOnly", true);
-    $('#suma_afianzada').val(formatear(policy.insuredSum));
+    const $sumaAfianzada = $('#suma_afianzada');
+    $sumaAfianzada.prop("readOnly", false);
+    // Preserve the amount already captured in the insured object. A new form
+    // starts with the policy amount only when the field has no saved value.
+    if (!String($sumaAfianzada.val() ?? '').trim()) {
+        $sumaAfianzada.val(formatear(policy.insuredSum));
+    }
     await setProductCoveragesFianza();
     await listarCobtar();
     renderTablaAgrupada(configCobtar);
@@ -2090,6 +2116,7 @@ const onDocumentReady = async () => {
 
     //Voy a validar si no hay nada en el hidden de cobtar lo voy a cargar con los datos por default
     setDefaultCobtar();    
+    bindSumaAfianzadaTarifas();
 
     renderToolbarCoberturasFianza();
     renderFooterCoberturasFianza();

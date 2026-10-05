@@ -588,16 +588,16 @@
       return { error: t('The main coverage has no usable start/end dates.') };
     }
 
-    // AXX-1978: a coverage lasts exactly the days registered in the tariff tab
-    // (inclusive count: end = start + days - 1). Without a registered value the
-    // current calendar span of the coverage is kept.
+    // AXX-1978: tariff duration means complete noon-to-noon periods:
+    // end = start + days. Without a registered value the current calendar
+    // span of the coverage is kept.
     const configuredDaysOf = (code) => {
       const item = tariffDays[txt(code)];
       return item && item.days ? item.days : null;
     };
     const endFromDays = (start, days, fallbackOffset) => {
       if (!start) return null;
-      if (days) return addDays(start, days - 1);
+      if (days) return addDays(start, days);
       return fallbackOffset == null ? null : addDays(start, fallbackOffset);
     };
     const mainTariff = hasRelationship ? tariffDays[mainCode] : null;
