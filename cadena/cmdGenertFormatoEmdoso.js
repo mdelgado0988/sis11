@@ -901,11 +901,23 @@ function getEndorsmentTitle(discriminator) {
   return map[discriminator] || discriminator;
 }
 
+function getEndorsementTitleForChange(change) {
+  const additional = safeJson(change && change.jAdditional, {}) || {};
+  const endorsementType = String(additional.endorsementType || '').trim().toUpperCase();
+  const titlesByType = {
+    CHANGE_COVERAGE_SURETY: 'Cambio de Vigencia de Cobertura',
+    CHANGE_INSURED_SUM_SURETY: 'Cambio de Suma de Cobertura',
+    PROCEEDORDER: 'Orden de proceder'
+  };
+
+  return titlesByType[endorsementType] || getEndorsmentTitle(change && change.Discriminator);
+}
+
 function generateDocWithCustom({ row, policy, change, billDiff }) {
   const arrayResult = [{ outdata: row }];
 
   const custom = buildCustomForTemplate({ row, policy, change, arrayResult, billDiff });
-  custom.TituloEndosoCan = getEndorsmentTitle(change.Discriminator);
+  custom.TituloEndosoCan = getEndorsementTitleForChange(change);
   custom.TituloEndosoCanEfectiva= '';
   custom.TituloCanceFecha= '';
   
@@ -931,7 +943,7 @@ function generateDocWithCustom({ row, policy, change, billDiff }) {
       ? 'Endoso de Beneficiarios'
       : 'Endoso de ' + custom.TituloEndosoCan;
     return generateEndorsementDocument(templateName, documentData, policy.id, documentTitle,
-      isBeneficiaryTemplate ? 'Documento de Endoso de Beneficiarios' : 'Documento de Endoso');
+      isBeneficiaryTemplate ? 'Documento de Endoso de Beneficiarios' : 'Documento de ' + custom.TituloEndosoCan);
   });
 
   return messages.filter(Boolean).join(' | ') || 'OK';

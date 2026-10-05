@@ -943,8 +943,45 @@
     const rows = Array.isArray(oldPayPlan)
       ? oldPayPlan.map(function (item) { return Object.assign({}, item); })
       : [];
-    const amount = money(difference);
-    if (Math.abs(amount) < 0.01) return rows;
+    let remainingCents = Math.round(money(difference) * 100);
+    if (!remainingCents) return rows;
+
+    // Reparte el movimiento entre las cuotas que aún tienen saldo sin pagar.
+    // Ninguna cuota puede quedar por debajo de lo que ya fue pagado.
+    let candidates = rows.map(function (row, index) {
+      const amount = Math.round(Number(row.minimum !== undefined ? row.minimum : row.expected || 0) * 100);
+      const paid = Math.round(Number(row.payed !== undefined ? row.payed : row.paid || 0) * 100);
+      return { row: row, index: index, amount: amount, paid: paid, weight: Math.max(amount, 1) };
+    }).filter(function (item) {
+      return !item.row.cancellationDate && item.amount > item.paid;
+    });
+
+    while (candidates.length && remainingCents) {
+      const initialRemaining = remainingCents;
+      const totalWeight = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
+      let applied = 0;
+      const nextCandidates = [];
+
+      candidates.forEach(function (item, index) {
+        const portion = index === candidates.length - 1
+          ? initialRemaining - applied
+          : Math.round(initialRemaining * item.weight / totalWeight);
+        const nextAmount = item.amount + portion;
+        const limitedAmount = initialRemaining < 0 ? Math.max(item.paid, nextAmount) : nextAmount;
+        const actualPortion = limitedAmount - item.amount;
+        item.amount = limitedAmount;
+        item.row.minimum = money(limitedAmount / 100);
+        item.row.expected = money(limitedAmount / 100);
+        applied += actualPortion;
+        if (initialRemaining >= 0 || item.amount > item.paid) nextCandidates.push(item);
+      });
+
+      remainingCents -= applied;
+      if (!applied) break;
+      candidates = nextCandidates;
+    }
+
+    if (!remainingCents) return rows;
 
     const last = rows[rows.length - 1] || {};
     const lastNumber = rows.reduce(function (max, item) {
@@ -958,8 +995,8 @@
       id: 0,
       lifePolicyId: Number(lifePolicyId),
       concept: 'Prima',
-      expected: amount,
-      minimum: amount,
+      expected: money(remainingCents / 100),
+      minimum: money(remainingCents / 100),
       payed: 0,
       payedDate: null,
       transferId: null,
@@ -1810,6 +1847,74 @@
       }
       reinsuranceExecuted = true;
 
+      // ExeChangeCoverage con exeNow no sincroniza las cuotas. Actualizamos
+      // las cuotas distribuidas y solo creamos una cuota de ajuste si queda
+      // un remanente que no se puede distribuir.
+      try {
+        const plannedRows = JSON.parse(payload.jNewPayPlan || '[]');
+        const oldRowsById = {};
+        oldPayPlan.forEach(function (item) { oldRowsById[String(item.id)] = item; });
+        for (let i = 0; i < plannedRows.length; i++) {
+          const planned = plannedRows[i];
+          const current = oldRowsById[String(planned && planned.id)];
+          if (!current || !Number(current.id) || current.cancellationDate) continue;
+          const before = money(current.minimum !== undefined ? current.minimum : current.expected);
+          const after = money(planned.minimum !== undefined ? planned.minimum : planned.expected);
+          const paid = money(current.payed !== undefined ? current.payed : current.paid);
+          if (after < paid) {
+            throw new Error(t('La distribución intentó reducir una cuota por debajo de lo ya pagado'));
+          }
+          if (before === after) continue;
+          const update = await exe('SetField', {
+            entity: 'PayPlan',
+            entityId: Number(current.id),
+            fieldValue: 'expected=' + after.toFixed(2) + ',minimum=' + after.toFixed(2),
+            raw: true
+          });
+          if (!update || !update.ok) {
+            throw new Error((update && update.msg) || t('No se pudo actualizar una cuota distribuida'));
+          }
+        }
+
+        const endorsementInstallments = plannedRows.filter(function (item) {
+          return !Number(item && item.id || 0);
+        }).map(function (item) {
+          const installmentAmount = money(item.minimum !== undefined ? item.minimum : item.expected);
+          const movementTax = calc && calc.billing && calc.billing.tax
+            ? money(calc.billing.tax.after - calc.billing.tax.before) : 0;
+          const detailTax = Math.abs(movementTax) <= Math.abs(installmentAmount) ? movementTax : 0;
+          const detailConcept = 'Detalle de cuota #' + (item.numberInYear || '');
+          return Object.assign({}, item, { changeId: changeId, PayPlanDetail: [
+            { amount: money(installmentAmount - detailTax), concept: detailConcept, detail: 'Prima Cobertura', order: 1, paid: 0 },
+            { amount: detailTax, concept: detailConcept, detail: 'Impuesto de Seguros', order: 2, paid: 0 }
+          ] });
+        });
+        if (endorsementInstallments.length) {
+          const payPlanResponse = await exe('MakePayPlan', {
+            policyId: policyId,
+            Change: {
+              id: changeId,
+              lifePolicyId: policyId,
+              effectiveDate: payload.effectiveDate,
+              jNewPayPlan: JSON.stringify(endorsementInstallments)
+            },
+            policy: {
+              id: policyId,
+              payerId: policy.payerId,
+              holderId: policy.holderId,
+              contractYear: policy.contractYear,
+              currency: policy.currency
+            }
+          });
+          if (!payPlanResponse || !payPlanResponse.ok) {
+            failures.push(t('cuota del endoso') + ': ' + cleanMessage(payPlanResponse));
+          }
+        }
+      } catch (payPlanError) {
+        failures.push(t('cuota del endoso') + ': '
+          + String(payPlanError && payPlanError.message ? payPlanError.message : payPlanError));
+      }
+
       // El flujo anterior fijaba las vigencias en un segundo paso despues del
       // ADD. Repetimos ese paso explicitamente para la cobertura seleccionada
       // y sus dependientes antes de sincronizar la poliza.
@@ -1903,6 +2008,23 @@
         }
       } catch (validityError) {
         failures.push(t('actualización de vigencia y duración') + ': ' + String(validityError && validityError.message ? validityError.message : validityError));
+      }
+
+      // Mantiene la grilla de tarifas del objeto asegurado alineada con las
+      // vigencias finales que este endoso dejó en cada cobertura.
+      try {
+        const synced = await exe('ExeChain', {
+          chain: 'cmdUpdateInsuredObjectData',
+          context: JSON.stringify({ policyId: policyId, jNewCoverages: newCoverages, syncDays: true })
+        });
+        const syncData = synced && synced.outData;
+        if (!synced || !synced.ok || !syncData || syncData.ok === false) {
+          failures.push(t('sincronización del objeto asegurado') + ': '
+            + String((syncData && syncData.msg) || (synced && synced.msg) || ''));
+        }
+      } catch (syncError) {
+        failures.push(t('sincronización del objeto asegurado') + ': '
+          + String(syncError && syncError.message ? syncError.message : syncError));
       }
 
       try {
@@ -2778,10 +2900,10 @@
           <div>
             {calc ? (
               <div style={{ marginBottom: 8 }}>
-                {t('Cobertura')} <b>{calc.rows[0].code}</b>: {day10(calc.rows[0].oldEnd)} → <b>{day10(calc.rows[0].newEnd)}</b><br />
-                {t('Prima')} {fmt(calc.rows[0].oldPremium)} → <b>{fmt(calc.rows[0].adjustedPremium)}</b> {calc.billing.currency}
-                {' '}({conSigno(calc.rows[0].variation)})<br />
-                {t('Total de la poliza')} {fmt(calc.billing.total.before)} → <b>{fmt(calc.billing.total.after)}</b>
+                {t('Cobertura modificada')}: <b>{calc.rows[0].code}</b><br />
+                {t('Cambio de vigencia')}: <b>{conSigno(moment(calc.rows[0].newEnd).startOf('day').diff(moment(calc.rows[0].oldEnd).startOf('day'), 'days'))} {t('dias')}</b><br />
+                {t('Prima del endoso')}: <b>{conSigno(calc.billing.movement && calc.billing.movement.premium)}</b> {calc.billing.currency}<br />
+                {t('Total del endoso')}: <b>{conSigno(calc.billing.movement && calc.billing.movement.total)}</b> {calc.billing.currency}
               </div>
             ) : null}
             <label>{t('Observacion')} *</label>

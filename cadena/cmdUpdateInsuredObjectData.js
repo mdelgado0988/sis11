@@ -7,7 +7,9 @@
  *          and DT_RAMO_TECNICO for technical lines, field hiddenCobtar) with the
  *          coverage dates actually applied to the policy.
  *          AXX-214 / GLOB-1221, ProceedOrderEndorsement v1.0 section 3.3.
- * @Input  { policyId, syncDays? }  syncDays (AXX-2420): tambien actualiza 'Duración Días' (inclusive) si la columna existe.
+ * @Input  { policyId, syncDays?, syncSums? }  syncDays actualiza 'Duración Días' con la
+ *         diferencia entre las fechas de inicio y fin, y
+ *         syncSums actualiza la suma afianzada y las sumas existentes en hiddenCobtar para Fianzas.
  * @Output { ok, msg, outData: { insuredObjectId, updated, rows } }
  *
  * Reads the dates from the POLICY (post-execution truth), not from the caller, so the grid
@@ -21,6 +23,7 @@ const keyStart = 'F. Inicial';
 const keyEnd = 'F. Final';
 const keyDays = 'Duración Días';
 const syncDays = !!(context && context.syncDays);
+const syncSums = !!(context && context.syncSums);
 
 const policyId = context && context.policyId ? Number(context.policyId) : 0;
 if (!policyId) {
@@ -57,10 +60,61 @@ const policy = (RepoLifePolicy.outData || [])[0];
 if (!policy) return { ok: false, msg: 'cmdUpdateInsuredObjectData: poliza ' + policyId + ' no encontrada' };
 
 const isTechnicalPolicy = ['96', '52'].indexOf(String(policy.lob == null ? '' : policy.lob).trim()) >= 0;
+const isSuretyPolicy = ['81', '82', '83', '84'].indexOf(String(policy.lob == null ? '' : policy.lob).trim()) >= 0;
 const objectDefinitionCode = isTechnicalPolicy ? 'DT_RAMO_TECNICO' : 'OBJFIANZA';
 
 const byCode = {};
 (policy.Coverages || []).forEach(function (c) { byCode[String(c.code).trim()] = c; });
+
+// The endoso has already been applied at this point, so policy.Coverages holds
+// the final sum (previous amount plus the endorsed movement).
+const coverageSums = {};
+let insuredBondSum = null;
+if (syncSums && isSuretyPolicy) {
+  doCmd({ cmd: 'GetFullTable', data: { table: 'cfgCoberturaProductoReaFianza' } });
+  if (!GetFullTable || !GetFullTable.ok) {
+    return { ok: false, msg: 'cmdUpdateInsuredObjectData: no se pudo leer la configuración de coberturas de fianza - ' + ((GetFullTable && GetFullTable.msg) || 'sin respuesta') };
+  }
+
+  const configRows = GetFullTable.outData || [];
+  const headers = Array.isArray(configRows[0]) ? configRows[0] : [];
+  const normalizeHeader = function (value) {
+    return String(value == null ? '' : value)
+      .trim().toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  };
+  const findColumn = function (names, fallback) {
+    const expected = names.map(normalizeHeader);
+    const index = headers.findIndex(function (header) {
+      return expected.indexOf(normalizeHeader(header)) >= 0;
+    });
+    return index >= 0 ? index : fallback;
+  };
+  const productIndex = findColumn(['productCode', 'codigoProducto', 'producto'], 1);
+  const coverageIndex = findColumn(['coverageCode', 'codigoCobertura', 'cobertura'], 3);
+  const isCoverageIndex = findColumn(['isCoverage', 'suma', 'sumaAsegurada'], 5);
+  const productCode = String(policy.productCode == null ? '' : policy.productCode).trim();
+
+  for (let i = 1; i < configRows.length; i++) {
+    const row = configRows[i] || [];
+    if (String(row[productIndex] == null ? '' : row[productIndex]).trim() !== productCode) continue;
+    if (String(row[isCoverageIndex] == null ? '' : row[isCoverageIndex]).trim().toUpperCase() !== 'SI') continue;
+    const code = String(row[coverageIndex] == null ? '' : row[coverageIndex]).trim();
+    const coverage = byCode[code];
+    if (!coverage) continue;
+    const finalSum = Number(coverage.limit || 0);
+    if (!Number.isFinite(finalSum)) continue;
+    coverageSums[code] = finalSum;
+  }
+
+  const configuredSums = Object.keys(coverageSums);
+  if (configuredSums.length) {
+    insuredBondSum = configuredSums.reduce(function (total, code) {
+      return total + Number(coverageSums[code] || 0);
+    }, 0);
+  }
+}
 
 // ChangeCoverage may leave the final dates only in the endorsement payload.
 // Persist them explicitly so the technical flow behaves like the surety flow.
@@ -148,11 +202,11 @@ if (!Array.isArray(grid) || !grid.length) {
   return { ok: false, msg: 'cmdUpdateInsuredObjectData: hiddenCobtar del objeto ' + target.id + ' no es una lista de coberturas' };
 }
 
-// 4. the date keys must ALREADY exist - we never introduce a format that was not there
+// 4. the date and sum keys must ALREADY exist - we never introduce a format that was not there
 const hasDates = grid.filter(function (row) {
   return row && Object.prototype.hasOwnProperty.call(row, keyStart) && Object.prototype.hasOwnProperty.call(row, keyEnd);
 }).length;
-if (!hasDates) {
+if (!hasDates && !(syncSums && isSuretyPolicy && insuredBondSum !== null)) {
   return { ok: false, msg: 'cmdUpdateInsuredObjectData: hiddenCobtar del objeto ' + target.id + ' no tiene las columnas "' + keyStart + '" / "' + keyEnd + '", asi que no hay fechas que actualizar sin inventar un formato nuevo' };
 }
 
@@ -160,23 +214,73 @@ if (!hasDates) {
 var updated = 0;
 var missing = [];
 const detail = [];
+var updatedSumRows = 0;
+const isSumField = function (key) {
+  const normalized = String(key == null ? '' : key)
+    .trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.]/g, '')
+    .replace(/\s+/g, ' ');
+  return ['sa', 'suma', 'suma asegurada'].indexOf(normalized) >= 0;
+};
 grid.forEach(function (row) {
-  if (!row || !Object.prototype.hasOwnProperty.call(row, keyStart) || !Object.prototype.hasOwnProperty.call(row, keyEnd)) return;
+  if (!row) return;
   var code = String(row.coverageCode == null ? '' : row.coverageCode).trim();
   var cov = byCode[code];
-  if (!cov) { missing.push(code); return; }
-  var s = ymd(cov.start), e = ymd(cov.end);
-  if (!s || !e) { missing.push(code); return; }
-  detail.push({ coverageCode: code, from: row[keyStart] + '..' + row[keyEnd], to: s + '..' + e });
-  row[keyStart] = s;
-  row[keyEnd] = e;
-  if (syncDays && Object.prototype.hasOwnProperty.call(row, keyDays)) {
-    row[keyDays] = Math.round((Date.parse(e + 'T00:00:00Z') - Date.parse(s + 'T00:00:00Z')) / 86400000) + 1;
+  var rowUpdated = false;
+  var detailRow = { coverageCode: code };
+
+  if (Object.prototype.hasOwnProperty.call(row, keyStart) && Object.prototype.hasOwnProperty.call(row, keyEnd)) {
+    if (!cov) {
+      missing.push(code);
+    } else {
+      var s = ymd(cov.start), e = ymd(cov.end);
+      if (!s || !e) {
+        missing.push(code);
+      } else {
+        detailRow.from = row[keyStart] + '..' + row[keyEnd];
+        detailRow.to = s + '..' + e;
+        row[keyStart] = s;
+        row[keyEnd] = e;
+        if (syncDays && Object.prototype.hasOwnProperty.call(row, keyDays)) {
+          row[keyDays] = Math.round((Date.parse(e + 'T00:00:00Z') - Date.parse(s + 'T00:00:00Z')) / 86400000);
+        }
+        rowUpdated = true;
+      }
+    }
   }
-  updated++;
+
+  if (syncSums && Object.prototype.hasOwnProperty.call(coverageSums, code)) {
+    const sumFields = Object.keys(row).filter(isSumField);
+    if (sumFields.length) {
+      sumFields.forEach(function (fieldName) { row[fieldName] = coverageSums[code]; });
+      detailRow.sum = coverageSums[code];
+      updatedSumRows++;
+      rowUpdated = true;
+    }
+  }
+
+  if (rowUpdated) {
+    detail.push(detailRow);
+    updated++;
+  }
 });
-if (!updated) {
-  return { ok: false, msg: 'cmdUpdateInsuredObjectData: ninguna fila de hiddenCobtar pudo casarse con una cobertura de la poliza (codigos sin correspondencia: ' + missing.join(', ') + ')' };
+let updatedBondSum = false;
+if (syncSums && isSuretyPolicy && insuredBondSum !== null) {
+  const bondSumField = fields.filter(function (item) {
+    return item && String(item.name == null ? '' : item.name).trim().toLowerCase() === 'suma_afianzada';
+  })[0];
+  if (bondSumField) {
+    if (Array.isArray(bondSumField.userData)) {
+      bondSumField.userData = [String(insuredBondSum)];
+    } else {
+      bondSumField.userData = String(insuredBondSum);
+    }
+    updatedBondSum = true;
+  }
+}
+if (!updated && !updatedBondSum) {
+  return { ok: false, msg: 'cmdUpdateInsuredObjectData: ninguna fila de hiddenCobtar ni la suma afianzada pudieron sincronizarse con la poliza (codigos sin correspondencia: ' + missing.join(', ') + ')' };
 }
 
 // 6. put it back in exactly the same shape and persist the WHOLE object
@@ -199,6 +303,15 @@ if (!RepoInsuredObject || !RepoInsuredObject.ok) {
 
 return {
   ok: true,
-  msg: 'hiddenCobtar sincronizado: ' + updated + ' cobertura(s) actualizada(s) en el objeto asegurado ' + target.id + (missing.length ? ' (sin correspondencia: ' + missing.join(', ') + ')' : ''),
-  outData: { insuredObjectId: target.id, updated: updated, unmatched: missing, rows: detail }
+  msg: 'hiddenCobtar sincronizado: ' + updated + ' cobertura(s) actualizada(s) en el objeto asegurado ' + target.id
+    + (updatedBondSum ? '; suma afianzada actualizada a ' + insuredBondSum : '')
+    + (missing.length ? ' (sin correspondencia: ' + missing.join(', ') + ')' : ''),
+  outData: {
+    insuredObjectId: target.id,
+    updated: updated,
+    updatedSumRows: updatedSumRows,
+    insuredBondSum: updatedBondSum ? insuredBondSum : null,
+    unmatched: missing,
+    rows: detail
+  }
 };
