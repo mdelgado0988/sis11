@@ -13,7 +13,7 @@
     const BackIcon  =()=><span role='img' aria-label='left'   class='anticon anticon-left'><svg viewBox='64 64 896 896' focusable='false' data-icon='left' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M724 218.3V141c0-6.7-7.7-10.4-12.9-6.3L260.3 486.8a31.86 31.86 0 000 50.3l450.8 352.1c5.3 4.1 12.9.4 12.9-6.3v-77.3c0-4.9-2.3-9.6-6.1-12.6l-360-281 360-281.1c3.8-3 6.1-7.7 6.1-12.6z'></path></svg></span>
     const SaveIcon  =()=><span role='img' aria-label='save'   class='anticon anticon-save'><svg viewBox='64 64 896 896' focusable='false' data-icon='save' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M893.3 293.3L730.7 130.7c-7.5-7.5-16.7-13-26.7-16V112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V338.5c0-17-6.7-33.2-18.7-45.2zM384 184h256v104H384V184zm456 656H184V184h136v136c0 17.7 14.3 32 32 32h320c17.7 0 32-14.3 32-32V205.8l136 136V840zM512 442c-79.5 0-144 64.5-144 144s64.5 144 144 144 144-64.5 144-144-64.5-144-144-144zm0 224c-44.2 0-80-35.8-80-80s35.8-80 80-80 80 35.8 80 80-35.8 80-80 80z'></path></svg></span>
     const DeleteIcon=()=><span role='img' aria-label='delete'class='anticon anticon-delete'><svg viewBox='64 64 896 896' focusable='false' data-icon='delete' width='1em' height='1em' fill='currentColor' aria-hidden='true'><path d='M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z'></path></svg></span>
-    const { Table, Button, Modal, Empty, Form, Select, Switch, Input, InputNumber, Row, Col, Space, message, notification, Checkbox, Typography, DatePicker } = A;
+    const { Table, Button, Modal, Empty, Form, Select, Switch, Input, InputNumber, Row, Col, Space, message, notification, Checkbox, Tooltip, Typography, DatePicker } = A;
     const { Text } = Typography;
     const { Column } = Table;
     const { confirm } = Modal;
@@ -52,6 +52,7 @@
         const [ selectedCov, setSelectCov ] = useState(null);
         const [ menuAction, setMenuAction ] = useState(0);
         const [ selected, setSelected ] = useState(null);
+        const [ hasPendingLoadingChanges, setHasPendingLoadingChanges ] = useState(false);
         const [ form ] = Form.useForm()
         const [endorsementReason, setEndorsementReason] = useState('');
         const initializedRef = useRef(false);
@@ -59,21 +60,45 @@
         const closeModal=()=> {
             setIsModalOpen(false);
             setSelectCov(null);
+            setMenuAction(0);
+            setSelected(null);
+            setHasPendingLoadingChanges(false);
         }
         const onModalSubmit=()=>{
+            if(menuAction === 1 && hasPendingLoadingChanges){
+                message.warning('Tiene cambios pendientes de guardar. Use Guardar el recargo/descuento antes de cerrar la ventana.');
+                return;
+            }
             closeModal()
+        }
+        const requestCloseModal=()=>{
+            if(menuAction === 1 && hasPendingLoadingChanges){
+                message.warning('Tiene cambios pendientes de guardar. Use Guardar el recargo/descuento antes de cerrar la ventana.');
+                return;
+            }
+            closeModal();
         }
         const openModal=( cov )=>{
             setSelectCov(cov);
             setIsModalOpen(true);
+            setHasPendingLoadingChanges(false);
         }
         const showLoadingForm=( loading )=>{
             setSelected(loading);
             setMenuAction(1);
+            setHasPendingLoadingChanges(false);
         }
         const hideLoadingForm=()=>{
             setMenuAction(0);
-            setSelected(null)
+            setSelected(null);
+            setHasPendingLoadingChanges(false);
+        }
+        const requestHideLoadingForm=()=>{
+            if(hasPendingLoadingChanges){
+                message.warning('Tiene cambios pendientes de guardar. Use Guardar el recargo/descuento antes de retornar.');
+                return;
+            }
+            hideLoadingForm();
         }
         /**
          * @function onAddLoading
@@ -96,8 +121,10 @@
 
                 const {
                     riskType,
-                    loading,
-                    fixedAmount,
+                    surcharge,
+                    discount,
+                    surchargeAmount,
+                    discountAmount,
                     byAmount,
                     applyAll
                 } = await form.validateFields();
@@ -117,11 +144,33 @@
                     name: risk ? risk.label : riskType
                 };
 
-                let loadingPercent = Number(loading || 0);
+                const surchargeValue = Number(
+                    (byAmount ? surchargeAmount : surcharge) || 0
+                );
+                const discountValue = Number(
+                    (byAmount ? discountAmount : discount) || 0
+                );
+                if (!Number.isFinite(surchargeValue) || !Number.isFinite(discountValue)
+                    || surchargeValue < 0 || discountValue < 0) {
+                    throw 'Recargo y descuento deben ser valores positivos.';
+                }
+                if (surchargeValue > 0 && discountValue > 0) {
+                    throw 'Indique un recargo o un descuento, no ambos a la vez.';
+                }
+                if (surchargeValue <= 0 && discountValue <= 0) {
+                    throw byAmount
+                        ? 'Indique un monto de recargo o descuento.'
+                        : 'Indique un porcentaje de recargo o descuento.';
+                }
+
+                const direction = surchargeValue > 0 ? 1 : -1;
+                const enteredValue = surchargeValue > 0 ? surchargeValue : discountValue;
+                let loadingPercent = direction * enteredValue;
+                let signedFixedAmount = 0;
 
                 if(byAmount){
 
-                    const amount = Number(fixedAmount || 0);
+                    signedFixedAmount = direction * enteredValue;
                     const basePremium = Number(selectedCov.basePremium || 0);
 
                     if(basePremium <= 0){
@@ -129,10 +178,8 @@
                     }
 
                     loadingPercent =
-                        (amount / basePremium) * 100;
+                        (signedFixedAmount / basePremium) * 100;
                 }
-
-                validateDiscountPercentage(loadingPercent);
 
                 const newLoading = selected
                     ? {
@@ -141,7 +188,7 @@
                         riskType,
                         RiskType,
                         byAmount: !!byAmount,
-                        fixedAmount: Number(fixedAmount || 0),
+                        fixedAmount: signedFixedAmount,
                         toUpdate: true
                     }
                     : {
@@ -150,7 +197,7 @@
                         riskType,
                         loading: loadingPercent,
                         byAmount: !!byAmount,
-                        fixedAmount: Number(fixedAmount || 0),
+                        fixedAmount: signedFixedAmount,
                         start: selectedCov.start,
                         end: selectedCov.end,
                         duration: 1,
@@ -195,8 +242,13 @@
                                     ? (loadingToApply.fixedAmount / basePremium) * 100
                                     : 0;
 
-                            validateDiscountPercentage(loadingToApply.loading);
                         }
+
+                        validateCoverageDiscount(
+                            cov,
+                            loadingToApply.loading,
+                            id
+                        );
 
                         cov.Loadings = [
                             ...covloadings,
@@ -210,6 +262,12 @@
                     });
 
                 } else {
+
+                    validateCoverageDiscount(
+                        selectedCov,
+                        loadingPercent,
+                        covloadingId
+                    );
 
                     let currentLoadings =
                         tempCoverages[index].Loadings.filter(function(item){
@@ -231,6 +289,7 @@
 
                 setSelectCov(updatedCov);
 
+                setHasPendingLoadingChanges(false);
                 hideLoadingForm();
 
             } catch (error) {
@@ -246,20 +305,25 @@
          * 
          * @returns {void}
          */
-        const removeLoading=()=>{
+        const removeLoading=(loading = selected)=>{
+            if(!loading){
+                return;
+            }
+
             let loadings = [...selectedCov.Loadings];
             const tempCoverages = JSON.parse(JSON.stringify( coverages ));
-            if(selected.id > 0){
-                const index = loadings.findIndex(item => item.id === selected.id);
+            if(!isNaN(loading.id)){
+                const index = loadings.findIndex(item => item.id === loading.id);
                 loadings[index].toRemove = true;                
             } else {
-                loadings = selectedCov.Loadings.filter( load => load.id != selected.id );
+                loadings = selectedCov.Loadings.filter( load => load.id != loading.id );
             }
             const index = tempCoverages.findIndex( cov => cov.id === selectedCov.id );
             tempCoverages[index].Loadings = loadings;
             setCoverages(tempCoverages);
             const updatedCov = tempCoverages.find(cov => cov.id === selectedCov.id);
             setSelectCov(updatedCov);
+            setHasPendingLoadingChanges(false);
             hideLoadingForm();
         }
         async function fetchData(){
@@ -529,10 +593,11 @@
 
         const value = {
             policyId, coverages, loadingCov,
-            isModalOpen, onModalSubmit, closeModal,
+            isModalOpen, onModalSubmit, requestCloseModal,
             selectedCov, openModal, form, riskTypes,
             onAddLoading, menuAction, selected,
-            showLoadingForm, hideLoadingForm, removeLoading,
+            showLoadingForm, hideLoadingForm, requestHideLoadingForm, removeLoading,
+            hasPendingLoadingChanges, setHasPendingLoadingChanges,
             fetchData, onSaveLoading, isPolicyActive
         }
 
@@ -551,14 +616,51 @@
     const App=()=>{
         const { coverages, loadingCov, onSaveLoading, isPolicyActive } = useAppContext();
         const hasChanges = (coverages || [] ).some( cov => cov.Loadings.some( load => isNaN(load.id) || load.toRemove || load.toUpdate  ));
+        const designStyles = `
+.loading-endorsement-manager { font-size:13px; min-height:0; }
+body:has(.loading-endorsement-manager) .ant-page-header,
+body:has(.loading-endorsement-manager) .page-header { background:#eef2f6 !important; border:1px solid #b6c1cd !important; border-radius:6px !important; box-shadow:inset 0 1px 0 rgba(255,255,255,.9), 0 1px 3px rgba(31,45,61,.12); }
+body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom:8px; border-bottom:1px solid #c7d0da; }
+.loading-endorsement-manager .lem-grid-panel { border:1px solid #cbd1d8; border-radius:6px; overflow:hidden; background:#fff; }
+.lem-modal .lem-grid { border:1px solid #cbd1d8; border-radius:6px; overflow:hidden; }
+.loading-endorsement-manager .lem-grid .ant-table-container, .lem-modal .lem-grid .ant-table-container { border:0 !important; }
+.loading-endorsement-manager .lem-grid .ant-table-thead > tr > th { background:#bfbfbf !important; border-inline-end:1px solid #cbd1d8 !important; border-bottom:1px solid #cbd1d8 !important; color:#1f1f1f; font-size:12px; line-height:18px; padding:5px 8px; }
+.loading-endorsement-manager .lem-grid .ant-table-tbody > tr > td { border-inline-end:0 !important; border-bottom:1px solid #cbd1d8 !important; font-size:12px; line-height:18px; padding:5px 8px; }
+.lem-modal .lem-grid .ant-table-thead > tr > th { background:#bfbfbf !important; border-inline-end:1px solid #cbd1d8 !important; border-bottom:1px solid #cbd1d8 !important; color:#1f1f1f; font-size:12px; line-height:18px; padding:4px; }
+.lem-modal .lem-grid .ant-table-tbody > tr > td { border-inline-end:0 !important; border-bottom:1px solid #cbd1d8 !important; font-size:12px; line-height:18px; padding:4px; }
+.loading-endorsement-manager .lem-grid .ant-table-tbody > tr:hover > td, .lem-modal .lem-grid .ant-table-tbody > tr:hover > td { background:#b7d7ff !important; }
+.loading-endorsement-manager .lem-grid .ant-table-tbody > tr.ant-table-row-selected > td, .lem-modal .lem-grid .ant-table-tbody > tr.ant-table-row-selected > td { background:#86b4ff !important; }
+.loading-endorsement-manager .lem-actionbar { display:flex; align-items:center; gap:8px; margin-bottom:2px; padding:10px 12px; background:transparent; border:1px solid #e6ebf2; border-radius:6px; }
+.lem-modal .lem-actionbar { display:flex; align-items:center; gap:8px; margin-bottom:2px; padding:4px; background:transparent; border:1px solid #e6ebf2; border-radius:6px; }
+.loading-endorsement-manager .ant-btn:not(.ant-btn-primary), .lem-modal .ant-btn:not(.ant-btn-primary) { border-color:#8f9aa7; }
+.loading-endorsement-manager .ant-btn[disabled], .lem-modal .ant-btn[disabled] { border-color:#6f7b88 !important; opacity:1; }
+.loading-endorsement-manager .ant-input, .loading-endorsement-manager .ant-input-number, .loading-endorsement-manager .ant-input-number-input, .loading-endorsement-manager .ant-select-selector,
+.lem-modal .ant-input, .lem-modal .ant-input-number, .lem-modal .ant-input-number-input, .lem-modal .ant-select-selector { border-color:#b8c4d1 !important; border-radius:6px !important; }
+.loading-endorsement-manager .ant-input:hover, .loading-endorsement-manager .ant-input-number:hover, .loading-endorsement-manager .ant-select:hover .ant-select-selector,
+.lem-modal .ant-input:hover, .lem-modal .ant-input-number:hover, .lem-modal .ant-select:hover .ant-select-selector { border-color:#8da9c2 !important; }
+.loading-endorsement-manager .ant-input:focus, .loading-endorsement-manager .ant-input-number-focused, .loading-endorsement-manager .ant-select-focused .ant-select-selector,
+.lem-modal .ant-input:focus, .lem-modal .ant-input-number-focused, .lem-modal .ant-select-focused .ant-select-selector { border-color:#1677ff !important; box-shadow:0 0 0 2px rgba(22,119,255,.2) !important; }
+.loading-endorsement-manager .ant-input[disabled], .loading-endorsement-manager .ant-input-number-disabled, .loading-endorsement-manager .ant-select-disabled .ant-select-selector,
+.lem-modal .ant-input[disabled], .lem-modal .ant-input-number-disabled, .lem-modal .ant-select-disabled .ant-select-selector { background:#f5f5f5 !important; border-color:#b8c4d1 !important; cursor:not-allowed; }
+.lem-modal .ant-checkbox-inner { border:2px solid #8f9aa7 !important; border-radius:4px; }
+.lem-modal .ant-checkbox:hover .ant-checkbox-inner { border-color:#8da9c2 !important; }
+.lem-modal .ant-checkbox-checked .ant-checkbox-inner { background:#1677ff !important; border-color:#1677ff !important; }
+.lem-modal .ant-modal-content { border:1px solid #cbd1d8; border-radius:6px; }
+.lem-modal .ant-modal-header { border-bottom:1px solid #cbd1d8; }
+.lem-modal .ant-modal-body { padding:6px; }
+.lem-positive { color:#237804; } .lem-negative { color:#cf1322; } .lem-zero { color:#262626; }
+`;
 
         return <DefaultPage 
             title={t('Recargos y descuentos')} 
             icon='calculator'
             subTitle={t('Endoso')}
-            extra={<Button icon={<SaveIcon />}onClick={onSaveLoading} disabled={!hasChanges} type='primary' htmlType='button' loading={loadingCov}>{ !isPolicyActive ? 'Actualizar Recargos': 'Crear Endoso' }</Button>}>
-            <CoveragesTable />
-            <ModalLoading />
+            extra={<Button className='lem-primary-action' icon={<SaveIcon />} onClick={onSaveLoading} disabled={!hasChanges} type='primary' htmlType='button' loading={loadingCov}>{ !isPolicyActive ? 'Actualizar Recargos': 'Crear Endoso' }</Button>}>
+            <style>{designStyles}</style>
+            <div className='loading-endorsement-manager'>
+                <div className='lem-grid-panel'><CoveragesTable /></div>
+                <ModalLoading />
+            </div>
         </DefaultPage>
     }
     return <AppProvider>
@@ -668,7 +770,7 @@
      */
     function CoveragesTable(){
         const { coverages, loadingCov, openModal } = useAppContext();
-        return <Table dataSource={ coverages || []} loading={loadingCov}>
+        return <Table className='lem-grid' size='small' rowKey='id' dataSource={ coverages || []} loading={loadingCov}>
             <Column title={t('Code')}           dataIndex='code' key='coverageCode' />
             <Column title={t('Name')}           dataIndex='name' key='name' render={ value => <b>{value}</b>}/>
             <Column title={t('Sum Assured')}    dataIndex='limit' key='sa' render={renderNumber}/>
@@ -688,8 +790,21 @@
      * @returns {JSX.Element}
      */
     function ModalLoading(){
-        const { isModalOpen, onModalSubmit, closeModal, menuAction } = useAppContext();
-        return <Modal title={t('Coverage Detail')} width={650} open={ isModalOpen } onOk={ onModalSubmit } onCancel={ closeModal }>
+        const { isModalOpen, onModalSubmit, requestCloseModal, menuAction, hasPendingLoadingChanges } = useAppContext();
+        const hasPendingChanges = menuAction === 1 && hasPendingLoadingChanges;
+        const pendingMessage = 'Tiene cambios pendientes de guardar. Guarde el recargo/descuento antes de cerrar la ventana.';
+        const footer = <Space>
+            <Button htmlType='button' onClick={requestCloseModal}>Cancelar</Button>
+            <Tooltip title={hasPendingChanges ? pendingMessage : null}>
+                <span>
+                    <Button type='primary' htmlType='button' disabled={hasPendingChanges} onClick={onModalSubmit}>
+                        Aceptar
+                    </Button>
+                </span>
+            </Tooltip>
+        </Space>;
+
+        return <Modal wrapClassName='lem-modal' title={t('Coverage Detail')} width={650} open={ isModalOpen } footer={footer} onCancel={requestCloseModal}>
             { menuAction === 0 && <LoadingTable />}
             { menuAction === 1 && <LoadingForm /> }
         </Modal>
@@ -704,14 +819,16 @@
      * @returns {JSX.Element}
      */
     function LoadingTable(){
-        const { selectedCov, showLoadingForm, isPolicyActive } = useAppContext();
+        const { selectedCov, showLoadingForm, removeLoading } = useAppContext();
         if(!selectedCov)
             return <Empty />
         return <div>
-            <Button type='link' htmlType='button' onClick={ ()=> showLoadingForm(null) }>
+            <div className='lem-actionbar'>
+            <Button type='primary' htmlType='button' onClick={ ()=> showLoadingForm(null) }>
                 <PlusIcon /> {t('New')}
             </Button>
-        <Table dataSource={ selectedCov.Loadings || []} rowKey='id'>
+            </div>
+        <Table className='lem-grid' size='small' dataSource={ selectedCov.Loadings || []} rowKey='id'>
             <Column title={t('Type')}       dataIndex='riskType' key='riskType' render={renderText}/>
             <Column title={t('Risk Type')}  dataIndex='RiskType' key='riskType' render={(value, r) => renderText(value ? value.name : '', r) } />
             <Column
@@ -741,7 +858,33 @@
                 }}
             />
             <Column title={t('Loading')}    dataIndex='loading' key='loadingValue' render={ (value, r) => renderNumber( value * selectedCov.basePremium / 100, r) } />
-            <Column title={t('Action')}     dataIndex='id' key='id' render={(_, record )=> <Button disabled={isPolicyActive} type='link' htmlType='button' onClick={()=>showLoadingForm(record)}><PencilIcon /></Button>} />
+            <Column
+                title={t('Action')}
+                dataIndex='id'
+                key='id'
+                render={function(_, record){
+                    const isPersisted = !isNaN(record.id);
+                    return <Space size={4}>
+                        <Button
+                            disabled={isPersisted}
+                            type='link'
+                            htmlType='button'
+                            onClick={function(){ showLoadingForm(record); }}
+                        >
+                            <PencilIcon />
+                        </Button>
+                        <Button
+                            disabled={isPersisted}
+                            type='link'
+                            danger
+                            htmlType='button'
+                            onClick={function(){ removeLoading(record); }}
+                        >
+                            <DeleteIcon />
+                        </Button>
+                    </Space>;
+                }}
+            />
         </Table>
         </div>
     }
@@ -755,20 +898,48 @@
      * @returns {JSX.Element}
      */
     function LoadingForm(){
-        const { form, riskTypes, onAddLoading, hideLoadingForm, selected, selectedCov, removeLoading } = useAppContext();
+        const { form, riskTypes, onAddLoading, requestHideLoadingForm, selected, removeLoading, setHasPendingLoadingChanges } = useAppContext();
         useEffect(()=>{
             if(!selected){
                 form.resetFields();
+                form.setFieldsValue({
+                    riskType: 'COMMERCIAL',
+                    byAmount: false,
+                    surcharge: null,
+                    discount: null,
+                    surchargeAmount: null,
+                    discountAmount: null,
+                    applyAll: false
+                });
                 return;
             }
-            form.setFieldsValue( selected );
+
+            const byAmount = !!selected.byAmount;
+            const storedValue = Number(
+                byAmount ? selected.fixedAmount : selected.loading
+            ) || 0;
+
+            form.resetFields();
+            form.setFieldsValue({
+                ...selected,
+                byAmount,
+                surcharge: !byAmount && storedValue > 0 ? storedValue : null,
+                discount: !byAmount && storedValue < 0 ? Math.abs(storedValue) : null,
+                surchargeAmount: byAmount && storedValue > 0 ? storedValue : null,
+                discountAmount: byAmount && storedValue < 0 ? Math.abs(storedValue) : null
+            });
         },[ selected ])
 
-        return <Form form={ form } layout='vertical' initialValues={{riskType:'COMMERCIAL'}}>
+        return <Form
+            form={ form }
+            layout='vertical'
+            initialValues={{riskType:'COMMERCIAL'}}
+            onFieldsChange={function(){ setHasPendingLoadingChanges(true); }}
+        >
         <Row gutter={ 16 }>
             <Col span={24}>
-                <Space>
-                    <Button type='link' htmlType='button' onClick={hideLoadingForm}>
+                <Space className='lem-actionbar'>
+                    <Button type='link' htmlType='button' onClick={requestHideLoadingForm}>
                         <BackIcon /> {t('Back')}
                     </Button>
                     <Button type='link' htmlType='button' onClick={onAddLoading}>
@@ -779,6 +950,7 @@
                     </Button>
                 </Space>
             </Col>
+            <Col span={24}>
             <Row gutter={16}>
 
                 <Col span={24}>
@@ -798,53 +970,44 @@
                     </Form.Item>
                 </Col>
 
-                <Col span={18}>
+                <Form.Item
+                    noStyle
+                    shouldUpdate={function(prev, curr){
+                        return prev.byAmount !== curr.byAmount;
+                    }}
+                >
+                    {function({ getFieldValue }){
+                        const byAmount = !!getFieldValue('byAmount');
+                        const labelSuffix = byAmount ? ' (monto)' : ' (%)';
+                        const precision = byAmount ? 2 : 4;
+                        const step = byAmount ? 0.01 : 0.0001;
+
+                        return <>
+                <Col span={9}>
                     <Form.Item
-                        noStyle
-                        shouldUpdate={function(prev, curr){
-                            return prev.byAmount !== curr.byAmount
-                                || prev.loading !== curr.loading
-                                || prev.fixedAmount !== curr.fixedAmount;
-                        }}
+                        name={byAmount ? 'surchargeAmount' : 'surcharge'}
+                        label={<strong>Recargo{labelSuffix}</strong>}
                     >
-                        {function({ getFieldValue }){
+                        <InputNumber
+                            min={0}
+                            style={{ width:'100%' }}
+                            precision={precision}
+                            step={step}
+                        />
+                    </Form.Item>
+                </Col>
 
-                            const byAmount = getFieldValue('byAmount');
-                            const fieldValue = getFieldValue(byAmount ? 'fixedAmount' : 'loading');
-                            const basePremium = Number(selectedCov && selectedCov.basePremium || 0);
-                            const fieldPercentage = byAmount
-                                ? (basePremium > 0 ? (Number(fieldValue || 0) / basePremium) * 100 : 0)
-                                : Number(fieldValue || 0);
-                            const hasInvalidDiscount = Number.isFinite(fieldPercentage)
-                                && fieldPercentage <= -100;
-
-                            return (
-                                <Form.Item
-                                    name={byAmount ? 'fixedAmount' : 'loading'}
-                                    label={
-                                        <strong>
-                                            {byAmount ? 'Monto' : 'Porcentaje (%)'}
-                                        </strong>
-                                    }
-                                    rules={[{
-                                        required:true,
-                                        message: byAmount
-                                            ? 'Monto obligatorio'
-                                            : 'Porcentaje obligatorio'
-                                    }]}
-                                    validateStatus={hasInvalidDiscount ? 'error' : ''}
-                                    help={hasInvalidDiscount
-                                        ? 'El descuento no puede ser mayor o igual al 100%.'
-                                        : undefined}
-                                >
-                                    <InputNumber
-                                        style={{ width:'100%' }}
-                                        precision={4}
-                                        step={0.0001}
-                                    />
-                                </Form.Item>
-                            );
-                        }}
+                <Col span={9}>
+                    <Form.Item
+                        name={byAmount ? 'discountAmount' : 'discount'}
+                        label={<strong>Descuento{labelSuffix}</strong>}
+                    >
+                        <InputNumber
+                            min={0}
+                            style={{ width:'100%' }}
+                            precision={precision}
+                            step={step}
+                        />
                     </Form.Item>
                 </Col>
 
@@ -857,6 +1020,9 @@
                         <Switch />
                     </Form.Item>
                 </Col>
+                        </>;
+                    }}
+                </Form.Item>
 
                 <Col span={24}>
                     <Form.Item
@@ -870,6 +1036,7 @@
                 </Col>
 
             </Row>
+            </Col>
 
         </Row>
     </Form>
@@ -892,8 +1059,22 @@
     function validateDiscountPercentage(value) {
         const percentage = Number(value);
         if (Number.isFinite(percentage) && percentage <= -100) {
-            throw new Error('El descuento no puede ser mayor o igual al 100%.');
+            throw new Error('El descuento total no puede ser mayor o igual al 100%.');
         }
+    }
+
+    function validateCoverageDiscount(coverage, proposedLoading, loadingId) {
+        const currentLoading = (coverage.Loadings || [])
+            .filter(function(item){
+                return item.id != loadingId && !item.toRemove;
+            })
+            .reduce(function(total, item){
+                return total + (Number(item.loading) || 0);
+            }, 0);
+
+        validateDiscountPercentage(
+            currentLoading + (Number(proposedLoading) || 0)
+        );
     }
     /**
      * @function renderNumber
@@ -906,8 +1087,11 @@
      * @returns {string}
      */
     function renderNumber(value, record){
-        const text = !value ? '0.00' : Number(value).toLocaleString('en-us',{ minimumFractionDigits: 2, maximumFractionDigits: 4 });
-        return renderText(text, record)
+        const amount = Number(value || 0);
+        const safeAmount = Number.isFinite(amount) ? amount : 0;
+        const text = safeAmount.toLocaleString('en-us',{ minimumFractionDigits: 2, maximumFractionDigits: 4 });
+        const state = safeAmount > 0 ? 'lem-positive' : (safeAmount < 0 ? 'lem-negative' : 'lem-zero');
+        return renderText(<span className={state}>{text}</span>, record)
     }
     /**
      * @function calcExtraPremium
