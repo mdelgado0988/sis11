@@ -1706,6 +1706,8 @@ async function setConfigCoverages(){
 }
 
 async function setProductCoverages() {
+  polizaConfirmada = esPolizaEmitida();
+  bloquearCoberturas = polizaConfirmada;
   
   const productJson = await getProduct(policy.lob, policy.productCode);
   const product = productJson.configJson ? JSON.parse(productJson.configJson) : {};
@@ -1782,7 +1784,7 @@ async function setProductCoverages() {
       jPremiumDetail: null,
       distributionMode: null
     }
-  });
+  }).filter(coverage => !bloquearCoberturas || coverage.incluido);
 
 }
 
@@ -1807,7 +1809,6 @@ function renderToolbarCoberturas() {
           type="button"
           id="btnGestionarCoberturas"
           class="ant-btn ant-btn-primary btn-gestionar-cob"
-          ${bloquearCoberturas ? 'disabled' : ''}
         >
 
           <span class="btn-gestionar-icon">
@@ -1899,7 +1900,7 @@ function renderModalCoberturas() {
 
     $("#modalCoberturas").remove();
 
-    const rows = productCoverages.map(c => `
+    const rows = (bloquearCoberturas ? productCoverages.filter(c => c.incluido) : productCoverages).map(c => `
       <tr>
 
         <td style="text-align:center;">
@@ -2165,6 +2166,8 @@ async function bindEventosCoberturas() {
     $(document)
       .off("click", "#btnGuardarCoberturas")
       .on("click", "#btnGuardarCoberturas", async function () {
+
+        if (bloquearCoberturas) return;
 
         coberturasSeleccionadas = productCoverages.filter(c => {
           const $chk = $(`.chk-cobertura[value="${c.code}"]`);

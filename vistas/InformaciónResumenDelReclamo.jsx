@@ -34,7 +34,7 @@
       if (contextCurrent()) setFailure(e && e.message || String(e));
     };
     const request = (name, data) => Promise.resolve().then(() => {
-      if (!contextCurrent()) throw new Error('El reclamo seleccionado cambió.');
+      if (!contextCurrent()) throw new Error('El siniestro seleccionado cambió.');
       return exe(name, data);
     }).then(r => {
       if (!r || r.ok !== true) throw new Error(r && r.msg || 'No se confirmó la operación.');
@@ -57,7 +57,7 @@
       return request('RepoClaim', { operation: 'GET', filter: 'id=' + captured.claimId,
         include: ['Process', 'Process.Pasos', 'Requirements'], size: 1, page: 0 }).then(r => {
         const fresh = r.outData && r.outData[0], p = fresh && fresh.Process;
-        if (!contextCurrent()) throw new Error('El reclamo seleccionado cambió.');
+        if (!contextCurrent()) throw new Error('El siniestro seleccionado cambió.');
         if (!p || p.id !== captured.id || p.estadoId !== captured.estadoId || p.fEstado !== captured.fEstado
           || p.formId !== process.formId || p.userActions !== process.userActions || p.finalizado !== process.finalizado) {
           current.current.reload();
@@ -174,7 +174,7 @@
       <span className="resumen-process-id">Proceso Id {process.id}</span>
       <A.Popover onVisibleChange={loadReason} content={<A.Descriptions size="small" bordered column={1}>
         <A.Descriptions.Item label="Estado del workflow">{process.estado}</A.Descriptions.Item>
-        <A.Descriptions.Item label="Estado del reclamo">{process.entityState}</A.Descriptions.Item>
+        <A.Descriptions.Item label="Estado del siniestro">{process.entityState}</A.Descriptions.Item>
         <A.Descriptions.Item label="Motivo">{reason || process.entityStateReason || '—'}</A.Descriptions.Item>
       </A.Descriptions>}>
         <A.Tag color={process.finalizado ? 'green' : 'blue'}>{process.estado}</A.Tag>
@@ -458,7 +458,7 @@
     const scope = commentScope();
     if (comments.loading || (comments.saving && afterWrite !== true)) return Promise.resolve(false);
     if (!scope) {
-      comments.error = 'No se pudo identificar la póliza del reclamo.';
+      comments.error = 'No se pudo identificar la póliza del siniestro.';
       notifyComments();
       return Promise.resolve(false);
     }
@@ -911,7 +911,7 @@
     });
   };
   const prepareNewClaimPolicy = (policy) => {
-    if (dirtyRef.current && !window.confirm('Hay cambios sin guardar. ¿Desea descartarlos para preparar un nuevo reclamo?')) return;
+    if (dirtyRef.current && !window.confirm('Hay cambios sin guardar. ¿Desea descartarlos para preparar un nuevo siniestro?')) return;
     const policyId = Number(policy && (policy.id || policy.lifePolicyId));
     const insured = policy && Array.isArray(policy.Insureds) && policy.Insureds.length
       ? policy.Insureds[0] && (policy.Insureds[0].Contact || policy.Insureds[0].contact || policy.Insureds[0])
@@ -919,7 +919,7 @@
     const contact = policy && (policy.Holder || policy.holder) || insured;
     const contactId = Number(contact && contact.id);
     if (!Number.isSafeInteger(policyId) || policyId <= 0 || !Number.isSafeInteger(contactId) || contactId <= 0) {
-      setNewClaimError('La póliza seleccionada no contiene un asegurado válido para iniciar el reclamo.');
+      setNewClaimError('La póliza seleccionada no contiene un asegurado válido para iniciar el siniestro.');
       return;
     }
     const claimType = String(firstValue(policy.policyType, policy.claimType,
@@ -1088,14 +1088,14 @@
   };
 
   const buildReserveEntity = (claim, coverageId, direction, bucket, amount, concept) => {
-    if (!claim || !canEdit(claim)) throw new Error('El reclamo no permite registrar reservas.');
+    if (!claim || !canEdit(claim)) throw new Error('El siniestro no permite registrar reservas.');
     const policyId = Number(claim.lifePolicyId || (claim.Policy && claim.Policy.id));
     const requestedClaimId = Number(claim.id);
     const requestedCoverageId = Number(coverageId);
     const coverages = claim.Policy && Array.isArray(claim.Policy.Coverages) ? claim.Policy.Coverages : [];
     if (!Number.isSafeInteger(policyId) || policyId <= 0 || !Number.isSafeInteger(requestedClaimId)
       || requestedClaimId <= 0 || !coverages.some((item) => item && Number(item.id) === requestedCoverageId)) {
-      throw new Error('La cobertura seleccionada no pertenece al reclamo.');
+      throw new Error('La cobertura seleccionada no pertenece al siniestro.');
     }
     if (direction !== 'INCREASE' && direction !== 'DECREASE') {
       throw new Error('El movimiento de reserva no es válido.');
@@ -1137,7 +1137,7 @@
     }
     const operationClaimId = currentClaimRef.current ? Number(currentClaimRef.current.id) : null;
     if (!operationClaimId || routeClaimId() !== operationClaimId) {
-      setReserveError('El reclamo cambió. Recargue la información antes de continuar.');
+      setReserveError('El siniestro cambió. Recargue la información antes de continuar.');
       return Promise.resolve(false);
     }
     const operationId = reserveOperationRef.current + 1;
@@ -1149,7 +1149,7 @@
     const validateObjects = commandName === 'RepoLifeCoveragePayout' && payload.operation === 'ADD'
       ? readFinancialObjects(operationClaim, payload.entity.lifeCoverageId) : Promise.resolve();
     return validateObjects.then(() => {
-      if (!affectedCurrent(operationClaim) || reserveOperationRef.current !== operationId) throw new Error('El reclamo cambió. Recargue la información.');
+      if (!affectedCurrent(operationClaim) || reserveOperationRef.current !== operationId) throw new Error('El siniestro cambió. Recargue la información.');
       return repositoryRequest(commandName, payload);
     }).then((result) => {
       const body = reserveResultPayload(result);
@@ -1238,7 +1238,7 @@
         if (!mountedRef.current || routeClaimId() !== operationClaimId
           || requestRef.current !== requestId) return false;
         if (!result || result.ok !== true) {
-          throw new Error(result && result.msg ? result.msg : 'No fue posible finalizar el reclamo.');
+          throw new Error(result && result.msg ? result.msg : 'No fue posible finalizar el siniestro.');
         }
         pendingStageConfirmationRef.current = { claimId: operationClaimId, stageCode: '7' };
         notifyRecordUpdated();
@@ -1247,7 +1247,7 @@
         if (mountedRef.current && routeClaimId() === operationClaimId
           && requestRef.current === requestId) {
           setError(caughtError && caughtError.message
-            ? caughtError.message : 'No fue posible finalizar el reclamo.');
+            ? caughtError.message : 'No fue posible finalizar el siniestro.');
         }
         return false;
       }).then((outcome) => {
@@ -1282,7 +1282,7 @@
     }
     Modal.confirm({
       title: 'Cerrar reservas',
-      content: 'El reclamo tiene saldo de reservas. ¿Desea cerrar las reservas antes de continuar?',
+      content: 'El siniestro tiene saldo de reservas. ¿Desea cerrar las reservas antes de continuar?',
       okText: 'Sí, cerrar reservas',
       cancelText: 'No',
       onOk: () => closeClaimReserves(true, true).then(resolve, () => resolve(false)),
@@ -1317,6 +1317,127 @@
     }
   };
 
+  const paymentRequestPayoutIds = (request) => {
+    const direct = request && request.payoutId;
+    const hasDirect = direct !== null && direct !== undefined && direct !== '';
+    if (hasDirect && !positiveIdText(direct)) throw new Error('La solicitud tiene una asociación de pago inválida.');
+    let details = [];
+    if (request && request.jDetail !== null && request.jDetail !== undefined && request.jDetail !== '') {
+      try { details = typeof request.jDetail === 'string' ? JSON.parse(request.jDetail) : request.jDetail; }
+      catch (error) { throw new Error('La solicitud tiene un detalle de pagos incompatible.'); }
+      if (!Array.isArray(details) || details.some((item) => !item || !positiveIdText(item.payoutId))) {
+        throw new Error('La solicitud tiene un detalle de pagos incompatible.');
+      }
+    }
+    const ids = Array.from(new Set(details.map((item) => Number(item.payoutId))));
+    if (hasDirect && ids.length && !ids.includes(Number(direct))) throw new Error('La solicitud tiene asociaciones de pago contradictorias.');
+    if (hasDirect && !ids.length) ids.push(Number(direct));
+    if (!ids.length) throw new Error('No se puede identificar el movimiento de una solicitud del siniestro.');
+    return ids;
+  };
+  // Only the observed initial treasury workflow is supported; unknown workflows fail closed.
+  const requestTreasuryUnexecuted = (request) => {
+    const process = request && request.Process;
+    return !!process && positiveIdText(request.processId) === positiveIdText(process.id)
+      && positiveIdText(process.id) && process.entity === 'ClaimPayment' && Number(process.entityId) === Number(request.id)
+      && process.definitionId === 388 && process.entityState === 'StartEvent_1'
+      && process.estadoId === 'Task_1d9491f' && process.isApproved === false && process.finalizado === false;
+  };
+  const requestHasCheque = (request) => request.checkNum !== null && request.checkNum !== undefined && String(request.checkNum).trim() !== '';
+  const revertedRequestHistory = (requests, payoutId) => {
+    if (!requests.length) return true;
+    let sum = 0, positive = false, negative = false;
+    return requests.every((request) => {
+      const ids = paymentRequestPayoutIds(request), amount = request.total;
+      const noProcess = request.processId == null && request.Process == null;
+      if (request.entityState !== 'REVERTED' || requestHasCheque(request)
+        || !(noProcess || requestTreasuryUnexecuted(request)) || ids.length !== 1 || ids[0] !== Number(payoutId)
+        || typeof amount !== 'number' || !Number.isFinite(amount) || amount === 0) return false;
+      sum += amount; positive = positive || amount > 0; negative = negative || amount < 0; return true;
+    }) && positive && negative && Math.abs(sum) < 0.000001;
+  };
+  const requestReversalIssue = (claim, requests, requestId) => {
+    if (!claim || !canEdit(claim) || !positiveIdText(requestId) || !Array.isArray(requests) || !Array.isArray(claim.Payouts))
+      return 'No se puede verificar la solicitud.';
+    try {
+      const payoutIds = claim.Payouts.map((row) => row && positiveIdText(row.id));
+      if (payoutIds.some((id) => !id) || new Set(payoutIds).size !== payoutIds.length
+        || claim.Payouts.some((row) => Number(row.claimId) !== Number(claim.id)))
+        return 'Los movimientos no tienen una identidad única del siniestro actual.';
+      const ids = new Set();
+      requests.forEach((request) => {
+        if (!request || !positiveIdText(request.id) || ids.has(String(request.id)) || Number(request.claimId) !== Number(claim.id))
+          throw new Error('La lista de solicitudes es incompatible.');
+        ids.add(String(request.id));
+        paymentRequestPayoutIds(request).forEach((id) => {
+          if (claim.Payouts.filter((payout) => Number(payout.id) === id && Number(payout.claimId) === Number(claim.id)).length !== 1)
+            throw new Error('La asociación de la solicitud no es verificable.');
+        });
+      });
+      const request = requests.find((row) => Number(row.id) === Number(requestId));
+      if (!request) return 'La solicitud ya no existe.';
+      const references = paymentRequestPayoutIds(request);
+      if (references.length !== 1) return 'Las solicitudes de varios movimientos deben gestionarse en el módulo nativo.';
+      const payout = claim.Payouts.find((row) => Number(row.id) === references[0] && Number(row.claimId) === Number(claim.id));
+      if (payout.reserveType !== 'IN' || !(numericValue(payout.payed) > 0) || ![1, '1', 3, '3'].includes(payout.status))
+        return 'La solicitud no corresponde a un pago aplicado verificable de este siniestro.';
+      if (request.entityState !== 'StartEvent_1' || !requestTreasuryUnexecuted(request) || requestHasCheque(request)
+        || typeof request.total !== 'number' || !Number.isFinite(request.total) || request.total <= 0)
+        return 'Solicitud ejecutada, con cheque, terminal o estado de tesorería no verificado. No se puede revertir.';
+      if (payout.requestedAmount !== undefined && (typeof payout.requestedAmount !== 'number'
+        || !Number.isFinite(payout.requestedAmount) || payout.requestedAmount < request.total
+        || payout.requestedAmount > numericValue(payout.payed)))
+        return 'El monto solicitado del movimiento es incompatible. Refresque y solicite revisión antes de revertir.';
+      const others = requests.filter((row) => row !== request && paymentRequestPayoutIds(row).includes(references[0]));
+      if (!revertedRequestHistory(others, references[0])) return 'Existe otra solicitud activa o no verificable para este movimiento.';
+      return '';
+    } catch (error) { return error.message; }
+  };
+  const paymentActionIssue = (claim, requests, payoutId, action) => {
+    if (!claim || !canEdit(claim) || !positiveIdText(payoutId) || !['CANCEL', 'REVERT'].includes(action)
+      || !Array.isArray(claim.Payouts) || !Array.isArray(requests)) return 'No se puede validar esta operación de Pagos.';
+    const payouts = claim.Payouts, ids = payouts.map((row) => row && positiveIdText(row.id));
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) return 'Los movimientos no tienen una identidad única.';
+    const payout = payouts.find((row) => Number(row.id) === Number(payoutId));
+    if (!payout || Number(payout.claimId) !== Number(claim.id) || payout.reserveType !== 'IN' || !(numericValue(payout.payed) > 0)) {
+      return 'Seleccione un movimiento de Pagos del siniestro actual; no una reserva ni un gasto.';
+    }
+    const linked = [], requestIds = new Set(); let uncertain = '';
+    requests.forEach((request) => {
+      try {
+        if (!request || !positiveIdText(request.id) || requestIds.has(String(request.id))
+          || Number(request.claimId) !== Number(claim.id)) throw new Error('La lista de solicitudes del siniestro es incompatible.');
+        requestIds.add(String(request.id));
+        const references = paymentRequestPayoutIds(request);
+        if (references.some((id) => !payouts.some((row) => Number(row.id) === id && Number(row.claimId) === Number(claim.id)))) {
+          throw new Error('Una solicitud tiene asociaciones de movimiento no verificables.');
+        }
+        if (references.includes(Number(payoutId))) linked.push(request);
+      } catch (error) { uncertain = error.message; }
+    });
+    // Neither an earlier request nor a terminal label can hide an executed process or issued cheque.
+    if (linked.some((request) => request.entityState === 'EXECUTED'
+      || request.Process && request.Process.entityState === 'EXECUTED'
+      || request.checkNum !== null && request.checkNum !== undefined && String(request.checkNum).trim() !== '')) {
+      return 'Operación bloqueada: solicitud ejecutada o cheque asignado. No se puede anular ni revertir este movimiento.';
+    }
+    if (uncertain) return uncertain;
+    if (payout.requestedAmount !== undefined && (typeof payout.requestedAmount !== 'number'
+      || !Number.isFinite(payout.requestedAmount) || payout.requestedAmount !== 0))
+      return 'El movimiento conserva un monto solicitado. Revise las solicitudes y sus compensaciones antes de anularlo o revertirlo.';
+    if (linked.length && !(action === 'REVERT' && revertedRequestHistory(linked, payoutId))) return 'El movimiento tiene una solicitud asociada (' + linked.map((request) => request.id).join(', ')
+      + '). Revise y revierta primero la solicitud desde su detalle si su estado lo permite. Las solicitudes creadas no se eliminan.';
+    if (!(action === 'CANCEL' ? [0, '0'] : [1, '1']).includes(payout.status)) {
+      return action === 'CANCEL' ? 'Solo se puede anular un pago pendiente de aprobación (estado 0).'
+        : 'Solo se puede revertir un pago aprobado (estado 1).';
+    }
+    return '';
+  };
+  const paymentMovementStateLabel = (status) => {
+    const labels = { 0: 'Pendiente de aprobación', 1: 'Aprobado', 2: 'Revertido', 3: 'Aplicado a solicitud' };
+    return status !== null && status !== undefined && status !== '' && typeof status !== 'boolean'
+      && labels[status] || 'Estado no verificado';
+  };
   const normalizePayoutRows = (claim, reserveType) => {
     if (!claim) return [];
     const requestedReserveType = String(reserveType || '').trim().toUpperCase();
@@ -1531,7 +1652,7 @@
       if (!current()) return false;
       const rules = affectedRuleMap(config, claim), saved = [], keys = new Set();
       associations.forEach((row) => {
-        if (!affectedId(row[0])) throw new Error('Asociación con reclamo inválido.');
+        if (!affectedId(row[0])) throw new Error('Asociación con siniestro inválido.');
         if (Number(row[0]) !== Number(claim.id)) return;
         if (row.slice(1, 5).some((id) => !affectedId(id)) || Number(row[1]) !== Number(policyId)
           || !coverageRowsRef.current.some((coverage) => coverage.id === Number(row[2]))
@@ -1707,6 +1828,50 @@
       return complete;
     });
   };
+  // Remote form names are dynamic; resolve the two known business labels, never guessed field IDs.
+  const affectedLabelKey = (label) => String(label || '').replace(/<[^>]*>/g, ' ')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const collectiveDeathFields = (claim, object) => {
+    if (String(claim && claim.Policy && claim.Policy.lob || '') !== '20'
+      || affectedLabelKey(object && object.description) !== 'persona asegurada colectivo') return null;
+    const fields = object && Array.isArray(object.fields) ? object.fields : [];
+    return [
+      { label: 'fecha de fallecimiento', labels: ['f fallecimiento', 'fecha fallecimiento', 'fecha de fallecimiento'] },
+      { label: 'causa de fallecimiento', labels: ['causa fallecimiento', 'causa de fallecimiento'] }
+    ].map((spec) => {
+      const matches = fields.filter((field) => field && spec.labels.includes(affectedLabelKey(field.label)));
+      const field = matches.length === 1 && matches[0].name
+        && fields.filter((candidate) => candidate && candidate.name === matches[0].name).length === 1 ? matches[0] : null;
+      return { label: spec.label, field };
+    });
+  };
+  const prepareAffectedFormFields = (claim, object) => {
+    const deathFields = collectiveDeathFields(claim, object);
+    const names = deathFields ? deathFields.filter((item) => item.field).map((item) => item.field.name) : [];
+    return (object.fields || []).map((field) => names.includes(field.name)
+      ? Object.assign({}, field, { required: false, label: String(field.label || '').replace(/\*/g, '') }) : Object.assign({}, field));
+  };
+  const applyOptionalDeathControls = (claim, object, container) => {
+    const fields = collectiveDeathFields(claim, object);
+    const names = fields ? fields.filter((item) => item.field).map((item) => item.field.name) : [];
+    if (container && names.length) Array.prototype.forEach.call(container.querySelectorAll('input, select, textarea'), (control) => {
+      if (!names.includes(control.name)) return;
+      control.required = false;
+      control.removeAttribute('required');
+      control.setAttribute('aria-required', 'false');
+      control.setAttribute('data-oa-skip-validation', 'true');
+    });
+    return names;
+  };
+  const collectiveDeathPaymentError = (claim, object) => {
+    const fields = collectiveDeathFields(claim, object);
+    if (!fields) return '';
+    if (fields.some((item) => !item.field)) return 'No se pudieron identificar los campos de fallecimiento del objeto afectado. Revise su formulario antes de registrar el pago.';
+    const missing = fields.filter((item) => !Array.isArray(item.field.userData)
+      || !item.field.userData.some((value) => value !== null && value !== undefined && String(value).trim() !== '')).map((item) => item.label);
+    return missing.length ? 'El objeto afectado seleccionado no tiene ' + missing.join(' y ')
+      + '. Complete estos datos en Objeto afectado para registrar el pago.' : '';
+  };
   const openAffectedFormModal = (coverageId, entry, selectedRule) => {
     const claim = currentClaimRef.current;
     const configured = affected.rules[Number(coverageId)] || [];
@@ -1753,10 +1918,17 @@
       fields = modal.renderer && Array.isArray(modal.renderer.userData)
         ? JSON.parse(JSON.stringify(modal.renderer.userData)) : JSON.parse(JSON.stringify(modal.fields));
       const container = document.getElementById('resumenAffectedObjectForm');
+      const optionalNames = applyOptionalDeathControls(claim, modal, container);
+      // Keep remote schema metadata intact; optionality is local to saving this view.
+      fields = fields.map((field) => {
+        const original = modal.fields.find((item) => item.name === field.name);
+        return original && optionalNames.includes(field.name)
+          ? Object.assign({}, field, { required: original.required, label: original.label }) : field;
+      });
       const configuredInvalid = [];
       if (container) {
         (modal.fields || fields).forEach((field) => {
-          if (!field || !field.required) return;
+          if (!field || !field.required || optionalNames.includes(field.name)) return;
           const controls = Array.prototype.filter.call(container.querySelectorAll('input, select, textarea'), (control) => control.name === field.name);
           const visible = controls.filter((control) => {
             const group = control.closest('.form-group');
@@ -1805,8 +1977,8 @@
     const current = () => affectedCurrent(claim) && affected.write === write;
     return repositoryRequest('RepoClaim', claimReadPayload(Number(claim.id)), undefined, current).then((result) => {
       if (!current()) return false;
-      const fresh = responseRows(result, 'el reclamo').find((row) => row && Number(row.id) === Number(claim.id));
-      if (!fresh) throw new Error('No se encontro el reclamo antes de guardar el objeto afectado.');
+      const fresh = responseRows(result, 'el siniestro').find((row) => row && Number(row.id) === Number(claim.id));
+      if (!fresh) throw new Error('No se encontro el siniestro antes de guardar el objeto afectado.');
       const instances = readAffectedFormInstances(fresh.jCustomForms);
       const index = modal.key ? instances.findIndex((item) => item.key === modal.key) : -1;
       if (modal.key && index < 0) throw new Error('El objeto afectado fue modificado por otra sesion.');
@@ -2235,7 +2407,7 @@ END CATCH;`;
 
   const changeActiveTab = (key) => {
     if (newClaimMode && key !== 'general') {
-      setError('Cree el reclamo antes de acceder a las demás pestañas.');
+      setError('Cree el siniestro antes de acceder a las demás pestañas.');
       return;
     }
     setActiveTab(key);
@@ -2273,7 +2445,7 @@ END CATCH;`;
     const claim = currentClaimRef.current;
     if (!claim || !canEdit(claim) || !recoveryClaimCurrent(claim) || recovery.write
       || !recovery.typesLoaded || !recovery.types.length) {
-      if (claim && !canEdit(claim)) setRecoveryError('Debe reabrir el reclamo antes de registrar una recuperación.');
+      if (claim && !canEdit(claim)) setRecoveryError('Debe reabrir el siniestro antes de registrar una recuperación.');
       return Promise.resolve(false);
     }
     if (recoveryBlocked(claim)) {
@@ -2387,7 +2559,7 @@ END CATCH;`;
       || recovery.form !== form || form.claim !== claim || !form.currenciesLoaded || !recovery.typesLoaded
       || recoveryBlocked(claim)) {
       setRecoveryError(claim && !canEdit(claim)
-        ? 'Debe reabrir el reclamo antes de registrar una recuperación.'
+        ? 'Debe reabrir el siniestro antes de registrar una recuperación.'
         : 'La recuperación ya no está disponible para registrar.');
       return Promise.resolve(false);
     }
@@ -2432,7 +2604,7 @@ END CATCH;`;
   const readFinancialObjects = (claim, coverageId) => {
     if (!affectedCurrent(claim) || !affectedId(coverageId) || !claim.Policy
       || !(claim.Policy.Coverages || []).some((row) => Number(row.id) === Number(coverageId))) {
-      return Promise.reject(new Error('El reclamo o la cobertura cambió. Recargue la información.'));
+      return Promise.reject(new Error('El siniestro o la cobertura cambió. Recargue la información.'));
     }
     try {
       const objects = readAffectedFormInstances(claim.jCustomForms)
@@ -2459,6 +2631,15 @@ END CATCH;`;
       return ok;
     });
   };
+  const selectFinancialObject = (value, section) => {
+    financialObjects.selectedId = value == null ? null : String(value);
+    if (!financialObjects.loading && financialObjects.rows.length) {
+      const selected = financialObjects.rows.find((object) => object.key === financialObjects.selectedId);
+      financialObjects.error = section === 'payments' && selected
+        ? collectiveDeathPaymentError(currentClaimRef.current, selected) : '';
+    }
+    notifyFinancialObjects();
+  };
   const selectFinancialCoverage = (coverageId) => {
     setPaymentCoverageId(coverageId);
     return loadFinancialObjects(coverageId);
@@ -2482,7 +2663,7 @@ END CATCH;`;
   const buildFinancialPaymentEntity = (claim, coverageId, amount, concept, bucket) => {
     const entity = buildReserveEntity(claim, coverageId, 'INCREASE', bucket, amount, concept);
     const coverage = normalizeCoverageRows(claim).find((row) => row.id === Number(coverageId));
-    if (!coverage) throw new Error('La cobertura seleccionada no pertenece al reclamo.');
+    if (!coverage) throw new Error('La cobertura seleccionada no pertenece al siniestro.');
     const available = paymentSpendingAvailable(claim, coverageId, bucket);
     if (!Number.isFinite(available) || entity.amount > available) {
       throw new Error('El monto supera el saldo reservado disponible; registre primero la reserva en Cobertura / Reservas.');
@@ -2510,7 +2691,7 @@ END CATCH;`;
     }
     const operationClaimId = currentClaimRef.current ? Number(currentClaimRef.current.id) : null;
     if (!operationClaimId || routeClaimId() !== operationClaimId) {
-      reportError('El reclamo cambió. Recargue la información antes de continuar.');
+      reportError('El siniestro cambió. Recargue la información antes de continuar.');
       return null;
     }
     const operationId = paymentOperationRef.current + 1;
@@ -2529,6 +2710,93 @@ END CATCH;`;
     return outcome;
   };
 
+  const readPaymentActionSnapshot = (claim, current) => Promise.all([
+    repositoryRequest('RepoClaim', { operation: 'GET', filter: 'id=' + Number(claim.id), include: ['Payouts'], page: 0, size: 1 }, undefined, current),
+    repositoryRequest('RepoClaimPayment', { operation: 'GET', filter: 'claimId=' + Number(claim.id), include: ['Process'], size: 0 }, undefined, current)
+  ]).then((results) => {
+    if (!current()) throw new Error('El siniestro cambió. Recargue la información.');
+    if (results.some((result) => !result || result.ok !== true || !Array.isArray(result.outData))) {
+      throw new Error('No fue posible verificar los movimientos y todas sus solicitudes.');
+    }
+    const claims = results[0].outData;
+    if (claims.length !== 1 || Number(claims[0].id) !== Number(claim.id) || !Array.isArray(claims[0].Payouts)
+      || Number(results[1].total) > results[1].outData.length) throw new Error('La consulta financiera está incompleta.');
+    return { claim: claims[0], requests: results[1].outData };
+  });
+  const requestPaymentReversal = (requestId) => requestPaymentMovementAction(requestId, 'REQUEST_REVERT');
+  const requestPaymentMovementAction = (payoutId, action) => {
+    const claim = currentClaimRef.current;
+    if (!claim || !canEdit(claim) || !positiveIdText(payoutId) || !['CANCEL', 'REVERT', 'REQUEST_REVERT'].includes(action)
+      || !Modal || typeof Modal.confirm !== 'function') return Promise.resolve(false);
+    const context = startPaymentOperation(setPaymentError);
+    if (!context) return Promise.resolve(false);
+    const current = () => mountedRef.current && currentClaimRef.current === claim && canEdit(claim)
+      && routeClaimId() === context.claimId && paymentOperationRef.current === context.operationId;
+    const validate = (snapshot) => {
+      const issue = action === 'REQUEST_REVERT' ? requestReversalIssue(snapshot.claim, snapshot.requests, payoutId)
+        : paymentActionIssue(snapshot.claim, snapshot.requests, payoutId, action);
+      if (issue) throw new Error(issue);
+      return snapshot;
+    };
+    return readPaymentActionSnapshot(claim, current).then(validate).then(() => {
+      if (!current()) return false;
+      return new Promise((resolve) => {
+        let handled = false;
+        let verifiedRequest = null;
+        let verifiedPayout = null;
+        Modal.confirm({
+          title: action === 'REQUEST_REVERT' ? '¿Revertir la solicitud #' + Number(payoutId) + '?' : (action === 'CANCEL' ? '¿Anular' : '¿Revertir') + ' el movimiento de pago #' + Number(payoutId) + '?',
+          content: 'Siniestro #' + context.claimId + (action === 'REQUEST_REVERT'
+            ? '. Se conservará la solicitud y se generará un registro negativo. No se revertirá automáticamente el movimiento de pago.'
+            : '. Se conservará el registro como Revertido, sin eliminarlo. Se volverán a verificar el estado y las solicitudes.'),
+          okText: action === 'CANCEL' ? 'Anular' : 'Revertir', cancelText: 'Cancelar',
+          onCancel: () => { if (!handled) { handled = true; resolve(false); } },
+          onOk: () => {
+            if (handled) return Promise.resolve(false);
+            handled = true;
+            // Re-read after confirmation. The backend still owns atomic state/race protection.
+            return readPaymentActionSnapshot(claim, current).then(validate).then((snapshot) => {
+              if (action === "REQUEST_REVERT") {
+                const request = snapshot.requests.find((row) => Number(row.id) === Number(payoutId));
+                verifiedRequest = { payoutId: paymentRequestPayoutIds(request)[0], total: request.total };
+              } else {
+                verifiedPayout = Object.assign({}, snapshot.claim.Payouts.find((row) => Number(row.id) === Number(payoutId)));
+              }
+              if (!current()) throw new Error('El siniestro cambió.');
+              return action === 'REQUEST_REVERT'
+                ? repositoryRequest('RevertClaimPayment', { claimPaymentId: Number(payoutId) }, undefined, current)
+                : repositoryRequest('UndoPayment', { lifeCoveragePayoutId: Number(payoutId) }, undefined, current);
+            }).then((result) => {
+              if (!current()) throw new Error('El siniestro cambió; verifique el resultado antes de repetir la operación.');
+              if (!result || result.ok !== true) throw new Error(result && result.msg || 'El servidor no confirmó la operación.');
+              return readPaymentActionSnapshot(claim, current);
+            }).then((snapshot) => {
+              const matches = snapshot.claim.Payouts.filter((row) => Number(row.id) === Number(payoutId));
+              let confirmed = !!verifiedPayout && matches.length === 1 && [2, '2'].includes(matches[0].status)
+                && ['claimId', 'lifePolicyId', 'lifeCoverageId', 'reserveType', 'payed', 'reserved', 'requestedAmount']
+                  .every((key) => matches[0][key] === verifiedPayout[key]);
+              if (action === 'REQUEST_REVERT') {
+                const requests = snapshot.requests.filter((row) => Number(row.id) === Number(payoutId));
+                const references = requests.length === 1 ? paymentRequestPayoutIds(requests[0]) : [];
+                confirmed = !!verifiedRequest && references.length === 1 && references[0] === verifiedRequest.payoutId
+                  && requests[0].total === verifiedRequest.total && requests[0].entityState === 'REVERTED'
+                  && paymentActionIssue(snapshot.claim, snapshot.requests, references[0], 'REVERT') === '';
+              }
+              if (!confirmed) throw new Error('El resultado no pudo verificarse. Refresque antes de repetir la operación.');
+              if (!current()) return false;
+              applyFinancialSnapshot(claim, Object.assign({}, snapshot.claim, { Payments: snapshot.requests }), context.claimId, true);
+              setPaymentRequestDetail(null);
+              setPaymentError('');
+              if (A.message && A.message.success) A.message.success(action === 'REQUEST_REVERT' ? 'Solicitud revertida. El movimiento de pago no se ha revertido.' : 'Movimiento de pago revertido.');
+              return true;
+            }).catch((error) => { if (current()) setPaymentError(error.message); return false; })
+              .then((outcome) => { resolve(outcome); return outcome; });
+          }
+        });
+      });
+    }).catch((error) => { if (current()) setPaymentError(error.message); return false; })
+      .then((outcome) => finishPaymentOperation(context, outcome));
+  };
   const approvePaymentMovement = (payoutId, bucket) => {
     const claim = currentClaimRef.current;
     const reportError = bucket === 'EX' ? setExpenseError : setPaymentError;
@@ -2537,7 +2805,7 @@ END CATCH;`;
       reportError('El movimiento no tiene una identidad única. Refresque la vista.'); return Promise.resolve(false);
     }
     if (!mountedRef.current || !claim || !canEdit(claim) || !payout || Number(payout.claimId) !== Number(claim.id)
-      || payout.reserveType !== bucket || !(numericValue(payout.payed) > 0) || [0, 2].indexOf(Number(payout.status)) === -1) {
+      || payout.reserveType !== bucket || !(numericValue(payout.payed) > 0) || !(bucket === 'IN' ? [0, '0'] : [0, '0', 2, '2']).includes(payout.status)) {
       reportError('Seleccione un movimiento de pago pendiente de aprobación.'); return Promise.resolve(false);
     }
     const context = startPaymentOperation(reportError);
@@ -2574,11 +2842,13 @@ END CATCH;`;
     const objectClaim = currentClaimRef.current;
     const selectedObjectId = financialObjects.selectedId;
     return readFinancialObjects(objectClaim, entity.lifeCoverageId).then((objects) => {
-      if (!affectedCurrent(objectClaim) || paymentOperationRef.current !== context.operationId) throw new Error('El reclamo cambió. Recargue la información.');
+      if (!affectedCurrent(objectClaim) || paymentOperationRef.current !== context.operationId) throw new Error('El siniestro cambió. Recargue la información.');
       const selected = objects.find((row) => row.key === selectedObjectId);
       if (financialObjects.claim !== objectClaim || financialObjects.coverageId !== Number(entity.lifeCoverageId) || !selected) {
         throw new Error('Seleccione un objeto afectado de esta cobertura antes de registrar el pago.');
       }
+      const deathError = collectiveDeathPaymentError(objectClaim, selected);
+      if (deathError) throw new Error(deathError);
       entity.jAffectedObjects = JSON.stringify(selected);
       return repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity });
     })
@@ -2632,7 +2902,7 @@ END CATCH;`;
     const objectClaim = currentClaimRef.current;
     const selectedObjectId = financialObjects.selectedId;
     return readFinancialObjects(objectClaim, entity.lifeCoverageId).then((objects) => {
-      if (!affectedCurrent(objectClaim) || paymentOperationRef.current !== context.operationId) throw new Error('El reclamo cambió. Recargue la información.');
+      if (!affectedCurrent(objectClaim) || paymentOperationRef.current !== context.operationId) throw new Error('El siniestro cambió. Recargue la información.');
       const selected = objects.find((row) => row.key === selectedObjectId);
       if (financialObjects.claim !== objectClaim || financialObjects.coverageId !== Number(entity.lifeCoverageId) || !selected) {
         throw new Error('Seleccione un objeto afectado de esta cobertura antes de registrar el gasto.');
@@ -2794,7 +3064,7 @@ END CATCH;`;
         session.methods = result.outData.filter((row) => row && (!row.module || row.module === 'PAYMENT')
           && ['cheque', 'transferencia cuenta a cuenta'].indexOf(String(row.name || '').trim().toLowerCase()) !== -1);
         if (session.methods.some((row) => !row.code || !row.name)) throw new Error('Catálogo de métodos de pago incompatible.');
-        if (session.method && !session.methods.some((row) => row.code === session.method)) throw new Error('El método de pago del reclamo no está disponible.');
+        if (session.method && !session.methods.some((row) => row.code === session.method)) throw new Error('El método de pago del siniestro no está disponible.');
       }), repositoryRequest('RepoPaymentTypeCatalog', { operation: 'GET' }).then((result) => {
         if (!paymentCatalogCurrent(session)) return;
         if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar los tipos de pago.');
@@ -2830,7 +3100,7 @@ END CATCH;`;
     const policy = session.claim.Policy;
     const currency = String(policy.currency || '').trim().toUpperCase();
     return Promise.resolve().then(() => {
-      if (!/^[A-Z]{3}$/.test(currency)) throw new Error('La moneda del reclamo no es válida.');
+      if (!/^[A-Z]{3}$/.test(currency)) throw new Error('La moneda del siniestro no es válida.');
       session.policyAccounts = session.type === 'BEN' && Number(policy.holderId) === session.contactId
         && !(session.config.Claim && session.config.Claim.beneficiaryAllAccounts);
       const filter = 'holderId=' + session.contactId + " AND currency='" + currency + "'"
@@ -2872,7 +3142,7 @@ END CATCH;`;
         if (!paymentCatalogCurrent(session) || session.accountVersion !== version) return;
         if (!result || result.ok !== true || !result.outData) throw new Error('No se pudo resolver el método de pago.');
         const code = result.outData.paymentMethodCode || null;
-        if (session.claim.paymentMethodCode && code !== session.claim.paymentMethodCode) throw new Error('El método calculado no coincide con el método del reclamo.');
+        if (session.claim.paymentMethodCode && code !== session.claim.paymentMethodCode) throw new Error('El método calculado no coincide con el método del siniestro.');
         if (code && !session.methods.some((row) => row.code === code)) throw new Error('El método calculado no está disponible.');
         session.method = code;
       }).catch((caught) => { if (paymentCatalogCurrent(session) && session.accountVersion === version) session.error = caught.message; })
@@ -2947,7 +3217,8 @@ END CATCH;`;
       managementType: session.managementType, amount: session.amount, reference: reference } : {};
   };
 
-  const nativePaymentGuidance = (paid, status) => {
+  const nativePaymentGuidance = (paid, status, bucket = 'IN') => {
+    if (bucket === 'IN' && [2, '2'].includes(status)) return 'Este pago está revertido. Se conserva como historial y no puede volver a aprobarse.';
     if (!(Number(paid) > 0)) return 'Registre el movimiento con Registrar pago; las reservas generales se administran en Cobertura / Reservas.';
     if ([0, 2].indexOf(Number(status)) !== -1) return 'Seleccione Aprobar pago para habilitar la solicitud de cheque.';
     if (Number(status) !== 1) return 'Este movimiento no está disponible para solicitar un cheque.';
@@ -2957,7 +3228,7 @@ END CATCH;`;
     if (!payout || !(claim.Payouts || []).some((row) => row === payout)
       || (claim.Payouts || []).filter((row) => Number(row.id) === Number(payout.id)).length !== 1) throw new Error('El movimiento seleccionado no está disponible. Refresque la vista.');
     if (payout.currency && payout.currency !== claim.Policy.currency) throw new Error('Los pagos en otra moneda requieren liquidación en la vista nativa.');
-    const guidance = nativePaymentGuidance(payout.payed, payout.status);
+    const guidance = nativePaymentGuidance(payout.payed, payout.status, payout.reserveType);
     if (guidance) throw new Error(guidance);
     const movements = (claim.Payouts || []).filter((row) => row && Number(row.claimId) === Number(claim.id) && Number(row.lifeCoverageId) === Number(payout.lifeCoverageId)
       && [1, 3].indexOf(Number(row.status)) !== -1);
@@ -3005,9 +3276,9 @@ END CATCH;`;
   };
 
   const buildClaimPaymentPayload = (claim, payout, form, reserveType) => {
-    if (!claim || !canEdit(claim)) throw new Error('El reclamo no permite registrar pagos.');
+    if (!claim || !canEdit(claim)) throw new Error('El siniestro no permite registrar pagos.');
     const claimId = numericValue(claim.id);
-    if (!Number.isSafeInteger(claimId) || claimId <= 0) throw new Error('El identificador del reclamo no es válido.');
+    if (!Number.isSafeInteger(claimId) || claimId <= 0) throw new Error('El identificador del siniestro no es válido.');
     const requestedReserveType = String(reserveType || 'IN').trim().toUpperCase();
     if (!payout || Number(payout.claimId) !== claimId
       || (requestedReserveType !== 'IN' && requestedReserveType !== 'EX')
@@ -3017,7 +3288,7 @@ END CATCH;`;
     }
     const coverage = claim.Policy && Array.isArray(claim.Policy.Coverages)
       ? claim.Policy.Coverages.find((item) => item && Number(item.id) === Number(payout.lifeCoverageId)) : null;
-    if (!coverage) throw new Error('La cobertura de la reserva no pertenece al reclamo.');
+    if (!coverage) throw new Error('La cobertura de la reserva no pertenece al siniestro.');
     let total = nativeSettlementAmount(claim, payout);
     const session = paymentCatalogRef.current;
     if (!session || !paymentCatalogCurrent(session) || session.loading || session.methodsLoading || session.accountLoading
@@ -3053,7 +3324,7 @@ END CATCH;`;
     if (!form || (form.managementType !== 'DIRECT' && !(form.beneficiaryType === 'PRO' && form.managementType === 'SO'))) throw new Error('El tipo de gestión no es válido.');
     const currency = claim.Policy && typeof claim.Policy.currency === 'string'
       ? claim.Policy.currency.trim().toUpperCase() : '';
-    if (!currency) throw new Error('La moneda del reclamo no está disponible.');
+    if (!currency) throw new Error('La moneda del siniestro no está disponible.');
     if (form.paymentMethodCode !== session.method || (session.method && !session.methods.some((row) => row.code === session.method))) throw new Error('El método de pago no es válido.');
     const coverageId = Number(coverage.id);
     return {
@@ -3285,7 +3556,7 @@ END CATCH;`;
     setSelectedCoverageId((currentId) => nextCoverageRows.some((row) => row.id === Number(currentId))
       ? Number(currentId) : nextCoverageRows.length ? nextCoverageRows[0].id : null);
     const indemnities = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
-      && String(row.reserveType || '').trim().toUpperCase() === 'IN');
+      && String(row.reserveType || '').trim().toUpperCase() === 'IN' && ![2, '2'].includes(row.status));
     const expenseRows = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
       && String(row.reserveType || '').trim().toUpperCase() === 'EX');
     const total = (rows, field) => roundMoney(rows.reduce((sum, row) => {
@@ -3317,7 +3588,7 @@ END CATCH;`;
         || routeClaimId() !== Number(requestedClaimId)) return false;
       const fresh = responseRows(result, 'las reservas').find((row) => row
         && Number(row.id) === Number(requestedClaimId));
-      if (!fresh) throw new Error('No se pudieron actualizar las reservas del reclamo.');
+      if (!fresh) throw new Error('No se pudieron actualizar las reservas del siniestro.');
       applyFinancialSnapshot(claim, fresh, requestedClaimId, false);
       return true;
     });
@@ -3335,7 +3606,7 @@ END CATCH;`;
         || routeClaimId() !== Number(requestedClaimId)) return false;
       const fresh = responseRows(result, 'los movimientos financieros').find((row) => row
         && Number(row.id) === Number(requestedClaimId));
-      if (!fresh) throw new Error('No se pudo actualizar los movimientos financieros del reclamo.');
+      if (!fresh) throw new Error('No se pudo actualizar los movimientos financieros del siniestro.');
       applyFinancialSnapshot(claim, fresh, requestedClaimId, true);
       return true;
     });
@@ -3541,7 +3812,7 @@ END CATCH;`;
     let stored = outer[EXTRA_SECTION];
     if (typeof stored === 'string') stored = JSON.parse(stored);
     if (stored == null) stored = [];
-    if (!Array.isArray(stored)) throw new Error('Información adicional del reclamo no compatible.');
+    if (!Array.isArray(stored)) throw new Error('Información adicional del siniestro no compatible.');
     const seen = {};
     stored.forEach((f) => {
       if (!f || typeof f.name !== 'string' || seen[f.name]) throw new Error('Campos adicionales duplicados o no válidos.');
@@ -3986,10 +4257,10 @@ END CATCH;`;
     try {
       outer = typeof raw === 'string' ? JSON.parse(raw) : raw;
     } catch (failure) {
-      throw new Error('El formulario personalizado del reclamo no es compatible.');
+      throw new Error('El formulario personalizado del siniestro no es compatible.');
     }
     if (!outer || typeof outer !== 'object' || Array.isArray(outer)) {
-      throw new Error('El formulario personalizado del reclamo no es compatible.');
+      throw new Error('El formulario personalizado del siniestro no es compatible.');
     }
     const section = outer[CLAIM_CUSTOM_SECTION];
     if (section === null || section === undefined || section === '') {
@@ -3999,10 +4270,10 @@ END CATCH;`;
     try {
       fields = typeof section === 'string' ? JSON.parse(section) : section;
     } catch (failure) {
-      throw new Error('El formulario personalizado del reclamo no es compatible.');
+      throw new Error('El formulario personalizado del siniestro no es compatible.');
     }
     if (!Array.isArray(fields)) {
-      throw new Error('El formulario personalizado del reclamo no es compatible.');
+      throw new Error('El formulario personalizado del siniestro no es compatible.');
     }
     const seen = {};
     fields.forEach((field) => {
@@ -4153,7 +4424,7 @@ END CATCH;`;
 
   const buildUpdate = (claim, draftValue, touchedFields, formsSnapshot) => {
     if (!canSaveClaim(claim, touchedFields)) {
-      throw new Error('Debe reabrir el reclamo antes de modificar sus datos.');
+      throw new Error('Debe reabrir el siniestro antes de modificar sus datos.');
     }
     if (!draftValue) throw new Error('No hay cambios disponibles para guardar.');
     const entity = serializeEntity(claim);
@@ -4260,7 +4531,7 @@ END CATCH;`;
     if (!values.eventReason || !values.insuredEvent || !values.insuredEvent.code
       || !values.claimType || !values.occurrence || !values.notification
       || typeof values.elegibleCoverages !== 'string' || !values.elegibleCoverages.trim()) {
-      throw new Error('Faltan datos verificados para crear el reclamo.');
+      throw new Error('Faltan datos verificados para crear el siniestro.');
     }
     return {
       lifePolicyId: Number(values.lifePolicyId),
@@ -4568,7 +4839,7 @@ END CATCH;`;
       || !isNewClaim && routeClaimId() !== claimIdValue) return Promise.resolve();
     if (!productCode) {
       clearEventCatalog();
-      setCatalogError('El reclamo no contiene un producto válido para cargar eventos.');
+      setCatalogError('El siniestro no contiene un producto válido para cargar eventos.');
       return Promise.resolve();
     }
     const operationId = catalogOperationRef.current + 1;
@@ -4590,7 +4861,7 @@ END CATCH;`;
       const mappings = parseEventMatrix(strictOutData(results[0], 'tabla de eventos'), productCode);
       if (Object.keys(mappings).length === 0) {
         clearEventCatalog();
-        throw new Error('No hay eventos configurados para el producto del reclamo.');
+        throw new Error('No hay eventos configurados para el producto del siniestro.');
       }
       const reasonByCode = parseReasonCatalog(strictOutData(results[1], 'catálogo de razones'));
       const eventByCode = parseInsuredEventCatalog(strictOutData(results[2], 'catálogo de eventos'));
@@ -4866,7 +5137,7 @@ END CATCH;`;
       return Promise.resolve();
     }
     if (claimStageCode(claim) === stageCode) {
-      setError('El reclamo ya tiene el estado seleccionado.');
+      setError('El siniestro ya tiene el estado seleccionado.');
       return Promise.resolve();
     }
     if (dirtyRef.current) {
@@ -4916,7 +5187,7 @@ END CATCH;`;
     if (!newClaimModeRef.current || !claim || !draftRef.current || !policy) return Promise.resolve();
     if (customFormsStatusRef.current === 'loading' || customFormsStatusRef.current === 'rendering') {
       setActiveTab('custom');
-      setError('Espere a que terminen de cargar los formularios personalizados antes de crear el reclamo.');
+      setError('Espere a que terminen de cargar los formularios personalizados antes de crear el siniestro.');
       return Promise.resolve();
     }
     let entity;
@@ -4941,7 +5212,7 @@ END CATCH;`;
       };
       setNewClaimValidation(invalid);
       if (Object.keys(invalid).some((key) => invalid[key])) {
-        throw new Error('Complete los campos requeridos del reclamo.');
+        throw new Error('Complete los campos requeridos del siniestro.');
       }
       const claimantId = positiveIdText(values.claimantId || claim.claimerId);
       const occurrence = occurrenceIso(Object.assign({}, values, {
@@ -4977,7 +5248,7 @@ END CATCH;`;
       });
     } catch (validationError) {
       setError(validationError && validationError.message
-        ? validationError.message : 'Complete los datos requeridos del reclamo.');
+        ? validationError.message : 'Complete los datos requeridos del siniestro.');
       return Promise.resolve();
     }
     savingRef.current = true;
@@ -4986,13 +5257,13 @@ END CATCH;`;
     return repositoryRequest('RepoClaim', { operation: 'ADD', entity: entity })
       .then((result) => {
         if (!result || result.ok !== true) {
-          throw new Error(result && result.msg ? result.msg : 'No fue posible crear el reclamo.');
+          throw new Error(result && result.msg ? result.msg : 'No fue posible crear el siniestro.');
         }
-        const rows = responseRows(result, 'el reclamo creado');
+        const rows = responseRows(result, 'el siniestro creado');
         const created = rows[0] || result.entity || result.data || result;
         const createdId = Number(created && (created.id || created.claimId));
         if (!Number.isSafeInteger(createdId) || createdId <= 0) {
-          throw new Error('El reclamo fue creado, pero la respuesta no incluyó su identificador.');
+          throw new Error('El siniestro fue creado, pero la respuesta no incluyó su identificador.');
         }
         dirtyRef.current = false;
         touchedRef.current = {};
@@ -5002,7 +5273,7 @@ END CATCH;`;
       })
       .catch((caughtError) => {
         if (mountedRef.current) setError(caughtError && caughtError.message
-          ? caughtError.message : 'No fue posible crear el reclamo.');
+          ? caughtError.message : 'No fue posible crear el siniestro.');
       })
       .then(() => {
         savingRef.current = false;
@@ -5050,13 +5321,13 @@ END CATCH;`;
         if (!mountedRef.current || routeClaimId() !== savingClaimId) {
           throw new Error('La ruta cambió antes de guardar.');
         }
-        const fresh = responseRows(result, 'el reclamo').find((row) =>
+        const fresh = responseRows(result, 'el siniestro').find((row) =>
           row && Number(row.id) === savingClaimId);
-        if (!fresh) throw new Error('No se encontró el reclamo antes de guardar.');
+        if (!fresh) throw new Error('No se encontró el siniestro antes de guardar.');
         const conflict = Object.keys(touched).some((field) =>
           JSON.stringify(touchedClaimValue(original, field))
             !== JSON.stringify(touchedClaimValue(fresh, field)));
-        if (conflict) throw new Error('El reclamo fue modificado por otra sesión. Recargue antes de guardar.');
+        if (conflict) throw new Error('El siniestro fue modificado por otra sesión. Recargue antes de guardar.');
         updatedEntity = buildUpdate(fresh, savingDraft, touched, savingForms);
         return repositoryRequest('RepoClaim', {
           operation: 'UPDATE',
@@ -5066,7 +5337,7 @@ END CATCH;`;
       .then((result) => {
         if (!mountedRef.current || routeClaimId() !== savingClaimId) return;
         if (!result || result.ok !== true) {
-          throw new Error(result && result.msg ? result.msg : 'No fue posible guardar el reclamo.');
+          throw new Error(result && result.msg ? result.msg : 'No fue posible guardar el siniestro.');
         }
         dirtyRef.current = false;
         touchedRef.current = {};
@@ -5115,7 +5386,7 @@ END CATCH;`;
       .catch((caughtError) => {
         if (mountedRef.current && routeClaimId() === savingClaimId) {
           setError(caughtError && caughtError.message
-            ? caughtError.message : 'No fue posible guardar el reclamo.');
+            ? caughtError.message : 'No fue posible guardar el siniestro.');
         }
       })
       .then(() => {
@@ -5152,7 +5423,7 @@ END CATCH;`;
         setValuationWarning('');
         if (!preservingNewClaim) clearLoadedClaim();
         setError(newClaimModeRef.current ? ''
-          : 'Abra el reclamo desde «Ver» en Búsqueda de Reclamos. La dirección debe incluir un claimId válido.');
+          : 'Abra el siniestro desde «Ver» en Búsqueda de Siniestro. La dirección debe incluir un claimId válido.');
       }
       return Promise.resolve();
     }
@@ -5166,9 +5437,9 @@ END CATCH;`;
 
     return claimRequest.then((result) => {
         if (!mountedRef.current || requestId !== requestRef.current || routeClaimId() !== requestedClaimId) return;
-        const claims = responseRows(result, 'el reclamo');
+        const claims = responseRows(result, 'el siniestro');
         const claim = claims.find((row) => row && Number(row.id) === requestedClaimId);
-        if (!claim) throw new Error('No se encontró el reclamo solicitado.');
+        if (!claim) throw new Error('No se encontró el siniestro solicitado.');
         newClaimModeRef.current = false;
         setNewClaimMode(false);
         setNewClaimValidation({});
@@ -5201,7 +5472,7 @@ END CATCH;`;
             applyEventCatalogToDraft(eventCatalogRef.current, nextDraft, claim);
           } else {
             clearEventCatalog();
-            setCatalogError('Los catálogos deben recargarse para el producto del reclamo.');
+            setCatalogError('Los catálogos deben recargarse para el producto del siniestro.');
           }
         }
         const nextStage = claimStageCode(claim);
@@ -5221,7 +5492,7 @@ END CATCH;`;
         setEditable(canEdit(claim));
         const policy = claim.Policy || {};
         if (policy.id != null && claim.lifePolicyId != null && Number(policy.id) !== Number(claim.lifePolicyId)) {
-          throw new Error('La póliza recibida no corresponde al reclamo solicitado.');
+          throw new Error('La póliza recibida no corresponde al siniestro solicitado.');
         }
         const nextCoverageRows = normalizeCoverageRows(claim);
         coverageRowsRef.current = nextCoverageRows;
@@ -5240,7 +5511,7 @@ END CATCH;`;
         if (Array.isArray(claim.Payouts) && currency) {
           const rows = claim.Payouts.filter((row) => row && Number(row.claimId) === requestedClaimId);
           const reserveType = (row) => String(row.reserveType || '').trim().toUpperCase();
-          const indemnityRows = rows.filter((row) => reserveType(row) === 'IN');
+          const indemnityRows = rows.filter((row) => reserveType(row) === 'IN' && ![2, '2'].includes(row.status));
           const expenseRows = rows.filter((row) => reserveType(row) === 'EX');
           const validHeaderAmount = (value) => (typeof value === 'number' || typeof value === 'string')
             && numericValue(value) !== null;
@@ -5321,7 +5592,7 @@ END CATCH;`;
         }
         clearLoadedClaim();
         setError(caughtError && caughtError.message
-          ? caughtError.message : 'No fue posible cargar la información del reclamo.');
+          ? caughtError.message : 'No fue posible cargar la información del siniestro.');
       })
       .then(() => {
         if (mountedRef.current && requestId === requestRef.current) { documentClaimLoadingRef.current = false; setLoading(false); }
@@ -5747,8 +6018,8 @@ END CATCH;`;
   };
   const submitCheckRequest = () => submitClaimPayment(selectedPaymentReserveId, nativePaymentForm(paymentReference));
   const openExpenseCheckRequest = () => {
-    if (!selectedExpense || nativePaymentGuidance(selectedExpense.paid, selectedExpense.status)) {
-      setExpenseError(selectedExpense ? nativePaymentGuidance(selectedExpense.paid, selectedExpense.status) || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
+    if (!selectedExpense || nativePaymentGuidance(selectedExpense.paid, selectedExpense.status, 'EX')) {
+      setExpenseError(selectedExpense ? nativePaymentGuidance(selectedExpense.paid, selectedExpense.status, 'EX') || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
       return;
     }
     openPaymentCatalogs(selectedExpense.coverageId, selectedExpense.id, 'EX');
@@ -5922,7 +6193,7 @@ END CATCH;`;
           </div>)}
         </div>
         <div className="resumen-reinsurance-context">
-          <span>Reclamo: <strong>{displayValue(first.Payout && first.Payout.claimId)}</strong></span>
+          <span>Siniestro: <strong>{displayValue(first.Payout && first.Payout.claimId)}</strong></span>
           <span>Contrato: <strong>{displayValue(first.contractId || (first.Cession && first.Cession.contractId))}</strong></span>
           <span>Línea: <strong>{displayValue(first.lineId || (first.Cession && first.Cession.lineId))}</strong></span>
           <span>Moneda: <strong>{displayValue(currency)}</strong></span>
@@ -5958,20 +6229,26 @@ END CATCH;`;
           <Button size="small" type="primary" disabled={!editable || paymentSaving || config.coverages.length === 0}
             onClick={config.openReserve}>{config.registerLabel}</Button>
           <Popconfirm title="¿Aprobar este movimiento de pago?" okText="Aprobar" cancelText="Cancelar"
-            disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0 || [0, 2].indexOf(Number(config.selected.status)) === -1}
+            disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0 || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}
             onConfirm={() => approvePaymentMovement(config.selectedId, config.key === 'expenses' ? 'EX' : 'IN')}>
             <Button size="small" disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0
-              || [0, 2].indexOf(Number(config.selected.status)) === -1}>Aprobar pago</Button>
+              || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}>Aprobar pago</Button>
           </Popconfirm>
-          <Button size="small" title={config.selected ? nativePaymentGuidance(config.selected.paid, config.selected.status) || undefined : undefined}
+          {config.key === 'payments' ? <React.Fragment>
+            <Button size="small" disabled={!editable || paymentSaving || !config.selected || ![0, '0'].includes(config.selected.status)}
+              onClick={() => requestPaymentMovementAction(config.selectedId, 'CANCEL')}>Anular pago</Button>
+            <Button size="small" disabled={!editable || paymentSaving || !config.selected || ![1, '1'].includes(config.selected.status)}
+              onClick={() => requestPaymentMovementAction(config.selectedId, 'REVERT')}>Revertir pago</Button>
+          </React.Fragment> : null}
+          <Button size="small" title={config.selected ? nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || undefined : undefined}
             disabled={!editable || paymentSaving || !config.selected
-            || !!nativePaymentGuidance(config.selected.paid, config.selected.status) || config.selected.available <= 0}
+            || !!nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || config.selected.available <= 0}
             onClick={config.openCheck}>Solicitud de cheque</Button>
           <Button size="small" loading={sectionRefreshing} disabled={sectionRefreshing || paymentSaving}
             onClick={() => refreshSection(() => config.refresh(), config.errorSetter)}><ReloadOutlinedIcon /> Refrescar</Button>
         </div>
       </div>
-      <small>Solo movimientos del reclamo actual. Disponible corresponde al saldo pendiente de solicitud del movimiento.</small>
+      <small>Solo movimientos del siniestro actual. Disponible corresponde al saldo pendiente de solicitud del movimiento.</small>
       {selectedFinancialIssue(config.selected) ? <div role="alert" className="resumen-reserve-error">{selectedFinancialIssue(config.selected)}</div> : null}
       <div className="resumen-table-wrap"><table className="resumen-data-table">
         <thead><tr><th className="resumen-financial-payment-id">No.</th><th className="resumen-financial-coverage">Cobertura</th><th>Concepto</th>{['payments', 'expenses'].includes(config.key) ? <th className="resumen-financial-affected">Objeto afectado</th> : null}
@@ -5999,12 +6276,12 @@ END CATCH;`;
               </Button> : null}
             </td>
             <td>{displayValue(row.payment && row.payment.reference)}</td>
-            <td>{[0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
+            <td>{config.key === 'payments' ? paymentMovementStateLabel(row.status) : [0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
             <td><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
           </tr>
         )) : <tr><td className="resumen-empty-row" colSpan="12">{config.emptyText}</td></tr>}</tbody>
       </table></div>
-      {config.selected && nativePaymentGuidance(config.selected.paid, config.selected.status) ? <div role="status">{nativePaymentGuidance(config.selected.paid, config.selected.status)}</div> : null}
+      {config.selected && nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') ? <div role="status">{nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN')}</div> : null}
       {!config.reserveOpen && !config.checkOpen && config.error
         ? <div className="resumen-reserve-error">{config.error}</div> : null}
       <Modal title={config.registerTitle} visible={config.reserveOpen} footer={null} destroyOnClose
@@ -6025,7 +6302,7 @@ END CATCH;`;
               placeholder="Seleccione un objeto afectado"
               options={financialObjects.claim === currentClaimRef.current && financialObjects.coverageId === Number(config.coverageId)
                 ? financialObjects.rows.map((object) => ({ value: object.key, label: financialObjectLabel(object) })) : []}
-              onChange={(value) => { financialObjects.selectedId = value == null ? null : String(value); notifyFinancialObjects(); }} />
+              onChange={(value) => selectFinancialObject(value, config.key)} />
             {financialObjects.error ? <div role="alert" className="resumen-reserve-error">{financialObjects.error}</div> : null}
           </div> : null}
           <div className="resumen-reserve-input"><label>Monto</label><Input size="small" inputMode="decimal"
@@ -6138,9 +6415,20 @@ END CATCH;`;
             String(item && item.code || '').trim() === String(payment.paymentMethodCode || '').trim());
           const paymentType = paymentRequestCatalogs.types.find((item) =>
             String(item && item.code || '').trim() === String(payment.paymentType || '').trim());
-          const status = [0, 2].indexOf(Number(detail.status)) !== -1
+          const status = config.key === 'payments'
+            ? [payment.entityState, payment.Process && payment.Process.entityState].filter(Boolean).join(' / ') || 'Estado de solicitud no verificado'
+            : [0, 2].indexOf(Number(detail.status)) !== -1
             ? 'Pendiente de aprobación' : detail.available > 0 ? 'Aprobado — disponible' : 'Aplicado';
           return <div className="resumen-payment-request-detail-grid">
+            {config.key === 'payments' ? <div className="resumen-payment-request-detail-wide">
+              <span>Solicitudes asociadas al movimiento</span>
+              {(currentClaimRef.current.Payments || []).filter((request) => {
+                try { return paymentRequestPayoutIds(request).includes(Number(detail.id)); } catch (error) { return false; }
+              }).map((request) => <div key={request.id}>Solicitud #{request.id} — {displayValue(request.entityState)}{' '}
+                <Button size="small" disabled={!editable || paymentSaving || request.entityState !== 'StartEvent_1'}
+                  onClick={() => requestPaymentReversal(request.id)}>Revertir solicitud #{request.id}</Button>
+              </div>)}
+            </div> : null}
             <div><span>Solicitud</span><strong>{displayValue(detail.checkRequestId)}</strong></div>
             <div><span>Movimiento</span><strong>{displayValue(detail.id)}</strong></div>
             <div><span>Tipo</span><strong>{config.key === 'expenses' ? 'Gasto' : 'Pago'}</strong></div>
@@ -6341,7 +6629,7 @@ END CATCH;`;
         formId: modal.formId
       });
       try {
-      const renderer = $(container).formRender({ formData: modal.fields });
+      const renderer = $(container).formRender({ formData: prepareAffectedFormFields(claim, modal) });
       modal.renderer = renderer;
       let syncTimer = null;
       Array.prototype.forEach.call(container.querySelectorAll('input,select,textarea,button'), (control) => {
@@ -6378,6 +6666,7 @@ END CATCH;`;
         readOnlyObserver.observe(container, { childList: true, subtree: true });
       }
       executeCustomFormLogic(modal.logic, runtime);
+      applyOptionalDeathControls(claim, modal, container);
       cleanup = () => {
         if (readOnlyObserver) readOnlyObserver.disconnect();
         if (syncTimer !== null) runtime.clearTimeout(syncTimer);
@@ -6703,10 +6992,10 @@ END CATCH;`;
     <div ref={shellRef} className="resumen-shell">
       <header className="resumen-header">
         <span className="resumen-header-icon" aria-hidden="true" />
-        <h2 className="resumen-title">Información Resumen del Reclamo
+        <h2 className="resumen-title">Información Resumen de Siniestro
           {!newClaimMode && claimId != null ? ' ' + claimId + '' : ''}</h2>
         {!newClaimMode && claimId != null && claimDetails.claimNumber
-          ? <span className="resumen-header-claim-number">Nº Reclamo {displayValue(claimDetails.claimNumber)}</span> : null}
+          ? <span className="resumen-header-claim-number">Nº Siniestro {displayValue(claimDetails.claimNumber)}</span> : null}
         <ClaimWorkflow key={claimId || 'new'} claim={currentClaimRef.current} loading={loading}
           isCurrent={() => mountedRef.current && routeClaimId() === claimId}
           isDirty={() => dirtyRef.current}
@@ -6720,7 +7009,7 @@ END CATCH;`;
 
       {(loading || error || valuationWarning) ? (
         <div className="resumen-status">
-          {loading ? <div className="resumen-loading"><Spin size="small" /> Cargando información del reclamo...</div> : null}
+          {loading ? <div className="resumen-loading"><Spin size="small" /> Cargando información del siniestro...</div> : null}
           {error ? <Alert type="error" showIcon message={error} /> : null}
           {!loading && !error && valuationWarning
             ? <div className="resumen-recovery-warning">{valuationWarning}</div>
@@ -6729,10 +7018,10 @@ END CATCH;`;
       ) : null}
 
       {newClaimSelectedPolicy ? <Alert type="info" showIcon
-        message={'Póliza seleccionada para nuevo reclamo: ' + displayValue(newClaimSelectedPolicy.code || newClaimSelectedPolicy.id)}
+        message={'Póliza seleccionada para nuevo siniestro: ' + displayValue(newClaimSelectedPolicy.code || newClaimSelectedPolicy.id)}
         description={policySearchLabel(newClaimSelectedPolicy)} /> : null}
 
-      <Modal title="Nuevo reclamo: seleccionar póliza" visible={newClaimModalOpen}
+      <Modal title="Nuevo siniestro: seleccionar póliza" visible={newClaimModalOpen}
         width={1050} destroyOnClose wrapClassName="resumen-new-claim-modal"
         onCancel={() => setNewClaimModalOpen(false)}
         footer={null}>
@@ -6844,7 +7133,7 @@ END CATCH;`;
         </Panel>
       </Collapse>
 
-      <nav className="resumen-tabs" aria-label="Secciones del reclamo">
+      <nav className="resumen-tabs" aria-label="Secciones del siniestro">
         {tabItems.map((tab) => (
           <button type="button" key={tab[0]}
             disabled={newClaimMode && tab[0] !== 'general'}
@@ -6863,10 +7152,10 @@ END CATCH;`;
             <Button size="small" disabled={loading} loading={loading}
               icon={<ReloadOutlinedIcon />} onClick={refreshClaim}>Refrescar</Button>
             <Button size="small" onClick={openNewClaimModal}>
-              <span className="resumen-action-icon" aria-hidden="true">+</span>Nuevo Reclamo
+              <span className="resumen-action-icon" aria-hidden="true">+</span>Nuevo Siniestro
             </Button>
           </div>
-          <span className="resumen-secondary-title">{newClaimMode ? 'Nuevo reclamo' : 'Siniestro No. ' + displayValue(claimId)}</span>
+          <span className="resumen-secondary-title">{newClaimMode ? 'Nuevo Siniestro' : 'Siniestro No. ' + displayValue(claimId)}</span>
         </div>
       ) : null}
 
@@ -7007,7 +7296,7 @@ END CATCH;`;
                 </table></div>}
               </div>
               <div className="resumen-affected-block resumen-affected-registered-block"><h3>Objetos registrados</h3>
-              {!affected.saved.length ? <p>No hay objetos afectados registrados en este reclamo.</p> : <div className="resumen-table-wrap resumen-affected-registered-table-wrap"><table className="resumen-data-table resumen-affected-table">
+              {!affected.saved.length ? <p>No hay objetos afectados registrados en este siniestro.</p> : <div className="resumen-table-wrap resumen-affected-registered-table-wrap"><table className="resumen-data-table resumen-affected-table">
                 <thead><tr><th>Cobertura</th><th>Tipo de objeto</th><th>Referencia</th><th>Información registrada</th><th>Acción</th></tr></thead>
                 <tbody>{affected.saved.map((entry) => <tr key={entry.key}>
                   <td>{(coverageRows.find((row) => row.id === entry.coverageId) || {}).name || 'Cobertura no disponible'}</td>
@@ -7065,7 +7354,7 @@ END CATCH;`;
                     <td className="resumen-cell-number">{formatGridAmount(row.payments)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.expenses)}</td>
                   </tr>
-                )) : <tr><td className="resumen-empty-row" colSpan="11">No hay coberturas disponibles para este reclamo.</td></tr>}</tbody>
+                )) : <tr><td className="resumen-empty-row" colSpan="11">No hay coberturas disponibles para este siniestro.</td></tr>}</tbody>
               </table>
             </div>
 
@@ -7079,7 +7368,7 @@ END CATCH;`;
                     setReserveModalOpen(true);
                   }}>Registrar reserva</Button>
                 <Popconfirm
-                  title="¿Está seguro que desea cerrar todas las reservas del reclamo?"
+                  title="¿Está seguro que desea cerrar todas las reservas del siniestro?"
                   okText="Aceptar" cancelText="Cancelar"
                   placement="topRight"
                   disabled={closeReservesDisabled}
@@ -7168,7 +7457,7 @@ END CATCH;`;
         ) : activeTab === 'payments' ? renderFinancialSection({
           key: 'payments', ariaLabel: 'Pagos del siniestro', sectionTitle: 'Pagos',
           registerLabel: 'Registrar pago', registerTitle: 'Registrar pago', checkTitle: 'Solicitud de cheque',
-          appliedLabel: 'Pagado', emptyText: 'No hay pagos registrados para este reclamo.',
+          appliedLabel: 'Pagado', emptyText: 'No hay pagos registrados para este siniestro.',
           rows: paymentRows, selected: selectedPayment, selectedId: selectedPaymentReserveId,
           select: setSelectedPaymentReserveId, coverages: coverageRows.map((row) => Object.assign({}, row, { available: paymentSpendingAvailable(currentClaimRef.current, row.id, 'IN') })), coverageId: paymentCoverageId,
           setCoverageId: selectFinancialCoverage, amount: paymentAmount, setAmount: setPaymentAmount,
@@ -7186,7 +7475,7 @@ END CATCH;`;
         }) : activeTab === 'expenses' ? renderFinancialSection({
           key: 'expenses', ariaLabel: 'Gastos del siniestro', sectionTitle: 'Gastos',
           registerLabel: 'Registrar gasto', registerTitle: 'Registrar gasto', checkTitle: 'Solicitud de cheque de gasto',
-          appliedLabel: 'Aplicado', emptyText: 'No hay gastos registrados para este reclamo.',
+          appliedLabel: 'Aplicado', emptyText: 'No hay gastos registrados para este siniestro.',
           rows: expenseRows, selected: selectedExpense, selectedId: selectedExpenseReserveId,
           select: setSelectedExpenseReserveId, coverages: expenseCoverageRows, coverageId: expenseCoverageId,
           setCoverageId: selectExpenseFinancialCoverage, amount: expenseAmount, setAmount: setExpenseAmount,
@@ -7227,7 +7516,7 @@ END CATCH;`;
                 {renderRecoveryField('Tipo', <Select size="small" value={recoveryForm.type} options={recovery.types} onChange={(value) => recoveryFormChanged('type', value)} />)}
                 {renderRecoveryField('Cobertura', <Select size="small" value={recoveryForm.coverageId} options={coverageRows.map((row) => ({ value: row.id, label: row.name }))} onChange={(value) => recoveryFormChanged('coverageId', value)} />)}
                 {['buyerId', 'recovererId'].map((field) => renderRecoveryField(field === 'buyerId' ? 'Comprador' : 'Recuperador', <Select size="small" showSearch allowClear filterOption={false} value={recoveryForm[field]} options={recoveryForm[field === 'buyerId' ? 'buyerOptions' : 'recovererOptions']} onSearch={(text) => searchRecoveryContacts(field, text)} onChange={(value) => recoveryFormChanged(field, value)} />, field))}
-                {renderRecoveryField('Inicio', <DatePicker size="small" showTime onChange={(value) => recoveryFormChanged('start', value && typeof value.toISOString === 'function' ? value.toISOString() : undefined)} />)}
+                {renderRecoveryField('Inicio', <DatePicker size="small" format="DD/MM/YYYY" onChange={(value) => recoveryFormChanged('start', value && typeof value.clone === 'function' ? value.clone().startOf('day').toISOString() : undefined)} />)}
                 {renderRecoveryField('Moneda', <Select size="small" value={recoveryForm.currency} options={recovery.currencies.map((row) => ({ value: row.code, label: row.name || row.code }))} onChange={(value) => recoveryFormChanged('currency', value)} />)}
                 {['income', 'expenses'].map((field) => renderRecoveryField(field === 'income' ? 'Ingreso' : 'Gastos', <Input size="small" inputMode="decimal" value={formatMoneyInput(recoveryForm[field])} onChange={(event) => changeMoneyInput(event, (value) => recoveryFormChanged(field, value))} />, field))}
                 {['Retenciones', 'Adiciones'].map((label) => renderRecoveryField(label, <Input size="small" disabled value="0.00" />, label))}
@@ -7257,7 +7546,7 @@ END CATCH;`;
                     onChange={(value) => writeDocument('GENERATE', value)}>
                     {documentTemplates().map((template) => <Select.Option key={template} value={template}>{template}</Select.Option>)}
                   </Select>
-                  {!documentTemplates().length ? <p style={{ margin: '8px 0 0' }}>No hay plantillas habilitadas con una condición compatible para este reclamo.</p> : null}
+                  {!documentTemplates().length ? <p style={{ margin: '8px 0 0' }}>No hay plantillas habilitadas con una condición compatible para este siniestro.</p> : null}
                 </div>}>
                 <Button type="link" disabled={!documents.loaded || documentMutationBlocked()}><DocumentIcon name="generate" />Generar</Button>
               </A.Popover>
@@ -7358,7 +7647,7 @@ END CATCH;`;
             {!customFormsLoading && customFormsError ? <div className="resumen-custom-state"><Alert type="error" showIcon
               message={customFormsError} action={<Button size="small" onClick={() => loadCustomForms(currentClaimRef.current)}>Reintentar</Button>} /></div> : null}
             {!customFormsLoading && !customFormsError && customForms.length === 0
-              ? <div className="resumen-custom-state">No hay formularios personalizados configurados para este reclamo.</div> : null}
+              ? <div className="resumen-custom-state">No hay formularios personalizados configurados para este siniestro.</div> : null}
             {!customFormsLoading && !customFormsError && customForms.length ? <React.Fragment>
               <nav className="resumen-custom-tabs" aria-label="Formularios configurados">
                 {customForms.map((form) => <button type="button" key={form.key}

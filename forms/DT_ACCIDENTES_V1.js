@@ -16,7 +16,6 @@ let polizaConfirmada = false;
 const isEndorsment = window.location.href.includes('tab12');
 const camposEditablesEnEndoso = new Set([
     'txtNoPrestamo',
-    'txtNoCobis',
     'txtPolizaCobis',
     'txtObservaciones',
     'cmbRenovacion',
@@ -25,7 +24,6 @@ const camposEditablesEnEndoso = new Set([
 const camposConRestriccion = [
     'txtEdadSuscripcion',
     'txtSumaExcedente',
-    'txtNoCobis',
     'txtPeso',
     'txtAltura',
     'cmbOcupacion',
@@ -1162,6 +1160,7 @@ async function setConfigCoverages(){
 }
 
 async function setProductCoverages() {
+  polizaConfirmada = esPolizaEmitida();
   
   const productJson = await getProduct(policy.lob, policy.productCode);
   const product = productJson.configJson ? JSON.parse(productJson.configJson) : {};
@@ -1237,7 +1236,7 @@ async function setProductCoverages() {
       jPremiumDetail: null,
       distributionMode: null
     }
-  });
+  }).filter(coverage => !polizaConfirmada || coverage.incluido);
 
 }
 
@@ -1261,7 +1260,6 @@ function renderToolbarCoberturas() {
           type="button"
           id="btnGestionarCoberturas"
           class="ant-btn ant-btn-primary btn-gestionar-cob"
-          ${polizaConfirmada ? 'disabled' : ''}
         >
 
           <span class="btn-gestionar-icon">
@@ -1350,7 +1348,7 @@ function renderToolbarCoberturas() {
 function renderModalCoberturas() {
   try {
     $("#modalCoberturas").remove();
-    const rows = productCoverages.map(c => `
+    const rows = (polizaConfirmada ? productCoverages.filter(c => c.incluido) : productCoverages).map(c => `
       <tr>
         <td class="cobertura-check-cell">
           <input type="checkbox" class="chk-cobertura" value="${c.code}"
@@ -1439,6 +1437,8 @@ async function bindEventosCoberturas() {
     $(document)
       .off("click", "#btnGuardarCoberturas")
       .on("click", "#btnGuardarCoberturas", async function () {
+
+        if (polizaConfirmada) return;
 
         coberturasSeleccionadas = productCoverages.filter(c => {
           const $chk = $(`.chk-cobertura[value="${c.code}"]`);

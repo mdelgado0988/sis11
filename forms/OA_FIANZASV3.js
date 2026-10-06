@@ -1277,7 +1277,7 @@ async function setProductCoveragesFianza() {
                 ofnGroup: productCoverage.ofnGroup ?? policyCoverage?.ofnGroup ?? 0,
                 reinsuranceCode: productCoverage.reinsurance ?? policyCoverage?.reinsuranceCode ?? null
             };
-        });
+        }).filter(coverage => !polizaConfirmadaFianza || coverage.incluido);
     } catch (error) {
         console.error(`Error cargando coberturas del producto: ${error.toString()}`);
         productCoveragesFianza = [];
@@ -1329,7 +1329,7 @@ function renderToolbarCoberturasFianza() {
 
     $tab.prepend(`
         <div id="toolbarCoberturasFianza">
-            <button type="button" id="btnGestionarCoberturasFianza" class="ant-btn ant-btn-primary" ${polizaConfirmadaFianza ? 'disabled' : ''}>
+            <button type="button" id="btnGestionarCoberturasFianza" class="ant-btn ant-btn-primary">
                 <span style="margin-right:6px;">▦</span> Gestionar Coberturas
             </button>
         </div>
@@ -1385,7 +1385,7 @@ function aplicarRestriccionesEndosoFianza() {
             .removeClass('disabled');
     });
 
-    $('#toolbarCoberturasFianza button, #btnGestionarCoberturasFianza, #btnGuardarCoberturasFianza')
+    $('#btnGuardarCoberturasFianza')
         .prop('disabled', true);
     $('#modalCoberturasFianza').hide();
 }
@@ -1440,6 +1440,8 @@ function renderModalCoberturasFianza() {
 }
 
 async function guardarCoberturasFianza() {
+    if (polizaConfirmadaFianza) return;
+
     coberturasSeleccionadasFianza = productCoveragesFianza.filter(coverage =>
         coverage.mandatory || $(`.chk-cobertura-fianza[value="${coverage.code}"]`).is(':checked')
     );

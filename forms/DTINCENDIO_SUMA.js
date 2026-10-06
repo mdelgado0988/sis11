@@ -1547,6 +1547,21 @@ async function getProduct(lobCode, productCode) {
 }
 
 let configCoverages = []
+
+function esPolizaEmitidaCoberturas() {
+  const active = policy?.active;
+  const activeDate = policy?.activeDate;
+  const tieneFechaEmision = activeDate !== null
+    && activeDate !== undefined
+    && String(activeDate).trim() !== '';
+
+  return tieneFechaEmision
+    || active === true
+    || active === 1
+    || String(active).toLowerCase() === 'true'
+    || String(active) === '1';
+}
+
 async function setConfigCoverages(){
   const tableName = cfgCoberturaReaseguro.find(x => x.lob == policy.lob)?.name ?? "cfgCoberturaProductoRea";
   const tableConfig = await me.exe("GetFullTable", { table: tableName });
@@ -1555,6 +1570,7 @@ async function setConfigCoverages(){
 }
 
 async function setProductCoverages() {
+  polizaConfirmada = esPolizaEmitidaCoberturas();
   
   const productJson = await getProduct(policy.lob, policy.productCode);
   const product = productJson.configJson ? JSON.parse(productJson.configJson) : {};
@@ -1631,13 +1647,15 @@ async function setProductCoverages() {
       jPremiumDetail: null,
       distributionMode: null
     }
-  });
+  }).filter(coverage => !polizaConfirmada || coverage.incluido);
 
 }
 
 function renderToolbarCoberturas() {
 
   try {
+
+    polizaConfirmada = esPolizaEmitidaCoberturas();
 
     const $tab = $("#tabTarifas");
 
@@ -1746,7 +1764,7 @@ function renderModalCoberturas() {
 
     $("#modalCoberturas").remove();
 
-    const rows = productCoverages.map(c => `
+    const rows = (polizaConfirmada ? productCoverages.filter(c => c.incluido) : productCoverages).map(c => `
       <tr>
 
         <td style="text-align:center;">
@@ -2012,6 +2030,8 @@ async function bindEventosCoberturas() {
     $(document)
       .off("click", "#btnGuardarCoberturas")
       .on("click", "#btnGuardarCoberturas", async function () {
+
+        if (polizaConfirmada) return;
 
         coberturasSeleccionadas = productCoverages.filter(c => {
           const $chk = $(`.chk-cobertura[value="${c.code}"]`);
