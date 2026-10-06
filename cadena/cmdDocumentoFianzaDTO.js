@@ -65,6 +65,9 @@ resultado.SumaLetras = numeroALetras(policy.insuredSum ?? 0)
   .replace(/\s+CON\s+(\d{2}\/100)$/, " BALBOAS CON $1");
 resultado.DiasVigencia = diasVigenciaDocumento;
 resultado.NumeroContrato = oaUserData?.txtNumeroContrato ?? "0";
+resultado.TipoVigencia = obtenerTextoTipoVigencia(oaUserData?.tipo_vigencia);
+resultado.TipoVigencia = resultado.TipoVigencia ? ` ${resultado.TipoVigencia}` : "";
+resultado.TipoVigencia2 = resultado.TipoVigencia ? resultado.TipoVigencia.toUpperCase() : "";
 
 //Fecha actual
 resultado.DiaFecha = dia;
@@ -96,6 +99,7 @@ resultado.FechaFinVicioTexto = partesFinVicio
   : "";
 resultado.DiasVigenciaTexto = `${vigenciaDocumento.texto} A PARTIR DEL ${resultado.DesdeTexto}`;
 resultado.VigenciaTexto = vigenciaDocumento.texto;
+resultado.VigenciaTexto2 = vigenciaDocumento.textoTitulo;
 resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
 resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
 resultado.Prestamo = "";
@@ -376,6 +380,16 @@ function setSeller() {
   seller = (GetContacts.ok && Array.isArray(GetContacts.outData) ? GetContacts.outData[0] : null) || {};
 }
 
+function obtenerTextoTipoVigencia(value) {
+  const code = String(Array.isArray(value) ? value[0] : value ?? '').trim();
+  if (!code) return '';
+
+  doCmd({ cmd: 'GetFullTable', data: { table: 'tipovigencia' } });
+  const rows = GetFullTable?.ok && Array.isArray(GetFullTable.outData) ? GetFullTable.outData : [];
+  const row = rows.slice(1).find(item => Array.isArray(item) && String(item[0] ?? '').trim() === code);
+  return row ? String(row[1] ?? '').trim() : '';
+}
+
 function obtenerDiasVigenciaDocumento() {
   const vigenciaPoliza = calcularDiasEntre(policy?.start, policy?.end);
   const coverages = Array.isArray(policy?.Coverages) ? policy.Coverages : [];
@@ -424,7 +438,11 @@ function obtenerTextoVigencia(diasVigencia, tipoCalendario) {
     unidad = periodo === 1 ? 'DÍA' : 'DÍAS';
   }
 
-  return { periodo, texto: `${periodo} ${unidad}` };
+  return {
+    periodo,
+    texto: `${periodo} ${unidad}`,
+    textoTitulo: `${periodo} ${unidad.charAt(0) + unidad.slice(1).toLowerCase()}`
+  };
 }
 
 function esCoberturaPrincipal(parentCode) {

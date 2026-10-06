@@ -53,6 +53,7 @@ const reportesEndoso = {
   vidaTarjetaProtegida: 'FormatoEndososVidaTarjetaProtegida.docx'
   
 };
+const reporteCambioBeneficiarioVida = 'FormatoEndososCambioBeneficiario.docx';
 const { eventName, nombreEndoso } = mapChangeName(changeName);
 // return change
 // -----------------------------
@@ -163,6 +164,15 @@ if(isTest){
   const arrayResult = [{ outdata: row }];
   const custom = buildCustomForTemplate({ row, policy, change, arrayResult, billDiff });
   calculateEndorsmentNote(change, changeName, custom, policy);
+  if (esCambioBeneficiarioVida(policy, beneficiaryDocumentPlan)) {
+    return {
+      template: reporteCambioBeneficiarioVida,
+      data: datosCambioBeneficiarioVida(
+        buildBeneficiaryTemplateData(policy.id, beneficiaryDocumentPlan.beneficiaryUserData),
+        custom
+      )
+    };
+  }
   if (beneficiaryDocumentPlan.hasBeneficiary) {
     const beneficiaryData = buildBeneficiaryTemplateData(policy.id, beneficiaryDocumentPlan.beneficiaryUserData);
     return beneficiaryDocumentPlan.hasOtherObjects
@@ -383,6 +393,10 @@ function getBeneficiaryDocumentPlan(change) {
     hasOtherObjects: objects.some(object => !isBeneficiary(object)),
     beneficiaryUserData: beneficiaryObject?.userData || {}
   };
+}
+
+function esCambioBeneficiarioVida(policy, plan) {
+  return isLifePolicyLob(policy?.lob) && !!plan?.hasBeneficiary;
 }
 
 function normalizeInsuredObject(insuredObject) {
@@ -875,6 +889,10 @@ function calculateEndorsmentNote(change, changeName, custom, policy) {
     custom.Endoso.DetalleEndoso = `Cambio de frecuencia, anterior: ${frequencyName(policy.oldFrequency ?? "No Tiene")} => nueva: ${frequencyName(policy.newFrequency ?? "No Tiene")}`
   }
 
+  if (esCambioBeneficiarioVida(policy, beneficiaryDocumentPlan)) {
+    custom.Endoso.DetalleEndoso = "Modificación de Beneficiarios";
+  }
+
   if (changeName === "InsuredObjectChange" && isSuretyPolicy(policy)) {
     const insuredObjectNote = buildSuretyInsuredObjectChangeNote(change, policy, loadSuretyCatalogs());
     if (insuredObjectNote) custom.Endoso.DetalleEndoso = insuredObjectNote;
@@ -948,17 +966,26 @@ function generateDocWithCustom({ row, policy, change, billDiff }) {
 
   calculateEndorsmentNote(change, changeName, custom, policy);
 
-  const templates = beneficiaryDocumentPlan.hasBeneficiary
+  const isLifeBeneficiaryChange = esCambioBeneficiarioVida(policy, beneficiaryDocumentPlan);
+  const templates = isLifeBeneficiaryChange
+    ? [reporteCambioBeneficiarioVida]
+    : beneficiaryDocumentPlan.hasBeneficiary
     ? (beneficiaryDocumentPlan.hasOtherObjects
       ? [template, 'Sub_Beneficiarios.docx']
       : ['Sub_Beneficiarios.docx'])
     : [template];
 
   const messages = templates.map(templateName => {
-    const isBeneficiaryTemplate = templateName === 'Sub_Beneficiarios.docx';
-    const documentData = isBeneficiaryTemplate
-      ? buildBeneficiaryTemplateData(policy.id, beneficiaryDocumentPlan.beneficiaryUserData)
-      : custom;
+    const isLifeBeneficiaryTemplate = templateName === reporteCambioBeneficiarioVida;
+    const isBeneficiaryTemplate = templateName === 'Sub_Beneficiarios.docx' || isLifeBeneficiaryTemplate;
+    const beneficiaryData = isBeneficiaryTemplate
+      ? incluirEndosoEnDatosBeneficiarios(
+        buildBeneficiaryTemplateData(policy.id, beneficiaryDocumentPlan.beneficiaryUserData),
+        custom
+      ) : null;
+    const documentData = isLifeBeneficiaryTemplate
+      ? beneficiaryData.custom
+      : (beneficiaryData || custom);
     const documentTitle = isBeneficiaryTemplate
       ? 'Endoso de Beneficiarios'
       : 'Endoso de ' + custom.TituloEndosoCan;
@@ -985,6 +1012,26 @@ function buildBeneficiaryTemplateData(policyId, beneficiariesUserData) {
   return {
     custom: applyChangedBeneficiaries(ExeChain.outData, beneficiariesUserData)
   };
+}
+
+function incluirEndosoEnDatosBeneficiarios(beneficiaryData, custom) {
+  const beneficiaryDto = beneficiaryData?.custom || {};
+  return {
+    ...beneficiaryData,
+    custom: {
+      ...beneficiaryDto,
+      // El DTO del endoso conserva los objetos anidados que usan las plantillas.
+      ...custom,
+      Beneficiarios: beneficiaryDto.Beneficiarios || [],
+      TotalPorcentajeBeneficiarios: beneficiaryDto.TotalPorcentajeBeneficiarios || n(0),
+      // El detalle del endoso se construye en el DTO base y debe prevalecer.
+      Endoso: custom?.Endoso || beneficiaryDto.Endoso || {}
+    }
+  };
+}
+
+function datosCambioBeneficiarioVida(beneficiaryData, custom) {
+  return incluirEndosoEnDatosBeneficiarios(beneficiaryData, custom).custom;
 }
 
 function buildSuretyDocumentData({ policy, change, insuredData, holder, contacts, countries, provinces, cities, sectors }) {

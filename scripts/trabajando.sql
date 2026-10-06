@@ -15,8 +15,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 71
-and t.cplan = 'TAR_PRO' 
+where t.cramo = 31
+and t.cplan = 'P10' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 81
+declare @ramoXY int = 31
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -135,7 +135,8 @@ declare @cplan varchar(15) = null--'RD';
 		cross apply (select count(1)  cobs
 						from adpolcob c
 					where p.cpoliza = c.cpoliza and p.fanopol = c.fanopol and p.fmespol = c.fmespol) c
-		where p.cramo = @cramo and p.cplan = @cplan 
+		where p.cramo = @cramo 
+		--and p.cplan = @cplan 
 		--and p.cendoso = 36
 		AND p.fanopol >= 2025 AND p.istatpol <> 'C'
 		order by c.cobs desc, cpoliza desc) 
@@ -185,7 +186,7 @@ select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END 
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
 where cramo in (81)
-and xnombrep like '%endoso%'
+and xnombrep not like '%endoso%'
 --AND xdpto <> 'SINIESTROS'
 --AND xformula1 <> '0'
 --AND xformula1 is not null and xformula1 <> '0'
@@ -207,7 +208,7 @@ select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.
 	inner join adpolcob c on c.crecibo = rec.crecibo and c.isuma = 'S' ) AS oferta2
 
 from marepteccia r
-where r.cramo in (52)
+where r.cramo in (81)
 and r.xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 AND (r.xformula1 is not null and r.xformula1 <> '0' and isnumeric(r.xformula1) = 1)
