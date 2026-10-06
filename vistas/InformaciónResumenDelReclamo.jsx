@@ -1036,6 +1036,21 @@
     (numericValue(reserves) || 0) - (numericValue(payments) || 0)
     - (numericValue(expenses) || 0) + (numericValue(recoveries) || 0)
   );
+  const reserveSummary = (payouts, claimId) => {
+    const summary = { payment: 0, expense: 0, total: 0 };
+    (Array.isArray(payouts) ? payouts : []).forEach((row) => {
+      if (!row || Number(row.claimId) !== Number(claimId) || !isReserveMovement(row)) return;
+      const bucket = String(row.reserveType || '').trim().toUpperCase();
+      const amount = numericValue(row.reserved);
+      if (amount === null || (bucket !== 'IN' && bucket !== 'EX')) return;
+      if (bucket === 'IN') summary.payment += amount;
+      else summary.expense += amount;
+    });
+    summary.payment = roundMoney(summary.payment);
+    summary.expense = roundMoney(summary.expense);
+    summary.total = roundMoney(summary.payment + summary.expense);
+    return summary;
+  };
   const activeReserveMovements = (claim, coverageId) => {
     const requestedClaimId = claim && Number(claim.id);
     return Array.isArray(claim && claim.Payouts) ? claim.Payouts.filter((item) => {
@@ -3563,7 +3578,7 @@ END CATCH;`;
       const value = numericValue(row[field]);
       return sum + (value === null ? 0 : value);
     }, 0));
-    const reserves = total(indemnities.filter(isReserveMovement), 'reserved');
+    const reserves = reserveSummary(claim.Payouts, requestedClaimId).total;
     const payments = total(indemnities, 'payed');
     const expenses = expenseRows.length ? total(expenseRows, 'payed') : null;
     setClaimSummary((summary) => Object.assign({}, summary, {
@@ -5528,11 +5543,11 @@ END CATCH;`;
           };
           // Expense movements belong to a separate channel, not these indemnity totals.
           const usable = rows.every((row) => ['IN', 'EX'].indexOf(reserveType(row)) !== -1)
-            && indemnityRows.every((row) => usesPolicyCurrency(row)
+            && indemnityRows.concat(expenseRows).every((row) => usesPolicyCurrency(row)
               && validHeaderAmount(row.reserved) && validHeaderAmount(row.payed));
           if (usable) {
-            // Payment movements reduce their own available balance, but are not a reserve reduction.
-            reserves = indemnityRows.filter(isReserveMovement).reduce((total, row) => total + numericValue(row.reserved), 0);
+            // Both indemnity and expense reserve movements are part of the outstanding reserve.
+            reserves = reserveSummary(rows, requestedClaimId).total;
             payments = indemnityRows.reduce((total, row) => total + numericValue(row.payed), 0);
             expenses = expenseRows.length ? expenseRows.reduce((total, row) => total + numericValue(row.payed), 0) : null;
           } else {
@@ -5603,13 +5618,13 @@ END CATCH;`;
   const DOCUMENT_UPLOAD_ENDPOINT = 'https://sisos-api-latest.axxis-systems.net/proxy/upload';
   const documents = React.useRef({ rows: [], statuses: [], loaded: false, loading: false,
     saving: false, downloading: null, needsReconciliation: false, revision: 0, error: '', filter: null, uploadOpen: false, generateOpen: false,
-    filterOpen: false, pending: null }).current;
+    filterOpen: false, pending: null, paymentDocumentGenerating: false }).current;
   const [, renderDocuments] = React.useState(0);
   const notifyDocuments = () => { if (mountedRef.current) renderDocuments((value) => value + 1); };
   const resetDocuments = () => {
     Object.assign(documents, { rows: [], statuses: [], loaded: false, loading: false,
       saving: false, downloading: null, needsReconciliation: false, revision: documents.revision + 1, error: '', filter: null,
-      uploadOpen: false, generateOpen: false, filterOpen: false, pending: null });
+      uploadOpen: false, generateOpen: false, filterOpen: false, pending: null, paymentDocumentGenerating: false });
     notifyDocuments();
   };
   const documentInputRef = React.useRef(null);
@@ -5705,6 +5720,51 @@ END CATCH;`;
       return false;
     }).then((result) => { if (current()) { documents.saving = false; notifyDocuments(); } return result; });
   };
+  const generatePaymentRequestDocument = (requestId) => {
+    const claim = documentScope();
+    const paymentId = Number(requestId);
+    if (!claim || documentMutationBlocked() || !Number.isSafeInteger(paymentId) || paymentId <= 0) return Promise.resolve(false);
+    const current = documentGuard(claim, documents.revision);
+    documents.saving = true; documents.paymentDocumentGenerating = true; documents.error = ''; notifyDocuments();
+    const reportName = 'Solicitud No. ' + paymentId;
+    return repositoryRequest('ExeChain', {
+      chain: 'cmdGenerateClaimDocument',
+      context: JSON.stringify({
+        claimId: Number(claim.id),
+        context: { paymentId: paymentId },
+        template: 'Solcitud de Pago.docx',
+        reportName: reportName
+      })
+    }, undefined, current).then((result) => {
+      if (!current()) return false;
+      const generated = result && result.outData && typeof result.outData === 'object' ? result.outData : result;
+      if (!result || result.ok !== true || !generated || generated.ok !== true || !documentUrl(generated.url)) {
+        throw new Error(generated && generated.msg || result && result.msg || 'No se confirmó la generación del documento.');
+      }
+      return loadDocuments(true).then((loaded) => {
+        if (!current() || !loaded) throw new Error('El documento se generó, pero no pudo cargarse para abrirlo.');
+        const document = documents.rows.find((row) => row.url === generated.url);
+        if (!document) throw new Error('El documento se generó, pero no se encontró en el reclamo para abrirlo.');
+        documents.saving = false; documents.paymentDocumentGenerating = false; notifyDocuments();
+        return downloadDocument(document.id).then((opened) => {
+          if (opened && A.message && typeof A.message.success === 'function') A.message.success(reportName + ' generado.');
+          if (!opened && A.message && typeof A.message.warning === 'function') {
+            A.message.warning(reportName + ' fue generado, pero no se pudo abrir automáticamente.');
+          }
+          return true;
+        });
+      });
+    }).catch((error) => {
+      if (current()) {
+        documents.error = error && error.message ? error.message : 'No se pudo generar la solicitud de pago.';
+        notifyDocuments();
+      }
+      return false;
+    }).then((result) => {
+      if (current()) { documents.saving = false; documents.paymentDocumentGenerating = false; notifyDocuments(); }
+      return result;
+    });
+  };
   const documentAuthorization = () => {
       let token;
       try {
@@ -5731,7 +5791,7 @@ END CATCH;`;
     return type === 'application/pdf' || type === 'text/plain'
       || type.indexOf('image/') === 0 || type.indexOf('audio/') === 0 || type.indexOf('video/') === 0;
   };
-  const downloadDocument = (id) => {
+  const downloadDocument = (id, targetWindow) => {
     const claim = documentScope();
     const row = documents.rows.find((item) => commentId(item.id) === commentId(id));
     if (!claim || !documents.loaded || documents.saving || documents.loading || documents.downloading
@@ -5740,8 +5800,10 @@ END CATCH;`;
     const scopeCurrent = documentGuard(claim, documents.revision);
     const current = () => scopeCurrent() && documents.downloading === operation
       && documents.rows.some((item) => item.id === row.id && item.url === row.url);
-    let documentWindow = null;
-    try { documentWindow = window.open('about:blank', '_blank'); } catch (error) { documentWindow = null; }
+    let documentWindow = targetWindow && !targetWindow.closed ? targetWindow : null;
+    if (!documentWindow) {
+      try { documentWindow = window.open('about:blank', '_blank'); } catch (error) { documentWindow = null; }
+    }
     if (!documentWindow) {
       documents.error = 'El navegador bloqueó la nueva pestaña. Permita ventanas emergentes para abrir el documento.';
       notifyDocuments();
@@ -6221,6 +6283,12 @@ END CATCH;`;
       </React.Fragment>}
     </Modal>;
   };
+  const financialText = (value) => {
+    const text = displayValue(value);
+    return <A.Tooltip title={text === EMPTY_VALUE ? undefined : text} placement="topLeft">
+      <span className="resumen-financial-text">{text}</span>
+    </A.Tooltip>;
+  };
   const renderFinancialSection = (config) => (
     <section className={'resumen-' + config.key} aria-label={config.ariaLabel}>
       <div className="resumen-coverage-toolbar">
@@ -6231,7 +6299,7 @@ END CATCH;`;
           <Popconfirm title="¿Aprobar este movimiento de pago?" okText="Aprobar" cancelText="Cancelar"
             disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0 || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}
             onConfirm={() => approvePaymentMovement(config.selectedId, config.key === 'expenses' ? 'EX' : 'IN')}>
-            <Button size="small" disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0
+            <Button size="small" className="resumen-approve-payment-btn" disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0
               || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}>Aprobar pago</Button>
           </Popconfirm>
           {config.key === 'payments' ? <React.Fragment>
@@ -6244,6 +6312,9 @@ END CATCH;`;
             disabled={!editable || paymentSaving || !config.selected
             || !!nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || config.selected.available <= 0}
             onClick={config.openCheck}>Solicitud de cheque</Button>
+          <Button size="small" className="resumen-payment-document-btn"
+            disabled={documentMutationBlocked() || !config.selected || config.selected.checkRequestId == null}
+            onClick={() => generatePaymentRequestDocument(config.selected.checkRequestId)}>Generar solicitud</Button>
           <Button size="small" loading={sectionRefreshing} disabled={sectionRefreshing || paymentSaving}
             onClick={() => refreshSection(() => config.refresh(), config.errorSetter)}><ReloadOutlinedIcon /> Refrescar</Button>
         </div>
@@ -6251,10 +6322,10 @@ END CATCH;`;
       <small>Solo movimientos del siniestro actual. Disponible corresponde al saldo pendiente de solicitud del movimiento.</small>
       {selectedFinancialIssue(config.selected) ? <div role="alert" className="resumen-reserve-error">{selectedFinancialIssue(config.selected)}</div> : null}
       <div className="resumen-table-wrap"><table className="resumen-data-table">
-        <thead><tr><th className="resumen-financial-payment-id">No.</th><th className="resumen-financial-coverage">Cobertura</th><th>Concepto</th>{['payments', 'expenses'].includes(config.key) ? <th className="resumen-financial-affected">Objeto afectado</th> : null}
+        <thead><tr><th className="resumen-financial-payment-id">No.</th><th className="resumen-financial-coverage">Cobertura</th><th className="resumen-financial-concept">Concepto</th>{['payments', 'expenses'].includes(config.key) ? <th className="resumen-financial-affected">Objeto afectado</th> : null}
           <th className="resumen-cell-number">{config.appliedLabel}</th>
           <th className="resumen-cell-number">Disponible</th>
-          <th>Fecha</th><th>Beneficiario</th><th className="resumen-financial-check-request">Solicitud de cheque</th><th>Referencia</th><th>Estado</th><th>Reaseguro</th></tr></thead>
+          <th className="resumen-financial-date">Fecha</th><th className="resumen-financial-beneficiary">Beneficiario</th><th className="resumen-financial-check-request">Solicitud de cheque</th><th className="resumen-financial-reference">Referencia</th><th className="resumen-financial-status">Estado</th><th className="resumen-financial-reinsurance">Reaseguro</th></tr></thead>
         <tbody>{config.rows.length ? config.rows.map((row) => (
           <tr key={row.id} tabIndex="0"
             className={row.id === Number(config.selectedId) ? 'resumen-row-selected' : ''}
@@ -6262,11 +6333,11 @@ END CATCH;`;
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') config.select(row.id);
             }}>
-            <td className="resumen-financial-payment-id">{displayValue(row.id)}</td><td className="resumen-financial-coverage" title={row.coverage || undefined}>{displayValue(row.coverage)}</td><td>{displayValue(row.concept)}</td>
-            {['payments', 'expenses'].includes(config.key) ? <td className="resumen-financial-affected" title={row.affectedObject || undefined}>{displayValue(row.affectedObject)}</td> : null}
+            <td className="resumen-financial-payment-id">{displayValue(row.id)}</td><td className="resumen-financial-coverage">{financialText(row.coverage)}</td><td className="resumen-financial-concept">{financialText(row.concept)}</td>
+            {['payments', 'expenses'].includes(config.key) ? <td className="resumen-financial-affected">{financialText(row.affectedObject)}</td> : null}
             <td className="resumen-cell-number">{formatGridAmount(row.paid)}</td>
             <td className="resumen-cell-number">{formatGridAmount(row.available)}</td>
-            <td>{displayValue(formatDate(row.date))}</td><td>{displayValue(row.beneficiary)}</td>
+            <td className="resumen-financial-date">{financialText(formatDate(row.date))}</td><td className="resumen-financial-beneficiary">{financialText(row.beneficiary)}</td>
             <td className="resumen-financial-check-request">
               {paymentRequestLink(row.checkRequestId)}
               {row.checkRequestId != null ? <Button type="link" size="small"
@@ -6275,9 +6346,9 @@ END CATCH;`;
                 <SearchIcon />
               </Button> : null}
             </td>
-            <td>{displayValue(row.payment && row.payment.reference)}</td>
-            <td>{config.key === 'payments' ? paymentMovementStateLabel(row.status) : [0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
-            <td><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
+            <td className="resumen-financial-reference">{financialText(row.payment && row.payment.reference)}</td>
+            <td className="resumen-financial-status">{financialText([0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado')}</td>
+            <td className="resumen-financial-reinsurance"><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
           </tr>
         )) : <tr><td className="resumen-empty-row" colSpan="12">{config.emptyText}</td></tr>}</tbody>
       </table></div>
@@ -6744,6 +6815,8 @@ END CATCH;`;
        .resumen-shell .resumen-process-id{color:var(--rz-muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
        .resumen-shell .resumen-status{flex:0 0 auto;margin-bottom:4px}
       .resumen-shell .resumen-loading{display:flex;align-items:center;gap:8px;padding:4px 8px;color:var(--rz-brand-dark);background:var(--rz-brand-soft);border:1px solid #c7d9f2;border-radius:6px}
+      .resumen-document-generation-mask{position:fixed;inset:0;z-index:1005;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.36)}
+      .resumen-document-generation-mask>div{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:260px;padding:24px 32px;color:var(--rz-brand-dark);background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 16px 40px rgba(15,23,42,.24);font-weight:600}
       .resumen-shell .resumen-recovery-warning{margin-top:4px;padding:4px 8px;color:var(--rz-warn);background:var(--rz-warn-bg);border:1px solid var(--rz-warn-line);border-radius:6px;font-size:12px}
        .resumen-shell .resumen-summary-card{flex:0 0 auto;border:1px solid #aebdcd;border-radius:8px;box-shadow:0 1px 3px rgba(15,23,42,.08)}
        .resumen-shell .resumen-summary-card>.ant-collapse-item{border-bottom:0}.resumen-shell .resumen-summary-card>.ant-collapse-item>.ant-collapse-header{color:#194b8b;font-weight:600;padding:4px 8px 4px 28px;border-bottom:1px solid #cbd5e1}.resumen-shell .resumen-summary-card .ant-collapse-arrow{color:#194b8b}.resumen-shell .resumen-summary-card .ant-collapse-content-box{padding:4px}
@@ -6762,6 +6835,9 @@ END CATCH;`;
       .resumen-shell .resumen-amount{min-width:0;color:var(--rz-ink);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
       .resumen-shell .resumen-valuation-row{justify-content:space-between;gap:18px;padding:3px 0}
       .resumen-shell .resumen-amount{text-align:right;white-space:nowrap}
+      .resumen-shell .resumen-valuation-detail-link{padding:0;border:0;background:transparent;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+      .resumen-shell .resumen-valuation-detail-link:hover,.resumen-shell .resumen-valuation-detail-link:focus{color:var(--rz-brand-dark);outline:0;text-decoration-style:solid}
+      .resumen-shell .resumen-valuation-detail-link:focus-visible{outline:2px solid var(--rz-accent);outline-offset:2px;border-radius:2px}
       .resumen-shell .resumen-balance{color:var(--rz-good);font-weight:700}
       .resumen-shell .resumen-valuation-income{color:#237804}
       .resumen-shell .resumen-valuation-expense{color:#cf1322}
@@ -6852,10 +6928,25 @@ END CATCH;`;
       .resumen-shell .resumen-coverage-toolbar .ant-btn{height:28px;border-radius:6px}
       .resumen-shell .resumen-table-wrap{flex:0 0 auto;max-width:100%;overflow:auto;border:1px solid #cbd1d8;border-radius:6px;background:#fff}
       .resumen-shell .resumen-data-table{width:100%;min-width:1040px;border-collapse:collapse;font-size:12px;line-height:18px}
-      .resumen-shell .resumen-payments .resumen-data-table,.resumen-shell .resumen-expenses .resumen-data-table{table-layout:fixed}
+      .resumen-shell .resumen-payments .resumen-data-table,.resumen-shell .resumen-expenses .resumen-data-table{min-width:1480px;table-layout:fixed}
       .resumen-shell .resumen-financial-payment-id{width:52px;max-width:52px}
-      .resumen-shell .resumen-financial-coverage,.resumen-shell .resumen-financial-affected{width:180px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .resumen-shell .resumen-financial-check-request{text-align:center}
+      .resumen-shell .resumen-financial-coverage{width:160px;max-width:160px}
+      .resumen-shell .resumen-financial-concept{width:170px;max-width:170px}
+      .resumen-shell .resumen-financial-affected{width:170px;max-width:170px}
+      .resumen-shell .resumen-financial-date{width:94px;max-width:94px}
+      .resumen-shell .resumen-financial-beneficiary{width:160px;max-width:160px}
+      .resumen-shell .resumen-financial-check-request{width:128px;max-width:128px;text-align:center}
+      .resumen-shell .resumen-financial-reference{width:170px;max-width:170px}
+      .resumen-shell .resumen-financial-status{width:142px;max-width:142px}
+      .resumen-shell .resumen-financial-reinsurance{width:126px;max-width:126px}
+      .resumen-shell .resumen-payments .resumen-cell-number,.resumen-shell .resumen-expenses .resumen-cell-number{width:112px;max-width:112px}
+      .resumen-shell .resumen-financial-text{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .resumen-shell .resumen-coverage-toolbar .resumen-payment-document-btn{color:#fff;background:#cf1322;border-color:#cf1322}
+      .resumen-shell .resumen-coverage-toolbar .resumen-payment-document-btn:hover,.resumen-shell .resumen-coverage-toolbar .resumen-payment-document-btn:focus{color:#fff;background:#a8071a;border-color:#a8071a}
+      .resumen-shell .resumen-coverage-toolbar .resumen-payment-document-btn[disabled]{color:#f2b8be;background:#fff1f0;border-color:#f2b8be}
+      .resumen-shell .resumen-coverage-toolbar .resumen-approve-payment-btn{color:#fff;background:#389e0d;border-color:#389e0d}
+      .resumen-shell .resumen-coverage-toolbar .resumen-approve-payment-btn:hover,.resumen-shell .resumen-coverage-toolbar .resumen-approve-payment-btn:focus{color:#fff;background:#237804;border-color:#237804}
+      .resumen-shell .resumen-coverage-toolbar .resumen-approve-payment-btn[disabled]{color:#b7d9a8;background:#f6ffed;border-color:#b7d9a8}
       .resumen-shell .resumen-payment-request-link{color:var(--rz-accent);font-weight:600;text-decoration:none}
       .resumen-shell .resumen-payment-request-link:hover{text-decoration:underline}
       .resumen-shell .resumen-payment-request-detail{height:auto;padding:0 4px;color:var(--rz-accent);font-size:11px}
@@ -6988,6 +7079,18 @@ END CATCH;`;
     };
   }, []);
 
+  const currentReserveSummary = reserveSummary(
+    currentClaimRef.current && currentClaimRef.current.Payouts,
+    currentClaimRef.current && currentClaimRef.current.id
+  );
+  const currentBalanceSummary = {
+    payment: roundMoney(currentReserveSummary.payment - (numericValue(claimSummary.valuation.payments) || 0)),
+    expense: roundMoney(currentReserveSummary.expense - (numericValue(claimSummary.valuation.expenses) || 0)),
+    recoveries: roundMoney(numericValue(claimSummary.valuation.recoveries) || 0),
+    total: valuationBalance(claimSummary.valuation.reserves, claimSummary.valuation.payments,
+      claimSummary.valuation.expenses, claimSummary.valuation.recoveries)
+  };
+
   return (
     <div ref={shellRef} className="resumen-shell">
       <header className="resumen-header">
@@ -7006,6 +7109,10 @@ END CATCH;`;
               return r.blob();
             }).then(blob => window.open(URL.createObjectURL(blob)))} />
       </header>
+
+      {documents.paymentDocumentGenerating ? <div className="resumen-document-generation-mask" role="status" aria-live="polite">
+        <div><Spin size="large" /><span>Generando solicitud de pago...</span></div>
+      </div> : null}
 
       {(loading || error || valuationWarning) ? (
         <div className="resumen-status">
@@ -7120,11 +7227,28 @@ END CATCH;`;
               <div className="resumen-valuation-grid">{valuationFields.map((field) => (
                 <div className="resumen-valuation-row" key={field[1]}>
                   <span className="resumen-summary-label">{field[0]}:</span>
-                  <span className={'resumen-amount ' + (field[1] === 'balance' ? 'resumen-balance'
-                    : ['reserves', 'recoveries'].includes(field[1]) ? 'resumen-valuation-income'
+                  {field[1] === 'reserves' ? <A.Popover title="Desglose de reservas" trigger="click" placement="bottomRight"
+                    content={<A.Descriptions bordered size="small" column={1} className="resumen-reserve-breakdown">
+                      <A.Descriptions.Item label="Pago (IN)">{formatAmount(currentReserveSummary.payment)}</A.Descriptions.Item>
+                      <A.Descriptions.Item label="Gasto (EX)">{formatAmount(currentReserveSummary.expense)}</A.Descriptions.Item>
+                      <A.Descriptions.Item label="Total reservado"><strong>{formatAmount(currentReserveSummary.total)}</strong></A.Descriptions.Item>
+                    </A.Descriptions>}>
+                    <button type="button" className="resumen-amount resumen-valuation-income resumen-valuation-detail-link"
+                      title="Ver desglose de reservas">{formatAmount(claimSummary.valuation[field[1]])}</button>
+                  </A.Popover> : field[1] === 'balance' ? <A.Popover title="Desglose de saldo" trigger="click" placement="bottomRight"
+                    content={<A.Descriptions bordered size="small" column={1} className="resumen-reserve-breakdown">
+                      <A.Descriptions.Item label="Saldo de pagos (IN)">{formatAmount(currentBalanceSummary.payment)}</A.Descriptions.Item>
+                      <A.Descriptions.Item label="Saldo de gastos (EX)">{formatAmount(currentBalanceSummary.expense)}</A.Descriptions.Item>
+                      <A.Descriptions.Item label="Recuperaciones">{formatAmount(currentBalanceSummary.recoveries)}</A.Descriptions.Item>
+                      <A.Descriptions.Item label="Saldo neto"><strong>{formatAmount(currentBalanceSummary.total)}</strong></A.Descriptions.Item>
+                    </A.Descriptions>}>
+                    <button type="button" className="resumen-amount resumen-balance resumen-valuation-detail-link"
+                      title="Ver desglose de saldo">{formatAmount(claimSummary.valuation[field[1]])}</button>
+                  </A.Popover> : <span className={'resumen-amount ' + (field[1] === 'balance' ? 'resumen-balance'
+                    : ['recoveries'].includes(field[1]) ? 'resumen-valuation-income'
                     : ['payments', 'expenses'].includes(field[1]) ? 'resumen-valuation-expense' : '')}>
                     {formatAmount(claimSummary.valuation[field[1]])}
-                  </span>
+                  </span>}
                 </div>
               ))}</div>
             </section>
