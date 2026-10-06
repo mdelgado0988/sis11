@@ -504,6 +504,77 @@ function adjustCancellationReinsurance(policyId, changeId) {
     return;
   }
 
+  const fullCancellation = Math.abs(toNumber(detail.prorate) - 1) < 0.000001;
+  const statements = fullCancellation
+    ? buildFullCancellationStatements(policyId, targetChangeId, cessions)
+    : buildProratedCancellationStatements(policyId, targetChangeId, cessions, targetPremium);
+
+  statements.push(`UPDATE p
+SET sumInsured = ROUND(ISNULL(c.sumInsuredRe, 0) * ISNULL(p.split, 0) / 100.0, 2),
+    premium = ROUND(ISNULL(c.premiumRe, 0) * ISNULL(p.split, 0) / 100.0, 2),
+    commission = ROUND(ISNULL(c.comissionCedant, 0) * ISNULL(p.split, 0) / 100.0, 2),
+    tax = ROUND(ISNULL(c.tax, 0) * ISNULL(p.split, 0) / 100.0, 2)
+FROM CessionPart p
+INNER JOIN Cession c ON c.id = p.cessionId
+WHERE p.cessionId IN (${cessionIds.join(",")});`);
+
+  doCmd({ cmd: "DoQuery", data: { sql: statements.join("\n") } });
+  if (!DoQuery || DoQuery.ok === false) {
+    throw new Error(DoQuery && DoQuery.msg
+      ? DoQuery.msg
+      : "No fue posible ajustar el reaseguro de la cancelaciÃ³n");
+  }
+}
+
+function buildFullCancellationStatements(policyId, changeId, cancellationCessions) {
+  doCmd({
+    cmd: "LoadEntities",
+    data: {
+      entity: "Cession",
+      fields: "id,coverageId,coverageCode,lineId,sumInsured,premium,sumInsuredCedant,premiumCedant,sumInsuredRe,premiumRe,comissionCedant,tax,nonTechnicalPremium,fee,proportionCed,proportionRe",
+      filter: `lifePolicyId = ${policyId} AND overwritten = 0 AND premiumType <> 'CANCELLATION' AND changeId IS NULL`,
+      noTracking: true
+    }
+  });
+
+  const activeByCoverageLine = (Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [])
+    .reduce((result, cession) => {
+      const key = cancellationCessionKey(cession);
+      if (!key) return result;
+      const current = result[key];
+      if (!current || Number(cession.id || 0) > Number(current.id || 0)) result[key] = cession;
+      return result;
+    }, {});
+
+  return cancellationCessions.map(cancellation => {
+    const source = activeByCoverageLine[cancellationCessionKey(cancellation)];
+    if (!source) {
+      throw new Error(`No existe cesión vigente para cancelar la cobertura ${cancellation.coverageId || cancellation.coverageCode} en la línea ${cancellation.lineId}`);
+    }
+
+    const negative = field => (-Math.abs(toNumber(source[field]))).toFixed(2);
+    return `UPDATE Cession
+SET changeId = ${changeId},
+    sumInsured = ${negative("sumInsured")},
+    premium = ${negative("premium")},
+    sumInsuredCedant = ${negative("sumInsuredCedant")},
+    premiumCedant = ${negative("premiumCedant")},
+    sumInsuredRe = ${negative("sumInsuredRe")},
+    premiumRe = ${negative("premiumRe")},
+    comissionCedant = ${negative("comissionCedant")},
+    tax = ${negative("tax")},
+    nonTechnicalPremium = ${negative("nonTechnicalPremium")},
+    fee = ${negative("fee")},
+    proportionCed = ${toNumber(source.proportionCed).toFixed(8)},
+    proportionRe = ${toNumber(source.proportionRe).toFixed(8)}
+WHERE id = ${Number(cancellation.id)}
+  AND lifePolicyId = ${policyId}
+  AND premiumType = 'CANCELLATION'
+  AND (changeId IS NULL OR changeId = ${changeId});`;
+  });
+}
+
+function buildProratedCancellationStatements(policyId, changeId, cessions, targetPremium) {
   const basePremium = cessions.reduce((total, cession) => total + Math.abs(toNumber(cession.premium)), 0);
   if (basePremium <= 0 && targetPremium !== 0) {
     throw new Error("Las Cessions de cancelación no tienen prima base para distribuir coveragesDif");
@@ -511,7 +582,7 @@ function adjustCancellationReinsurance(policyId, changeId) {
 
   const targetAbsPremium = Math.abs(targetPremium);
   let allocatedPremium = 0;
-  const statements = cessions.map((cession, index) => {
+  return cessions.map((cession, index) => {
     const id = Number(cession.id);
     const currentPremium = toNumber(cession.premium);
     const weight = basePremium > 0 ? Math.abs(currentPremium) / basePremium : 0;
@@ -555,7 +626,7 @@ function adjustCancellationReinsurance(policyId, changeId) {
     const tax = Math.round(premiumRe * taxRatio * 100) / 100;
 
     return `UPDATE Cession
-SET changeId = ${targetChangeId},
+SET changeId = ${changeId},
     premium = ${premium.toFixed(2)},
     premiumCedant = ${premiumCedant.toFixed(2)},
     premiumRe = ${premiumRe.toFixed(2)},
@@ -564,23 +635,14 @@ SET changeId = ${targetChangeId},
 WHERE id = ${id}
   AND lifePolicyId = ${policyId}
   AND premiumType = 'CANCELLATION'
-  AND (changeId IS NULL OR changeId = ${targetChangeId});`;
+  AND (changeId IS NULL OR changeId = ${changeId});`;
   });
+}
 
-  statements.push(`UPDATE p
-SET premium = ROUND(ISNULL(c.premiumRe, 0) * ISNULL(p.split, 0) / 100.0, 2),
-    commission = ROUND(ISNULL(c.comissionCedant, 0) * ISNULL(p.split, 0) / 100.0, 2),
-    tax = ROUND(ISNULL(c.tax, 0) * ISNULL(p.split, 0) / 100.0, 2)
-FROM CessionPart p
-INNER JOIN Cession c ON c.id = p.cessionId
-WHERE p.cessionId IN (${cessionIds.join(",")});`);
-
-  doCmd({ cmd: "DoQuery", data: { sql: statements.join("\n") } });
-  if (!DoQuery || DoQuery.ok === false) {
-    throw new Error(DoQuery && DoQuery.msg
-      ? DoQuery.msg
-      : "No fue posible ajustar el reaseguro de la cancelaciÃ³n");
-  }
+function cancellationCessionKey(cession) {
+  const coverage = String(cession?.coverageId ?? cession?.coverageCode ?? "").trim();
+  const line = String(cession?.lineId ?? "").trim().toUpperCase();
+  return coverage && line ? `${coverage}|${line}` : "";
 }
 
 function toNumber(value) {

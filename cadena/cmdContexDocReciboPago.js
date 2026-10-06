@@ -8,11 +8,13 @@
  * @name cmdContexDocReciboPago
  * @version 1.1
  * @purpose Builds the payment receipt document context for a claim payment.
- * @context Receives the claim identifier through _row.reclamo.
+ * @context Receives the claim identifier through _row.reclamo and, optionally,
+ *          the payment request identifier through _row.solicitud.
  * @output Returns the payment data enriched with document and user information.
  */
 
 const claimId = context.row.reclamo;
+const requestedPaymentId = getRequestedPaymentId(context && context.row);
 
 /*==================
   Obtener Pago PayClaim
@@ -46,7 +48,7 @@ if (!(RepoClaim.total > 0) || !RepoClaim.outData) {
 }
 
 const claim = RepoClaim.outData[0]
-const paymentClaim = getLatestClaimPayment(claim);
+const paymentClaim = requestedPaymentId ? { id: requestedPaymentId } : getLatestClaimPayment(claim);
 
 if (!paymentClaim) {
   return { ok: true, msg: '@No se encontró un pago asociado al reclamo', cumulo: 0 };
@@ -73,6 +75,13 @@ doCmd({
 
 
 const payment = RepoClaimPayment.outData[0];
+
+if (!payment) {
+  return { ok: true, msg: '@No se encontró la solicitud de pago indicada', cumulo: 0 };
+}
+if (Number(payment.claimId) !== Number(claimId)) {
+  return { ok: true, msg: '@La solicitud de pago no pertenece al reclamo indicado', cumulo: 0 };
+}
 
 doCmd({"cmd":"GetContacts","data":{"filter":`id = ${payment.contactId}`}})
 
@@ -157,6 +166,12 @@ function getAdditionalBeneficiary(...payments) {
   }
 
   return '';
+}
+
+function getRequestedPaymentId(row) {
+  const value = row && (row.solicitud ?? row.idSolicitud ?? row.claimPaymentId ?? row.paymentId);
+  const paymentId = Number(value);
+  return Number.isInteger(paymentId) && paymentId > 0 ? paymentId : null;
 }
 
 function formatOutputAmounts(output) {

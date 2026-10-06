@@ -2,10 +2,10 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20260701'
-        ,@fend DATE =  '20260730'
-		,@ramo varchar(50) = null
-		,@producto varchar(50) = null
+DECLARE  @fstart DATE = '20261001'
+        ,@fend DATE =  '20261030'
+		,@ramo varchar(50) = 20
+		,@producto varchar(50) = 'GAP'
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
@@ -30,14 +30,17 @@ SELECT
     CASE WHEN ISNULL(lp.policyVersion,0) = 0 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
 
     ISNULL(pym.name, '') AS recursopago,
-    CASE snap.periodicity 
+    CASE WHEN lp.lob='81' THEN COALESCE(axxPay.name,
+ CASE LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity))) WHEN 'y' THEN 'Anual' WHEN 's' THEN 'Semestral' WHEN 'q' THEN 'Trimestral' WHEN 'm' THEN 'Mensual' WHEN 'b' THEN 'Bimensual'
+ ELSE CONCAT(N'Sin descripciÃ³n configurada (', COALESCE(snap.periodicity,lp.periodicity), ')') END)
+ ELSE CASE snap.periodicity 
         WHEN 'y' THEN 'Anual'
         WHEN 'm' THEN 'Mensual'
         WHEN 'b' THEN 'Bimensual'
         WHEN 's' THEN 'Semestral'
         WHEN 'q' THEN 'Trimestral'
         ELSE lp.periodicity 
-    END AS [Forma pago],
+    END END AS [Forma pago],
 
     ISNULL(sumaAseg.sumaAseg,0) AS [Suma Aseg],
     ISNULL(snap.surcharges,0) AS Recargos,
@@ -72,8 +75,8 @@ SELECT
             NULLIF(LTRIM(RTRIM(br.surname2)), ''))
         ))
     END AS [Corredor de Seguros],
-    benf.name AS Beneficiario,
-    NULL AS [Descrip Objeto Afianzado],
+    CASE WHEN lp.productCode='81FIAGCCOG' THEN COALESCE(axxBondBeneficiary.name, CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(acref.Acreedor,'')='' THEN 'No Tiene' ELSE acref.Acreedor END ELSE ISNULL(benf.name, 'No Tiene') END) ELSE CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(acref.Acreedor,'')='' THEN 'No Tiene' ELSE acref.Acreedor END ELSE ISNULL(benf.name, 'No Tiene') END END AS Beneficiario,
+    CASE WHEN lp.lob='81' THEN axxObject.description ELSE NULL END AS [Descrip Objeto Afianzado],
     CASE WHEN ISNULL(acref.Acreedor, '') = '' THEN 'No Tiene' ELSE acref.Acreedor END Acreedor,
     ISNULL(c.nationalId, '0') AS [Cuenta Cobis],
     CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro,
@@ -141,7 +144,19 @@ OUTER APPLY (
             CROSS APPLY OPENJSON(
                 SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
             )
-            WHERE name = 'cfgCoberturaProductoRea'
+            WHERE name = CASE lp.lob
+                WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
+                WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
+                WHEN '31' THEN 'cfgCoberturaProductoReaVida'
+                WHEN '71' THEN 'cfgCoberturaProductoReaVidaIndividual'
+                WHEN '52' THEN 'cfgCoberturaProductoReaRiesgosVarios'
+                WHEN '6' THEN 'cfgCoberturaProductoReaAuto'
+                WHEN '81' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '82' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '83' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '84' THEN 'cfgCoberturaProductoReaFianza'
+                ELSE 'cfgCoberturaProductoRea'
+            END
         ) x
         WHERE RowNumber > 0
           AND JSON_VALUE(RowData,'$[0]') = lp.lob
@@ -151,7 +166,8 @@ OUTER APPLY (
 ) sumaAseg
 /* FIN - información de la póliza según snapshot  */
 
-LEFT JOIN Contact c ON c.id = lp.holderId        
+OUTER APPLY (SELECT TOP 1 mi.id, mi.contactId FROM Insured mi WHERE mi.lifePolicyId = lp.id AND mi.role = 0 ORDER BY mi.id) mainIns /* MSN-000035: cliente = asegurado principal */
+LEFT JOIN Contact c ON c.id = COALESCE(mainIns.contactId, lp.holderId)        
 LEFT JOIN Contact br ON br.id = snap.sellerId
 LEFT JOIN Contact acre ON acre.id = snap.cessionBeneficiary
 OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
@@ -163,7 +179,14 @@ OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
 LEFT JOIN Product prod ON prod.code = lp.productCode
 LEFT JOIN Proceso prcp ON prcp.id = lp.processId
 LEFT JOIN ChannelCatalog cc ON cc.code = snap.channel
-LEFT JOIN Insured benf ON benf.LifePolicyId = lp.id
+/* MSN-000035: beneficiario = todo asegurado de la póliza que no sea el asegurado principal */
+OUTER APPLY (SELECT STRING_AGG(COALESCE(NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
+                NULLIF(LTRIM(RTRIM(oc.name)), ''),
+                NULLIF(LTRIM(RTRIM(oc.middleName)), ''),
+                NULLIF(LTRIM(RTRIM(oc.surname1)), ''),
+                NULLIF(LTRIM(RTRIM(oc.surname2)), '')))), ''), LTRIM(RTRIM(oi.name))), ', ') WITHIN GROUP (ORDER BY oi.id) AS name
+             FROM Insured oi LEFT JOIN Contact oc ON oc.id = oi.contactId
+             WHERE oi.lifePolicyId = lp.id AND oi.id <> ISNULL(mainIns.id, -1) AND oi.contactId <> ISNULL(mainIns.contactId, -1)) benf
 LEFT JOIN lob lob ON lob.code = lp.lob
 LEFT JOIN PaymentMethodCatalog pym ON pym.code = snap.paymentMethod
 
@@ -297,7 +320,7 @@ OUTER APPLY (
             ELSE '[]'
         END
     ) campo
-    WHERE c.id = lp.holderId
+    WHERE c.id = COALESCE(mainIns.contactId, lp.holderId)
       AND (
             formulario.[key] = N'Información adicional'
             OR formulario.[key] = 'Informacion adicional'
@@ -326,6 +349,25 @@ OUTER APPLY (
     WHERE bf.id = lp.cessionBeneficiary
 ) bf
 
+OUTER APPLY (SELECT TOP 1 ch.jSnapshot FROM [Change] ch WHERE ch.lifePolicyId=lp.id AND ch.status=1 AND JSON_QUERY(ch.jSnapshot,'$.InsuredObjects') IS NOT NULL ORDER BY ch.executionDate,ch.id) axxHistory
+OUTER APPLY (SELECT COALESCE(JSON_QUERY(an.jSnapshot,'$.InsuredObjects'),JSON_QUERY(axxHistory.jSnapshot,'$.InsuredObjects'),(SELECT io.jValues FROM InsuredObject io WHERE io.lifePolicyId=lp.id ORDER BY io.id FOR JSON PATH)) objects) axxObjects
+OUTER APPLY (SELECT TOP 1 fld.description
+ FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
+ CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
+ WITH (name nvarchar(100) '$.name',description nvarchar(max) '$.userData[0]') fld
+ WHERE fld.name='desc_objeto_afianzado' ORDER BY TRY_CONVERT(int,obj.[key])) axxObject
+OUTER APPLY (SELECT TOP 1 JSON_VALUE(custom.value,'$.name') name
+ FROM OPENJSON(prod.configJson,'$.Premium.periodicity') opt
+ CROSS APPLY OPENJSON(CASE WHEN opt.type=5 THEN opt.value ELSE '{}' END,'$.custom') custom
+ WHERE LOWER(JSON_VALUE(custom.value,'$.expression'))=LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity)))) axxPay
+OUTER APPLY (SELECT TOP 1 NULLIF(LTRIM(RTRIM(fld.nameValue)),'') name
+ FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
+ CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
+ WITH (fieldName nvarchar(100) '$.name',nameValue nvarchar(max) '$.userData[0]') fld
+ WHERE fld.fieldName='nombre' AND NULLIF(LTRIM(RTRIM(fld.nameValue)),'') IS NOT NULL
+ ORDER BY TRY_CONVERT(int,obj.[key])) axxBondBeneficiary
 WHERE CAST(lp.activeDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
@@ -383,15 +425,18 @@ SELECT
 		ELSE ed.Discriminator
 	END AS Tipo
     ,ISNULL(pym.name, '') AS recursopago
-    ,CASE SUBSTRING(TRIM(ISNULL(bed.periodicity, lp.periodicity)),1,1)
+    ,CASE WHEN lp.lob='81' THEN COALESCE(axxPay.name,
+ CASE LOWER(TRIM(COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity))) WHEN 'y' THEN 'Anual' WHEN 's' THEN 'Semestral' WHEN 'q' THEN 'Trimestral' WHEN 'm' THEN 'Mensual' WHEN 'b' THEN 'Bimensual'
+ ELSE CONCAT(N'Sin descripciÃ³n configurada (', COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity), ')') END)
+ ELSE CASE SUBSTRING(TRIM(ISNULL(bed.periodicity, lp.periodicity)),1,1)
         WHEN 'y' THEN 'Anual'
         WHEN 'm' THEN 'Mensual'
         WHEN 'b' THEN 'Bimensual'
         WHEN 's' THEN 'Semestral'
         WHEN 'q' THEN 'Trimestral'
         ELSE TRIM(ISNULL(bed.periodicity, lp.periodicity))
-    END AS [Forma pago]
-    ,CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNULL(sumaAsegCancela.sumaAseg,0) 
+    END END AS [Forma pago]
+    ,CASE WHEN lp.lob='81' AND ed.Discriminator='CapitalChange' AND ed.newCapital>ed.oldCapital THEN ed.newCapital WHEN ed.Discriminator = 'CancellationChange' THEN ISNULL(sumaAsegCancela.sumaAseg,0) 
 		ELSE ISNULL(sumaAsegNew.sumaAseg,0) - ISNULL(sumaAsegOld.sumaAseg,0) END 
 		AS [Suma Aseg]
 	,mo.Recargos
@@ -425,8 +470,8 @@ SELECT
             NULLIF(LTRIM(RTRIM(br.surname2)), ''))
         ))
     END AS [Corredor de Seguros]
-    ,benf.name AS Beneficiario
-    ,NULL AS [Descrip Objeto Afianzado]
+    ,CASE WHEN lp.productCode='81FIAGCCOG' THEN COALESCE(axxBondBeneficiary.name, CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(bf.name,'')='' THEN 'No Tiene' ELSE bf.name END ELSE ISNULL(benf.name, 'No Tiene') END) ELSE CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(bf.name,'')='' THEN 'No Tiene' ELSE bf.name END ELSE ISNULL(benf.name, 'No Tiene') END END AS Beneficiario
+    ,CASE WHEN lp.lob='81' THEN axxObject.description ELSE NULL END AS [Descrip Objeto Afianzado]
     ,CASE WHEN ISNULL(bf.name,'') = '' THEN 'No Tiene' ELSE bf.name END AS Acreedor
     ,ISNULL(c.nationalId, '0') AS [Cuenta Cobis]
     ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro
@@ -438,13 +483,21 @@ INNER JOIN [Change] ed ON ed.lifePolicyId = lp.id AND ed.status = '1'
 LEFT JOIN Proceso pr ON pr.id = ed.processId
 LEFT JOIN Bill bed ON bed.changeId = ed.id
 LEFT JOIN BillDiff bfed ON bfed.changeId = ed.id
-LEFT JOIN Contact c ON c.id = ISNULL(ed.newPolicyholder, lp.holderId)
+OUTER APPLY (SELECT TOP 1 mi.id, mi.contactId FROM Insured mi WHERE mi.lifePolicyId = lp.id AND mi.role = 0 ORDER BY mi.id) mainIns /* MSN-000035: cliente = asegurado principal */
+LEFT JOIN Contact c ON c.id = COALESCE(mainIns.contactId, ed.newPolicyholder, lp.holderId)
 LEFT JOIN Contact br ON br.id = ISNULL(ed.newSellerId, lp.sellerId)
 LEFT JOIN Product prod ON prod.code = lp.productCode
 LEFT JOIN Proceso prc ON prc.id = ed.processId
 LEFT JOIN PaymentMethodCatalog pym ON pym.code = ISNULL(ed.newpaymentMethod, lp.paymentMethod)
 LEFT JOIN ChannelCatalog cc ON cc.code = ISNULL(ed.newChannel , lp.channel)
-LEFT JOIN Insured benf ON benf.LifePolicyId = lp.id
+/* MSN-000035: beneficiario = todo asegurado de la póliza que no sea el asegurado principal */
+OUTER APPLY (SELECT STRING_AGG(COALESCE(NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
+                NULLIF(LTRIM(RTRIM(oc.name)), ''),
+                NULLIF(LTRIM(RTRIM(oc.middleName)), ''),
+                NULLIF(LTRIM(RTRIM(oc.surname1)), ''),
+                NULLIF(LTRIM(RTRIM(oc.surname2)), '')))), ''), LTRIM(RTRIM(oi.name))), ', ') WITHIN GROUP (ORDER BY oi.id) AS name
+             FROM Insured oi LEFT JOIN Contact oc ON oc.id = oi.contactId
+             WHERE oi.lifePolicyId = lp.id AND oi.id <> ISNULL(mainIns.id, -1) AND oi.contactId <> ISNULL(mainIns.contactId, -1)) benf
 LEFT JOIN lob lob ON lob.code = lp.lob
 
 /* Valores monetarios => si no hay billDiff, que tome lo que genera Bill, (Cancelaciones por ejem)  */
@@ -493,7 +546,19 @@ OUTER APPLY (
             CROSS APPLY OPENJSON(
                 SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
             )
-            WHERE name = 'cfgCoberturaProductoRea'
+            WHERE name = CASE lp.lob
+                WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
+                WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
+                WHEN '31' THEN 'cfgCoberturaProductoReaVida'
+                WHEN '71' THEN 'cfgCoberturaProductoReaVidaIndividual'
+                WHEN '52' THEN 'cfgCoberturaProductoReaRiesgosVarios'
+                WHEN '6' THEN 'cfgCoberturaProductoReaAuto'
+                WHEN '81' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '82' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '83' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '84' THEN 'cfgCoberturaProductoReaFianza'
+                ELSE 'cfgCoberturaProductoRea'
+            END
         ) x
         WHERE RowNumber > 0
           AND JSON_VALUE(RowData,'$[0]') = lp.lob
@@ -522,7 +587,19 @@ OUTER APPLY (
             CROSS APPLY OPENJSON(
                 SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
             )
-            WHERE name like 'cfgCoberturaProductoRea%'
+            WHERE name = CASE lp.lob
+                WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
+                WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
+                WHEN '31' THEN 'cfgCoberturaProductoReaVida'
+                WHEN '71' THEN 'cfgCoberturaProductoReaVidaIndividual'
+                WHEN '52' THEN 'cfgCoberturaProductoReaRiesgosVarios'
+                WHEN '6' THEN 'cfgCoberturaProductoReaAuto'
+                WHEN '81' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '82' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '83' THEN 'cfgCoberturaProductoReaFianza'
+                WHEN '84' THEN 'cfgCoberturaProductoReaFianza'
+                ELSE 'cfgCoberturaProductoRea'
+            END
         ) x
         WHERE RowNumber > 0
           AND JSON_VALUE(RowData,'$[0]') = lp.lob
@@ -545,7 +622,19 @@ OUTER APPLY (SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 't
 					CROSS APPLY OPENJSON(
 						SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
 					)
-					WHERE name like 'cfgCoberturaProductoRea%'
+					WHERE name = CASE lp.lob
+					    WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
+					    WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
+					    WHEN '31' THEN 'cfgCoberturaProductoReaVida'
+					    WHEN '71' THEN 'cfgCoberturaProductoReaVidaIndividual'
+					    WHEN '52' THEN 'cfgCoberturaProductoReaRiesgosVarios'
+					    WHEN '6' THEN 'cfgCoberturaProductoReaAuto'
+					    WHEN '81' THEN 'cfgCoberturaProductoReaFianza'
+					    WHEN '82' THEN 'cfgCoberturaProductoReaFianza'
+					    WHEN '83' THEN 'cfgCoberturaProductoReaFianza'
+					    WHEN '84' THEN 'cfgCoberturaProductoReaFianza'
+					    ELSE 'cfgCoberturaProductoRea'
+					END
 				) x
 				WHERE RowNumber > 0
 				  AND JSON_VALUE(RowData,'$[0]') = lp.lob
@@ -625,7 +714,7 @@ OUTER APPLY (
             ELSE '[]'
         END
     ) campo
-    WHERE c.id = lp.holderId
+    WHERE c.id = COALESCE(mainIns.contactId, ed.newPolicyholder, lp.holderId)
       AND (
             formulario.[key] = N'Información adicional'
             OR formulario.[key] = 'Informacion adicional'
@@ -654,6 +743,25 @@ OUTER APPLY (
     WHERE bf.id = ISNULL(ed.newCessionBeneficiary, lp.cessionBeneficiary)
 ) bf
 
+OUTER APPLY (SELECT TOP 1 ch.jSnapshot FROM [Change] ch WHERE ch.lifePolicyId=lp.id AND ch.status=1 AND (ch.executionDate>ed.executionDate OR (ch.executionDate=ed.executionDate AND ch.id>ed.id)) AND JSON_QUERY(ch.jSnapshot,'$.InsuredObjects') IS NOT NULL ORDER BY ch.executionDate,ch.id) axxHistory
+OUTER APPLY (SELECT COALESCE(NULLIF(ed.jNewInsuredObjects,''),JSON_QUERY(axxHistory.jSnapshot,'$.InsuredObjects'),(SELECT io.jValues FROM InsuredObject io WHERE io.lifePolicyId=lp.id ORDER BY io.id FOR JSON PATH),JSON_QUERY(ed.jSnapshot,'$.InsuredObjects')) objects) axxObjects
+OUTER APPLY (SELECT TOP 1 fld.description
+ FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
+ CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
+ WITH (name nvarchar(100) '$.name',description nvarchar(max) '$.userData[0]') fld
+ WHERE fld.name='desc_objeto_afianzado' ORDER BY TRY_CONVERT(int,obj.[key])) axxObject
+OUTER APPLY (SELECT TOP 1 JSON_VALUE(custom.value,'$.name') name
+ FROM OPENJSON(prod.configJson,'$.Premium.periodicity') opt
+ CROSS APPLY OPENJSON(CASE WHEN opt.type=5 THEN opt.value ELSE '{}' END,'$.custom') custom
+ WHERE LOWER(JSON_VALUE(custom.value,'$.expression'))=LOWER(TRIM(COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity)))) axxPay
+OUTER APPLY (SELECT TOP 1 NULLIF(LTRIM(RTRIM(fld.nameValue)),'') name
+ FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
+ CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
+ WITH (fieldName nvarchar(100) '$.name',nameValue nvarchar(max) '$.userData[0]') fld
+ WHERE fld.fieldName='nombre' AND NULLIF(LTRIM(RTRIM(fld.nameValue)),'') IS NOT NULL
+ ORDER BY TRY_CONVERT(int,obj.[key])) axxBondBeneficiary
 WHERE CAST(ed.executionDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
