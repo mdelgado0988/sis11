@@ -37,7 +37,10 @@ const reportesEndoso = {
   },
   fianza: {
     conPrima: 'FormatoEndososFianza.docx',
-    sinPrima: 'FormatoEndososSinCoberturaFianza.docx'
+    sinPrima: 'FormatoEndososSinCoberturaFianza.docx',
+    ordenProceder: 'EndosoOrdenProcederFianza.docx',
+    cambioSuma: 'EndosoCambioSumaFianza.docx',
+    cambioVigencia: 'EndosoCambioVigenciaFianza.docx'
   },
   vida: {
     conPrima: 'FormatoEndososVida.docx',
@@ -254,6 +257,12 @@ function setContactsList() {
       xContactsFilterArray.push(dataCotizacionAsegurados.contactId);
     }    
   };  
+  if (isSuretyPolicy(policy)) {
+    const beneficiaryId = Number(InsuredObject?.userData?.contactid || InsuredObject?.userData?.cci_rif_afavor || 0);
+    if (beneficiaryId > 0 && !xContactsFilterArray.includes(beneficiaryId)) {
+      xContactsFilterArray.push(beneficiaryId);
+    }
+  }
 }
 
 function getInsureds(lifePolicyId) {
@@ -537,6 +546,17 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
     return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
       ? reportes.ramoTecnico.conPrima
       : reportes.ramoTecnico.sinPrima;
+  }
+
+  const endorsementType = tipoCambioCobertura(change).endorsementType;
+  if (isSuretyPolicy(policy) && endorsementType === 'PROCEEDORDER') {
+    return reportes.fianza.ordenProceder;
+  }
+  if (isSuretyPolicy(policy) && endorsementType === 'CHANGE_INSURED_SUM_SURETY') {
+    return reportes.fianza.cambioSuma;
+  }
+  if (isSuretyPolicy(policy) && endorsementType === 'CHANGE_COVERAGE_SURETY') {
+    return reportes.fianza.cambioVigencia;
   }
 
   if (!isSuretyPolicy(policy)) {
@@ -967,6 +987,198 @@ function buildBeneficiaryTemplateData(policyId, beneficiariesUserData) {
   };
 }
 
+function buildSuretyDocumentData({ policy, change, insuredData, holder, contacts, countries, provinces, cities, sectors }) {
+  const data = insuredData || {};
+  const allContacts = Array.isArray(contacts) ? contacts : [];
+  const contactById = id => allContacts.find(contact => Number(contact.id) === Number(id));
+  const holderData = contactById(policy.holderId) || holder || {};
+  const seller = contactById(policy.sellerId) || {};
+  const beneficiary = contactById(data.contactid || data.cci_rif_afavor) || {};
+  const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  const dateParts = value => {
+    const raw = String(value || '').trim();
+    const date = raw ? new Date(/\d{4}-\d{2}-\d{2}$/.test(raw) ? raw + 'T12:00:00Z' : raw) : null;
+    if (!date || Number.isNaN(date.getTime())) return { day: '', month: 1, year: '' };
+    const panama = new Date(date.getTime() - (5 * 60 * 60 * 1000));
+    return { day: panama.getUTCDate(), month: panama.getUTCMonth() + 1, year: panama.getUTCFullYear() };
+  };
+  const formatDate = value => {
+    const parts = dateParts(value);
+    return parts.year ? String(parts.day).padStart(2, '0') + '/' + String(parts.month).padStart(2, '0') + '/' + parts.year : '';
+  };
+  const fullName = contact => contact?.isPerson === false
+    ? String(contact?.surname2 || contact?.name || '').trim()
+    : [contact?.name, contact?.middlename, contact?.surname1, contact?.surname2].filter(Boolean).join(' ').trim();
+  const phoneByType = (list, type) => (Array.isArray(list) ? list.find(item => item?.type === type) : null)?.num || '';
+  const address = Array.isArray(holderData.Addresses) ? holderData.Addresses[0] || {} : {};
+  const start = dateParts(policy.start);
+  const end = dateParts(policy.end);
+  const today = dateParts(new Date());
+  const endPlusThirty = new Date(String(policy.end || '').slice(0, 10) + 'T12:00:00Z');
+  if (!Number.isNaN(endPlusThirty.getTime())) endPlusThirty.setUTCDate(endPlusThirty.getUTCDate() + 30);
+  const endPlusThirtyParts = dateParts(endPlusThirty);
+  const policyDays = start.year && end.year
+    ? Math.round((new Date(String(policy.end).slice(0, 10) + 'T12:00:00Z') - new Date(String(policy.start).slice(0, 10) + 'T12:00:00Z')) / 86400000)
+    : 0;
+  const vigencia = suretyVigenciaText(policyDays, suretyValue(data, ['tipo_calendario']));
+  const nuevaVigenciaTexto = suretyChangedCoverageTerm(change, months, dateParts);
+  const coverages = Array.isArray(policy.Coverages) ? policy.Coverages.slice().sort((left, right) => Number(left.number || 0) - Number(right.number || 0)) : [];
+  const vices = coverages.find(coverage => String(coverage.code || '') === '314');
+  const vicesEnd = vices ? dateParts(vices.end) : { day: '', month: 1, year: '' };
+  const insuredSum = Number(policy.insuredSum || 0);
+  const changedInsuredSum = suretyChangedInsuredSum(policy, change);
+  const beneficiaryId = beneficiary?.isPerson === false ? beneficiary.nif : beneficiary.cnp;
+  const country = (countries || []).find(item => String(item.code || '') === String(address.country || ''))?.name || '';
+  const province = (provinces || []).find(item => String(item.code || '') === String(address.state || ''))?.name || '';
+  const city = (cities || []).find(item => String(item.code || '') === String(address.city || ''))?.name || '';
+  const district = (sectors || []).find(item => String(item.id || item.code || '') === String(address.sector || ''))?.name || '';
+  const sumLetters = suretyNumberToWords(insuredSum).toUpperCase().replace(/\s+CON\s+(\d{2}\/100)$/, ' BALBOAS CON $1');
+  const fromText = start.day + ' DE ' + String(months[start.month - 1] || '').toUpperCase() + ' DEL ' + start.year;
+  const untilText = end.day + ' DE ' + String(months[end.month - 1] || '').toUpperCase() + ' DEL ' + end.year;
+  const result = {
+    NumeroFianza: policy.code || '', Tenedor: fullName(holderData), AFavor: suretyValue(data, ['nombre']) || 'No Definido',
+    Descripcion: suretyValue(data, ['desc_objeto_afianzado']), Secuestrante: suretyValue(data, ['secuestrante']),
+    FechaActoPublico: formatDate(suretyValue(data, ['f_acto_publico'])), ActoPublico: suretyValue(data, ['n_acto_publico']),
+    Moneda: 'B/.', Suma: n(insuredSum), SumaLetras: sumLetters, DiasVigencia: policyDays,
+    NumeroContrato: suretyValue(data, ['txtNumeroContrato', 'txtNumeroContratoFianza', 'text-1770999106315']) || '0',
+    DiaFecha: today.day, MesFecha: months[today.month - 1], AnioFecha: today.year, FechaActual: formatDate(new Date()),
+    FechaActualTextoMin: today.day + ' del mes de ' + String(months[today.month - 1] || '').toLowerCase() + ' de ' + today.year,
+    DiaVigenciaIni: start.day, MesVigenciaIni: months[start.month - 1], AnioVigenciaIni: start.year,
+    DiaVigenciaFin: end.day, MesVigenciaFin: months[end.month - 1], AnioVigenciaFin: end.year,
+    DesdeTexto: fromText, HastaTexto: untilText,
+    Hasta2Texto: endPlusThirtyParts.day + ' DE ' + String(months[endPlusThirtyParts.month - 1] || '').toUpperCase() + ' DEL ' + endPlusThirtyParts.year,
+    FechaFinVicioTexto: vicesEnd.year ? vicesEnd.day + ' DE ' + String(months[vicesEnd.month - 1] || '').toUpperCase() + ' DEL ' + vicesEnd.year : '',
+    DiasVigenciaTexto: vigencia.texto + ' A PARTIR DEL ' + fromText, VigenciaTexto: vigencia.texto,
+    NuevaVigenciaTexto: nuevaVigenciaTexto,
+    SumaTextoTotal: ('B/. ' + n(insuredSum) + ' ' + sumLetters).trim().toUpperCase(),
+    SumaCambioTexto: changedInsuredSum === null ? '' : suretyAmountText(changedInsuredSum),
+    MonedaMonto: ('B/. ' + n(insuredSum)).trim(), Prestamo: '', TipoLicitacion: '', NombreEncargado: '', TituloEncargado: '',
+    IdentificacionTenedor: holderData.isPerson === true ? holderData.cnp || '' : holderData.nif || '',
+    DireccionTenedor: [address.address1, address.address2, district].filter(Boolean).join(', '), TelefonoTenedor: phoneByType(holderData.Phones, 'PHONETYPE1') || holderData.phone || '',
+    CelularTenedor: phoneByType(holderData.Phones, 'PHONETYPE2'), FaxTenedor: phoneByType(holderData.Phones, 'PHONETYPE4'),
+    EmailTenedor: phoneByType(holderData.Emails, 'EMAILTYPE1') || holderData.email || '', PaisTenedor: country, ProvinciaTenedor: province, CiudadTenedor: city,
+    Desde: formatDate(policy.start), Hasta: formatDate(policy.end), IdentificacionAFavor: beneficiaryId || suretyValue(data, ['contacto_ruc', 'rut']),
+    Licitacion: suretyValue(data, ['n_licitacion']), Prima: n(policy.annualPremium || 0), Gastos: n(policy.fee || 0), Impuestos: n(policy.tax || 0), Total: n(policy.annualTotal || 0),
+    TipoMovimiento: Number(policy.contractYear || 0) === 1 ? 'Nuevo' : 'Renovación', Corredor: fullName(seller) || 'No Tiene', Oferta: policy.id,
+    Coberturas: coverages.map(coverage => ({ Codigo: coverage.code, Cobertura: coverage.name || '', Limite: n(coverage.limit), Prima: n(coverage.premium), Moneda: 'B/.' }))
+  };
+  return result;
+}
+
+function suretyChangedInsuredSum(policy, change) {
+  if (tipoCambioCobertura(change).endorsementType !== 'CHANGE_INSURED_SUM_SURETY') return null;
+
+  const changedCoverages = safeJson(change?.jNewCoverages, []);
+  const previousCoverages = safeJson(change?.jOldCoverages, []);
+  if (!Array.isArray(changedCoverages) || !Array.isArray(previousCoverages)) return 0;
+
+  const configTable = loadSuretyCatalog('cfgCoberturaProductoReaFianza');
+  const headers = Array.isArray(configTable[0]) ? configTable[0].map(value => String(value || '').trim().toLowerCase()) : [];
+  const productIndex = headers.indexOf('productcode');
+  const coverageIndex = headers.indexOf('coveragecode');
+  const sumsIndex = headers.indexOf('iscoverage');
+  const productCode = String(policy?.productCode || '').trim();
+  const configuredCoverages = new Set(
+    configTable.slice(1)
+      .filter(row => Array.isArray(row) && String(row[productIndex >= 0 ? productIndex : 1] || '').trim() === productCode)
+      .filter(row => String(row[sumsIndex >= 0 ? sumsIndex : 5] || '').trim().toUpperCase() === 'SI')
+      .map(row => String(row[coverageIndex >= 0 ? coverageIndex : 3] || '').trim())
+      .filter(Boolean)
+  );
+
+  return changedCoverages.reduce((total, coverage) => {
+    const code = String(coverage?.code || '').trim();
+    if (!configuredCoverages.has(code)) return total;
+
+    const previousCoverage = previousCoverages.find(item => String(item?.code || '').trim() === code) || {};
+    const currentLimit = numericValue(coverage?.limit ?? coverage?.sumInsured);
+    const previousLimit = numericValue(previousCoverage?.limit ?? previousCoverage?.sumInsured);
+    return total + currentLimit - previousLimit;
+  }, 0);
+}
+
+function suretyAmountText(value) {
+  const amount = numericValue(value);
+  const letters = suretyNumberToWords(Math.abs(amount))
+    .toUpperCase()
+    .replace(/\s+CON\s+(\d{2}\/100)$/, ' BALBOAS CON $1');
+  const prefix = amount < 0 ? '-B/. ' : 'B/. ';
+  return prefix + n(Math.abs(amount)) + ' (' + (amount < 0 ? 'MENOS ' : '') + letters + ')';
+}
+
+function suretyChangedCoverageTerm(change, months, dateParts) {
+  if (tipoCambioCobertura(change).endorsementType !== 'CHANGE_COVERAGE_SURETY') return '';
+
+  const additional = safeJson(change?.jAdditional, {}) || {};
+  const coverageCode = String(additional.coverageCode || '').trim();
+  const newCoverages = safeJson(change?.jNewCoverages, []);
+  const oldCoverages = safeJson(change?.jOldCoverages, []);
+  const changedCoverage = Array.isArray(newCoverages)
+    ? newCoverages.find(coverage => String(coverage?.code || '').trim() === coverageCode)
+      || newCoverages.find(coverage => {
+        const previous = Array.isArray(oldCoverages)
+          ? oldCoverages.find(item => String(item?.code || '').trim() === String(coverage?.code || '').trim())
+          : null;
+        return previous && (String(previous.start || '') !== String(coverage.start || '') || String(previous.end || '') !== String(coverage.end || ''));
+      })
+    : null;
+  const startValue = change?.newStart || changedCoverage?.start;
+  const endValue = change?.newEnd || changedCoverage?.end;
+  const previousCoverage = Array.isArray(oldCoverages) && changedCoverage
+    ? oldCoverages.find(item => String(item?.code || '').trim() === String(changedCoverage.code || '').trim())
+    : null;
+  const previousEndValue = previousCoverage?.end;
+  const start = dateParts(startValue);
+  const end = dateParts(endValue);
+  const endDate = new Date(String(endValue || '').slice(0, 10) + 'T12:00:00Z');
+  const previousEndDate = new Date(String(previousEndValue || '').slice(0, 10) + 'T12:00:00Z');
+  if (!start.year || !end.year || Number.isNaN(endDate.getTime()) || Number.isNaN(previousEndDate.getTime())) return '';
+
+  const days = Math.round((endDate - previousEndDate) / 86400000);
+  const period = days + ' ' + (Math.abs(days) === 1 ? 'DÍA' : 'DÍAS');
+  const longDate = value => value.day + ' DE ' + String(months[value.month - 1] || '').toUpperCase() + ' DE ' + value.year;
+  return period + ' A PARTIR DE ' + longDate(start) + ', ES DECIR QUE PERMANECERÁ VIGENTE HASTA EL ' + longDate(end);
+}
+
+function suretyVigenciaText(daysValue, calendarType) {
+  const days = Number(daysValue || 0);
+  const type = String(calendarType || '').trim();
+  let period = Math.round(days);
+  let unit = period === 1 ? 'DÍA' : 'DÍAS';
+
+  if (type === '2') {
+    period = Math.round(days / 30);
+    unit = period === 1 ? 'MES' : 'MESES';
+  } else if (type === '3') {
+    period = Math.round(days / 365);
+    unit = period === 1 ? 'AÑO' : 'AÑOS';
+  }
+
+  return { period, texto: period + ' ' + unit };
+}
+
+function suretyNumberToWords(value) {
+  const units = ['', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+  const tens = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+  const special = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
+  const hundreds = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+  const belowThousand = number => {
+    if (!number) return '';
+    if (number === 100) return 'CIEN';
+    let text = number >= 100 ? hundreds[Math.floor(number / 100)] + ' ' : '';
+    number %= 100;
+    if (number >= 10 && number < 20) return text + special[number - 10];
+    if (number >= 20) return text + (number === 20 ? 'VEINTE' : (number < 30 ? 'VEINTI' + units[number % 10].toLowerCase() : tens[Math.floor(number / 10)] + (number % 10 ? ' Y ' + units[number % 10] : '')));
+    return text + units[number];
+  };
+  const numeric = Number(value || 0);
+  const whole = Math.floor(Math.abs(numeric));
+  const millions = Math.floor(whole / 1000000), thousands = Math.floor((whole % 1000000) / 1000), hundredsPart = whole % 1000;
+  const text = [millions ? (millions === 1 ? 'UN MILLÓN' : belowThousand(millions) + ' MILLONES') : '', thousands ? (thousands === 1 ? 'MIL' : belowThousand(thousands) + ' MIL') : '', belowThousand(hundredsPart)].filter(Boolean).join(' ') || 'CERO';
+  const decimals = String(Math.round((Math.abs(numeric) % 1) * 100)).padStart(2, '0');
+  return text + ' CON ' + decimals + '/100';
+}
+
 function applyChangedBeneficiaries(documentData, beneficiariesUserData) {
   const custom = { ...(documentData || {}) };
   const raw = beneficiariesUserData?.hiddenBeneficiarios;
@@ -1187,6 +1399,15 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     Riesgo: riesgo
     
   };
+
+  // The surety DTO remains the single source for every fianza-document field.
+  // It is intentionally absent from non-surety endorsement payloads.
+  if (isSuretyPolicy(policy)) {
+    custom.DocumentoFianza = buildSuretyDocumentData({
+      policy, change, insuredData, holder, contacts: dataContacto,
+      countries, provinces: procincias, cities: Municipios, sectors
+    });
+  }
 
   dataContacto.forEach(row => {
 

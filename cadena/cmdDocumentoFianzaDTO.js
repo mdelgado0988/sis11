@@ -83,6 +83,7 @@ resultado.AnioVigenciaFin = anioFin;
 const monedaMonto = resultado.Moneda;
 const sumaMonto = n(policy?.insuredSum ?? 0);
 const sumaEnLetras = resultado.SumaLetras;
+const vigenciaDocumento = obtenerTextoVigencia(resultado.DiasVigencia, oaUserData?.tipo_calendario);
 resultado.DesdeTexto = `${diaIni} DE ${String(mesIni).toUpperCase()} DEL ${anioIni}`;
 resultado.HastaTexto = `${diaFin} DE ${String(mesFin).toUpperCase()} DEL ${anioFin}`;
 const partesHasta2 = partesFechaPanama(sumarDiasUTC(dateFin, 30)) || { dia: "", mes: 1, anio: "" };
@@ -93,7 +94,8 @@ const partesFinVicio = coberturaVicio ? partesFechaPanama(fechaComoUTC(cobertura
 resultado.FechaFinVicioTexto = partesFinVicio
   ? `${partesFinVicio.dia} DE ${String(meses[partesFinVicio.mes - 1]).toUpperCase()} DEL ${partesFinVicio.anio}`
   : "";
-resultado.DiasVigenciaTexto = `${resultado.DiasVigencia} DÍAS A PARTIR DEL ${resultado.DesdeTexto}`;
+resultado.DiasVigenciaTexto = `${vigenciaDocumento.texto} A PARTIR DEL ${resultado.DesdeTexto}`;
+resultado.VigenciaTexto = vigenciaDocumento.texto;
 resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
 resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
 resultado.Prestamo = "";
@@ -108,7 +110,7 @@ resultado.TituloEncargado = "";
 //Datos de contacto del tenedor (holder real de la poliza)
 const dirTenedor = Array.isArray(holder?.Addresses) && holder.Addresses.length > 0 ? holder.Addresses[0] : null;
 resultado.IdentificacionTenedor = (holder?.isPerson == true ? holder?.cnp : holder?.nif) ?? "";
-resultado.DireccionTenedor = `${dirTenedor?.address1 ?? ""} ${dirTenedor?.address2 ?? ""}`.trim();
+resultado.DireccionTenedor = axxDireccionCompleta(dirTenedor); //AXX-2418
 resultado.TelefonoTenedor = findByType(holder?.Phones, telPhoneType)?.num ?? holder?.phone ?? "";
 resultado.CelularTenedor = findByType(holder?.Phones, celPhoneType)?.num ?? "";
 resultado.FaxTenedor = findByType(holder?.Phones, faxPhoneType)?.num ?? "";
@@ -406,6 +408,25 @@ function obtenerDiasVigenciaDocumento() {
     : vigenciaPoliza;
 }
 
+function obtenerTextoVigencia(diasVigencia, tipoCalendario) {
+  const dias = Number(diasVigencia || 0);
+  const tipo = String(Array.isArray(tipoCalendario) ? tipoCalendario[0] : tipoCalendario || '').trim();
+  let periodo = Math.round(dias);
+  let unidad = 'DÍAS';
+
+  if (tipo === '2') {
+    periodo = Math.round(dias / 30);
+    unidad = periodo === 1 ? 'MES' : 'MESES';
+  } else if (tipo === '3') {
+    periodo = Math.round(dias / 365);
+    unidad = periodo === 1 ? 'AÑO' : 'AÑOS';
+  } else {
+    unidad = periodo === 1 ? 'DÍA' : 'DÍAS';
+  }
+
+  return { periodo, texto: `${periodo} ${unidad}` };
+}
+
 function esCoberturaPrincipal(parentCode) {
   return !parentCode || parentCode === "0" || parentCode === "NULL";
 }
@@ -479,4 +500,24 @@ function getCatalogValue(catalogName, filter, fieldName) {
   const catalogResult = globalThis[catalogName];
   if (!catalogResult?.ok) return "";
   return catalogResult?.outData?.[0]?.[fieldName] ?? "";
+}
+
+//AXX-2418 (GLOBUAT-268): dirección completa del contacto en los documentos (Barriada, Ubicación y Corregimiento), sin perder ni sustituir componentes.
+function axxDireccionCompleta(addr, extras) {
+  var a = addr || {};
+  var partes = [a.address1, a.address2, axxNombreCorregimiento(a.sector)].concat(extras || []);
+  var salida = [];
+  partes.forEach(function (p) {
+    var v = String(p == null ? "" : p).trim();
+    var repetido = salida.some(function (x) { return x.toUpperCase() == v.toUpperCase(); });
+    if (v && !repetido) salida.push(v);
+  });
+  return salida.join(", ");
+}
+function axxNombreCorregimiento(sector) {
+  var id = Number(sector || 0);
+  if (!(id > 0)) return "";
+  doCmd({cmd:"RepoSectorCatalog",data:{operation:"GET",filter:"id=" + id,size:1}});
+  var fila = RepoSectorCatalog && RepoSectorCatalog.outData && RepoSectorCatalog.outData[0];
+  return fila && fila.name ? String(fila.name) : "";
 }
