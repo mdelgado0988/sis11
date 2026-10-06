@@ -1685,15 +1685,10 @@
         }
 
         const validatePolicyRenewalAvailability = (policyId, policyCode) => {
-            const safePolicyCode = String(policyCode || '').replace(/'/g, "''");
-            const codeCondition = safePolicyCode
-                ? ` OR ([code] = N'${safePolicyCode}' AND id <> ${policyId})`
-                : '';
-
             return exe('DoQuery', {
                 sql: `SELECT TOP 1 id
                       FROM LifePolicy
-                      WHERE originalPolicyId = ${policyId}${codeCondition}
+                      WHERE originalPolicyId = ${policyId}
                       ORDER BY id DESC;`
             }).then(response => {
                 if (!response || response.ok === false) {

@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 71
+declare @ramoXY int = 81
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -128,8 +128,8 @@ WHERE cramo = 71  and cplan = 'TAR_PRO'
 ORDER BY cproces DESC
 
 --cobs que  suma, ejemplo
-declare @cramo int = 31
-declare @cplan varchar(15) = 'RD';
+declare @cramo int = 81
+declare @cplan varchar(15) = null--'RD';
 ; WITH polizas AS (select top (1) cpoliza, fanopol, fmespol
 		from adpoliza p
 		cross apply (select count(1)  cobs
@@ -184,8 +184,8 @@ WHERE c.cramo IN (81,82,83,84)
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
 	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
 from marepteccia
-where cramo in (71)
-and xnombrep not like '%endoso%'
+where cramo in (81)
+and xnombrep like '%endoso%'
 --AND xdpto <> 'SINIESTROS'
 --AND xformula1 <> '0'
 --AND xformula1 is not null and xformula1 <> '0'

@@ -10,8 +10,36 @@
  * (hiddenCobtar "Duración Días"); the endorsement shows no premium information.
  */
 () => {
-  const { Card, Row, Col, Form, DatePicker, Input, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, Spin, Tabs, message } = A;
+  const { Card, Row, Col, Form, DatePicker, Input, InputNumber, Button, Table, Descriptions, Alert, Tag, Skeleton, Space, Divider, Popconfirm, Spin, Tabs, Empty, Select, message } = A;
   const { TabPane } = Tabs;
+
+  const EditableFormattedNumber = function (props) {
+    const decimals = props.decimals === undefined ? 2 : props.decimals;
+    const [draft, setDraft] = useState(props.value === null || props.value === undefined ? '' : String(props.value));
+    const [focused, setFocused] = useState(false);
+    const [valueOnFocus] = useState({ current: '' });
+
+    useEffect(function () {
+      if (!focused) setDraft(props.value === null || props.value === undefined ? '' : String(props.value));
+    }, [props.value, focused]);
+
+    const displayValue = focused || draft === '' ? draft : Number(draft).toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+    return <Input size="small" inputMode="decimal" disabled={props.disabled} readOnly={props.readOnly}
+      value={displayValue} style={{ textAlign: 'right', width: props.width || '100%' }}
+      onFocus={function () { valueOnFocus.current = draft; setFocused(true); }}
+      onChange={function (event) { setDraft(event.target.value.replace(/[^0-9.,-]/g, '').replace(',', '.')); }}
+      onBlur={function () {
+        setFocused(false);
+        const parsed = draft === '' || draft === '-' || draft === '.' ? 0 : Number(draft);
+        const value = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+        const original = valueOnFocus.current === '' ? 0 : Number(valueOnFocus.current);
+        if (value !== original) props.onCommit(value);
+        setDraft(value.toFixed(decimals));
+      }} />;
+  };
 
   // ---------------------------------------------------------------- utilities
   // Date rule (§2.3): every date is handled as a CALENDAR date in the browser
@@ -223,6 +251,24 @@
   const [premiumValidationError, setPremiumValidationError] = useState('');
   const [proceedOrderEnabled, setProceedOrderEnabled] = useState(false);
   const [tariffDays, setTariffDays] = useState({});
+  const [resultTab, setResultTab] = useState('coverage');
+  const [reinsuranceSnapshot, setReinsuranceSnapshot] = useState(null);
+  const [reinsuranceBaseline, setReinsuranceBaseline] = useState(null);
+  const [reinsuranceLoading, setReinsuranceLoading] = useState(false);
+  const [reinsuranceError, setReinsuranceError] = useState('');
+  const [reinsuranceConfirmed, setReinsuranceConfirmed] = useState(false);
+  const [reinsuranceDetailTab, setReinsuranceDetailTab] = useState('distribution');
+  const [reinsuranceContractKey, setReinsuranceContractKey] = useState(null);
+  const [reinsuranceLineKey, setReinsuranceLineKey] = useState(null);
+  const [reinsuranceLines, setReinsuranceLines] = useState([]);
+  const [reinsuranceCoverageConfig, setReinsuranceCoverageConfig] = useState({});
+  const [reinsuranceContactNames, setReinsuranceContactNames] = useState({});
+  const [reinsuranceContacts, setReinsuranceContacts] = useState([]);
+  const [reinsuranceBrokers, setReinsuranceBrokers] = useState([]);
+  const [reinsuranceReinsurersReady, setReinsuranceReinsurersReady] = useState(false);
+  // The confirmation click can occur immediately after an input blur. Keep
+  // the current grid draft synchronously available for that same event.
+  let currentReinsuranceLines = reinsuranceLines;
 
   const getPolicyId = () => {
     try {
@@ -317,6 +363,7 @@
         const idx = {};
         header.forEach((h, i) => { if (idx[h] === undefined) idx[h] = i; });
         const iLob = idx.lobCode, iProd = idx.productCode, iCov = idx.coverageCode;
+        const iIsCoverage = idx.isCoverage === undefined ? header.indexOf('isCoverage') : idx.isCoverage;
         const iDep = header.indexOf('coverageCodeDep');
         const iParent = header.indexOf('coberturaPrincipal');
         if (iLob === undefined || iProd === undefined || iCov === undefined) {
@@ -329,7 +376,8 @@
             const dependency = iParent >= 0
               ? (parent && parent !== '-1' && parent.toUpperCase() !== 'NULL' ? parent : '')
               : (iDep >= 0 ? txt(r[iDep]) : '');
-            return { lobCode: txt(r[iLob]), productCode: txt(r[iProd]), coverageCode: txt(r[iCov]), coverageCodeDep: dependency };
+            return { lobCode: txt(r[iLob]), productCode: txt(r[iProd]), coverageCode: txt(r[iCov]), coverageCodeDep: dependency,
+              isCoverage: iIsCoverage >= 0 ? isCheckedValue(r[iIsCoverage]) : true };
           });
 
         // In technical catalogs the parent column points from the dependent
@@ -348,6 +396,9 @@
           setPolicy(pol);
           setCoverages(Array.isArray(pol.Coverages) ? pol.Coverages : []);
           setCfgRows(rows);
+          const coverageConfig = {};
+          rows.forEach((row) => { coverageConfig[String(row.coverageCode)] = { isCoverage: row.isCoverage !== false }; });
+          setReinsuranceCoverageConfig(coverageConfig);
           setProceedOrderEnabled(hasProceedOrder);
           setTariffDays(configuredDays);
         }
@@ -433,9 +484,97 @@
         padding: 8px;
       }
 
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .ant-table {
+        border: 1px solid #cbd1d8;
+        margin-top: 8px;
+        width: 100%;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .ant-table-container,
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .ant-table-content > table {
+        width: 100%;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .ant-input-number-input {
+        text-align: right !important;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-color: #cbd1d8 !important;
+        color: #262626;
+        font-size: 12px;
+        padding: 5px 8px !important;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .ant-table-tbody > tr > td {
+        border-color: #d9e2ec !important;
+        font-size: 12px;
+        padding: 5px 8px !important;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .proceed-order-reinsurance-selected > td {
+        background: #d6e8ff !important;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-panel .proceed-order-reinsurance-total > td {
+        background: #86b4ff !important;
+        color: #0b1f3a;
+        font-weight: 700;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-detail-tabs {
+        margin-top: 8px;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-detail-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+        border: 1px solid #aebdca;
+        border-bottom-color: #aebdca;
+        border-radius: 5px 5px 0 0;
+        margin-right: 2px;
+        color: #263746;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-detail-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+        border-color: #1677ff;
+        border-bottom-color: #fff;
+        color: #0958d9;
+        font-weight: 600;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-detail-tabs > .ant-tabs-content-holder {
+        border: 1px solid #aebdca;
+        border-top: 0;
+        padding: 4px;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-detail-tabs .ant-table-content > table {
+        table-layout: fixed;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-reinsurance-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        margin-top: 8px;
+        background: #e6f4ff;
+        border: 1px solid #91caff;
+        color: #334155;
+        font-size: 12px;
+      }
+
+      .proceed-order-endorsement-view .proceed-order-folder-button {
+        min-width: 24px;
+        padding: 2px 4px;
+        margin-left: 4px;
+        color: #1677ff;
+      }
+
       .proceed-order-endorsement-view .ant-input,
       .proceed-order-endorsement-view .ant-input-affix-wrapper,
       .proceed-order-endorsement-view .ant-picker,
+      .proceed-order-endorsement-view .ant-input-number,
       .proceed-order-endorsement-view .ant-select:not(.ant-select-customize-input) .ant-select-selector {
         border: 1px solid #b8c4d1 !important;
         border-radius: 6px;
@@ -444,6 +583,7 @@
       .proceed-order-endorsement-view .ant-input:hover,
       .proceed-order-endorsement-view .ant-input-affix-wrapper:hover,
       .proceed-order-endorsement-view .ant-picker:hover,
+      .proceed-order-endorsement-view .ant-input-number:hover,
       .proceed-order-endorsement-view .ant-select:not(.ant-select-disabled):hover .ant-select-selector {
         border-color: #8da9c2 !important;
       }
@@ -452,6 +592,8 @@
       .proceed-order-endorsement-view .ant-input-focused,
       .proceed-order-endorsement-view .ant-input-affix-wrapper-focused,
       .proceed-order-endorsement-view .ant-picker-focused,
+      .proceed-order-endorsement-view .ant-input-number-focused,
+      .proceed-order-endorsement-view .ant-input-number:focus-within,
       .proceed-order-endorsement-view .ant-select-focused .ant-select-selector {
         border-color: #1677ff !important;
         box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2) !important;
@@ -460,6 +602,7 @@
       .proceed-order-endorsement-view .ant-input:disabled,
       .proceed-order-endorsement-view .ant-input-affix-wrapper-disabled,
       .proceed-order-endorsement-view .ant-picker-disabled,
+      .proceed-order-endorsement-view .ant-input-number-disabled,
       .proceed-order-endorsement-view .ant-select-disabled .ant-select-selector {
         border-color: #b8c4d1 !important;
         background: #f5f5f5 !important;
@@ -808,6 +951,22 @@
     }
   };
 
+  const persistReinsuranceSnapshot = async function (changeId, snapshot) {
+    const json = JSON.stringify({
+      endorsementType: 'PROCEEDORDER',
+      reinsuranceSnapshot: snapshot
+    }).replace(/'/g, "''");
+    const response = await exe('SetField', {
+      entity: 'Change',
+      entityId: Number(changeId),
+      fieldValue: "jAdditional='" + json + "'",
+      raw: true
+    });
+    if (!response || !response.ok) {
+      throw new Error(translatedMessage(response && response.msg, 'The endorsement reinsurance distribution could not be saved.'));
+    }
+  };
+
   const updateExecutedPayPlanDates = async function (plannedPayPlan) {
     const response = await exe('RepoPayPlan', {
       operation: 'GET',
@@ -890,6 +1049,8 @@
     const cessionsById = {};
     cessions.forEach((cession) => { cessionsById[String(cession.id)] = cession; });
     const distribution = cessions.map((cession) => ({
+      id: cession.id,
+      cessionId: cession.id,
       contractId: cession.contractId,
       lineId: cession.lineId,
       coverageId: cession.coverageId,
@@ -927,6 +1088,7 @@
     const coinsuranceResponse = await exe('RepoCoCession', {
       operation: 'GET',
       filter: 'lifePolicyId=' + policyId + ' AND parentCoCession IS NULL AND overwritten=0',
+      include: ['Contact'],
       size: 0
     });
     if (coinsuranceResponse && coinsuranceResponse.ok) {
@@ -934,6 +1096,8 @@
       coinsurance = rows.map((cession) => ({
         id: Number(cession.id || 0),
         contactId: Number(cession.contactId || 0),
+        contactName: cession.Contact && (cession.Contact.name || cession.Contact.description),
+        leader: Number(cession.leader) === 1 || cession.leader === true,
         percentage: cession.percentage,
         sumInsured: cession.sumInsured,
         premium: cession.premium,
@@ -951,6 +1115,741 @@
       sourceCessionIds: cessionIds,
       sourceCoinsuranceIds: coinsurance.map((cession) => Number(cession.id || 0)).filter((id) => id > 0)
     };
+  };
+
+  const reinsuranceLineOrder = ['No Técnica', 'Retención', 'Cuota Parte', 'Excedente 1', 'Facultativo', 'Fronting', 'Coaseguro'];
+  const reinsuranceNumber = (value) => {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number : 0;
+  };
+  const moneyValue = (value) => Number(reinsuranceNumber(value).toFixed(2));
+  const finalCoinsuranceBase = function () {
+    let quotedCoverages = [];
+    try { quotedCoverages = JSON.parse((calculation && calculation.quote && calculation.quote.jNewCoverages) || '[]'); } catch (error) { quotedCoverages = []; }
+    const source = quotedCoverages.length ? quotedCoverages : coverages;
+    return source.reduce((total, coverage) => {
+      const code = String(coverage.code || coverage.coverageCode || '');
+      const configuredForSum = !reinsuranceCoverageConfig[code] || reinsuranceCoverageConfig[code].isCoverage !== false;
+      if (configuredForSum) total.sum += reinsuranceNumber(coverage.limit || coverage.sumInsured);
+      total.premium += reinsuranceNumber(coverage.premium || coverage.newPremium);
+      return total;
+    }, { sum: 0, premium: 0 });
+  };
+  const coinsurancePercentage = function (snapshot) {
+    return Math.max(0, Math.min(100, (snapshot && snapshot.coinsurance || []).reduce((sum, row) => sum + reinsuranceNumber(row.percentage), 0)));
+  };
+  const coinsuranceRate = function (snapshot, field) {
+    const totals = (snapshot && snapshot.coinsurance || []).reduce((result, row) => {
+      result.premium += reinsuranceNumber(row.premiumCeded || row.premium);
+      result.value += reinsuranceNumber(row[field]);
+      return result;
+    }, { premium: 0, value: 0 });
+    return totals.premium ? totals.value / totals.premium : 0;
+  };
+  const buildCoinsuranceRows = function (snapshot) {
+    const base = finalCoinsuranceBase();
+    const rows = (snapshot && snapshot.coinsurance || []).map((cession, index) => {
+      const percentage = reinsuranceNumber(cession.percentage);
+      const premium = moneyValue(base.premium * percentage / 100);
+      const sourcePremium = reinsuranceNumber(cession.premiumCeded || cession.premium);
+      return {
+        key: cession.id || String(cession.contactId || '') + '-' + String(index),
+        id: Number(cession.id || 0),
+        contactId: Number(cession.contactId || 0),
+        name: cession.contactName || reinsuranceContactNames[String(cession.contactId)] || String(cession.contactId || '-'),
+        leader: cession.leader === true || Number(cession.leader) === 1,
+        percentage: percentage,
+        sumInsured: moneyValue(base.sum * percentage / 100),
+        premium: premium,
+        sumInsuredCeded: moneyValue(base.sum * percentage / 100),
+        premiumCeded: premium,
+        commission: sourcePremium ? moneyValue(premium * reinsuranceNumber(cession.commission) / sourcePremium) : 0,
+        tax: sourcePremium ? moneyValue(premium * reinsuranceNumber(cession.tax) / sourcePremium) : 0
+      };
+    });
+    const placedPercentage = rows.reduce((sum, row) => sum + row.percentage, 0);
+    const companyPercentage = Math.max(0, 100 - placedPercentage);
+    rows.push({
+      key: 'company', isCompany: true, name: t('Company'), leader: Number(policy && policy.coinsurance) === 1,
+      percentage: companyPercentage,
+      sumInsured: moneyValue(base.sum * companyPercentage / 100),
+      premium: moneyValue(base.premium * companyPercentage / 100),
+      sumInsuredCeded: moneyValue(base.sum * companyPercentage / 100),
+      premiumCeded: moneyValue(base.premium * companyPercentage / 100),
+      commission: 0, tax: 0
+    });
+    return rows;
+  };
+  const applyCoinsuranceToSnapshot = function (snapshot) {
+    if (!snapshot) return snapshot;
+    const next = JSON.parse(JSON.stringify(snapshot));
+    const percentage = coinsurancePercentage(next);
+    const reinsuranceFactor = (100 - percentage) / 100;
+    if (!next._coinsuranceReinsurancePrepared) {
+      const grossByContract = {};
+      (next.distribution || []).forEach((row) => {
+        const key = String(row.contractId || '');
+        if (!grossByContract[key]) grossByContract[key] = { sum: 0, premium: 0 };
+        grossByContract[key].sum += reinsuranceNumber(row.sumInsuredCedant) + reinsuranceNumber(row.sumInsuredRe);
+        grossByContract[key].premium += reinsuranceNumber(row.premiumCedant) + reinsuranceNumber(row.premiumRe);
+        ['sumInsuredCedant', 'sumInsuredRe', 'premiumCedant', 'premiumRe', 'commission', 'tax'].forEach((field) => {
+          row[field] = moneyValue(reinsuranceNumber(row[field]) * reinsuranceFactor);
+        });
+      });
+      next._coinsuranceGrossByContract = grossByContract;
+      next._coinsuranceReinsurancePrepared = true;
+    }
+    next.coinsurance = buildCoinsuranceRows(next).filter((row) => !row.isCompany).map((row) => ({
+      id: row.id, contactId: row.contactId, contactName: row.name, leader: row.leader,
+      percentage: row.percentage, sumInsured: row.sumInsured, premium: row.premium,
+      sumInsuredCeded: row.sumInsuredCeded, premiumCeded: row.premiumCeded,
+      commission: row.commission, tax: row.tax
+    }));
+    return next;
+  };
+  const buildReinsuranceLines = function (snapshot) {
+    const rows = snapshot && Array.isArray(snapshot.distribution) ? snapshot.distribution : [];
+    const groups = {};
+    rows.forEach((row) => {
+      const key = String(row.contractId || '') + '|' + String(row.lineId || '');
+      if (!groups[key]) groups[key] = {
+        key: key,
+        contractId: row.contractId,
+        lineId: row.lineId || '',
+        sum: 0,
+        premium: 0,
+        sumCedant: 0,
+        sumRe: 0,
+        premiumCedant: 0,
+        premiumRe: 0,
+        commission: 0,
+        tax: 0,
+        rows: []
+      };
+      const line = groups[key];
+      line.rows.push(row);
+      const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
+        || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
+      if (configuredForSum) {
+        line.sumCedant += Number(row.sumInsuredCedant || 0);
+        line.sumRe += Number(row.sumInsuredRe || 0);
+      }
+      line.premiumCedant += Number(row.premiumCedant || 0);
+      line.premiumRe += Number(row.premiumRe || 0);
+      line.sum = line.sumCedant + line.sumRe;
+      line.premium = line.premiumCedant + line.premiumRe;
+      line.commission += Number(row.commission || 0);
+      line.tax += Number(row.tax || 0);
+    });
+    const contracts = {};
+    Object.keys(groups).forEach((key) => {
+      const line = groups[key];
+      const contractKey = String(line.contractId || '');
+      if (!contracts[contractKey]) contracts[contractKey] = { contractId: line.contractId, lines: [] };
+      contracts[contractKey].lines.push(line);
+    });
+    const result = [];
+    Object.keys(contracts).forEach((contractKey) => {
+      const contract = contracts[contractKey];
+      const retained = {
+        key: contractKey + '|Retención',
+        contractId: contract.contractId,
+        lineId: 'Retención',
+        sum: 0,
+        premium: 0,
+        sumCedant: 0,
+        sumRe: 0,
+        premiumCedant: 0,
+        premiumRe: 0,
+        commission: 0,
+        tax: 0,
+        rows: []
+      };
+      contract.lines.forEach((line) => {
+        retained.sum += Number(line.sumCedant || 0);
+        retained.premium += Number(line.premiumCedant || 0);
+        retained.sumCedant += Number(line.sumCedant || 0);
+        retained.premiumCedant += Number(line.premiumCedant || 0);
+        retained.rows = retained.rows.concat(line.rows || []);
+        line.sum = Number(line.sumRe || 0);
+        line.premium = Number(line.premiumRe || 0);
+        line.sumCedant = 0;
+        line.premiumCedant = 0;
+        line.sumRe = line.sum;
+        line.premiumRe = line.premium;
+      });
+      contract.lines = contract.lines.filter((line) => String(line.lineId) !== 'Retención');
+      contract.lines.push(retained);
+      const coinsurancePct = coinsurancePercentage(snapshot);
+      const reinsuranceFactor = (100 - coinsurancePct) / 100;
+      const remainingContractSum = contract.lines.reduce((sum, line) => sum + Number(line.sum || 0), 0);
+      const remainingContractPremium = contract.lines.reduce((sum, line) => sum + Number(line.premium || 0), 0);
+      const storedGross = snapshot && snapshot._coinsuranceGrossByContract && snapshot._coinsuranceGrossByContract[String(contract.contractId || '')];
+      const grossContractSum = storedGross ? Number(storedGross.sum || 0) : (reinsuranceFactor ? remainingContractSum / reinsuranceFactor : remainingContractSum);
+      const grossContractPremium = storedGross ? Number(storedGross.premium || 0) : (reinsuranceFactor ? remainingContractPremium / reinsuranceFactor : remainingContractPremium);
+      // Reinsurance only receives the portion not assigned to coinsurance.
+      if (!snapshot || !snapshot._coinsuranceReinsurancePrepared) {
+        contract.lines.forEach((line) => {
+          ['sum', 'premium', 'sumCedant', 'sumRe', 'premiumCedant', 'premiumRe', 'commission', 'tax'].forEach((field) => {
+            line[field] = moneyValue(Number(line[field] || 0) * reinsuranceFactor);
+          });
+        });
+      }
+      const existing = {};
+      contract.lines.forEach((line) => { existing[String(line.lineId)] = line; });
+      reinsuranceLineOrder.forEach((lineId) => {
+        if (!existing[lineId]) {
+          const empty = {
+            key: contractKey + '|' + lineId,
+            contractId: contract.contractId,
+            lineId: lineId,
+            sum: 0,
+            premium: 0,
+            sumCedant: 0,
+            sumRe: 0,
+            premiumCedant: 0,
+            premiumRe: 0,
+            commission: 0,
+            tax: 0,
+            rows: [],
+            percentage: 0,
+            commissionPercentage: 0,
+            taxPercentage: 0
+          };
+          contract.lines.push(empty);
+        }
+      });
+      const coinsuranceLine = contract.lines.find((line) => String(line.lineId) === 'Coaseguro');
+      if (coinsuranceLine) {
+        const coinsurancePremium = moneyValue(grossContractPremium * coinsurancePct / 100);
+        coinsuranceLine.sum = moneyValue(grossContractSum * coinsurancePct / 100);
+        coinsuranceLine.premium = coinsurancePremium;
+        coinsuranceLine.commission = moneyValue(coinsurancePremium * coinsuranceRate(snapshot, 'commission'));
+        coinsuranceLine.tax = moneyValue(coinsurancePremium * coinsuranceRate(snapshot, 'tax'));
+        coinsuranceLine.percentage = coinsurancePct;
+        coinsuranceLine.isCoinsurance = true;
+      }
+      const contractSum = contract.lines.filter((line) => !line.isCoinsurance).reduce((sum, line) => sum + Number(line.sum || 0), 0);
+      const contractPremium = contract.lines.filter((line) => !line.isCoinsurance).reduce((sum, line) => sum + Number(line.premium || 0), 0);
+      contract.lines.forEach((line) => {
+        line.percentage = line.isCoinsurance ? coinsurancePct : (contractSum ? (line.sum / contractSum) * 100 : 0);
+        line.commissionPercentage = line.premiumRe ? (line.commission / line.premiumRe) * 100 : 0;
+        line.taxPercentage = line.premiumRe ? (line.tax / line.premiumRe) * 100 : 0;
+        line.contractSum = contractSum;
+        line.contractPremium = contractPremium;
+      });
+      contract.lines.sort((left, right) => {
+        const leftIndex = reinsuranceLineOrder.indexOf(String(left.lineId));
+        const rightIndex = reinsuranceLineOrder.indexOf(String(right.lineId));
+        return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
+      });
+      result.push.apply(result, contract.lines);
+    });
+    return result;
+  };
+
+  const loadReinsuranceForView = async function (forceReload) {
+    if (reinsuranceLoading || (!forceReload && reinsuranceSnapshot)) return reinsuranceSnapshot;
+    setReinsuranceLoading(true);
+    setReinsuranceError('');
+    try {
+      const snapshot = await loadCurrentReinsuranceSnapshot();
+      const contactIds = [];
+      (snapshot.participants || []).forEach((participant) => {
+        if (participant.contactId) contactIds.push(Number(participant.contactId));
+        if (participant.brokerId) contactIds.push(Number(participant.brokerId));
+      });
+      (snapshot.coinsurance || []).forEach((cession) => {
+        if (cession.contactId) contactIds.push(Number(cession.contactId));
+      });
+      const uniqueIds = contactIds.filter((id, index) => id > 0 && contactIds.indexOf(id) === index);
+      if (uniqueIds.length) {
+        const contacts = await exe('LoadEntities', {
+          entity: 'Contact',
+          fields: 'id, name, middlename, surname1, surname2, isPerson',
+          filter: 'id in (' + uniqueIds.join(',') + ')'
+        });
+        const directory = {};
+        ((contacts && contacts.outData) || []).forEach((contact) => {
+          const name = contact.isPerson
+            ? [contact.name, contact.middlename || contact.middleName, contact.surname1, contact.surname2].filter(Boolean).join(' ').trim()
+            : String(contact.surname2 || contact.name || '').trim();
+          if (name) directory[String(contact.id)] = name;
+        });
+        setReinsuranceContactNames(directory);
+      }
+      const [brokerResponse, reinsurerResponse] = await Promise.all([
+        exe('LoadEntities', {
+          entity: 'Contact',
+          fields: 'id, name, middlename, surname1, surname2, isPerson',
+          filter: "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'REI')"
+        }).catch(() => ({ outData: [] })),
+        exe('LoadEntities', {
+          entity: 'Contact',
+          fields: 'id, name, middlename, surname1, surname2, isPerson',
+          filter: "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'RIN')"
+        }).catch(() => ({ outData: [] }))
+      ]);
+      const contactLabel = (item) => item.isPerson
+        ? [item.name, item.middlename || item.middleName, item.surname1, item.surname2].filter(Boolean).join(' ').trim()
+        : String(item.surname2 || item.name || '').trim();
+      setReinsuranceBrokers(((brokerResponse && brokerResponse.outData) || [])
+        .map((item) => ({ id: Number(item.id), name: contactLabel(item) }))
+        .filter((item) => item.id > 0 && item.name));
+      setReinsuranceContacts(((reinsurerResponse && reinsurerResponse.outData) || [])
+        .map((item) => ({ id: Number(item.id), name: contactLabel(item) }))
+        .filter((item) => item.id > 0 && item.name));
+      const recalculatedSnapshot = recalculateReinsuranceParticipants(applyCoinsuranceToSnapshot(snapshot));
+      setReinsuranceSnapshot(recalculatedSnapshot);
+      setReinsuranceBaseline(JSON.parse(JSON.stringify(recalculatedSnapshot)));
+      currentReinsuranceLines = buildReinsuranceLines(recalculatedSnapshot);
+      setReinsuranceLines(currentReinsuranceLines);
+      const first = (recalculatedSnapshot.distribution || [])[0];
+      setReinsuranceContractKey(first ? String(first.contractId) : null);
+      setReinsuranceLineKey(first ? String(first.contractId) + '|' + String(first.lineId || '') : null);
+      setReinsuranceReinsurersReady(false);
+      return recalculatedSnapshot;
+    } catch (error) {
+      setReinsuranceError(translatedMessage(error && error.message, 'The current reinsurance could not be loaded.'));
+      setReinsuranceSnapshot(null);
+      setReinsuranceBaseline(null);
+      currentReinsuranceLines = [];
+      setReinsuranceLines(currentReinsuranceLines);
+      setReinsuranceConfirmed(false);
+      return null;
+    } finally {
+      setReinsuranceLoading(false);
+    }
+  };
+
+  const reinsuranceMoney = (value) => {
+    const number = Number(value || 0);
+    return Number.isFinite(number) ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+  };
+  const reinsuranceAmountFormatter = (value) => {
+    if (value === null || value === undefined || value === '') return '';
+    const number = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(number) ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+  };
+  const reinsuranceAmountParser = (value) => String(value || '').replace(/,/g, '');
+
+  const reinsuranceRows = reinsuranceSnapshot && Array.isArray(reinsuranceSnapshot.distribution)
+    ? reinsuranceSnapshot.distribution
+    : [];
+  const reinsuranceGroups = reinsuranceRows.reduce((groups, row) => {
+    const key = String(row.contractId || '');
+    if (!groups[key]) groups[key] = {
+      key: key,
+      policyId: policyId,
+      contractId: row.contractId,
+      lineId: row.lineId,
+      rows: [],
+      sum: 0,
+      cededSum: 0,
+      premium: 0,
+      cededPremium: 0,
+      retainedSum: 0,
+      retainedPremium: 0,
+      commission: 0,
+      tax: 0
+    };
+    const group = groups[key];
+    group.rows.push(row);
+    const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
+      || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
+    if (configuredForSum) {
+      group.sum += Number(row.sumInsuredCedant || 0) + Number(row.sumInsuredRe || 0);
+      group.cededSum += Number(row.sumInsuredRe || 0);
+      group.retainedSum += Number(row.sumInsuredCedant || 0);
+    }
+    group.premium += Number(row.premiumCedant || 0) + Number(row.premiumRe || 0);
+    group.cededPremium += Number(row.premiumRe || 0);
+    group.retainedPremium += Number(row.premiumCedant || 0);
+    group.commission += Number(row.commission || 0);
+    group.tax += Number(row.tax || 0);
+    return groups;
+  }, {});
+  Object.keys(reinsuranceGroups).forEach((key) => {
+    const group = reinsuranceGroups[key];
+    const gross = reinsuranceSnapshot && reinsuranceSnapshot._coinsuranceGrossByContract
+      && reinsuranceSnapshot._coinsuranceGrossByContract[String(group.contractId || '')];
+    const percentage = coinsurancePercentage(reinsuranceSnapshot);
+    if (gross) {
+      const coinsurancePremium = Number(gross.premium || 0) * percentage / 100;
+      group.sum = Number(gross.sum || 0);
+      group.premium = Number(gross.premium || 0);
+      group.commission += moneyValue(coinsurancePremium * coinsuranceRate(reinsuranceSnapshot, 'commission'));
+      group.tax += moneyValue(coinsurancePremium * coinsuranceRate(reinsuranceSnapshot, 'tax'));
+    }
+  });
+  const reinsuranceContractRows = Object.keys(reinsuranceGroups).map((key) => reinsuranceGroups[key]);
+  const selectedReinsuranceLines = reinsuranceLines.filter((line) => String(line.contractId) === String(reinsuranceContractKey || '').split('|')[0]);
+  const updateReinsuranceLine = function (lineKey, field, value) {
+    const amount = Number(value || 0);
+    const nextLines = currentReinsuranceLines.map((line) => {
+      if (line.key !== lineKey) return line;
+      if (String(line.lineId) === 'Coaseguro') return line;
+      const next = Object.assign({}, line);
+      if (field === 'percentage') {
+        const percentage = Math.max(0, amount);
+        next.percentage = percentage;
+        next.sum = Number((Number(line.contractSum || 0) * percentage / 100).toFixed(2));
+        next.premium = Number((Number(line.contractPremium || 0) * percentage / 100).toFixed(2));
+        const cedantLine = String(line.lineId).toUpperCase() === 'RETENCIÓN' || String(line.lineId).toUpperCase() === 'NO TÉCNICA';
+        next.sumCedant = cedantLine ? next.sum : 0;
+        next.sumRe = cedantLine ? 0 : next.sum;
+        next.premiumCedant = cedantLine ? next.premium : 0;
+        next.premiumRe = cedantLine ? 0 : next.premium;
+        next.commission = Number((next.premiumRe * Number(line.commissionPercentage || 0) / 100).toFixed(2));
+        next.tax = Number((next.premiumRe * Number(line.taxPercentage || 0) / 100).toFixed(2));
+      } else {
+        next[field] = Math.max(0, amount);
+        if (field === 'sum') {
+          next.sumCedant = Number(next.sumCedant || 0);
+          next.sumRe = Number(next.sumRe || 0);
+        }
+        if (field === 'premium') {
+          next.premiumCedant = Number(next.premiumCedant || 0);
+          next.premiumRe = Number(next.premiumRe || 0);
+        }
+      }
+      if (field === 'commissionPercentage') next.commission = Number((next.premiumRe * Math.max(0, amount) / 100).toFixed(2));
+      if (field === 'taxPercentage') next.tax = Number((next.premiumRe * Math.max(0, amount) / 100).toFixed(2));
+      next.percentage = Number(next.contractSum || 0) ? Number((next.sum / next.contractSum * 100).toFixed(4)) : 0;
+      if (field !== 'commission' && field !== 'percentage' && field !== 'premium') next.commissionPercentage = Number(next.premiumRe || 0) ? Number((next.commission / next.premiumRe * 100).toFixed(4)) : 0;
+      if (field !== 'tax' && field !== 'percentage' && field !== 'premium') next.taxPercentage = Number(next.premiumRe || 0) ? Number((next.tax / next.premiumRe * 100).toFixed(4)) : 0;
+      return next;
+    });
+    currentReinsuranceLines = nextLines;
+    setReinsuranceLines(nextLines);
+    setReinsuranceConfirmed(false);
+  };
+
+  const buildEditedReinsuranceSnapshot = function () {
+    if (!reinsuranceSnapshot) return null;
+    const next = JSON.parse(JSON.stringify(reinsuranceSnapshot));
+    const lines = currentReinsuranceLines;
+    (next.distribution || []).forEach((row) => {
+      const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
+        || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
+      const cededLine = lines.find((item) => String(item.contractId) === String(row.contractId) && String(item.lineId || '') === String(row.lineId || ''));
+      const retentionLine = lines.find((item) => String(item.contractId) === String(row.contractId) && String(item.lineId) === 'Retención');
+      const sourceRows = cededLine && cededLine.rows && cededLine.rows.length ? cededLine.rows : [];
+      if (!sourceRows.length) return;
+      const sourceRetentionSum = sourceRows.reduce((sum, item) => {
+        const configuredForSum = !reinsuranceCoverageConfig[String(item.coverageCode)]
+          || reinsuranceCoverageConfig[String(item.coverageCode)].isCoverage !== false;
+        return sum + (configuredForSum ? Number(item.sumInsuredCedant || 0) : 0);
+      }, 0);
+      const sourceCededSum = sourceRows.reduce((sum, item) => {
+        const configuredForSum = !reinsuranceCoverageConfig[String(item.coverageCode)]
+          || reinsuranceCoverageConfig[String(item.coverageCode)].isCoverage !== false;
+        return sum + (configuredForSum ? Number(item.sumInsuredRe || 0) : 0);
+      }, 0);
+      const sourceRetentionPremium = sourceRows.reduce((sum, item) => sum + Number(item.premiumCedant || 0), 0);
+      const sourceCededPremium = sourceRows.reduce((sum, item) => sum + Number(item.premiumRe || 0), 0);
+      const factorRetentionSum = sourceRetentionSum ? Number((retentionLine && retentionLine.sum) || 0) / sourceRetentionSum : 1;
+      const factorCededSum = sourceCededSum ? Number((cededLine && cededLine.sum) || 0) / sourceCededSum : 1;
+      const factorRetentionPremium = sourceRetentionPremium ? Number((retentionLine && retentionLine.premium) || 0) / sourceRetentionPremium : 1;
+      const factorCededPremium = sourceCededPremium ? Number((cededLine && cededLine.premium) || 0) / sourceCededPremium : 1;
+      const oldPremiumRe = Number(row.premiumRe || 0);
+      const sourceLineCommission = Number((cededLine && cededLine.commission) || 0);
+      const sourceLineTax = Number((cededLine && cededLine.tax) || 0);
+      row.sumInsuredCedant = Number(row.sumInsuredCedant || 0) * factorRetentionSum;
+      row.sumInsuredRe = Number(row.sumInsuredRe || 0) * factorCededSum;
+      // Las coberturas que no suman para el contrato no deben trasladar su
+      // suma a los aceptantes, tal como sucede en cambio de vigencia.
+      if (!configuredForSum) {
+        row.sumInsuredCedant = 0;
+        row.sumInsuredRe = 0;
+      }
+      row.premiumCedant = Number(row.premiumCedant || 0) * factorRetentionPremium;
+      row.premiumRe = Number(row.premiumRe || 0) * factorCededPremium;
+      // The reinsurance command versions these proportions, not only the
+      // calculated amounts. Keep them in sync with the distribution edited
+      // in the grid so a 50/50 change is not restored as the prior split.
+      if (retentionLine) row.proportionCed = Number(retentionLine.percentage || 0) / 100;
+      if (cededLine) row.proportionRe = Number(cededLine.percentage || 0) / 100;
+      // Comisión e impuesto se distribuyen por la prima cedida final. No se
+      // usa el valor histórico porque puede ser cero al ingresar una nueva tasa.
+      row.commission = Number((sourceLineCommission && Number(cededLine && cededLine.premium || 0)
+        ? sourceLineCommission * Number(row.premiumRe || 0) / Number(cededLine.premium || 0)
+        : 0).toFixed(2));
+      row.tax = Number((sourceLineTax && Number(cededLine && cededLine.premium || 0)
+        ? sourceLineTax * Number(row.premiumRe || 0) / Number(cededLine.premium || 0)
+        : 0).toFixed(2));
+      (next.participants || []).filter((participant) => String(participant.cessionId) === String(row.cessionId || row.id)).forEach((participant) => {
+        participant.sumInsured = Number(participant.sumInsured || 0) * factorCededSum;
+        participant.premium = Number(participant.premium || 0) * factorCededPremium;
+      });
+    });
+    return applyCoinsuranceToSnapshot(next);
+  };
+
+  const validateProceedReinsurance = function (snapshotOverride) {
+    const source = snapshotOverride || buildEditedReinsuranceSnapshot() || reinsuranceSnapshot;
+    const sourceRows = source && Array.isArray(source.distribution) ? source.distribution : [];
+    const errors = [];
+    if (!source) {
+      errors.push(t('La distribución de reaseguro todavía no está cargada.'));
+      return { ok: false, errors: errors };
+    }
+    if (!sourceRows.length) {
+      errors.push(t('La póliza no tiene reaseguro vigente para este endoso.'));
+    }
+    const percentageByContract = {};
+    currentReinsuranceLines.filter((line) => !line.isCoinsurance && String(line.lineId) !== 'Coaseguro').forEach((line) => {
+      const key = String(line.contractId || '');
+      percentageByContract[key] = (percentageByContract[key] || 0) + Number(line.percentage || 0);
+    });
+    Object.keys(percentageByContract).forEach((key) => {
+      if (Math.abs(percentageByContract[key] - 100) > 0.01) {
+        errors.push(t('La distribución del contrato') + ' ' + key + ' ' + t('debe sumar 100%.'));
+      }
+    });
+    const totalsBy = function (rows, keyBuilder) {
+      return (rows || []).reduce((result, row) => {
+        const key = keyBuilder(row);
+        if (!result[key]) result[key] = { sum: 0, premium: 0 };
+        const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
+          || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
+        if (configuredForSum) {
+          result[key].sum += Number(row.sumInsuredCedant || 0) + Number(row.sumInsuredRe || 0);
+        }
+        result[key].premium += Number(row.premiumCedant || 0) + Number(row.premiumRe || 0);
+        return result;
+      }, {});
+    };
+    const baselineRows = reinsuranceBaseline && Array.isArray(reinsuranceBaseline.distribution)
+      ? reinsuranceBaseline.distribution
+      : [];
+    const verifyTotals = function (label, keyBuilder) {
+      const actual = totalsBy(sourceRows, keyBuilder);
+      const expected = totalsBy(baselineRows, keyBuilder);
+      Object.keys(expected).forEach((key) => {
+        const current = actual[key] || { sum: 0, premium: 0 };
+        if (Math.abs(current.sum - expected[key].sum) > 0.01 || Math.abs(current.premium - expected[key].premium) > 0.01) {
+          errors.push(t('La distribución de ') + label + ' ' + key + ' ' + t('no coincide con el total calculado.'));
+        }
+      });
+    };
+    // An edited percentage must only redistribute the quoted final values.
+    verifyTotals(t('la cobertura'), (row) => String(row.coverageCode || row.coverageId || ''));
+    verifyTotals(t('el contrato'), (row) => String(row.contractId || ''));
+    sourceRows.forEach((row) => {
+      if ([row.sumInsuredCedant, row.sumInsuredRe, row.premiumCedant, row.premiumRe, row.commission, row.tax]
+        .some((value) => Number(value || 0) < -0.01)) {
+        errors.push(t('La distribución contiene importes negativos.'));
+      }
+      const cededSum = Number(row.sumInsuredRe || 0);
+      const cededPremium = Number(row.premiumRe || 0);
+      if (cededSum > 0.01 || cededPremium > 0.01) {
+        const participants = (source.participants || []).filter((participant) =>
+          String(participant.cessionId) === String(row.cessionId || row.id)
+          || (String(participant.contractId) === String(row.contractId)
+            && String(participant.lineId || '') === String(row.lineId || '')
+            && String(participant.coverageCode || '') === String(row.coverageCode || ''))
+        );
+        if (!participants.length) {
+          errors.push(t('La línea cedida debe tener aceptantes.'));
+        } else {
+          const split = participants.reduce((sum, participant) => sum + Number(participant.split || 0), 0);
+          const participantSum = participants.reduce((sum, participant) => sum + Number(participant.sumInsured || 0), 0);
+          const participantPremium = participants.reduce((sum, participant) => sum + Number(participant.premium || 0), 0);
+          const participantCommission = participants.reduce((sum, participant) => sum + Number(participant.commission || 0), 0);
+          const participantTax = participants.reduce((sum, participant) => sum + Number(participant.tax || 0), 0);
+          if (Math.abs(split - 100) > 0.01) errors.push(t('Los aceptantes deben sumar 100%.'));
+          if (Math.abs(participantSum - cededSum) > 0.01) errors.push(t('La suma de aceptantes no coincide con la suma cedida.'));
+          if (Math.abs(participantPremium - cededPremium) > 0.01) errors.push(t('La prima de aceptantes no coincide con la prima cedida.'));
+          if (Math.abs(participantCommission - Number(row.commission || 0)) > 0.01) errors.push(t('La comisión de aceptantes no coincide con la línea.'));
+          if (Math.abs(participantTax - Number(row.tax || 0)) > 0.01) errors.push(t('El impuesto de aceptantes no coincide con la línea.'));
+        }
+      }
+    });
+    return { ok: errors.length === 0, errors: errors };
+  };
+
+  const confirmProceedReinsurance = function (snapshotOverride) {
+    if (reinsuranceLoading) {
+      message.info(t('La distribución de reaseguro todavía se está cargando.'));
+      return;
+    }
+    const edited = snapshotOverride || recalculateReinsuranceParticipants(buildEditedReinsuranceSnapshot());
+    const validation = validateProceedReinsurance(edited);
+    if (!validation.ok) {
+      setReinsuranceConfirmed(false);
+      setReinsuranceError(validation.errors.join(' '));
+      message.error(validation.errors.join(' '));
+      return;
+    }
+    setReinsuranceConfirmed(true);
+    setReinsuranceError('');
+    message.success(t('El reaseguro está validado y todo está en orden.'));
+  };
+
+  const reinsuranceParticipantsFor = (row) => (reinsuranceSnapshot && reinsuranceSnapshot.participants || []).filter((participant) =>
+    String(participant.cessionId) === String(row.cessionId || row.id)
+    || (String(participant.contractId) === String(row.contractId)
+      && String(participant.lineId || '') === String(row.lineId || '')
+      && String(participant.coverageCode || '') === String(row.coverageCode || ''))
+  );
+  const groupReinsuranceParticipants = function (participants) {
+    const grouped = {};
+    (participants || []).forEach((participant) => {
+      const key = String(participant.contactId || '') + '|' + String(participant.brokerId || '') + '|' + String(participant._newKey || '');
+      if (!grouped[key]) grouped[key] = Object.assign({}, participant, { split: Number(participant.split || 0), sumInsured: 0, premium: 0, commission: 0, tax: 0 });
+      grouped[key].sumInsured += Number(participant.sumInsured || 0);
+      grouped[key].premium += Number(participant.premium || 0);
+      grouped[key].commission += Number(participant.commission || 0);
+      grouped[key].tax += Number(participant.tax || 0);
+    });
+    return Object.keys(grouped).map((key) => grouped[key]);
+  };
+
+  const selectedReinsuranceParticipants = function (line) {
+    if (!line || !reinsuranceSnapshot) return [];
+    return (reinsuranceSnapshot.participants || []).filter((participant) =>
+      String(participant.contractId) === String(line.contractId)
+      && String(participant.lineId || '') === String(line.lineId || '')
+    );
+  };
+
+  // Reproduce the coverage-level allocation used by ChangeCoverageSuretyEndorsement:
+  // each reinsurer receives its split of the ceded values for each coverage, with
+  // the final participant receiving any rounding remainder.
+  const recalculateReinsuranceParticipants = function (snapshot) {
+    if (!snapshot) return snapshot;
+    (snapshot.distribution || []).forEach((cession) => {
+      const participants = (snapshot.participants || []).filter((participant) =>
+        String(participant.cessionId || '') === String(cession.cessionId || cession.id || '')
+        || (String(participant.contractId) === String(cession.contractId)
+          && String(participant.lineId || '') === String(cession.lineId || '')
+          && String(participant.coverageCode || '') === String(cession.coverageCode || ''))
+      );
+      const totalSplit = participants.reduce((sum, participant) => sum + Number(participant.split || 0), 0);
+      if (!participants.length || Math.abs(totalSplit - 100) > 0.01) return;
+      [
+        { participant: 'sumInsured', source: 'sumInsuredRe' },
+        { participant: 'premium', source: 'premiumRe' },
+        { participant: 'commission', source: 'commission' },
+        { participant: 'tax', source: 'tax' }
+      ].forEach((field) => {
+        const configuredForSum = !reinsuranceCoverageConfig[String(cession.coverageCode)]
+          || reinsuranceCoverageConfig[String(cession.coverageCode)].isCoverage !== false;
+        const target = field.participant === 'sumInsured' && !configuredForSum
+          ? 0
+          : Number(cession[field.source] || 0);
+        let assigned = 0;
+        participants.forEach((participant, index) => {
+          const amount = index === participants.length - 1
+            ? Number((target - assigned).toFixed(2))
+            : Number((target * Number(participant.split || 0) / totalSplit).toFixed(2));
+          participant[field.participant] = amount;
+          assigned += amount;
+        });
+      });
+    });
+    return snapshot;
+  };
+
+  const updateReinsuranceParticipant = function (row, field, value) {
+    setReinsuranceConfirmed(false);
+    setReinsuranceSnapshot((current) => {
+      if (!current) return current;
+      const next = JSON.parse(JSON.stringify(current));
+      const matches = (next.participants || []).filter((participant) =>
+        String(participant.contractId) === String(row.contractId)
+        && String(participant.lineId || '') === String(row.lineId || '')
+        && (row._newKey
+          ? String(participant._newKey || '') === String(row._newKey)
+          : String(participant.contactId || '') === String(row.contactId || '')
+            && String(participant.brokerId || '') === String(row.brokerId || ''))
+      );
+      if (field === 'contactId' || field === 'brokerId') {
+        matches.forEach((participant) => { participant[field] = value; });
+        if (field === 'contactId') matches.forEach((participant) => { participant.contactName = (reinsuranceContacts.find((item) => String(item.id) === String(value)) || {}).name || ''; });
+        if (field === 'brokerId') matches.forEach((participant) => { participant.brokerName = (reinsuranceBrokers.find((item) => String(item.id) === String(value)) || {}).name || ''; });
+      } else if (field === 'split') {
+        matches.forEach((participant) => { participant.split = Math.max(0, Number(value || 0)); });
+      } else {
+        const target = Math.max(0, Number(value || 0));
+        const weights = matches.map((participant) => Math.abs(Number(participant[field] || 0)));
+        const totalWeight = weights.reduce((sum, item) => sum + item, 0);
+        let assigned = 0;
+        matches.forEach((participant, index) => {
+          const amount = index === matches.length - 1
+            ? Number((target - assigned).toFixed(2))
+            : Number((totalWeight ? target * weights[index] / totalWeight : target / (matches.length || 1)).toFixed(2));
+          participant[field] = amount;
+          assigned += amount;
+        });
+      }
+      return field === 'split' ? recalculateReinsuranceParticipants(next) : next;
+    });
+  };
+
+  const addReinsuranceParticipant = function (line) {
+    if (!line || !reinsuranceSnapshot) return;
+    const source = (line.rows || [])[0];
+    if (!source) return;
+    const newParticipantKey = String(Date.now());
+    setReinsuranceConfirmed(false);
+    setReinsuranceSnapshot((current) => {
+      const next = JSON.parse(JSON.stringify(current));
+      next.participants = next.participants || [];
+      (line.rows || []).forEach((row) => next.participants.push({
+        // A single visible reinsurer is represented internally per coverage.
+        // The shared key keeps those coverage rows grouped in the grid.
+        _newKey: newParticipantKey,
+        contractId: line.contractId,
+        lineId: line.lineId,
+        coverageId: row.coverageId,
+        coverageCode: row.coverageCode,
+        cessionId: row.cessionId || source.cessionId,
+        contactId: null,
+        brokerId: null,
+        split: 0,
+        sumInsured: 0,
+        premium: 0,
+        commission: 0,
+        tax: 0
+      }));
+      return next;
+    });
+  };
+
+  const removeReinsuranceParticipant = function (row) {
+    setReinsuranceConfirmed(false);
+    setReinsuranceSnapshot((current) => {
+      if (!current) return current;
+      const next = JSON.parse(JSON.stringify(current));
+      next.participants = (next.participants || []).filter((participant) => !(
+        String(participant.contractId) === String(row.contractId)
+        && String(participant.lineId || '') === String(row.lineId || '')
+        && (row._newKey
+          ? String(participant._newKey || '') === String(row._newKey)
+          : String(participant.contactId || '') === String(row.contactId || '')
+            && String(participant.brokerId || '') === String(row.brokerId || ''))
+      ));
+      return next;
+    });
+  };
+
+  const saveReinsuranceDistributionInMemory = function () {
+    const edited = recalculateReinsuranceParticipants(buildEditedReinsuranceSnapshot());
+    const validation = validateProceedReinsurance(edited);
+    if (!validation.ok) {
+      setReinsuranceError(validation.errors.join(' '));
+      message.error(validation.errors.join(' '));
+      setReinsuranceConfirmed(false);
+      return;
+    }
+    setReinsuranceSnapshot(edited);
+    currentReinsuranceLines = buildReinsuranceLines(edited);
+    setReinsuranceLines(currentReinsuranceLines);
+    setReinsuranceError('');
+    setReinsuranceConfirmed(false);
+    message.success(t('La distribución de reaseguro fue guardada correctamente.'));
   };
 
   const approveEndorsementWorkflow = async function (processId) {
@@ -982,6 +1881,11 @@
     setResult(null);
     setChangeId(null);
     setCalculation(null);
+    setReinsuranceSnapshot(null);
+    setReinsuranceBaseline(null);
+    setReinsuranceConfirmed(false);
+    setReinsuranceError('');
+    setReinsuranceReinsurersReady(false);
     setPremiumValidationError('');
 
     try {
@@ -1038,6 +1942,9 @@
       pushStep(t('Premium invariant (CA6)'), true, t('premium, sum insured and reinsurance unchanged'));
       setResult({ kind: 'calculated', msg: t('Calculation completed. Review the coverage changes before executing the endorsement.') });
       message.success(t('Calculation completed successfully.'));
+      // La carga de reaseguro no debe bloquear el resultado de la cotización.
+      // La pestaña conserva su propio indicador, igual que cambio de vigencia.
+      void loadReinsuranceForView(true);
     } catch (err) {
       const errorMessage = err && err.message ? err.message : String(err);
       pushStep(t('Calculate the term change'), false, translatedMessage(errorMessage, 'Unexpected error'));
@@ -1078,6 +1985,12 @@
 
   const onExecute = async function () {
     setTouched(true);
+    if (!reinsuranceConfirmed) {
+      setResult({ kind: 'error', msg: t('Confirme el reaseguro antes de ejecutar el endoso.') });
+      setResultTab('reinsurance');
+      message.warning(t('Confirme el reaseguro antes de ejecutar el endoso.'));
+      return;
+    }
     let currentProceedOrderEnabled = false;
     try {
       currentProceedOrderEnabled = await loadProceedOrderFlag();
@@ -1115,10 +2028,16 @@
         calculation.oldPayPlan,
         calculation.newPayPlan
       );
-      const reinsuranceSnapshot = await loadCurrentReinsuranceSnapshot();
+      const editedReinsurance = buildEditedReinsuranceSnapshot()
+        || applyCoinsuranceToSnapshot(await loadCurrentReinsuranceSnapshot());
+      const reinsuranceSnapshot = recalculateReinsuranceParticipants(editedReinsurance);
+      if (!reinsuranceSnapshot) throw new Error(t('The reinsurance distribution could not be prepared.'));
+      // Solo se persisten los datos de distribución; los auxiliares visuales
+      // usados para calcular la porción restante no forman parte del contrato.
+      delete reinsuranceSnapshot._coinsuranceReinsurancePrepared;
+      delete reinsuranceSnapshot._coinsuranceGrossByContract;
       addPayload.jAdditional = JSON.stringify({
         endorsementType: 'PROCEEDORDER',
-        preserveActiveReinsurance: true,
         reinsuranceSnapshot: reinsuranceSnapshot
       });
       Object.keys(calculation.quote).forEach((k) => { if (addPayload[k] === undefined) addPayload[k] = calculation.quote[k]; });
@@ -1140,6 +2059,10 @@
 
       await persistChangePayPlan(cid, calculation.oldPayPlan, calculation.newPayPlan);
       pushStep(t('Save installment dates'), true, t('Pending installment dates were preserved in the endorsement.'));
+      // `cmdApplyReaChangeCoverage` reads the snapshot from Change.jAdditional.
+      // Persist the confirmed draft explicitly before preparing the version.
+      await persistReinsuranceSnapshot(cid, reinsuranceSnapshot);
+      pushStep(t('Save reinsurance distribution'), true, '');
 
       await approveEndorsementWorkflow(created.outData.processId);
       pushStep(t('Approve endorsement workflow'), true, '');
@@ -1386,6 +2309,224 @@
     { title: t('Previous due date'), dataIndex: 'oldDueDate', key: 'oldDueDate', width: 170, align: 'center', render: value => value ? <span style={{ color: '#d32f2f' }}>{fmt(toPolicyLocalDate(value))}</span> : '—' },
     { title: t('New due date'), dataIndex: 'newDueDate', key: 'newDueDate', width: 170, align: 'center', render: value => value ? <span style={{ color: '#1677ff' }}>{fmt(toPolicyLocalDate(value))}</span> : '—' }
   ];
+  const reinsuranceContractColumns = [
+    { title: t('Policy'), dataIndex: 'policyId', key: 'policyId', width: 90, align: 'center' },
+    { title: t('Contract'), dataIndex: 'contractId', key: 'contractId', width: 90, align: 'center' },
+    { title: t('Movement'), children: [
+      { title: t('Endorsement'), key: 'endorsement', align: 'center', render: () => '0' },
+      { title: t('Type'), key: 'type', align: 'center', render: () => t('Extension') }
+    ] },
+    { title: t('Totals'), children: [
+      { title: t('Sum'), dataIndex: 'sum', key: 'sum', align: 'right', render: reinsuranceMoney },
+      { title: t('Premium'), dataIndex: 'premium', key: 'premium', align: 'right', render: reinsuranceMoney }
+    ] },
+    { title: t('Retention'), children: [
+      { title: t('Premium'), dataIndex: 'retainedPremium', key: 'retainedPremium', align: 'right', render: reinsuranceMoney },
+      { title: t('Sum'), dataIndex: 'retainedSum', key: 'retainedSum', align: 'right', render: reinsuranceMoney }
+    ] },
+    { title: t('Ceded'), children: [
+      { title: t('Premium'), dataIndex: 'cededPremium', key: 'cededPremium', align: 'right', render: reinsuranceMoney },
+      { title: t('Sum'), dataIndex: 'cededSum', key: 'cededSum', align: 'right', render: reinsuranceMoney }
+    ] },
+    { title: t('Other'), children: [
+      { title: t('Commission'), dataIndex: 'commission', key: 'commission', align: 'right', render: reinsuranceMoney },
+      { title: t('Tax'), dataIndex: 'tax', key: 'tax', align: 'right', render: reinsuranceMoney }
+    ] }
+  ];
+  const reinsuranceCoverageColumns = [
+    { title: t('Coverage'), dataIndex: 'coverageCode', key: 'coverageCode', width: 100, align: 'center' },
+    { title: t('Sum for contract'), key: 'sum', align: 'right', render: (value, row) => {
+      const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
+        || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
+      return reinsuranceMoney(configuredForSum ? Number(row.sumInsuredCedant || 0) + Number(row.sumInsuredRe || 0) : 0);
+    } },
+    { title: t('Cedant sum'), dataIndex: 'sumInsuredCedant', key: 'sumInsuredCedant', align: 'right', render: reinsuranceMoney },
+    { title: t('Reinsurance sum'), dataIndex: 'sumInsuredRe', key: 'sumInsuredRe', align: 'right', render: reinsuranceMoney },
+    { title: t('Premium'), key: 'premium', align: 'right', render: (value, row) => reinsuranceMoney(Number(row.premiumCedant || 0) + Number(row.premiumRe || 0)) },
+    { title: t('Cedant premium'), dataIndex: 'premiumCedant', key: 'premiumCedant', align: 'right', render: reinsuranceMoney },
+    { title: t('Reinsurance premium'), dataIndex: 'premiumRe', key: 'premiumRe', align: 'right', render: reinsuranceMoney },
+    { title: t('Commission'), dataIndex: 'commission', key: 'commission', align: 'right', render: reinsuranceMoney },
+    { title: t('Tax'), dataIndex: 'tax', key: 'tax', align: 'right', render: reinsuranceMoney }
+  ];
+  const reinsuranceParticipantColumns = [
+    { title: t('Reinsurer'), dataIndex: 'contactId', width: 260, render: (value, row) => <Select size="small" value={value || undefined} placeholder={t('Select')} style={{ width: 245 }} onChange={(next) => updateReinsuranceParticipant(row, 'contactId', next)}>
+      {reinsuranceContacts.map((item) => <Select.Option key={String(item.id)} value={item.id}>{item.name}</Select.Option>)}
+    </Select> },
+    { title: t('Broker'), dataIndex: 'brokerId', width: 200, render: (value, row) => <Select size="small" value={value || undefined} placeholder={t('Select')} style={{ width: 185 }} onChange={(next) => updateReinsuranceParticipant(row, 'brokerId', next)}>
+      {reinsuranceBrokers.map((item) => <Select.Option key={String(item.id)} value={item.id}>{item.name}</Select.Option>)}
+    </Select> },
+    { title: t('Split (%)'), dataIndex: 'split', key: 'split', align: 'right', render: (value, row) => <EditableFormattedNumber decimals={4} value={value} onCommit={(next) => updateReinsuranceParticipant(row, 'split', next)} /> },
+    { title: t('Sum'), dataIndex: 'sumInsured', key: 'sumInsured', align: 'right', render: (value, row) => <EditableFormattedNumber value={value} onCommit={(next) => updateReinsuranceParticipant(row, 'sumInsured', next)} /> },
+    { title: t('Premium'), dataIndex: 'premium', key: 'premium', align: 'right', render: (value, row) => <EditableFormattedNumber value={value} onCommit={(next) => updateReinsuranceParticipant(row, 'premium', next)} /> },
+    { title: t('Commission'), dataIndex: 'commission', key: 'commission', align: 'right', render: (value, row) => <EditableFormattedNumber value={value} onCommit={(next) => updateReinsuranceParticipant(row, 'commission', next)} /> },
+    { title: t('Tax'), dataIndex: 'tax', key: 'tax', align: 'right', render: (value, row) => <EditableFormattedNumber value={value} onCommit={(next) => updateReinsuranceParticipant(row, 'tax', next)} /> },
+    { title: t('Actions'), width: 90, render: (_, row) => <Button type="link" danger size="small" onClick={() => removeReinsuranceParticipant(row)}>{t('Delete')}</Button> }
+  ];
+  const reinsuranceCoinsuranceColumns = [
+    { title: t('Coinsurer'), dataIndex: 'name', key: 'name' },
+    { title: t('Leader'), dataIndex: 'leader', key: 'leader', align: 'center', render: (value) => value ? t('Yes') : t('No') },
+    { title: t('Percentage (%)'), dataIndex: 'percentage', key: 'percentage', align: 'right', render: reinsuranceMoney },
+    { title: t('Sum'), dataIndex: 'sumInsured', key: 'sumInsured', align: 'right', render: reinsuranceMoney },
+    { title: t('Premium'), dataIndex: 'premium', key: 'premium', align: 'right', render: reinsuranceMoney },
+    { title: t('Commission'), dataIndex: 'commission', key: 'commission', align: 'right', render: reinsuranceMoney },
+    { title: t('Tax'), dataIndex: 'tax', key: 'tax', align: 'right', render: reinsuranceMoney }
+  ];
+  const renderCoinsuranceTab = () => {
+    const rows = buildCoinsuranceRows(reinsuranceSnapshot);
+    return <>
+      <Alert type="info" showIcon message={t('Coinsurance information')} description={t('The values are calculated from the final endorsement state and are not editable. Reinsurance only distributes the remaining portion.')} />
+      <Table size="small" pagination={false} rowKey="key" dataSource={rows} columns={reinsuranceCoinsuranceColumns}
+        summary={() => <Table.Summary><Table.Summary.Row className="proceed-order-reinsurance-total">
+          <Table.Summary.Cell index={0}><b>{t('Totals')}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={1}></Table.Summary.Cell>
+          <Table.Summary.Cell index={2} align="right">{reinsuranceMoney(rows.reduce((sum, row) => sum + Number(row.percentage || 0), 0))}</Table.Summary.Cell>
+          <Table.Summary.Cell index={3} align="right">{reinsuranceMoney(rows.reduce((sum, row) => sum + Number(row.sumInsured || 0), 0))}</Table.Summary.Cell>
+          <Table.Summary.Cell index={4} align="right">{reinsuranceMoney(rows.reduce((sum, row) => sum + Number(row.premium || 0), 0))}</Table.Summary.Cell>
+          <Table.Summary.Cell index={5} align="right">{reinsuranceMoney(rows.reduce((sum, row) => sum + Number(row.commission || 0), 0))}</Table.Summary.Cell>
+          <Table.Summary.Cell index={6} align="right">{reinsuranceMoney(rows.reduce((sum, row) => sum + Number(row.tax || 0), 0))}</Table.Summary.Cell>
+        </Table.Summary.Row></Table.Summary>} />
+    </>;
+  };
+  const ProceedFolderIcon = () => <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 5.5A1.5 1.5 0 0 1 4.5 4h5l2 2h8A1.5 1.5 0 0 1 21 7.5v11A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5v-13Zm2 2v10.5h14V8.5h-8.33l-2-2H5Z" /></svg>;
+  const isReinsuranceReadonlyLine = (row) => String(row && row.lineId) === 'Coaseguro';
+  const reinsuranceLineColumns = [
+    { title: t('Line'), dataIndex: 'lineId', key: 'lineId', width: 180, align: 'left',
+      render: (value, row) => <span>{value}{row.lineId === 'No Técnica' || row.lineId === 'Retención' || row.lineId === 'Coaseguro' ? null : <Button type="link" size="small" className="proceed-order-folder-button"
+        onClick={(event) => { event.stopPropagation(); setReinsuranceLineKey(row.key); setReinsuranceReinsurersReady(true); setReinsuranceDetailTab('reinsurers'); }}>
+        <ProceedFolderIcon />
+      </Button>}</span> },
+    { title: t('Percentage (%)'), dataIndex: 'percentage', key: 'percentage', width: 170, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={4} value={value} width={150} onCommit={(next) => updateReinsuranceLine(row.key, 'percentage', next)} /> },
+    { title: t('Sum'), dataIndex: 'sum', key: 'sum', width: 170, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={145} onCommit={(next) => updateReinsuranceLine(row.key, 'sum', next)} /> },
+    { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 170, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={145} onCommit={(next) => updateReinsuranceLine(row.key, 'premium', next)} /> },
+    { title: t('Commission %'), dataIndex: 'commissionPercentage', key: 'commissionPercentage', width: 180, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={4} value={value} width={145} onCommit={(next) => updateReinsuranceLine(row.key, 'commissionPercentage', next)} /> },
+    { title: t('Commission'), dataIndex: 'commission', key: 'commission', width: 160, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={125} onCommit={(next) => updateReinsuranceLine(row.key, 'commission', next)} /> },
+    { title: t('Tax %'), dataIndex: 'taxPercentage', key: 'taxPercentage', width: 180, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={4} value={value} width={125} onCommit={(next) => updateReinsuranceLine(row.key, 'taxPercentage', next)} /> },
+    { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 140, align: 'right',
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={105} onCommit={(next) => updateReinsuranceLine(row.key, 'tax', next)} /> },
+    { title: t('Balance'), key: 'balance', width: 140, align: 'right', render: (value, row) => {
+      return reinsuranceMoney(row.isCoinsurance ? 0 : Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0));
+    } }
+  ];
+  const renderReinsurancePanel = () => {
+    const validation = validateProceedReinsurance();
+    const selectedGroup = reinsuranceContractRows.find((group) => group.key === reinsuranceContractKey) || reinsuranceContractRows[0];
+    const selectedRows = selectedGroup ? selectedGroup.rows : [];
+    const selectedLine = reinsuranceLines.find((line) => line.key === reinsuranceLineKey) || selectedReinsuranceLines.find((line) => line.lineId === 'Cuota Parte') || selectedReinsuranceLines[0];
+    const participants = selectedLine
+      ? (reinsuranceSnapshot && reinsuranceSnapshot.participants || []).filter((participant) => String(participant.contractId) === String(selectedLine.contractId) && String(participant.lineId || '') === String(selectedLine.lineId || ''))
+      : [];
+    const groupedParticipants = groupReinsuranceParticipants(participants);
+    return (
+      <div className="proceed-order-reinsurance-panel">
+        <Alert type="info" showIcon message={t('Distribución de reaseguro')} />
+        <Spin spinning={reinsuranceLoading}>
+          {reinsuranceError ? <Alert type="error" showIcon style={{ marginTop: 8 }} message={reinsuranceError} /> : null}
+          {!reinsuranceSnapshot && !reinsuranceLoading ? <Empty description={t('No hay datos de reaseguro cargados.')} /> : null}
+          {reinsuranceSnapshot && reinsuranceContractRows.length ? (
+            <div>
+              <Table className="proceed-order-reinsurance-table" size="small" pagination={false} rowKey="key"
+                dataSource={reinsuranceContractRows} columns={reinsuranceContractColumns}
+                rowClassName={(row) => row.key === reinsuranceContractKey ? 'proceed-order-reinsurance-selected' : ''}
+                rowSelection={{
+                  type: 'radio',
+                  selectedRowKeys: reinsuranceContractKey ? [reinsuranceContractKey] : [],
+                  onChange: (keys) => {
+                    const selectedKey = keys[0] || null;
+                    const selected = reinsuranceContractRows.find((row) => String(row.key) === String(selectedKey));
+                    setReinsuranceContractKey(selectedKey);
+                    const firstLine = selected
+                      ? reinsuranceLines.find((line) => String(line.contractId) === String(selected.contractId) && line.lineId === 'Cuota Parte')
+                        || reinsuranceLines.find((line) => String(line.contractId) === String(selected.contractId))
+                      : null;
+                    setReinsuranceLineKey(firstLine ? firstLine.key : null);
+                    setReinsuranceReinsurersReady(false);
+                    setReinsuranceDetailTab('distribution');
+                  }
+                }}
+                onRow={(row) => ({ onClick: () => {
+                  setReinsuranceContractKey(row.key);
+                  const firstLine = reinsuranceLines.find((line) => String(line.contractId) === String(row.contractId) && line.lineId === 'Cuota Parte')
+                    || reinsuranceLines.find((line) => String(line.contractId) === String(row.contractId));
+                  setReinsuranceLineKey(firstLine ? firstLine.key : null);
+                  setReinsuranceReinsurersReady(false);
+                  setReinsuranceDetailTab('distribution');
+                } })}
+                summary={() => (
+                  <Table.Summary.Row className="proceed-order-reinsurance-total">
+                    <Table.Summary.Cell index={0}></Table.Summary.Cell>
+                    <Table.Summary.Cell index={1}><b>{t('Totals')}</b></Table.Summary.Cell>
+                    <Table.Summary.Cell index={2}></Table.Summary.Cell>
+                    <Table.Summary.Cell index={3}></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4}></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.sum, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={6} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.premium, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={7} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.retainedPremium, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={8} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.retainedSum, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={9} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.cededPremium, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={10} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.cededSum, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={11} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.commission, 0))}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={12} align="right">{reinsuranceMoney(reinsuranceContractRows.reduce((sum, row) => sum + row.tax, 0))}</Table.Summary.Cell>
+                  </Table.Summary.Row>
+                )}
+              />
+              {selectedGroup ? (
+                <Tabs className="proceed-order-reinsurance-detail-tabs" type="card" activeKey={reinsuranceDetailTab} onChange={setReinsuranceDetailTab}>
+                  <TabPane tab={t('Distribution')} key="distribution">
+                    <div className="proceed-order-reinsurance-toolbar"><Button type="primary" onClick={saveReinsuranceDistributionInMemory}>{t('Save')}</Button><span>{t('Reinsurance distribution')}</span></div>
+                    <Table size="small" pagination={false} rowKey="key" dataSource={selectedReinsuranceLines} columns={reinsuranceLineColumns} scroll={{ x: 1490 }}
+                      summary={() => (
+                        <Table.Summary.Row className="proceed-order-reinsurance-total">
+                          <Table.Summary.Cell index={0}><b>{t('Totals')}</b></Table.Summary.Cell>
+                          <Table.Summary.Cell index={1} align="right">{reinsuranceMoney(selectedReinsuranceLines.reduce((sum, row) => sum + (row.isCoinsurance ? 0 : Number(row.percentage || 0)), 0))}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={2} align="right">{reinsuranceMoney(selectedReinsuranceLines.reduce((sum, row) => sum + Number(row.sum || 0), 0))}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={3} align="right">{reinsuranceMoney(selectedReinsuranceLines.reduce((sum, row) => sum + Number(row.premium || 0), 0))}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={4}></Table.Summary.Cell>
+                          <Table.Summary.Cell index={5} align="right">{reinsuranceMoney(selectedReinsuranceLines.reduce((sum, row) => sum + Number(row.commission || 0), 0))}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={6}></Table.Summary.Cell>
+                          <Table.Summary.Cell index={7} align="right">{reinsuranceMoney(selectedReinsuranceLines.reduce((sum, row) => sum + Number(row.tax || 0), 0))}</Table.Summary.Cell>
+                          <Table.Summary.Cell index={8} align="right">{reinsuranceMoney(selectedReinsuranceLines.reduce((sum, row) => sum + (row.isCoinsurance ? 0 : Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0)), 0))}</Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      )} />
+                  </TabPane>
+                  <TabPane tab={t('Reinsurers')} key="reinsurers" disabled={!reinsuranceReinsurersReady}>
+                    <Alert type="info" showIcon message={selectedLine ? t('Contract') + ': ' + selectedLine.contractId + ' | ' + t('Line') + ': ' + selectedLine.lineId : t('Select a line')} />
+                    {selectedLine ? <div className="proceed-order-reinsurance-toolbar">
+                      <Button type="primary" size="small" onClick={() => addReinsuranceParticipant(selectedLine)}>{t('Add reinsurer')}</Button>
+                      <Button size="small" onClick={saveReinsuranceDistributionInMemory}>{t('Save distribution')}</Button>
+                      <span>{t('Reinsurer distribution')}</span>
+                    </div> : null}
+                    <Table size="small" pagination={false} rowKey={(row, index) => String(row.contactId || '') + '|' + String(row.brokerId || '') + '|' + String(row._newKey || index)} dataSource={groupedParticipants} columns={reinsuranceParticipantColumns} locale={{ emptyText: t('No reinsurers found.') }} />
+                  </TabPane>
+                  <TabPane tab={t('Coinsurance')} key="coinsurance">
+                    {renderCoinsuranceTab()}
+                  </TabPane>
+                  <TabPane tab={t('Coverage')} key="coverage">
+                    <Table size="small" pagination={false} rowKey={(row) => String(row.coverageId || row.coverageCode)} dataSource={selectedRows} columns={reinsuranceCoverageColumns} />
+                  </TabPane>
+                </Tabs>
+              ) : null}
+              {!validation.ok ? <Alert type="error" showIcon message={t('La distribución no permite ejecutar el endoso')} description={validation.errors.join(' ')} /> : <Alert type="success" showIcon message={t('La distribución de reaseguro es válida para ejecutar')} />}
+            </div>
+          ) : (reinsuranceSnapshot ? <Empty description={t('La póliza no tiene reaseguro vigente para este endoso.')} /> : null)}
+        </Spin>
+      </div>
+    );
+  };
+  const confirmReinsuranceFromButton = function () {
+    setResultTab('reinsurance');
+    if (reinsuranceLoading) {
+      message.info(t('La distribución de reaseguro todavía se está cargando.'));
+      return;
+    }
+    if (reinsuranceSnapshot) confirmProceedReinsurance();
+    else message.error(t('La distribución de reaseguro no pudo cargarse después de calcular el endoso.'));
+  };
   if (loading) return <Card title={t('Proceed Order endorsement')}><Skeleton active /></Card>;
 
   if (loadError) {
@@ -1444,19 +2585,28 @@
         >
           {t('Calculate')}
         </Button>
+        <Button
+          type="primary"
+          id="btnConfirmReinsurance"
+          loading={reinsuranceLoading}
+          disabled={!calculationIsCurrent || executing}
+          onClick={confirmReinsuranceFromButton}
+        >
+          {t('Confirm reinsurance')}
+        </Button>
         <Popconfirm
           title={t('Execute endorsement?')}
           description={t('This action will create and execute the endorsement using the current calculation.')}
           okText={t('Yes')}
           cancelText={t('Cancel')}
           onConfirm={onExecute}
-          disabled={!proceedOrderEnabled || !isValid || !calculationIsCurrent || executing}
+          disabled={!proceedOrderEnabled || !isValid || !calculationIsCurrent || !reinsuranceConfirmed || executing}
         >
           <Button
             type="primary"
             id="btnExecute"
             loading={executing}
-            disabled={!proceedOrderEnabled || !isValid || !calculationIsCurrent || executing}
+            disabled={!proceedOrderEnabled || !isValid || !calculationIsCurrent || !reinsuranceConfirmed || executing}
           >
             {t('Execute endorsement')}
           </Button>
@@ -1471,7 +2621,9 @@
               ? t('The endorsement data changed. Calculate again before executing.')
             : t('Calculate before executing the endorsement.')}
           </span>
-        ) : null))}
+        ) : (!reinsuranceConfirmed ? (
+          <span style={{ color: '#d48806' }}>{t('Confirm reinsurance before executing the endorsement.')}</span>
+        ) : null)))}
         <span className="proceed-order-context-summary">
           <span><strong>{t('Policy start date')}:</strong> {fmt(policyStartDate) || '—'}</span>
           <span><strong>{t('Policy')}:</strong> {policy ? (policy.code || policy.id) : '—'}</span>
@@ -1533,7 +2685,7 @@
         : null}
 
       {model && !model.error ? (
-        <Tabs className="proceed-order-result-tabs" defaultActiveKey="coverage" type="card">
+        <Tabs className="proceed-order-result-tabs" activeKey={resultTab} onChange={(key) => { setResultTab(key); }} type="card">
           <TabPane tab={t('Coverage comparison')} key="coverage">
             <Divider orientation="left">{t('Coverage comparison')}</Divider>
             <Table className="proceed-order-coverage-table" size="small" pagination={false} rowKey="key" dataSource={model.rows} columns={columns} />
@@ -1549,6 +2701,9 @@
                 {model.mainRow ? model.mainRow.duration + ' → ' + (model.mainRow.newDuration == null ? '—' : model.mainRow.newDuration) : ''}
               </Descriptions.Item>
             </Descriptions>
+          </TabPane>
+          <TabPane tab={t('Reinsurance')} key="reinsurance">
+            {renderReinsurancePanel()}
           </TabPane>
           <TabPane tab={t('Installment preview')} key="installments">
             {!calculationIsCurrent ? (

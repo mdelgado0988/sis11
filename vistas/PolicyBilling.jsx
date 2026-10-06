@@ -18,7 +18,8 @@
     Descriptions,
     Empty,
     Spin,
-    message
+    message,
+    Tooltip
   } = A;
   const { TabPane } = Tabs;
 
@@ -32,6 +33,7 @@
 
   const SummaryIcon = () => <i className="bi bi-file-text" aria-hidden="true" />;
   const InstallmentIcon = () => <i className="bi bi-calendar3" aria-hidden="true" />;
+  const RefreshIcon = () => <i className="bi bi-arrow-clockwise" aria-hidden="true" />;
 
   const [policyId, setPolicyId] = useState(0);
   const [policy, setPolicy] = useState(null);
@@ -39,6 +41,10 @@
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [activeMainTab, setActiveMainTab] = useState('movements');
+  const [reinsuranceRows, setReinsuranceRows] = useState([]);
+  const [reinsuranceLoaded, setReinsuranceLoaded] = useState(false);
+  const [reinsuranceLoading, setReinsuranceLoading] = useState(false);
   const policyHref = policy && policy.id ? `/#/lifePolicy/${policy.id}` : '#/home';
 
   useEffect(() => {
@@ -61,9 +67,48 @@
       .policy-billing-table .ant-table-thead > tr > th,
       .policy-billing-table .ant-table-tbody > tr > td,
       .policy-billing-table .ant-table-summary > tr > td {
-        padding: 4px 8px !important;
+        padding: 5px 8px !important;
         font-size: 12px;
         line-height: 18px;
+      }
+
+      .policy-billing-table .ant-table-container,
+      .policy-billing-installments .ant-table-container {
+        border: 1px solid #cbd1d8;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .policy-billing-table .ant-table-thead > tr > th,
+      .policy-billing-installments .ant-table-thead > tr > th {
+        background: #bfbfbf !important;
+        border-right: 1px solid #cbd1d8 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+        color: #262626;
+        font-weight: 600;
+      }
+
+      .policy-billing-table .ant-table-thead > tr > th:last-child,
+      .policy-billing-installments .ant-table-thead > tr > th:last-child {
+        border-right: 0 !important;
+      }
+
+      .policy-billing-table .ant-table-tbody > tr > td,
+      .policy-billing-installments .ant-table-tbody > tr > td,
+      .policy-billing-table .ant-table-summary > tr > td,
+      .policy-billing-installments .ant-table-summary > tr > td {
+        border-right: 0 !important;
+        border-bottom: 1px solid #cbd1d8 !important;
+      }
+
+      .policy-billing-table .ant-table-tbody > tr:hover > td,
+      .policy-billing-installments .ant-table-tbody > tr:hover > td {
+        background: #b7d7ff !important;
+      }
+
+      .policy-billing-table .ant-table-tbody > tr.ant-table-row-selected > td,
+      .policy-billing-installments .ant-table-tbody > tr.ant-table-row-selected > td {
+        background: #86b4ff !important;
       }
 
       .policy-billing-table .policy-billing-total-row > td,
@@ -74,9 +119,9 @@
       .policy-billing-installments .ant-table-thead > tr > th,
       .policy-billing-installments .ant-table-tbody > tr > td,
       .policy-billing-installments .ant-table-summary > tr > td {
-        padding: 3px 8px !important;
+        padding: 5px 8px !important;
         font-size: 12px;
-        line-height: 16px;
+        line-height: 18px;
       }
 
       .policy-billing-installments .policy-billing-installment-total-row > td,
@@ -107,6 +152,25 @@
         color: #1677ff;
         font-size: 10px;
         line-height: 14px;
+        white-space: nowrap;
+      }
+
+      .policy-billing-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .policy-billing-actions .policy-billing-back {
+        border-color: #8c8c8c;
+        color: #262626;
+        font-weight: 500;
+      }
+
+      .policy-billing-ellipsis {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
     `;
@@ -172,6 +236,56 @@
         message.error(error && error.message ? error.message : t('An unexpected error occurred.'));
       })
       .finally(() => setLoading(false));
+  }
+
+  function apiDate(value) {
+    const raw = String(value || '');
+    return raw.length >= 10 ? raw.substring(0, 10) : '';
+  }
+
+  function getReinsuranceContext() {
+    const from = apiDate(policy && (policy.created || policy.start || policy.activeDate));
+    const to = apiDate(policy && policy.end) || new Date().toISOString().substring(0, 10);
+    return {
+      fdesde: from || to,
+      fhasta: to,
+      ramos: [],
+      poliza: policy && (policy.code || '') || String(policy && policy.id || ''),
+      page: 1,
+      size: 500
+    };
+  }
+
+  async function loadReinsurance(force) {
+    if (!policy || !policy.id || reinsuranceLoading) return;
+    if (reinsuranceLoaded && !force) return;
+
+    setReinsuranceLoading(true);
+    try {
+      const response = await exe('ExeChain', {
+        chain: 'cmdBorderoMovimientos',
+        context: JSON.stringify(getReinsuranceContext())
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The reinsurance could not be loaded.'));
+      }
+      const rows = response.outData && Array.isArray(response.outData.filas)
+        ? response.outData.filas
+        : [];
+      setReinsuranceRows(rows);
+      setReinsuranceLoaded(true);
+    } catch (error) {
+      setReinsuranceRows([]);
+      message.error(error && error.message ? error.message : t('The reinsurance could not be loaded.'));
+    } finally {
+      setReinsuranceLoading(false);
+    }
+  }
+
+  function refreshPolicy() {
+    if (policyId <= 0) return;
+    loadPolicy(policyId);
+    if (reinsuranceLoaded) loadReinsurance(true);
   }
 
   function buildReceiptRows(loadedPolicy) {
@@ -258,6 +372,104 @@
       } catch (error) {
         return [];
       }
+    }
+
+    function isActualPlanEndorsement(change) {
+      const additional = parseJsonObject(change && change.jAdditional);
+      const type = String(additional.endorsementType || '').trim().toUpperCase();
+      return [
+        'CHANGE_COVERAGE_SURETY',
+        'CHANGE_INSURED_SUM_SURETY',
+        'PROCEEDORDER'
+      ].indexOf(type) >= 0;
+    }
+
+    function installmentAmount(installment) {
+      const minimum = Number(installment && installment.minimum);
+      const expected = Number(installment && installment.expected);
+      return Number.isFinite(minimum) && minimum !== 0
+        ? minimum
+        : (Number.isFinite(expected) ? expected : 0);
+    }
+
+    function buildMovementInstallments(change, currentPayPlans, billDiff, billFallback) {
+      const oldPlan = parseJsonArray(change && change.jOldPayPlan);
+      const oldById = {};
+      oldPlan.forEach(installment => {
+        const id = Number(installment && installment.id);
+        if (id > 0) oldById[String(id)] = installment;
+      });
+
+      const changeId = String(change && change.id || '');
+      const rows = (Array.isArray(currentPayPlans) ? currentPayPlans : []).reduce((result, current) => {
+        const currentId = Number(current && current.id);
+        if (currentId <= 0) return result;
+        const previous = oldById[String(currentId)];
+        const belongsToChange = String(current && current.changeId || '') === changeId
+          || String(current && current.Change && current.Change.id || '') === changeId;
+        const movement = previous
+          ? installmentAmount(current) - installmentAmount(previous)
+          : (belongsToChange ? installmentAmount(current) : 0);
+
+        if (Math.abs(movement) < 0.005) return result;
+        result.push({
+          ...current,
+          expected: Number(movement.toFixed(2)),
+          minimum: Number(movement.toFixed(2)),
+          payed: 0,
+          cancellationDate: null
+        });
+        return result;
+      }, []);
+
+      if (rows.length) return rows;
+
+      // Si no hay una relación histórica confiable, no mostramos el plan final
+      // completo. Usamos únicamente sus cuotas reales y distribuimos el importe
+      // diferencial del endoso; las cuotas sintéticas (id 0) quedan excluidas.
+      const newPlan = parseJsonArray(change && change.jNewPayPlan)
+        .filter(installment => Number(installment && installment.id) > 0);
+      const sourcePlan = newPlan.length
+        ? newPlan
+        : (Array.isArray(currentPayPlans) ? currentPayPlans : [])
+          .filter(installment => Number(installment && installment.id) > 0);
+      if (!sourcePlan.length) return [];
+
+      const snapshotDifferences = sourcePlan.map(current => {
+        const previous = oldById[String(Number(current && current.id))];
+        return previous
+          ? installmentAmount(current) - installmentAmount(previous)
+          : 0;
+      });
+      const differenceTotal = snapshotDifferences.reduce((total, amount) => total + amount, 0);
+      const detail = parseJsonObject(change && change.jDetail);
+      const diffBill = getBillValues(billDiff, billFallback);
+      const movementTotal = Number(diffBill.receiptAmount)
+        || Number(detail.annualPremiumDif)
+        || Number(detail.changeCost)
+        || 0;
+      const targetTotal = Math.abs(differenceTotal) >= 0.005
+        ? differenceTotal
+        : movementTotal;
+      if (Math.abs(targetTotal) < 0.005) return [];
+
+      let distributed = 0;
+      return sourcePlan.map((current, index) => {
+        const isLast = index === sourcePlan.length - 1;
+        const sourceAmount = installmentAmount(current);
+        const sourceTotal = sourcePlan.reduce((total, row) => total + installmentAmount(row), 0);
+        const amount = isLast
+          ? Number((targetTotal - distributed).toFixed(2))
+          : Number((targetTotal * (sourceTotal ? sourceAmount / sourceTotal : 1 / sourcePlan.length)).toFixed(2));
+        distributed += amount;
+        return {
+          ...current,
+          expected: amount,
+          minimum: amount,
+          payed: 0,
+          cancellationDate: null
+        };
+      });
     }
 
     function distributeReceiptAmount(installments, receiptAmount) {
@@ -360,7 +572,9 @@
           ? Number(paymentGroup.paid) || 0
           : billValues.paidAmount || 0);
       const isCancellation = !!config.isCancellation;
-      const installments = config.keepInstallmentAmounts
+      const installments = config.movementInstallments
+        ? (Array.isArray(config.installments) ? config.installments : [])
+        : config.keepInstallmentAmounts
         ? keepInstallmentAmounts(config.installments)
         : distributeReceiptAmount(config.installments, receiptAmount);
 
@@ -386,6 +600,7 @@
         status: config.status,
         source: config.source,
         installments,
+        movementInstallments: !!config.movementInstallments,
         isCancellation,
         cancellationBreakdown: isCancellation
           ? buildCancellationBreakdown(billValues, paid)
@@ -401,18 +616,17 @@
     function getMovementType(change) {
       const discriminator = String(change && change.Discriminator || '');
       const discriminatorKey = discriminator.toUpperCase();
-      if (discriminatorKey !== 'COVERAGECHANGE' && discriminatorKey !== 'CAPITALCHANGE') {
-        return discriminator || t('Endorsement');
-      }
-
       const additional = parseJsonObject(change && change.jAdditional);
       const rawEndorsementType = String(additional.endorsementType || '').trim();
       const endorsementType = rawEndorsementType.toUpperCase();
-      if (discriminatorKey === 'CAPITALCHANGE' && rawEndorsementType) {
+      if (endorsementType === 'CHANGE_INSURED_SUM_SURETY') {
         return rawEndorsementType;
       }
       if (endorsementType === 'PROCEEDORDER') return 'ProceedOrder';
       if (endorsementType === 'CHANGE_COVERAGE_SURETY') return 'ChangeCoverageSurety';
+      if (discriminatorKey !== 'COVERAGECHANGE' && discriminatorKey !== 'CAPITALCHANGE') {
+        return discriminator || t('Endorsement');
+      }
       return discriminator;
     }
 
@@ -529,6 +743,7 @@
       const changeId = change && change.id ? String(change.id) : '';
       const changeDetail = parseJsonObject(change && change.jDetail);
       const cancellationChange = isCancellationChange(change);
+      const actualPlanEndorsement = isActualPlanEndorsement(change);
       return buildInvoiceRow({
         key: `change-${changeId || index}`,
         recordType: 'Endorsement',
@@ -544,7 +759,10 @@
         id: change && change.id,
         changeId: change && change.id,
         status: change && change.status,
-        installments: parseJsonArray(change && change.jNewPayPlan),
+        installments: actualPlanEndorsement
+          ? buildMovementInstallments(change, payPlans, change && change.BillDiff, change && change.Bill)
+          : parseJsonArray(change && change.jNewPayPlan),
+        movementInstallments: actualPlanEndorsement,
         isCancellation: cancellationChange,
         paidOverride: cancellationChange
           ? getChangePaidAmount(change, changeDetail)
@@ -605,13 +823,171 @@
     return `${parts[0]}.${parts[1]}`;
   }
 
+  function translateReinsuranceType(value) {
+    const key = String(value || '').trim();
+    const translations = {
+      EMISION: 'Emisión',
+      ANIVERSARIO: 'Aniversario',
+      CANCELACION: 'Cancelación',
+      'RETIRO DE CESION': 'Retiro de cesión',
+      ENDOSO: 'Endoso',
+      AddCoverageChange: 'Alta de cobertura',
+      BeneficiaryChange: 'Cambio de beneficiarios',
+      BenefitChange: 'Cambio de beneficio',
+      CancellationChange: 'Cancelación',
+      CapitalChange: 'Cambio de capital',
+      CessionBeneficiaryChange: 'Cambio de beneficiario de cesión',
+      ClauseChange: 'Cambio de cláusulas',
+      ContingentBeneficiaryChange: 'Cambio de beneficiario contingente',
+      CoverageChange: 'Cambio de coberturas',
+      CoverageChangeTechData: 'Cambio de datos técnicos de cobertura',
+      ExclusionChange: 'Cambio de exclusiones',
+      FrequencyChange: 'Cambio de frecuencia',
+      InformativeChange: 'Cambio informativo',
+      InsuredObjectChange: 'Cambio de objeto asegurado',
+      IntermediaryChange: 'Cambio de intermediario',
+      LoadingChange: 'Recargo / Descuento',
+      PaymentMethodChange: 'Cambio de medio de pago',
+      PayPlanChange: 'Cambio de plan de pagos',
+      PolicyholderChange: 'Cambio de tomador',
+      PolicySurchargeChange: 'Cambio de recargos de póliza',
+      ReinstatementChange: 'Rehabilitación',
+      RemoveCoverageChange: 'Baja de cobertura',
+      TemporalStatusChange: 'Cambio de estado temporal',
+      TermChange: 'Cambio de vigencia',
+      ProceedOrder: 'Orden de proceder',
+      ChangeCoverageSurety: 'Cambio de vigencia de cobertura',
+      CHANGE_COVERAGE_SURETY: 'Cambio de vigencia de cobertura',
+      CHANGE_INSURED_SUM_SURETY: 'Cambio de suma de cobertura'
+    };
+    return translations[key] || (typeof t === 'function' && t(key) !== key ? t(key) : key) || '-';
+  }
+
+  function reinsuranceRemainder(total, parts) {
+    const amount = Number(total || 0);
+    const used = (parts || []).reduce((sum, part) => sum + (Number(part) || 0), 0);
+    return amount - used;
+  }
+
+  function renderReinsuranceTotals(rows) {
+    const totals = (rows || []).reduce((result, row) => {
+      result.insuredSum += Number(row && row.sumaAsegurada100) || 0;
+      result.cedantSum += Number(row && row.sumaRetenida) || 0;
+      result.cededSum += Number(row && row.sumaCedida) || 0;
+      result.retSum += Number(row && row.sumaRetenida) || 0;
+      result.quotaSum += Number(row && row.sumaCuotaParte) || 0;
+      result.excessSum += Number(row && row.sumaExcedente) || 0;
+      result.facSum += Number(row && row.sumaFacultativa) || 0;
+      result.froSum += reinsuranceRemainder(row && row.sumaCedida, [row && row.sumaCuotaParte, row && row.sumaExcedente, row && row.sumaFacultativa]);
+      result.totalPremium += Number(row && row.primaSuscrita100) || 0;
+      result.cedantPremium += Number(row && row.primaRetenida) || 0;
+      result.cededPremium += Number(row && row.primaCedida) || 0;
+      result.retPremium += Number(row && row.primaRetenida) || 0;
+      result.quotaPremium += Number(row && row.primaCuotaParte) || 0;
+      result.excessPremium += Number(row && row.primaExcedente) || 0;
+      result.facPremium += Number(row && row.primaFacultativa) || 0;
+      result.contractualCommission += Number(row && row.comisionContractual) || 0;
+      result.quotaCommission += Number(row && row.comisionCuotaParte) || 0;
+      result.excessCommission += Number(row && row.comisionExcedente) || 0;
+      result.facCommission += Number(row && row.comisionFacultativa) || 0;
+      result.totalTax += Number(row && row.impuesto) || 0;
+      result.quotaTax += Number(row && row.impuestoCuotaParte) || 0;
+      result.excessTax += Number(row && row.impuestoExcedente) || 0;
+      result.facTax += Number(row && row.impuestoFacultativo) || 0;
+      return result;
+    }, {
+      insuredSum: 0, cedantSum: 0, cededSum: 0, retSum: 0, quotaSum: 0,
+      excessSum: 0, facSum: 0, totalPremium: 0, cedantPremium: 0, cededPremium: 0,
+      retPremium: 0, quotaPremium: 0, excessPremium: 0, facPremium: 0,
+      contractualCommission: 0, quotaCommission: 0, excessCommission: 0, facCommission: 0,
+      totalTax: 0, quotaTax: 0, excessTax: 0, facTax: 0
+    });
+    const money = value => renderColoredMoney(value);
+    const cells = [
+      totals.insuredSum, totals.cedantSum, totals.cededSum, totals.retSum,
+      totals.quotaSum, totals.excessSum, totals.facSum,
+      totals.totalPremium, totals.cedantPremium, totals.cededPremium, totals.retPremium,
+      totals.quotaPremium, totals.excessPremium, totals.facPremium,
+      totals.contractualCommission, totals.quotaCommission, totals.excessCommission, totals.facCommission,
+      totals.totalTax, totals.quotaTax, totals.excessTax, totals.facTax
+    ];
+
+    return (
+      <Table.Summary>
+        <Table.Summary.Row className="policy-billing-total-row">
+          <Table.Summary.Cell index={0} colSpan={4}><strong>{t('Total')}</strong></Table.Summary.Cell>
+          {cells.map((value, index) => (
+            <Table.Summary.Cell key={index} index={index + 4} align="right">
+              {money(value)}
+            </Table.Summary.Cell>
+          ))}
+        </Table.Summary.Row>
+      </Table.Summary>
+    );
+  }
+
+  function reinsuranceColumns() {
+    const money = value => renderColoredMoney(value);
+    return [
+      { title: t('Endorsement'), dataIndex: 'changeId', key: 'changeId', width: 95, align: 'center', render: value => value || '-' },
+      { title: t('Type'), dataIndex: 'tipo', key: 'tipo', width: 150, ellipsis: true, render: value => {
+        const label = translateReinsuranceType(value);
+        return <Tooltip title={label}><span className="policy-billing-ellipsis">{label}</span></Tooltip>;
+      } },
+      { title: t('Start date'), dataIndex: 'fDesde', key: 'fDesde', width: 105, align: 'center', render: value => formatDate(value) },
+      { title: t('End date'), dataIndex: 'fHasta', key: 'fHasta', width: 105, align: 'center', render: value => formatDate(value) },
+      {
+        title: t('Sums'),
+        children: [
+          { title: t('Insured sum'), dataIndex: 'sumaAsegurada100', key: 'sumaAsegurada100', width: 125, align: 'right', render: money },
+          { title: `${t('Sum')} ${t('Cedant')}`, dataIndex: 'sumaRetenida', key: 'sumaRetenida', width: 120, align: 'right', render: money },
+          { title: t('Ceded sum'), dataIndex: 'sumaCedida', key: 'sumaCedida', width: 120, align: 'right', render: money },
+          { title: 'RET', dataIndex: 'sumaRetenida', key: 'ret', width: 105, align: 'right', render: money },
+          { title: 'Cuota Parte', dataIndex: 'sumaCuotaParte', key: 'cuotaParte', width: 120, align: 'right', render: money },
+          { title: 'Excedente 1', dataIndex: 'sumaExcedente', key: 'excedente', width: 120, align: 'right', render: money },
+          { title: 'FAC', dataIndex: 'sumaFacultativa', key: 'fac', width: 105, align: 'right', render: money }
+        ]
+      },
+      {
+        title: t('Premiums'),
+        children: [
+          { title: `${t('Total')} ${t('Premium')}`, dataIndex: 'primaSuscrita100', key: 'primaSuscrita100', width: 125, align: 'right', render: money },
+          { title: `${t('Premium')} ${t('Cedant')}`, dataIndex: 'primaRetenida', key: 'primaRetenida', width: 120, align: 'right', render: money },
+          { title: t('Ceded Premium'), dataIndex: 'primaCedida', key: 'primaCedida', width: 120, align: 'right', render: money },
+          { title: 'RET', dataIndex: 'primaRetenida', key: 'retPremium', width: 105, align: 'right', render: money },
+          { title: 'Cuota Parte', dataIndex: 'primaCuotaParte', key: 'cuotaPartePremium', width: 120, align: 'right', render: money },
+          { title: 'Excedente 1', dataIndex: 'primaExcedente', key: 'excedentePremium', width: 120, align: 'right', render: money },
+          { title: 'FAC', dataIndex: 'primaFacultativa', key: 'facPremium', width: 105, align: 'right', render: money }
+        ]
+      },
+      {
+        title: t('Commissions'),
+        children: [
+          { title: `${t('Total Commission')}`, dataIndex: 'comisionContractual', key: 'comisionContractual', width: 125, align: 'right', render: money },
+          { title: 'Cuota Parte', dataIndex: 'comisionCuotaParte', key: 'comisionCuotaParte', width: 120, align: 'right', render: money },
+          { title: 'Excedente 1', dataIndex: 'comisionExcedente', key: 'comisionExcedente', width: 120, align: 'right', render: money },
+          { title: 'FAC', dataIndex: 'comisionFacultativa', key: 'comisionFacultativa', width: 105, align: 'right', render: money }
+        ]
+      },
+      {
+        title: t('Taxes'),
+        children: [
+          { title: `${t('Total')} ${t('Tax')}`, dataIndex: 'impuesto', key: 'impuesto', width: 105, align: 'right', render: money },
+          { title: 'Cuota Parte', dataIndex: 'impuestoCuotaParte', key: 'impuestoCuotaParte', width: 120, align: 'right', render: money },
+          { title: 'Excedente 1', dataIndex: 'impuestoExcedente', key: 'impuestoExcedente', width: 120, align: 'right', render: money },
+          { title: 'FAC', dataIndex: 'impuestoFacultativo', key: 'impuestoFacultativo', width: 105, align: 'right', render: money }
+        ]
+      }
+    ];
+  }
+
   function renderColoredMoney(value) {
     const amount = Number(value || 0);
     const color = amount > 0
-      ? '#389e0d'
+      ? '#237804'
       : amount < 0
         ? '#cf1322'
-        : 'inherit';
+        : '#262626';
 
     return <span style={{ color }}>{formatMoney(value)}</span>;
   }
@@ -748,9 +1124,9 @@
         </Button>
       )
     },
-    { title: t('Type'), dataIndex: 'recordType', key: 'recordType', width: 100, render: value => t(value) },
-    { title: t('Id'), dataIndex: 'id', key: 'id', width: 80 },
-    { title: t('Receipt number'), dataIndex: 'receiptNumber', key: 'receiptNumber', width: 140 },
+    { title: t('Type'), dataIndex: 'recordType', key: 'recordType', width: 70, align: 'center', render: value => t(value) },
+    { title: t('Id'), dataIndex: 'id', key: 'id', width: 55, align: 'center' },
+    { title: t('Receipt number'), dataIndex: 'receiptNumber', key: 'receiptNumber', width: 120, align: 'center' },
     {
       title: t('Receipt amount'),
       dataIndex: 'receiptAmount',
@@ -763,22 +1139,32 @@
       title: t('Start date'),
       dataIndex: 'startDate',
       key: 'startDate',
-      width: 120,
+      width: 105,
+      align: 'center',
       render: value => formatDate(value)
     },
     {
       title: t('End date'),
       dataIndex: 'endDate',
       key: 'endDate',
-      width: 120,
+      width: 105,
+      align: 'center',
       render: value => formatDate(value)
     },
     {
       title: t('Type'),
       dataIndex: 'movementType',
       key: 'movementType',
-      width: 160,
-      render: value => value ? t(String(value)) : '-'
+      width: 220,
+      ellipsis: true,
+      render: value => {
+        const label = value ? t(String(value)) : '-';
+        return (
+          <Tooltip title={label}>
+            <span className="policy-billing-ellipsis">{label}</span>
+          </Tooltip>
+        );
+      }
     },
     { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 110, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'premium') },
     { title: t('Discounts'), dataIndex: 'discounts', key: 'discounts', width: 110, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'discounts') },
@@ -786,14 +1172,21 @@
     { title: t('Gross premium'), dataIndex: 'grossPremium', key: 'grossPremium', width: 120, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'grossPremium') },
     { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 100, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'tax') },
     { title: t('Expenses'), dataIndex: 'expenses', key: 'expenses', width: 100, align: 'right', render: (value, record) => renderBillingAmount(value, record, 'expenses') },
-    { title: t('Income date'), dataIndex: 'incomeDate', key: 'incomeDate', width: 160, render: value => formatDate(value, true) }
+    { title: t('Income date'), dataIndex: 'incomeDate', key: 'incomeDate', width: 135, align: 'center', render: value => formatDate(value, true) }
   ];
 
   const installmentColumns = [
     { title: t('Id'), dataIndex: 'id', key: 'id', width: 90 },
     { title: t('Installment number'), dataIndex: 'numberInYear', key: 'numberInYear', width: 150, align: 'center' },
     { title: t('Due date'), dataIndex: 'dueDate', key: 'dueDate', width: 150, render: value => formatDate(value) },
-    { title: t('Minimum'), dataIndex: 'minimum', key: 'minimum', width: 130, align: 'right', render: value => renderColoredMoney(value) }
+    {
+      title: selectedReceipt && selectedReceipt.movementInstallments ? t('Variación') : t('Minimum'),
+      dataIndex: 'minimum',
+      key: 'minimum',
+      width: 130,
+      align: 'right',
+      render: value => renderColoredMoney(value)
+    }
   ];
 
   return (
@@ -802,33 +1195,66 @@
       subTitle={policy ? `${t('Currency')}: ${policy.currency || '-'}` : t('Receipts and movements')}
       icon="file-text"
       extra={(
-        <Button type="default" href={policyHref}>
-          <BackIcon /> {t('Back')}
-        </Button>
+        <span className="policy-billing-actions">
+          <Button type="primary" onClick={refreshPolicy} loading={loading || reinsuranceLoading}>
+            <RefreshIcon /> {t('Actualizar')}
+          </Button>
+          <Button type="default" className="policy-billing-back" href={policyHref}>
+            <BackIcon /> {t('Back')}
+          </Button>
+        </span>
       )}
     >
-      <Row gutter={[16, 16]}>
-        <Col span={24}>
-          {loading ? (
-            <Spin />
-          ) : receipts.length === 0 ? (
-            <Empty description={t('No receipts or endorsements to display.')} />
+      <Tabs
+        activeKey={activeMainTab}
+        onChange={key => {
+          setActiveMainTab(key);
+          if (key === 'reinsurance') loadReinsurance(false);
+        }}
+      >
+        <TabPane key="movements" tab={t('Movements')}>
+          <Row gutter={[16, 16]}>
+            <Col span={24}>
+              {loading ? (
+                <Spin />
+              ) : receipts.length === 0 ? (
+                <Empty description={t('No receipts or endorsements to display.')} />
+              ) : (
+                <Table
+                  rowKey="key"
+                  columns={columns}
+                  dataSource={receipts}
+                  loading={loading}
+                  size="small"
+                  className="policy-billing-table"
+                  rowClassName={getBillingRowClass}
+                  pagination={{ pageSize: 25, showSizeChanger: false }}
+                  scroll={{ x: 1200 }}
+                  summary={() => renderTotals(receipts)}
+                />
+              )}
+            </Col>
+          </Row>
+        </TabPane>
+        <TabPane key="reinsurance" tab={t('Reinsurance')}>
+          {!reinsuranceLoaded && !reinsuranceLoading ? (
+            <Empty description={t('Select the tab to load reinsurance movements.')} />
           ) : (
             <Table
-              rowKey="key"
-              columns={columns}
-              dataSource={receipts}
-              loading={loading}
+              rowKey={(row, index) => [row.id, row.changeId, row.movKey, index].join('-')}
+              columns={reinsuranceColumns()}
+              dataSource={reinsuranceRows}
+              loading={reinsuranceLoading}
               size="small"
               className="policy-billing-table"
-              rowClassName={getBillingRowClass}
               pagination={{ pageSize: 25, showSizeChanger: false }}
-              scroll={{ x: 1200 }}
-              summary={() => renderTotals(receipts)}
+              scroll={{ x: 2500 }}
+              summary={rows => renderReinsuranceTotals(rows)}
+              locale={{ emptyText: t('No reinsurance movements to display.') }}
             />
           )}
-        </Col>
-      </Row>
+        </TabPane>
+      </Tabs>
 
       <Modal
         title={selectedReceipt ? `${t('Details')}: ${t(selectedReceipt.recordType)}` : t('Receipt details')}

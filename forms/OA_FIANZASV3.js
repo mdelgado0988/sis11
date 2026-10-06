@@ -1375,9 +1375,9 @@ function aplicarRestriccionesEndosoFianza() {
         '#cmbEstadoFianza'
     ];
     if (permiteFechaActo) camposEditables.push('#f_acto_publico');
-    // AXX-2420 / GLOBUAT-270 (8): en la Fianza de Construcción el endoso de objeto asegurado permite cambiar el
-    // beneficiario («A favor de»): nombre (autocompletado) y código SIS; el contacto se completa solo.
-    if (producto === '81FIAGCCOG') camposEditables.push('#nombre', '#rut');
+    // En cualquier endoso el beneficiario puede cambiarse mediante el
+    // autocompletado de Nombre. Los campos relacionados se completan solos.
+    if (isEndorsementFianza) camposEditables.push('#nombre');
 
     camposEditables.forEach(selector => {
         $(selector).prop('disabled', false).prop('readonly', false)

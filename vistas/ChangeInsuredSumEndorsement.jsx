@@ -1761,18 +1761,8 @@
     const effective = moment(effectiveDate).format('YYYY-MM-DD');
     const policyStart = day10(policy && policy.start);
     if (policyStart && effective < policyStart) { setError(t('La fecha efectiva no puede ser anterior al inicio de la póliza') + ' (' + policyStart + ')'); return; }
-    for (let i = 0; i < changes.length; i++) {
-      const coverageStart = day10(changes[i].coverage.start);
-      const coverageEnd = day10(changes[i].coverage.end);
-      if (effective > coverageEnd) {
-        setError(t('La fecha efectiva no puede ser posterior al fin de la cobertura') + ' (' + changes[i].code + ': ' + coverageEnd + ')');
-        return;
-      }
-      if (effective < coverageStart) {
-        setError(t('La fecha efectiva no puede ser anterior al inicio de la cobertura') + ' (' + changes[i].code + ': ' + coverageStart + ')');
-        return;
-      }
-    }
+    const policyEnd = day10(policy && policy.end);
+    if (policyEnd && effective > policyEnd) { setError(t('La fecha efectiva no puede ser posterior al fin de la fianza') + ' (' + policyEnd + ')'); return; }
 
     const calculationVersion = ++requestVersion.calculation;
     // Invalida tambien cualquier simulacion iniciada con el calculo anterior.
