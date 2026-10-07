@@ -721,6 +721,18 @@
     });
     return contacts.map(personName).filter(Boolean).join(' ');
   };
+  const newClaimClientLabel = (policy) => {
+    const insured = Array.isArray(policy && policy.Insureds) ? policy.Insureds[0] : null;
+    const contact = policy && (policy.Holder || policy.holder)
+      || insured && (insured.Contact || insured.contact || insured);
+    if (!contact || typeof contact !== 'object') return personName(contact);
+
+    const isPerson = contact.isPerson === true || Number(contact.isPerson) === 1
+      || String(contact.isPerson).trim().toLowerCase() === 'true';
+    return isPerson
+      ? firstValue([contact.name, contact.surname1].filter(Boolean).join(' '), personName(contact))
+      : firstValue(contact.surname2, personName(contact));
+  };
   const policyContactSearchText = (policy) => {
     const contacts = [];
     if (policy && policy.Holder) contacts.push(policy.Holder);
@@ -866,7 +878,7 @@
       setNewClaimPolicyTotal(0);
       return Promise.resolve();
     }
-    const conditions = ['active = 1'];
+    const conditions = ['[activeDate] IS NOT NULL'];
     if (code) conditions.push("[code] LIKE N'%" + code.replace(/'/g, "''").replace(/[%_]/g, '[$&]') + "%'");
     if (Number.isSafeInteger(holderId) && holderId > 0) conditions.push('[holderId] = ' + holderId);
     if (Number.isSafeInteger(insuredId) && insuredId > 0) {
@@ -891,7 +903,7 @@
       setNewClaimPolicyPage(page);
       setNewClaimPolicyTotal(Number.isFinite(total) ? total : filtered.length);
       setNewClaimRows(filtered.map((policy) => Object.assign({}, policy, {
-        __insuredLabel: policyContactNames(policy),
+        __insuredLabel: newClaimClientLabel(policy),
         __lobLabel: firstValue(policy && policy.Lob && policy.Lob.name, policy && policy.lobName,
           policy && policy.lob),
         __productLabel: firstValue(policy && policy.Product && policy.Product.name,
@@ -6289,6 +6301,12 @@ END CATCH;`;
       <span className="resumen-financial-text">{text}</span>
     </A.Tooltip>;
   };
+  const newClaimCellText = (value) => {
+    const text = displayValue(value);
+    return <A.Tooltip title={text === EMPTY_VALUE ? undefined : text} placement="topLeft">
+      <span className="resumen-new-claim-cell-ellipsis">{text}</span>
+    </A.Tooltip>;
+  };
   const renderFinancialSection = (config) => (
     <section className={'resumen-' + config.key} aria-label={config.ariaLabel}>
       <div className="resumen-coverage-toolbar">
@@ -6908,9 +6926,12 @@ END CATCH;`;
       .resumen-new-claim-results{max-height:360px;overflow:auto}
       .resumen-new-claim-modal .resumen-new-claim-results{border:1px solid #d9e2ec;border-radius:5px;background:#fff}
       .resumen-new-claim-modal .resumen-new-claim-results .ant-table{font-size:12px;color:#183153}
+      .resumen-new-claim-modal .resumen-new-claim-results .ant-table table{table-layout:fixed}
       .resumen-new-claim-modal .resumen-new-claim-results .ant-table-thead>tr>th{padding:8px 10px;background:#f0f2f5;border-bottom:1px solid #c8d2df;color:#183153;font-weight:600;white-space:nowrap}
       .resumen-new-claim-modal .resumen-new-claim-results .ant-table-tbody>tr>td{padding:7px 10px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
       .resumen-new-claim-modal .resumen-new-claim-results .ant-table-tbody>tr:hover>td{background:#f5f9ff}
+      .resumen-new-claim-modal .resumen-new-claim-cell-ellipsis{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .resumen-new-claim-modal .resumen-new-claim-policy-code{display:block;font-weight:600;white-space:nowrap}
       .resumen-new-claim-modal .resumen-new-claim-results .ant-pagination{margin:10px 8px}
       .resumen-new-claim-modal .ant-alert{margin-bottom:12px;border-radius:5px}
       .resumen-shell .resumen-stage-control{min-width:0}
@@ -7191,12 +7212,12 @@ END CATCH;`;
               onChange: (page) => searchNewClaimPolicies(page) }}
             locale={{ emptyText: newClaimLoading ? 'Consultando pólizas...' : 'Realice una búsqueda para ver resultados.' }}
             columns={[
-              { title: 'Póliza', dataIndex: 'code', render: (value, row) => displayValue(value || row.id) },
-              { title: 'Cliente', dataIndex: '__insuredLabel', render: (value) => displayValue(value) },
-              { title: 'Ramo', dataIndex: '__lobLabel', render: (value) => displayValue(value) },
-              { title: 'Producto', dataIndex: '__productLabel', render: (value) => displayValue(value) },
-              { title: 'Inicio', dataIndex: '__startLabel', render: (value) => displayValue(value) },
-              { title: 'Fin', dataIndex: '__endLabel', render: (value) => displayValue(value) },
+              { title: 'Póliza', dataIndex: 'code', width: 175, render: (value, row) => <span className="resumen-new-claim-policy-code">{displayValue(value || row.id)}</span> },
+              { title: 'Cliente', dataIndex: '__insuredLabel', width: 120, render: newClaimCellText },
+              { title: 'Ramo', dataIndex: '__lobLabel', width: 125, render: newClaimCellText },
+              { title: 'Producto', dataIndex: '__productLabel', width: 155, render: newClaimCellText },
+              { title: 'Inicio', dataIndex: '__startLabel', width: 85, render: (value) => displayValue(value) },
+              { title: 'Fin', dataIndex: '__endLabel', width: 85, render: (value) => displayValue(value) },
               { title: '', key: 'select', width: 100, render: (_, row) => <Button size="small" type="primary"
                 onClick={() => prepareNewClaimPolicy(row)}>Seleccionar</Button> }
             ]} />
