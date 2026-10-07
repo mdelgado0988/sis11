@@ -1051,8 +1051,6 @@
     summary.total = roundMoney(summary.payment + summary.expense);
     return summary;
   };
-  // A reversal is displayed for audit purposes, but neither side affects valuation totals.
-  const effectiveIndemnityMovement = (row) => ![2, '2'].includes(row.status);
   const activeReserveMovements = (claim, coverageId) => {
     const requestedClaimId = claim && Number(claim.id);
     return Array.isArray(claim && claim.Payouts) ? claim.Payouts.filter((item) => {
@@ -1361,23 +1359,6 @@
       && process.estadoId === 'Task_1d9491f' && process.isApproved === false && process.finalizado === false;
   };
   const requestHasCheque = (request) => request.checkNum !== null && request.checkNum !== undefined && String(request.checkNum).trim() !== '';
-  const requestWorkflowStates = (request) => [request && request.entityState,
-    request && request.Process && request.Process.entityState].map((state) => String(state || '').trim().toUpperCase());
-  const requestIsExecuted = (request) => requestWorkflowStates(request).includes('EXECUTED');
-  const requestIsRejected = (request) => requestWorkflowStates(request).includes('REJECTED');
-  const requestRejectionIssue = (request) => {
-    if (!request || !positiveIdText(request.id)) return 'La solicitud asociada no tiene una identidad válida.';
-    if (requestIsExecuted(request)) {
-      return 'La solicitud #' + Number(request.id) + ' está impresa (estado EXECUTED) y no puede revertir este pago.';
-    }
-    if (requestIsRejected(request)) return '';
-    const process = request.Process;
-    if (!positiveIdText(request.processId) || !process || positiveIdText(process.id) !== positiveIdText(request.processId)
-      || process.entity !== 'ClaimPayment' || Number(process.entityId) !== Number(request.id)) {
-      return 'No se pudo recuperar el proceso de la solicitud #' + Number(request.id) + ' para rechazarla.';
-    }
-    return '';
-  };
   const revertedRequestHistory = (requests, payoutId) => {
     if (!requests.length) return true;
     let sum = 0, positive = false, negative = false;
@@ -1453,20 +1434,20 @@
       } catch (error) { uncertain = error.message; }
     });
     // Neither an earlier request nor a terminal label can hide an executed process or issued cheque.
-    const executed = linked.find(requestIsExecuted);
-    if (executed) return 'La solicitud #' + Number(executed.id)
-      + ' está impresa (estado EXECUTED) y no puede anular ni revertir este movimiento.';
+    if (linked.some((request) => request.entityState === 'EXECUTED'
+      || request.Process && request.Process.entityState === 'EXECUTED'
+      || request.checkNum !== null && request.checkNum !== undefined && String(request.checkNum).trim() !== '')) {
+      return 'Operación bloqueada: solicitud ejecutada o cheque asignado. No se puede anular ni revertir este movimiento.';
+    }
     if (uncertain) return uncertain;
     if (payout.requestedAmount !== undefined && (typeof payout.requestedAmount !== 'number'
-      || !Number.isFinite(payout.requestedAmount) || (!linked.length && payout.requestedAmount !== 0)))
+      || !Number.isFinite(payout.requestedAmount) || payout.requestedAmount !== 0))
       return 'El movimiento conserva un monto solicitado. Revise las solicitudes y sus compensaciones antes de anularlo o revertirlo.';
-    if (linked.length && action !== 'REVERT') return 'El movimiento tiene una solicitud asociada (' + linked.map((request) => request.id).join(', ')
-      + '). Solo puede revertirse después de rechazar automáticamente la solicitud.';
-    const rejectionIssue = linked.map(requestRejectionIssue).find(Boolean);
-    if (rejectionIssue) return rejectionIssue;
-    if (!(action === 'CANCEL' ? [0, '0'] : [1, '1', 3, '3']).includes(payout.status)) {
+    if (linked.length && !(action === 'REVERT' && revertedRequestHistory(linked, payoutId))) return 'El movimiento tiene una solicitud asociada (' + linked.map((request) => request.id).join(', ')
+      + '). Revise y revierta primero la solicitud desde su detalle si su estado lo permite. Las solicitudes creadas no se eliminan.';
+    if (!(action === 'CANCEL' ? [0, '0'] : [1, '1']).includes(payout.status)) {
       return action === 'CANCEL' ? 'Solo se puede anular un ' + (bucket === 'EX' ? 'gasto' : 'pago') + ' pendiente de aprobación (estado 0).'
-        : 'Solo se puede revertir un pago aprobado o aplicado a una solicitud (estado 1 o 3).';
+        : 'Solo se puede revertir un pago aprobado (estado 1).';
     }
     return '';
   };
@@ -2779,6 +2760,9 @@ END CATCH;`;
         || (included.entity != null && included.entity !== 'ClaimPayment')
         || (included.entityId != null && positiveIdText(included.entityId) !== positiveIdText(request.id))))
         throw new Error('La identidad del proceso de la solicitud es inconsistente.');
+      if (included && (['EXECUTED', 'APPROVED'].includes(String(included.entityState || '').trim().toUpperCase())
+        || String(included.isApproved).toLowerCase() === 'true' || String(included.finalizado).toLowerCase() === 'true'))
+        throw new Error('Solicitud ejecutada, aprobada o finalizada; no se permite revertir.');
       return repositoryRequest('GetProcesses', { filter: 'id=' + Number(request.processId), page: 0, size: 0 }, undefined, current).then((result) => {
         const rows = result && result.outData;
         if (!result || result.ok !== true || !Array.isArray(rows) || rows.length !== 1 || Number(result.total) > 1
@@ -2811,6 +2795,14 @@ END CATCH;`;
       let requestId = action === 'REQUEST_REVERT' ? Number(payoutId) : null;
       let issue = requestId ? requestReversalIssue(snapshot.claim, snapshot.requests, requestId)
         : paymentActionIssue(snapshot.claim, snapshot.requests, payoutId, action, bucket);
+      if (issue && action === 'REVERT') {
+        const linked = snapshot.requests.filter((request) => paymentRequestPayoutIds(request).includes(Number(payoutId)));
+        const active = linked.filter((request) => request.entityState !== 'REVERTED');
+        if (active.length === 1) {
+          const requestIssue = requestReversalIssue(snapshot.claim, snapshot.requests, active[0].id);
+          if (!requestIssue) { requestId = Number(active[0].id); issue = ''; }
+        }
+      }
       if (issue) throw new Error(issue);
       return { snapshot: snapshot, requestId: requestId };
     };
@@ -2829,26 +2821,6 @@ END CATCH;`;
           || paymentRequestPayoutIds(matches[0]).length !== 1 || paymentRequestPayoutIds(matches[0])[0] !== targetId
           || paymentActionIssue(fresh.claim, fresh.requests, targetId, 'REVERT'))
           throw new Error('No se pudo verificar la compensación de la solicitud.');
-        return refresh(fresh);
-      });
-    };
-    const rejectLinkedRequests = (snapshot) => {
-      const linked = snapshot.requests.filter((request) => paymentRequestPayoutIds(request).includes(Number(payoutId)));
-      const pending = linked.filter((request) => !requestIsRejected(request));
-      const rejectionIssue = pending.map(requestRejectionIssue).find(Boolean);
-      if (rejectionIssue) throw new Error(rejectionIssue);
-      return pending.reduce((sequence, request) => sequence.then(() => {
-        requestAttempted = true;
-        return exe('GotoStep', { procesoId: Number(request.processId), estado: 'REJECTED' }).then((result) => {
-          if (!result || result.ok !== true) {
-            throw new Error(result && result.msg || 'No fue posible rechazar la solicitud #' + Number(request.id) + '.');
-          }
-        });
-      }), Promise.resolve()).then(() => readPaymentActionSnapshot(claim, current, payoutId, action)).then((fresh) => {
-        const currentLinked = fresh.requests.filter((request) => paymentRequestPayoutIds(request).includes(Number(payoutId)));
-        if (currentLinked.length !== linked.length || currentLinked.some((request) => !requestIsRejected(request))) {
-          throw new Error('No se pudo verificar el rechazo de las solicitudes asociadas al movimiento.');
-        }
         return refresh(fresh);
       });
     };
@@ -2925,8 +2897,7 @@ END CATCH;`;
             return readPaymentActionSnapshot(claim, current, payoutId, action);
           }).then((snapshot) => {
             const reversal = snapshot.claim.Payouts.find((row) => Number(row.id) === reversalId);
-            // DoPayment may transition the accounting entry to Approved while the original stays Reverted.
-            if (!reversal || ![1, '1', 2, '2'].includes(reversal.status)
+            if (!reversal || ![2, '2'].includes(reversal.status)
               || numericValue(reversal.reserved) !== entity.reserved || numericValue(reversal.payed) !== entity.payed
               || Number(reversal.claimId) !== claimId || Number(reversal.lifeCoverageId) !== lifeCoverageId
               || String(reversal.reserveType || '').trim().toUpperCase() !== bucket) {
@@ -2943,10 +2914,9 @@ END CATCH;`;
         Modal.confirm({
           title: action === 'REQUEST_REVERT' ? '¿Revertir la solicitud #' + Number(payoutId) + '?' : (action === 'CANCEL' ? '¿Anular' : '¿Revertir') + ' el movimiento de ' + movementLabel + ' #' + Number(payoutId) + '?',
           content: 'Siniestro #' + context.claimId + (initial.requestId
-            ? '. Se revertirá la solicitud #' + initial.requestId + ' conservando un registro negativo. El movimiento no se revertirá automáticamente.'
-            : action === 'REVERT'
-              ? '. Las solicitudes asociadas que no estén ejecutadas se rechazarán antes de revertir el movimiento. Si falla algún paso, se informará el resultado parcial.'
-              : '. Se conservará el registro como Revertido, sin eliminarlo. Se volverán a verificar el estado y las solicitudes.'),
+            ? '. Se revertirá la solicitud #' + initial.requestId + ' conservando un registro negativo.'
+              + (action === 'REVERT' ? ' Después de verificar su compensación, se revertirá el movimiento. Si falla el segundo paso, se informará el resultado parcial.' : ' No se revertirá automáticamente el movimiento de pago.')
+            : '. Se conservará el registro como Revertido, sin eliminarlo. Se volverán a verificar el estado y las solicitudes.'),
           okText: action === 'CANCEL' ? 'Anular' : 'Revertir', cancelText: 'Cancelar',
           onCancel: () => { if (!handled) { handled = true; resolve(false); } },
           onOk: () => {
@@ -2954,8 +2924,7 @@ END CATCH;`;
             handled = true;
             return readPaymentActionSnapshot(claim, current, payoutId, action).then(validate).then((plan) => {
               if (plan.requestId !== initial.requestId) throw new Error('Las solicitudes cambiaron. Revise y confirme nuevamente.');
-              if (plan.requestId) return reverseRequest(plan.snapshot, plan.requestId);
-              return action === 'REVERT' ? rejectLinkedRequests(plan.snapshot) : plan.snapshot;
+              return plan.requestId ? reverseRequest(plan.snapshot, plan.requestId) : plan.snapshot;
             }).then((snapshot) => {
               if (action === 'REQUEST_REVERT') return snapshot;
               // After compensation, fetch again before UndoPayment; the backend owns atomic race protection.
@@ -3758,7 +3727,7 @@ END CATCH;`;
     const indemnities = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
       && String(row.reserveType || '').trim().toUpperCase() === 'IN' && effectiveIndemnityMovement(row));
     const expenseRows = claim.Payouts.filter((row) => row && Number(row.claimId) === Number(requestedClaimId)
-      && String(row.reserveType || '').trim().toUpperCase() === 'EX' && effectiveIndemnityMovement(row));
+      && String(row.reserveType || '').trim().toUpperCase() === 'EX');
     const total = (rows, field) => roundMoney(rows.reduce((sum, row) => {
       const value = numericValue(row[field]);
       return sum + (value === null ? 0 : value);
@@ -5712,7 +5681,7 @@ END CATCH;`;
           const rows = claim.Payouts.filter((row) => row && Number(row.claimId) === requestedClaimId);
           const reserveType = (row) => String(row.reserveType || '').trim().toUpperCase();
           const indemnityRows = rows.filter((row) => reserveType(row) === 'IN' && effectiveIndemnityMovement(row));
-          const expenseRows = rows.filter((row) => reserveType(row) === 'EX' && effectiveIndemnityMovement(row));
+          const expenseRows = rows.filter((row) => reserveType(row) === 'EX');
           const validHeaderAmount = (value) => (typeof value === 'number' || typeof value === 'string')
             && numericValue(value) !== null;
           const usesPolicyCurrency = (row) => {
@@ -6504,7 +6473,6 @@ END CATCH;`;
           <Button size="small" className="resumen-payment-document-btn"
             disabled={documentMutationBlocked() || !config.selected || config.selected.checkRequestId == null}
             onClick={() => generatePaymentRequestDocument(config.selected.checkRequestId)}>Generar solicitud</Button>
-          <Button size="small" type="primary" loading={sectionRefreshing} disabled={sectionRefreshing || paymentSaving}
             onClick={() => refreshSection(() => config.refresh(), config.errorSetter)}><ReloadOutlinedIcon /> Refrescar</Button>
         </div>
       </div>
@@ -6539,8 +6507,6 @@ END CATCH;`;
             <td>{Number(row.status) === 2 ? 'Revertido' : config.key === 'payments'
               ? paymentMovementStateLabel(row.status) : Number(row.status) === 0 ? 'Pendiente de aprobación'
                 : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
-            <td className="resumen-financial-reinsurance"><Button size="small"
-              onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
           </tr>
         )) : <tr><td className="resumen-empty-row" colSpan="12">{config.emptyText}</td></tr>}</tbody>
       </table></div>
