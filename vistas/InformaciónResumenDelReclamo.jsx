@@ -1394,14 +1394,17 @@
       return '';
     } catch (error) { return error.message; }
   };
-  const paymentActionIssue = (claim, requests, payoutId, action) => {
+  const paymentActionIssue = (claim, requests, payoutId, action, reserveType = 'IN') => {
     if (!claim || !canEdit(claim) || !positiveIdText(payoutId) || !['CANCEL', 'REVERT'].includes(action)
       || !Array.isArray(claim.Payouts) || !Array.isArray(requests)) return 'No se puede validar esta operación de Pagos.';
+    const bucket = String(reserveType || '').trim().toUpperCase();
+    if (!['IN', 'EX'].includes(bucket)) return 'El tipo de movimiento no es válido.';
     const payouts = claim.Payouts, ids = payouts.map((row) => row && positiveIdText(row.id));
     if (ids.some((id) => !id) || new Set(ids).size !== ids.length) return 'Los movimientos no tienen una identidad única.';
     const payout = payouts.find((row) => Number(row.id) === Number(payoutId));
-    if (!payout || Number(payout.claimId) !== Number(claim.id) || payout.reserveType !== 'IN' || !(numericValue(payout.payed) > 0)) {
-      return 'Seleccione un movimiento de Pagos del siniestro actual; no una reserva ni un gasto.';
+    if (!payout || Number(payout.claimId) !== Number(claim.id)
+      || String(payout.reserveType || '').trim().toUpperCase() !== bucket || !(numericValue(payout.payed) > 0)) {
+      return 'Seleccione un movimiento de ' + (bucket === 'EX' ? 'Gastos' : 'Pagos') + ' del siniestro actual.';
     }
     const linked = [], requestIds = new Set(); let uncertain = '';
     requests.forEach((request) => {
@@ -1429,7 +1432,7 @@
     if (linked.length && !(action === 'REVERT' && revertedRequestHistory(linked, payoutId))) return 'El movimiento tiene una solicitud asociada (' + linked.map((request) => request.id).join(', ')
       + '). Revise y revierta primero la solicitud desde su detalle si su estado lo permite. Las solicitudes creadas no se eliminan.';
     if (!(action === 'CANCEL' ? [0, '0'] : [1, '1']).includes(payout.status)) {
-      return action === 'CANCEL' ? 'Solo se puede anular un pago pendiente de aprobación (estado 0).'
+      return action === 'CANCEL' ? 'Solo se puede anular un ' + (bucket === 'EX' ? 'gasto' : 'pago') + ' pendiente de aprobación (estado 0).'
         : 'Solo se puede revertir un pago aprobado (estado 1).';
     }
     return '';
@@ -1459,11 +1462,14 @@
       payment && Number(payment.claimId) === claimId) : [];
     const beneficiaries = claim.Policy && Array.isArray(claim.Policy.Beneficiaries)
       ? claim.Policy.Beneficiaries : [];
-    return (Array.isArray(claim.Payouts) ? claim.Payouts : []).filter((payout) =>
-      payout && Number(payout.claimId) === claimId
-      && String(payout.reserveType || '').trim().toUpperCase() === requestedReserveType
-      && numericValue(payout.payed) > 0
-      && Object.prototype.hasOwnProperty.call(coverageNames, Number(payout.lifeCoverageId)))
+    return (Array.isArray(claim.Payouts) ? claim.Payouts : []).filter((payout) => {
+      const paid = numericValue(payout && payout.payed);
+      return payout && Number(payout.claimId) === claimId
+        && String(payout.reserveType || '').trim().toUpperCase() === requestedReserveType
+        // Keep reversal entries visible for the movement audit while reserve-only rows stay hidden.
+        && paid !== null && paid !== 0
+        && Object.prototype.hasOwnProperty.call(coverageNames, Number(payout.lifeCoverageId));
+    })
     .map((payout) => {
       const reserved = numericValue(payout.reserved);
       const amount = reserved === null ? numericValue(payout.amount) : reserved;
@@ -2753,15 +2759,20 @@ END CATCH;`;
     })).then((requests) => ({ claim: claims[0], requests: requests }));
   });
   const requestPaymentReversal = (requestId) => requestPaymentMovementAction(requestId, 'REQUEST_REVERT');
-  const requestPaymentMovementAction = (payoutId, action) => {
+  const requestPaymentMovementAction = (payoutId, action, reserveType = 'IN') => {
     const claim = currentClaimRef.current;
     if (!claim || !canEdit(claim) || !positiveIdText(payoutId) || !['CANCEL', 'REVERT', 'REQUEST_REVERT'].includes(action)
       || !Modal || typeof Modal.confirm !== 'function') return Promise.resolve(false);
-    const context = startPaymentOperation(setPaymentError);
+    const bucket = String(reserveType || '').trim().toUpperCase();
+    if (!['IN', 'EX'].includes(bucket)) return Promise.resolve(false);
+    const movementLabel = bucket === 'EX' ? 'gasto' : 'pago';
+    const reportError = bucket === 'EX' ? setExpenseError : setPaymentError;
+    const context = startPaymentOperation(reportError);
     if (!context) return Promise.resolve(false);
     const current = () => mountedRef.current && currentClaimRef.current === claim && canEdit(claim)
       && routeClaimId() === context.claimId && paymentOperationRef.current === context.operationId;
     let requestAttempted = false;
+    let movementReverted = false;
     const refresh = (snapshot) => {
       if (current()) applyFinancialSnapshot(claim, Object.assign({}, snapshot.claim, { Payments: snapshot.requests }), context.claimId, true);
       return snapshot;
@@ -2769,7 +2780,7 @@ END CATCH;`;
     const validate = (snapshot) => {
       let requestId = action === 'REQUEST_REVERT' ? Number(payoutId) : null;
       let issue = requestId ? requestReversalIssue(snapshot.claim, snapshot.requests, requestId)
-        : paymentActionIssue(snapshot.claim, snapshot.requests, payoutId, action);
+        : paymentActionIssue(snapshot.claim, snapshot.requests, payoutId, action, bucket);
       if (issue && action === 'REVERT') {
         const linked = snapshot.requests.filter((request) => paymentRequestPayoutIds(request).includes(Number(payoutId)));
         const active = linked.filter((request) => request.entityState !== 'REVERTED');
@@ -2799,12 +2810,95 @@ END CATCH;`;
         return refresh(fresh);
       });
     };
+    const clearCancelledMovementAmounts = (snapshot) => {
+      const payout = snapshot.claim.Payouts.find((row) => Number(row.id) === Number(payoutId));
+      if (!payout || ![2, '2'].includes(payout.status)) {
+        throw new Error('El movimiento no quedó revertido antes de actualizar sus montos.');
+      }
+      const id = Number(payout.id);
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error('El movimiento no tiene una identidad válida para actualizar sus montos.');
+      }
+      return repositoryRequest('SetField', {
+        entity: 'LifeCoveragePayout',
+        entityId: id,
+        fieldValue: 'reserved=0,payed=0',
+        raw: true
+      }, undefined, current).then((result) => {
+        if (!result || result.ok !== true) {
+          throw new Error(result && result.msg || 'El servidor no confirmó la actualización de los montos anulados.');
+        }
+        return readPaymentActionSnapshot(claim, current, payoutId, action);
+      });
+    };
+    const registerReversalMovement = (original) => {
+      const lifePolicyId = Number(original && original.lifePolicyId);
+      const claimId = Number(original && original.claimId);
+      const lifeCoverageId = Number(original && original.lifeCoverageId);
+      const reserved = numericValue(original && original.reserved);
+      const payed = numericValue(original && original.payed);
+      if (!Number.isSafeInteger(lifePolicyId) || lifePolicyId <= 0
+        || !Number.isSafeInteger(claimId) || claimId <= 0
+        || !Number.isSafeInteger(lifeCoverageId) || lifeCoverageId <= 0
+        || reserved === null || payed === null) {
+        throw new Error('El movimiento no contiene los datos requeridos para registrar su reversión.');
+      }
+      const concept = String(original.concept || '').trim();
+      const entity = {
+        id: 0,
+        lifePolicyId: lifePolicyId,
+        claimId: claimId,
+        lifeCoverageId: lifeCoverageId,
+        date: new Date().toISOString(),
+        user: original.user || null,
+        reserved: roundMoney(-reserved),
+        payed: roundMoney(-payed),
+        amount: roundMoney(-payed),
+        concept: 'Reversión del movimiento #' + Number(original.id) + (concept ? ': ' + concept : ''),
+        operation: 'PAY',
+        status: 2,
+        requestedAmount: 0,
+        deductible: numericValue(original.deductible) || 0,
+        parentCode: original.parentCode || null,
+        reserveType: bucket,
+        expenseType: original.expenseType || null,
+        jAffectedObjects: original.jAffectedObjects || null
+      };
+      return repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity }, undefined, current)
+        .then((result) => {
+          const body = confirmedCommandResult(result, 'No fue posible registrar el movimiento de reversión.');
+          const rows = body && body.outData !== undefined ? responseRows(body, 'el movimiento de reversión')
+            : responseRows(result && result.outData, 'el movimiento de reversión');
+          let reversalId = numericValue(rows[0] && rows[0].id);
+          if (reversalId === null) {
+            const direct = result && result.outData && !Array.isArray(result.outData) ? result.outData : null;
+            reversalId = numericValue(direct && direct.id);
+          }
+          if (reversalId === null) throw new Error('La reversión fue aceptada sin un identificador verificable.');
+          // DoPayment triggers the same accounting hooks used by manual approval.
+          return exe('DoPayment', { lifeCoveragePayoutId: reversalId }).then((approval) => {
+            if (!approval || approval.ok !== true) {
+              throw new Error(approval && approval.msg || 'No fue posible contabilizar el movimiento de reversión.');
+            }
+            return readPaymentActionSnapshot(claim, current, payoutId, action);
+          }).then((snapshot) => {
+            const reversal = snapshot.claim.Payouts.find((row) => Number(row.id) === reversalId);
+            if (!reversal || ![2, '2'].includes(reversal.status)
+              || numericValue(reversal.reserved) !== entity.reserved || numericValue(reversal.payed) !== entity.payed
+              || Number(reversal.claimId) !== claimId || Number(reversal.lifeCoverageId) !== lifeCoverageId
+              || String(reversal.reserveType || '').trim().toUpperCase() !== bucket) {
+              throw new Error('No se pudo verificar el movimiento de reversión registrado.');
+            }
+            return snapshot;
+          });
+        });
+    };
     return readPaymentActionSnapshot(claim, current, payoutId, action).then(validate).then((initial) => {
       if (!current()) return false;
       return new Promise((resolve) => {
         let handled = false;
         Modal.confirm({
-          title: action === 'REQUEST_REVERT' ? '¿Revertir la solicitud #' + Number(payoutId) + '?' : (action === 'CANCEL' ? '¿Anular' : '¿Revertir') + ' el movimiento de pago #' + Number(payoutId) + '?',
+          title: action === 'REQUEST_REVERT' ? '¿Revertir la solicitud #' + Number(payoutId) + '?' : (action === 'CANCEL' ? '¿Anular' : '¿Revertir') + ' el movimiento de ' + movementLabel + ' #' + Number(payoutId) + '?',
           content: 'Siniestro #' + context.claimId + (initial.requestId
             ? '. Se revertirá la solicitud #' + initial.requestId + ' conservando un registro negativo.'
               + (action === 'REVERT' ? ' Después de verificar su compensación, se revertirá el movimiento. Si falla el segundo paso, se informará el resultado parcial.' : ' No se revertirá automáticamente el movimiento de pago.')
@@ -2821,33 +2915,41 @@ END CATCH;`;
               if (action === 'REQUEST_REVERT') return snapshot;
               // After compensation, fetch again before UndoPayment; the backend owns atomic race protection.
               return readPaymentActionSnapshot(claim, current, payoutId, action).then((fresh) => {
-                const issue = paymentActionIssue(fresh.claim, fresh.requests, payoutId, action);
+                const issue = paymentActionIssue(fresh.claim, fresh.requests, payoutId, action, bucket);
                 if (issue) throw new Error(issue);
                 const original = Object.assign({}, fresh.claim.Payouts.find((row) => Number(row.id) === Number(payoutId)));
                 return repositoryRequest('UndoPayment', { lifeCoveragePayoutId: Number(payoutId) }, undefined, current).then((result) => {
                   if (!result || result.ok !== true) throw new Error(result && result.msg || 'El servidor no confirmó la reversión del movimiento.');
+                  movementReverted = true;
                   return readPaymentActionSnapshot(claim, current, payoutId, action);
+                }).then((reverted) => {
+                  if (action === 'CANCEL') return clearCancelledMovementAmounts(reverted);
+                  return action === 'REVERT' ? registerReversalMovement(original) : reverted;
                 }).then((verified) => {
                   const matches = verified.claim.Payouts.filter((row) => Number(row.id) === Number(payoutId));
                   if (matches.length !== 1 || ![2, '2'].includes(matches[0].status)
-                    || !['claimId', 'lifePolicyId', 'lifeCoverageId', 'reserveType', 'payed', 'reserved', 'requestedAmount']
-                      .every((key) => matches[0][key] === original[key])) throw new Error('El resultado no pudo verificarse. Refresque antes de repetir la operación.');
+                    || !['claimId', 'lifePolicyId', 'lifeCoverageId', 'reserveType', 'requestedAmount']
+                      .every((key) => matches[0][key] === original[key])
+                    || (action === 'CANCEL'
+                      && (numericValue(matches[0].reserved) !== 0 || numericValue(matches[0].payed) !== 0))) {
+                    throw new Error('El resultado no pudo verificarse. Refresque antes de repetir la operación.');
+                  }
                   return verified;
                 });
               });
             }).then((snapshot) => {
               if (!current()) return false;
-              refresh(snapshot); setPaymentRequestDetail(null); setPaymentError('');
-              if (A.message && A.message.success) A.message.success(action === 'REQUEST_REVERT' ? 'Solicitud revertida. El movimiento de pago no se ha revertido.' : 'Movimiento de pago revertido.');
+              refresh(snapshot); setPaymentRequestDetail(null); reportError('');
+              if (A.message && A.message.success) A.message.success(action === 'REQUEST_REVERT' ? 'Solicitud revertida. El movimiento de pago no se ha revertido.' : 'Movimiento de ' + movementLabel + (action === 'CANCEL' ? ' anulado.' : ' revertido.'));
               return true;
             }).catch((error) => {
-              const report = () => { if (current()) setPaymentError((requestAttempted ? 'Resultado parcial o no confirmado: revise las solicitudes antes de reintentar. ' : '') + error.message); return false; };
-              return requestAttempted && current() ? readPaymentActionSnapshot(claim, current, payoutId, action).then(refresh).then(report, report) : report();
+              const report = () => { if (current()) reportError(((requestAttempted || movementReverted) ? 'Resultado parcial o no confirmado: revise los movimientos antes de reintentar. ' : '') + error.message); return false; };
+              return (requestAttempted || movementReverted) && current() ? readPaymentActionSnapshot(claim, current, payoutId, action).then(refresh).then(report, report) : report();
             }).then((outcome) => { resolve(outcome); return outcome; });
           }
         });
       });
-    }).catch((error) => { if (current()) setPaymentError(error.message); return false; })
+    }).catch((error) => { if (current()) reportError(error.message); return false; })
       .then((outcome) => finishPaymentOperation(context, outcome));
   };
   const approvePaymentMovement = (payoutId, bucket) => {
@@ -6284,20 +6386,24 @@ END CATCH;`;
           <Popconfirm title="¿Aprobar este movimiento de pago?" okText="Aprobar" cancelText="Cancelar"
             disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0 || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}
             onConfirm={() => approvePaymentMovement(config.selectedId, config.key === 'expenses' ? 'EX' : 'IN')}>
-            <Button size="small" disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0
+            <Button size="small" className="resumen-financial-approve" disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0
               || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}>Aprobar pago</Button>
           </Popconfirm>
-          {config.key === 'payments' ? <React.Fragment>
-            <Button size="small" disabled={!editable || paymentSaving || !config.selected || ![0, '0'].includes(config.selected.status)}
-              onClick={() => requestPaymentMovementAction(config.selectedId, 'CANCEL')}>Anular pago</Button>
-            <Button size="small" disabled={!editable || paymentSaving || !config.selected || ![1, '1', 3, '3'].includes(config.selected.status)}
-              onClick={() => requestPaymentMovementAction(config.selectedId, 'REVERT')}>Revertir pago</Button>
+          {['payments', 'expenses'].includes(config.key) ? <React.Fragment>
+            <Button size="small" className="resumen-financial-warning" disabled={!editable || paymentSaving || !config.selected || ![0, '0'].includes(config.selected.status)}
+              onClick={() => requestPaymentMovementAction(config.selectedId, 'CANCEL', config.key === 'expenses' ? 'EX' : 'IN')}>
+              {config.key === 'expenses' ? 'Anular gasto' : 'Anular pago'}
+            </Button>
+            <Button size="small" className="resumen-financial-warning" disabled={!editable || paymentSaving || !config.selected || ![1, '1', 3, '3'].includes(config.selected.status)}
+              onClick={() => requestPaymentMovementAction(config.selectedId, 'REVERT', config.key === 'expenses' ? 'EX' : 'IN')}>
+              {config.key === 'expenses' ? 'Revertir gasto' : 'Revertir pago'}
+            </Button>
           </React.Fragment> : null}
-          <Button size="small" title={config.selected ? nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || undefined : undefined}
+          <Button size="small" type="primary" title={config.selected ? nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || undefined : undefined}
             disabled={!editable || paymentSaving || !config.selected
             || !!nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || config.selected.available <= 0}
             onClick={config.openCheck}>Solicitud de cheque</Button>
-          <Button size="small" loading={sectionRefreshing} disabled={sectionRefreshing || paymentSaving}
+          <Button size="small" type="primary" loading={sectionRefreshing} disabled={sectionRefreshing || paymentSaving}
             onClick={() => refreshSection(() => config.refresh(), config.errorSetter)}><ReloadOutlinedIcon /> Refrescar</Button>
         </div>
       </div>
@@ -6329,7 +6435,9 @@ END CATCH;`;
               </Button> : null}
             </td>
             <td>{displayValue(row.payment && row.payment.reference)}</td>
-            <td>{config.key === 'payments' ? paymentMovementStateLabel(row.status) : [0, 2].indexOf(Number(row.status)) !== -1 ? 'Pendiente de aprobación' : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
+            <td>{Number(row.status) === 2 ? 'Revertido' : config.key === 'payments'
+              ? paymentMovementStateLabel(row.status) : Number(row.status) === 0 ? 'Pendiente de aprobación'
+                : row.available > 0 ? 'Aprobado — disponible' : 'Aplicado'}</td>
             <td><Button size="small" onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
           </tr>
         )) : <tr><td className="resumen-empty-row" colSpan="12">{config.emptyText}</td></tr>}</tbody>
@@ -6935,6 +7043,10 @@ END CATCH;`;
       .resumen-shell .resumen-empty-row{text-align:center!important;color:var(--rz-muted);padding:18px!important}
       .resumen-shell .resumen-reserve-panel{flex:0 0 auto;display:flex;justify-content:flex-end}
       .resumen-shell .resumen-reserve-actions{display:flex;gap:7px;white-space:nowrap}
+      .resumen-shell .resumen-financial-approve.ant-btn:not([disabled]){color:#fff;background:#389e0d;border-color:#389e0d}
+      .resumen-shell .resumen-financial-approve.ant-btn:not([disabled]):hover,.resumen-shell .resumen-financial-approve.ant-btn:not([disabled]):focus{color:#fff;background:#237804;border-color:#237804}
+      .resumen-shell .resumen-financial-warning.ant-btn:not([disabled]){color:#fff;background:#d97706;border-color:#d97706}
+      .resumen-shell .resumen-financial-warning.ant-btn:not([disabled]):hover,.resumen-shell .resumen-financial-warning.ant-btn:not([disabled]):focus{color:#fff;background:#b45309;border-color:#b45309}
       .resumen-shell .resumen-reserve-error{padding:7px 10px;color:#9f2d2d;background:#fff1f0;border:1px solid #ffccc7;border-radius:5px;font-size:12px}
       .resumen-reserve-modal .resumen-reserve-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}
       .resumen-reserve-modal .resumen-payment-concept{grid-column:1/-1}
