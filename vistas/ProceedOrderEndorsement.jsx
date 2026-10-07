@@ -951,6 +951,40 @@
     }
   };
 
+  const persistMaximumCoveragePolicyEnd = async function (changeId, jNewCoverages) {
+    let coverages = [];
+    try {
+      coverages = typeof jNewCoverages === 'string' ? JSON.parse(jNewCoverages || '[]') : (jNewCoverages || []);
+    } catch (error) {
+      throw new Error(t('The endorsement coverages could not be read to save the policy end date.'));
+    }
+    const policyEnd = coverages.reduce(function (maximum, coverage) {
+      const end = fmt(toLocalDate(coverage && coverage.end));
+      return end && (!maximum || end > maximum) ? end : maximum;
+    }, '');
+    if (!policyEnd) throw new Error(t('The endorsement does not contain a valid coverage end date.'));
+
+    const changeResponse = await exe('LoadEntity', {
+      entity: 'Change', fields: 'id,jDetail', filter: 'id=' + Number(changeId), noTracking: true
+    });
+    const data = changeResponse && changeResponse.outData;
+    const change = Array.isArray(data) ? (data[0] || {}) : (data || {});
+    if (!changeResponse || !changeResponse.ok || !change.id) {
+      throw new Error(translatedMessage(changeResponse && changeResponse.msg, 'The endorsement detail could not be loaded.'));
+    }
+    let detail = {};
+    try { detail = JSON.parse(change.jDetail || '{}'); } catch (error) { detail = {}; }
+    detail.policyEnd = policyEnd;
+    const saved = await exe('SetField', {
+      entity: 'Change', entityId: Number(changeId),
+      fieldValue: "jDetail='" + JSON.stringify(detail).replace(/'/g, "''") + "'", raw: true
+    });
+    if (!saved || !saved.ok) {
+      throw new Error(translatedMessage(saved && saved.msg, 'The endorsement policy end date could not be saved.'));
+    }
+    return policyEnd;
+  };
+
   const persistReinsuranceSnapshot = async function (changeId, snapshot) {
     const json = JSON.stringify({
       endorsementType: 'PROCEEDORDER',
@@ -2057,6 +2091,7 @@
       setChangeId(cid);
       pushStep(t('Generate the endorsement'), true, t('endorsement ') + cid);
 
+      await persistMaximumCoveragePolicyEnd(cid, addPayload.jNewCoverages);
       await persistChangePayPlan(cid, calculation.oldPayPlan, calculation.newPayPlan);
       pushStep(t('Save installment dates'), true, t('Pending installment dates were preserved in the endorsement.'));
       // `cmdApplyReaChangeCoverage` reads the snapshot from Change.jAdditional.

@@ -715,8 +715,15 @@
     const anniversaries = Array.isArray(loadedPolicy && loadedPolicy.Anniversaries)
       ? loadedPolicy.Anniversaries
       : [];
-    const firstAnniversary = anniversaries.length > 0 ? anniversaries[0] : null;
-    const anniversarySnapshot = parseJsonObject(firstAnniversary && firstAnniversary.jSnapshot);
+    const issuanceAnniversary = anniversaries
+      .slice()
+      .sort((left, right) => {
+        const leftInitial = Number(left && left.contractYear) === 1 ? 0 : 1;
+        const rightInitial = Number(right && right.contractYear) === 1 ? 0 : 1;
+        if (leftInitial !== rightInitial) return leftInitial - rightInitial;
+        return String(left && left.start || '').localeCompare(String(right && right.start || ''));
+      })[0] || null;
+    const anniversarySnapshot = parseJsonObject(issuanceAnniversary && issuanceAnniversary.jSnapshot);
     const snapshotBill = anniversarySnapshot && anniversarySnapshot.Bill
       ? anniversarySnapshot.Bill
       : anniversarySnapshot;
@@ -730,8 +737,8 @@
       bill: baseBill,
       fallback: loadedPolicy,
       paymentGroup: basePaymentGroup,
-      startDate: loadedPolicy && loadedPolicy.start,
-      endDate: loadedPolicy && loadedPolicy.end,
+      startDate: issuanceAnniversary && issuanceAnniversary.start || loadedPolicy && loadedPolicy.start,
+      endDate: anniversarySnapshot && anniversarySnapshot.end || loadedPolicy && loadedPolicy.end,
       movementType: t(policyVersion > 0 ? 'Anniversary' : 'New Policy'),
       incomeDate: loadedPolicy && (loadedPolicy.activeDate || loadedPolicy.start),
       id: loadedPolicy && loadedPolicy.id,
@@ -785,30 +792,26 @@
       return '-';
     }
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      const parts = raw.split('-');
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
-    }
-
-    const utcValue = /z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/i.test(raw)
-      ? raw
-      : `${raw}Z`;
+    // All persisted dates are UTC. Date-only values are midnight UTC, so they
+    // must follow the same browser-local conversion as timestamp values.
+    const utcValue = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+      ? `${raw}T00:00:00Z`
+      : (/z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/i.test(raw) ? raw : `${raw}Z`);
     const date = new Date(utcValue);
     if (Number.isNaN(date.getTime())) {
       return '-';
     }
 
-    const panamaDate = new Date(date.getTime() - (5 * 60 * 60 * 1000));
-    const day = String(panamaDate.getUTCDate()).padStart(2, '0');
-    const month = String(panamaDate.getUTCMonth() + 1).padStart(2, '0');
-    const year = panamaDate.getUTCFullYear();
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
     if (!includeTime) {
       return `${day}/${month}/${year}`;
     }
 
-    const hours = String(panamaDate.getUTCHours()).padStart(2, '0');
-    const minutes = String(panamaDate.getUTCMinutes()).padStart(2, '0');
-    const seconds = String(panamaDate.getUTCSeconds()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
   }
 

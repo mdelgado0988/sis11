@@ -937,7 +937,7 @@
           const sumEligible = list.filter(function (item) { return money(item.limit) > 0 && item.changeable !== false; });
           setCovCode(sumEligible.length ? sumEligible[0].code : null);
           setCoverageInputs({});
-          setEffectiveDate(moment());
+          setEffectiveDate(day10(p.start) ? moment(day10(p.start)) : null);
           setPayPlanPreview([]);
           return null;
         });
@@ -2190,6 +2190,37 @@
       const date = day10(value);
       return date ? date + 'T12:00:00' : '';
     };
+    const persistMaximumCoveragePolicyEnd = async function (changeId, jNewCoverages) {
+      let coverages = [];
+      try {
+        coverages = typeof jNewCoverages === 'string' ? JSON.parse(jNewCoverages || '[]') : (jNewCoverages || []);
+      } catch (parseError) {
+        throw new Error(t('No se pudieron leer las coberturas del endoso para guardar la vigencia final'));
+      }
+      const policyEnd = coverages.reduce(function (maximum, coverage) {
+        const end = day10(coverage && coverage.end);
+        return /^\d{4}-\d{2}-\d{2}$/.test(end) && (!maximum || end > maximum) ? end : maximum;
+      }, '');
+      if (!policyEnd) throw new Error(t('El endoso no contiene una fecha final de cobertura válida'));
+
+      const changeResponse = await exe('LoadEntity', {
+        entity: 'Change', fields: 'id,jDetail', filter: 'id=' + Number(changeId), noTracking: true
+      });
+      const data = changeResponse && changeResponse.outData;
+      const change = Array.isArray(data) ? (data[0] || {}) : (data || {});
+      if (!changeResponse || !changeResponse.ok || !change.id) {
+        throw new Error(t('No se pudo cargar el detalle del endoso para guardar la vigencia final'));
+      }
+      let detail = {};
+      try { detail = JSON.parse(change.jDetail || '{}'); } catch (parseError) { detail = {}; }
+      detail.policyEnd = policyEnd;
+      const saved = await exe('SetField', {
+        entity: 'Change', entityId: Number(changeId),
+        fieldValue: "jDetail='" + JSON.stringify(detail).replace(/'/g, "''") + "'", raw: true
+      });
+      if (!saved || !saved.ok) throw new Error(t('No se pudo guardar la vigencia final del endoso'));
+      return policyEnd;
+    };
     const oldCoverages = policy && Array.isArray(policy.Coverages) ? policy.Coverages : [];
     const finalCoverages = calc && Array.isArray(calc.finalCoverages) ? calc.finalCoverages : [];
     const newCoverages = oldCoverages.map(function (coverage) {
@@ -2333,6 +2364,7 @@
       const created = Array.isArray(createdResponse.outData) ? createdResponse.outData[0] : createdResponse.outData;
       changeId = Number(created.id || 0);
       setKey(String(changeId));
+      await persistMaximumCoveragePolicyEnd(changeId, payload.jNewCoverages);
       let processId = Number(created.processId || 0);
       if (!processId) {
         const changeEntity = await exe('LoadEntity', { entity: 'Change', fields: 'id,processId', filter: 'id=' + changeId, noTracking: true });
@@ -3331,14 +3363,18 @@
                           <Table className="axx-grilla axx-coverage-result-grid" size="small" pagination={false} rowKey="code"
                             dataSource={calc.rows} columns={colsGrid} scroll={{ x: 1200, y: altoGrilla }}
                             summary={function (pageData) {
-                              const total = function (field) {
-                                return money(pageData.reduce(function (sum, row) { return sum + Number(row[field] || 0); }, 0));
+                              const total = function (field, onlyConfiguredSums) {
+                                return money(pageData.reduce(function (sum, row) {
+                                  return onlyConfiguredSums && row.sums !== true
+                                    ? sum
+                                    : sum + Number(row[field] || 0);
+                                }, 0));
                               };
                               return <Table.Summary>
                                 <Table.Summary.Row className="axx-coverage-total-row">
                                   <Table.Summary.Cell index={0} colSpan={4}><b>{t('Totales')}</b></Table.Summary.Cell>
-                                  <Table.Summary.Cell index={4} align="right">{fmt(total('oldSum'))}</Table.Summary.Cell>
-                                  <Table.Summary.Cell index={5} align="right">{fmt(total('newSum'))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={4} align="right">{fmt(total('oldSum', true))}</Table.Summary.Cell>
+                                  <Table.Summary.Cell index={5} align="right">{fmt(total('newSum', true))}</Table.Summary.Cell>
                                   <Table.Summary.Cell index={6} align="right">{fmt(total('oldPremium'))}</Table.Summary.Cell>
                                   <Table.Summary.Cell index={7} align="right">{fmt(total('proportionalPremium'))}</Table.Summary.Cell>
                                   <Table.Summary.Cell index={8}></Table.Summary.Cell>

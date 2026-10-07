@@ -723,6 +723,35 @@
         border-bottom: 1px solid #cbd1d8;
       }
 
+      .cashier-supervisor-refund-modal .ant-modal-content {
+        border: 1px solid #cbd1d8;
+        border-radius: 6px;
+      }
+
+      .cashier-supervisor-refund-modal .ant-modal-header {
+        border-bottom: 1px solid #cbd1d8;
+        margin-bottom: 12px;
+      }
+
+      .cashier-supervisor-refund-grid {
+        display: grid;
+        grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr);
+        gap: 16px;
+      }
+
+      .cashier-supervisor-refund-grid .ant-form-item { min-width: 0; }
+      .cashier-supervisor-refund-grid .ant-select { width: 100%; min-width: 0; }
+      .cashier-supervisor-refund-grid .ant-select-selection-item,
+      .cashier-supervisor-refund-grid .ant-select-selection-placeholder {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 640px) {
+        .cashier-supervisor-refund-grid { grid-template-columns: minmax(0, 1fr); }
+      }
+
       .cashier-supervisor-status-bar {
         display: flex;
         flex-wrap: wrap;
@@ -10230,6 +10259,9 @@
 
         <Modal
           title={t('Money withdrawal request')}
+          className="cashier-supervisor-refund-modal"
+          width={720}
+          style={{ maxWidth: 'calc(100vw - 32px)' }}
           open={refundMoneyVisible}
           onCancel={closeRefundMoneyModal}
           onOk={() => refundMoneyForm.submit()}
@@ -10243,7 +10275,7 @@
             layout="vertical"
             onFinish={submitRefundMoneyRequest}
           >
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="cashier-supervisor-refund-grid">
               <Form.Item
                 label={t('Currency')}
                 name="currency"

@@ -81,6 +81,22 @@ tPage = tPage.replace(
   "r.esCancelacionVisual=1"
 );
 
+/* La vigencia debe reflejar el mismo origen de Movimientos: para la emision,
+   el inicio del aniversario y su jSnapshot.end; para un endoso, policyEnd.
+   La cesion conserva la fecha como respaldo para movimientos legacy. */
+base = base.replace(
+  "MIN(d.dstart) AS fDesde, MAX(d.dend) AS fHasta,",
+  "MIN(d.dstart) AS fDesdeCession, MAX(d.dend) AS fHastaCession,"
+);
+base = base.replace(
+  "SELECT mv.*,\n    lp.code AS poliza,",
+  "SELECT mv.*,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' AND ISJSON(emi.emisionSnapshot) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(emi.emisionSnapshot, '$.end')) END, CASE WHEN ISJSON(ch.jDetail) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(ch.jDetail, '$.policyEnd')) END, TODATETIMEOFFSET(CAST(mv.fHastaCession AS datetime2), '+00:00')) AS fHasta,\n    lp.code AS poliza,"
+);
+base = base.replace(
+  "LEFT JOIN Anniversary an ON an.id = mv.anniversaryId\n  LEFT JOIN Contract ct",
+  "LEFT JOIN Anniversary an ON an.id = mv.anniversaryId\n  OUTER APPLY (\n    SELECT TOP 1 an0.start AS emisionDesde, an0.jSnapshot AS emisionSnapshot\n    FROM Anniversary an0\n    WHERE an0.lifePolicyId = mv.lifePolicyId\n    ORDER BY CASE WHEN ISNULL(an0.contractYear, 0) = 1 THEN 0 ELSE 1 END, an0.start, an0.id\n  ) emi\n  LEFT JOIN Contract ct"
+);
+
 function normCfg(v) { return String(v === null || v === undefined ? '' : v).trim().toUpperCase(); }
 function sqlCfg(v) { return String(v === null || v === undefined ? '' : v).split("'").join("''"); }
 var cfgCoberturaReaseguro = [

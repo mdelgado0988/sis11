@@ -373,6 +373,8 @@
 
                 if(isPolicyActive){
                     let reason = '';
+                    const defaultEffectiveDate = formatLocalDate(policyStart) || formatLocalDate(new Date());
+                    effectiveDate = defaultEffectiveDate;
 
                     Modal.confirm({
                         title: 'Crear Endoso',
@@ -392,7 +394,7 @@
                                     width: '100%',
                                     marginBottom: 15
                                 },
-                                defaultValue: moment(),
+                                defaultValue: moment(defaultEffectiveDate, 'YYYY-MM-DD'),
                                 format: 'YYYY-MM-DD',
                                 onChange: function(date, dateString){
                                     effectiveDate = dateString;
@@ -524,6 +526,38 @@
 
             return response;
         }
+        async function persistMaximumCoveragePolicyEnd(changeId, jNewCoverages){
+            let coverages = [];
+            try {
+                coverages = typeof jNewCoverages === 'string' ? JSON.parse(jNewCoverages || '[]') : (jNewCoverages || []);
+            } catch (error) {
+                throw 'No se pudieron leer las coberturas del endoso para guardar la vigencia final.';
+            }
+            const policyEnd = coverages.reduce(function(maximum, coverage){
+                const match = String((coverage && coverage.end) || '').match(/^\d{4}-\d{2}-\d{2}/);
+                const end = match ? match[0] : '';
+                return end && (!maximum || end > maximum) ? end : maximum;
+            }, '');
+            if(!policyEnd) throw 'El endoso no contiene una fecha final de cobertura válida.';
+
+            const changeResponse = await exe('LoadEntity', {
+                entity: 'Change', fields: 'id,jDetail', filter: 'id=' + Number(changeId), noTracking: true
+            });
+            const data = changeResponse && changeResponse.outData;
+            const change = Array.isArray(data) ? (data[0] || {}) : (data || {});
+            if(!changeResponse || !changeResponse.ok || !change.id){
+                throw 'No se pudo cargar el detalle del endoso para guardar la vigencia final.';
+            }
+            let detail = {};
+            try { detail = JSON.parse(change.jDetail || '{}'); } catch (error) { detail = {}; }
+            detail.policyEnd = policyEnd;
+            const saved = await exe('SetField', {
+                entity: 'Change', entityId: Number(changeId),
+                fieldValue: "jDetail='" + JSON.stringify(detail).replace(/'/g, "''") + "'", raw: true
+            });
+            if(!saved || !saved.ok) throw 'No se pudo guardar la vigencia final del endoso.';
+            return policyEnd;
+        }
         async function createEndorsement(reason, effectiveDate){
             try {
                 const covId = coverages.map( item => item.id);
@@ -565,6 +599,7 @@
                             try {
                                 const change = await exe('ChangeLoading', {...dto, operation: 'ADD' });
                                 if(!change.ok) throw change.msg;
+                                await persistMaximumCoveragePolicyEnd(change.outData.id, jNewCoverages);
                                 await approveEndorsementWorkflow(change.outData.processId);
                                 const executeResult = await exe('ExeChangeLoading', {changeId: change.outData.id, operation: "EXECUTE", exeNow: true });
                                 if(!executeResult.ok) throw executeResult.msg;                                
@@ -707,6 +742,15 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         }
 
         return formatUtcDateTime7(new Date(selectedTime));
+    }
+
+    function formatLocalDate(value) {
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        const year = String(date.getFullYear()).padStart(4, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return year + '-' + month + '-' + day;
     }
 
     function parseSelectedDate(value) {
