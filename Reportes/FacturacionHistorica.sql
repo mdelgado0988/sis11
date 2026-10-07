@@ -2,10 +2,10 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20261001'
-        ,@fend DATE =  '20261030'
-		,@ramo varchar(50) = 20
-		,@producto varchar(50) = 'GAP'
+DECLARE  @fstart DATE = '20261006'
+        ,@fend DATE =  '20261006'
+		,@ramo varchar(50) = 81
+		,@producto varchar(50) = null
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
@@ -31,11 +31,20 @@ SELECT
 
     ISNULL(pym.name, '') AS recursopago,
     CASE WHEN lp.lob='81' THEN COALESCE(axxPay.name,
- CASE LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity))) WHEN 'y' THEN 'Anual' WHEN 's' THEN 'Semestral' WHEN 'q' THEN 'Trimestral' WHEN 'm' THEN 'Mensual' WHEN 'b' THEN 'Bimensual'
- ELSE CONCAT(N'Sin descripciÃ³n configurada (', COALESCE(snap.periodicity,lp.periodicity), ')') END)
+ CASE LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity))) 
+		WHEN 'y' THEN 'Anual'
+		WHEN 'y1' THEN 'Anual'
+        WHEN 'm' THEN 'Mensual'
+		WHEN 'm12' THEN 'Pago Unico'
+        WHEN 'b' THEN 'Bimensual'
+        WHEN 's' THEN 'Semestral'
+        WHEN 'q' THEN 'Trimestral'
+ ELSE  COALESCE(snap.periodicity,lp.periodicity) END)
  ELSE CASE snap.periodicity 
         WHEN 'y' THEN 'Anual'
+		WHEN 'y1' THEN 'Anual'
         WHEN 'm' THEN 'Mensual'
+		WHEN 'm12' THEN 'Pago Unico'
         WHEN 'b' THEN 'Bimensual'
         WHEN 's' THEN 'Semestral'
         WHEN 'q' THEN 'Trimestral'
@@ -394,7 +403,11 @@ SELECT
     ISNULL(prc.usuario, '') AS Usuario,
     CASE WHEN ed.Discriminator = 'CancellationChange' THEN CONVERT(VARCHAR, ed.effectiveDate, 103)
 		 ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) END AS Desde,
-    CONVERT(VARCHAR, ISNULL(ed.newEnd, lp.[end]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta
+    CONVERT(VARCHAR, COALESCE(
+        TRY_CONVERT(datetime2, CASE WHEN ISJSON(ed.jDetail) = 1 THEN JSON_VALUE(ed.jDetail, '$.policyEnd') END),
+        ed.newEnd,
+        lp.[end]
+    ) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta
     ,CASE 
 		WHEN ed.Discriminator = 'AddCoverageChange' THEN 'Adición de Cobertura'
 		WHEN ed.Discriminator = 'BeneficiaryChange' THEN 'Cambio de Beneficiario'
@@ -404,7 +417,15 @@ SELECT
 		WHEN ed.Discriminator = 'CessionBeneficiaryChange' THEN 'Cambio de Acreedor'
 		WHEN ed.Discriminator = 'ClauseChange' THEN 'Cambio de Cláusula'
 		WHEN ed.Discriminator = 'ContingentBeneficiaryChange' THEN 'Cambio de Beneficiario Contingente'
-		WHEN ed.Discriminator = 'CoverageChange' THEN 'Cambio de Cobertura'
+		WHEN ed.Discriminator = 'CoverageChange' THEN COALESCE(
+			CASE UPPER(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END)))
+				WHEN 'PROCEEDORDER' THEN 'Orden de proceder'
+				WHEN 'CHANGE_INSURED_SUM_SURETY' THEN 'Cambio de Suma Asegurada'
+				WHEN 'CHANGE_COVERAGE_SURETY' THEN 'Cambio de Vigencia'
+				ELSE NULLIF(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END)), '')
+			END,
+			'Cambio de Cobertura'
+		)
 		WHEN ed.Discriminator = 'CoverageChangeTechData' THEN 'Cambio Técnico de Cobertura'
 		WHEN ed.Discriminator = 'ExclusionChange' THEN 'Cambio de Exclusión'
 		WHEN ed.Discriminator = 'FrequencyChange' THEN 'Cambio de Frecuencia'
@@ -426,11 +447,20 @@ SELECT
 	END AS Tipo
     ,ISNULL(pym.name, '') AS recursopago
     ,CASE WHEN lp.lob='81' THEN COALESCE(axxPay.name,
- CASE LOWER(TRIM(COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity))) WHEN 'y' THEN 'Anual' WHEN 's' THEN 'Semestral' WHEN 'q' THEN 'Trimestral' WHEN 'm' THEN 'Mensual' WHEN 'b' THEN 'Bimensual'
- ELSE CONCAT(N'Sin descripciÃ³n configurada (', COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity), ')') END)
+ CASE LOWER(TRIM(COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity))) 
+	WHEN 'y' THEN 'Anual'
+	WHEN 'y1' THEN 'Anual'
+    WHEN 'm' THEN 'Mensual'
+	WHEN 'm12' THEN 'Pago Unico'
+    WHEN 'b' THEN 'Bimensual'
+    WHEN 's' THEN 'Semestral'
+    WHEN 'q' THEN 'Trimestral'
+ ELSE COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity) END)
  ELSE CASE SUBSTRING(TRIM(ISNULL(bed.periodicity, lp.periodicity)),1,1)
         WHEN 'y' THEN 'Anual'
+		WHEN 'y1' THEN 'Anual'
         WHEN 'm' THEN 'Mensual'
+		WHEN 'm12' THEN 'Pago Unico'
         WHEN 'b' THEN 'Bimensual'
         WHEN 's' THEN 'Semestral'
         WHEN 'q' THEN 'Trimestral'

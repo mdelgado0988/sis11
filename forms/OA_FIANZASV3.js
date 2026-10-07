@@ -20,6 +20,67 @@ let configCoveragesFianza = [];
 let coberturasSeleccionadasFianza = [];
 let polizaConfirmadaFianza = false;
 const isEndorsementFianza = window.location.href.includes('tab12');
+function polizaEmitidaParaUbicacion() {
+    const active = policy?.active;
+    const activeDate = policy?.activeDate;
+    return (activeDate !== null && activeDate !== undefined && String(activeDate).trim() !== '')
+        || active === true || active === 1 || String(active).toLowerCase() === 'true' || String(active) === '1';
+}
+
+async function cargarUbicacionAsegurado() {
+    const $hidden = $('#hiddenUbicacion');
+    if (!$hidden.length || polizaEmitidaParaUbicacion()) return;
+
+    try {
+        let insureds = Array.isArray(policy?.Insureds) ? policy.Insureds : [];
+        let contactId = policy?.MainInsured?.contactId
+            ?? insureds.find(item => Number(item?.role) === 0)?.contactId
+            ?? insureds[0]?.contactId;
+
+        if (!contactId) {
+            const result = await me.exe('RepoLifePolicy', {
+                operation: 'GET', include: ['Insureds'], filter: `id=${policyId}`, noTracking: true
+            });
+            insureds = result.outData?.[0]?.Insureds ?? [];
+            contactId = insureds.find(item => Number(item?.role) === 0)?.contactId ?? insureds[0]?.contactId;
+        }
+        if (!contactId) return;
+
+        const addressResult = await me.exe('RepoContactAddress', {
+            operation: 'GET', filter: `contactId=${Number(contactId)}`, noTracking: true
+        });
+        const address = addressResult.outData?.[0] ?? {};
+        const country = address.country ?? '';
+        const state = address.state ?? '';
+        const city = address.city ?? '';
+        const sector = address.sector ?? address.corregimiento ?? '';
+        const escape = value => String(value ?? '').replace(/'/g, "''");
+        const lookup = async (command, filter) => {
+            if (!filter) return {};
+            const result = await me.exe(command, { operation: 'GET', filter, noTracking: true });
+            return result.outData?.[0] ?? {};
+        };
+        const [countryRow, stateRow, cityRow, sectorRow] = await Promise.all([
+            lookup('RepoCountryCatalog', country && `code='${escape(country)}'`),
+            lookup('RepoStateCatalog', country && state && `countryCode='${escape(country)}' AND code='${escape(state)}'`),
+            lookup('RepoCityCatalog', state && city && `stateCode='${escape(state)}' AND code='${escape(city)}'`),
+            lookup('RepoSectorCatalog', city && sector && `cityCode='${escape(city)}' AND code='${escape(sector)}'`)
+        ]);
+        const catalog = (code, row) => ({ codigo: String(code ?? ''), descripcion: String(row?.name ?? '') });
+        const direccion = [address.address1, address.address2].filter(Boolean).join(', ');
+
+        $hidden.val(JSON.stringify({
+            pais: catalog(country, countryRow),
+            provincia: catalog(state, stateRow),
+            ciudad: catalog(city, cityRow),
+            corregimiento: catalog(sector, sectorRow),
+            direccion
+        })).trigger('change');
+    } catch (error) {
+        console.warn('No se pudo cargar la ubicación del asegurado.', error);
+    }
+}
+
 
 $("#rut").css({
   backgroundColor: "#f5f5f5",
@@ -2099,6 +2160,7 @@ const onDocumentReady = async () => {
     agregarAutocomplete("#nombre");
     
     policy = await getPolicyData(policyId);
+    await cargarUbicacionAsegurado();
     
     $('#policyStart').val(policy.Start);
     $('#policyEnd').val(policy.End);
@@ -2139,7 +2201,7 @@ const onDocumentReady = async () => {
 async function getPolicyData(policyId) {
     const result = await me.exe('LoadEntity', {
         entity: 'LifePolicy',
-        fields: '[id],[insuredSum],[start],[end],[productCode],[lob],[active]',
+        fields: '[id],[insuredSum],[start],[end],[productCode],[lob],[active],[activeDate]',
         filter: `id=${policyId}`,
         noTracking: true
     });
