@@ -1,4 +1,5 @@
 //block
+//noreplace
 /*
 Name: cmdImportPreloadMassiveNotification
 Author: Cesar Aguilar 
@@ -7,7 +8,7 @@ Category: PREPROCESSOR
 Version: 1
 */
 
-// Una fila sin ningun correo valido no puede entrar al lote porque no puede generar una notificacion.
+// AXX-1085: una fila por correo distinto; sin correo permanece en el detalle.
 const sendStatusWithEmail = "Con correo";
 const sendStatusNoEmail = "Sin correo";
 
@@ -123,7 +124,9 @@ const outputRows = [[
   "correo",
   "estadoEnvio",
   "tipoTelefono",
-  "mensaje"
+  "mensaje",
+  "destinatarioIndividual",
+  "descripcion_objeto"
 ]];
 const invalidRows = [];
 
@@ -159,19 +162,16 @@ policyRows.forEach(function (sourceRow) {
     }
   }
 
-  let contactEmail = "";
+  let validEmails = [];
   let sendStatus = sendStatusNoEmail;
 
   if (contact) {
-    const validEmails = getValidContactEmails(contact);
+    validEmails = getValidContactEmails(contact);
     const surname1 = normalizeText(contact.surname1 || "");
     const surname2 = normalizeText(contact.surname2 || "");
 
     if (validEmails.length) {
-      contactEmail = validEmails[0];
       sendStatus = sendStatusWithEmail;
-    } else {
-      errors.push("El cliente no tiene un correo válido registrado.");
     }
 
     if (surname1 === "NO DISPONIBLE" || surname2 === "NO DISPONIBLE") {
@@ -184,6 +184,11 @@ policyRows.forEach(function (sourceRow) {
     return;
   }
 
+  const descripcionObjeto = sourceRow && sourceRow["descripcion"]
+    ? String(sourceRow["descripcion"])
+    : "";
+  const rowEmails = validEmails.length ? validEmails : [""];
+  rowEmails.forEach(function (contactEmail, emailIndex) {
   outputRows.push([
     templateName,
     currentUser,
@@ -195,7 +200,7 @@ policyRows.forEach(function (sourceRow) {
     vehicle.plate,
     contactEmail,
     sendStatus,
-    contactEmail ? "email1" : "",
+    contactEmail ? "email" + (emailIndex + 1) : "",
     renderMessage(templateBody, {
       tipoPlantilla: templateName,
       usuario: currentUser,
@@ -204,8 +209,11 @@ policyRows.forEach(function (sourceRow) {
       apellidos: getContactSurnames(contact),
       marca: vehicle.brand,
       placa: vehicle.plate
-    })
+    }),
+    "SI",
+    descripcionObjeto
   ]);
+  });
 });
 
 const validCount = outputRows.length - 1;
@@ -230,7 +238,11 @@ function extractPolicyRows(rows) {
 
   if (!Array.isArray(rows[0])) {
     return rows.map(function (row, index) {
-      return { fila: index + 2, poliza: row && row.poliza };
+      return {
+        fila: index + 2,
+        poliza: row && row.poliza,
+        descripcion: row && (row["descripcion"] || row["descripcion_objeto"])
+      };
     });
   }
 
@@ -238,12 +250,14 @@ function extractPolicyRows(rows) {
     return normalizeText(value).toLowerCase();
   });
   const policyIndex = header.indexOf("poliza");
+  const descriptionIndex = header.indexOf("descripcion");
   if (policyIndex < 0) return [];
 
   return rows.slice(1).map(function (row, index) {
     return {
       fila: index + 2,
-      poliza: Array.isArray(row) ? row[policyIndex] : ""
+      poliza: Array.isArray(row) ? row[policyIndex] : "",
+      descripcion: descriptionIndex >= 0 && Array.isArray(row) ? row[descriptionIndex] : ""
     };
   }).filter(function (row) {
     return String(row.poliza || "").trim() !== "";

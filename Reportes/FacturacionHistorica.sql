@@ -90,7 +90,9 @@ SELECT
     ISNULL(c.nationalId, '0') AS [Cuenta Cobis],
     CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro,
     CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS [Es lider],
-    ISNULL(cc.name, '') AS Canal
+    ISNULL(cc.name, '') AS Canal,
+    ISNULL(provPol.provincia, '') AS [Provincia Poliza],
+    ISNULL(provAseg.provincia, '') AS [Provincia Poliza 1]
 
 FROM lifePolicy lp
 LEFT JOIN Anniversary an ON an.lifePolicyId = lp.id AND an.contractYear = 1
@@ -377,6 +379,29 @@ OUTER APPLY (SELECT TOP 1 NULLIF(LTRIM(RTRIM(fld.nameValue)),'') name
  WITH (fieldName nvarchar(100) '$.name',nameValue nvarchar(max) '$.userData[0]') fld
  WHERE fld.fieldName='nombre' AND NULLIF(LTRIM(RTRIM(fld.nameValue)),'') IS NOT NULL
  ORDER BY TRY_CONVERT(int,obj.[key])) axxBondBeneficiary
+/* MSN-000046: Provincia Poliza = provincia.descripcion del hidden hiddenUbicacion del objeto asegurado */
+OUTER APPLY (SELECT TOP 1 u.provincia FROM (
+   SELECT 0 AS src, TRY_CONVERT(int, obj.[key]) AS k, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '') AS provincia
+     FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects) = 1 THEN axxObjects.objects ELSE '[]' END) obj
+     CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues', jValuesJson nvarchar(max) '$.jValues' AS JSON) vals
+     CROSS APPLY OPENJSON(COALESCE(vals.jValuesJson, CASE WHEN ISJSON(vals.jValues) = 1 THEN vals.jValues END, '[]'))
+     WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
+    WHERE fld.name = 'hiddenUbicacion'
+   UNION ALL
+   SELECT 1, io.id, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '')
+     FROM InsuredObject io
+     CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END)
+     WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
+    WHERE io.lifePolicyId = lp.id AND fld.name = 'hiddenUbicacion'
+ ) u WHERE u.provincia IS NOT NULL ORDER BY u.src, u.k) provPol
+/* MSN-000046: Provincia Poliza 1 = provincia del asegurado de la póliza (el mismo contacto que Cliente) */
+OUTER APPLY (SELECT TOP 1 COALESCE(sc.name, a.state) AS provincia FROM (
+   SELECT CASE WHEN ca.legal = 1 THEN 0 ELSE 1 END AS src, ca.id AS k, ca.country, LTRIM(RTRIM(ca.state)) AS state
+     FROM ContactAddress ca WHERE ca.contactId = c.id AND NULLIF(LTRIM(RTRIM(ca.state)), '') IS NOT NULL
+   UNION ALL
+   SELECT 2, 0, c.country, LTRIM(RTRIM(c.state)) WHERE NULLIF(LTRIM(RTRIM(c.state)), '') IS NOT NULL
+ ) a LEFT JOIN StateCatalog sc ON sc.code = a.state AND sc.countryCode = a.country
+ ORDER BY a.src, a.k) provAseg
 WHERE CAST(lp.activeDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
@@ -507,6 +532,8 @@ SELECT
     ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro
     ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS [Es lider]
     ,ISNULL(cc.name, '') AS Canal
+    ,ISNULL(provPol.provincia, '') AS [Provincia Poliza]
+    ,ISNULL(provAseg.provincia, '') AS [Provincia Poliza 1]
 
 FROM lifePolicy lp
 INNER JOIN [Change] ed ON ed.lifePolicyId = lp.id AND ed.status = '1'
@@ -792,6 +819,29 @@ OUTER APPLY (SELECT TOP 1 NULLIF(LTRIM(RTRIM(fld.nameValue)),'') name
  WITH (fieldName nvarchar(100) '$.name',nameValue nvarchar(max) '$.userData[0]') fld
  WHERE fld.fieldName='nombre' AND NULLIF(LTRIM(RTRIM(fld.nameValue)),'') IS NOT NULL
  ORDER BY TRY_CONVERT(int,obj.[key])) axxBondBeneficiary
+/* MSN-000046: Provincia Poliza = provincia.descripcion del hidden hiddenUbicacion del objeto asegurado */
+OUTER APPLY (SELECT TOP 1 u.provincia FROM (
+   SELECT 0 AS src, TRY_CONVERT(int, obj.[key]) AS k, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '') AS provincia
+     FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects) = 1 THEN axxObjects.objects ELSE '[]' END) obj
+     CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues', jValuesJson nvarchar(max) '$.jValues' AS JSON) vals
+     CROSS APPLY OPENJSON(COALESCE(vals.jValuesJson, CASE WHEN ISJSON(vals.jValues) = 1 THEN vals.jValues END, '[]'))
+     WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
+    WHERE fld.name = 'hiddenUbicacion'
+   UNION ALL
+   SELECT 1, io.id, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '')
+     FROM InsuredObject io
+     CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END)
+     WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
+    WHERE io.lifePolicyId = lp.id AND fld.name = 'hiddenUbicacion'
+ ) u WHERE u.provincia IS NOT NULL ORDER BY u.src, u.k) provPol
+/* MSN-000046: Provincia Poliza 1 = provincia del asegurado de la póliza (el mismo contacto que Cliente) */
+OUTER APPLY (SELECT TOP 1 COALESCE(sc.name, a.state) AS provincia FROM (
+   SELECT CASE WHEN ca.legal = 1 THEN 0 ELSE 1 END AS src, ca.id AS k, ca.country, LTRIM(RTRIM(ca.state)) AS state
+     FROM ContactAddress ca WHERE ca.contactId = c.id AND NULLIF(LTRIM(RTRIM(ca.state)), '') IS NOT NULL
+   UNION ALL
+   SELECT 2, 0, c.country, LTRIM(RTRIM(c.state)) WHERE NULLIF(LTRIM(RTRIM(c.state)), '') IS NOT NULL
+ ) a LEFT JOIN StateCatalog sc ON sc.code = a.state AND sc.countryCode = a.country
+ ORDER BY a.src, a.k) provAseg
 WHERE CAST(ed.executionDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)

@@ -508,8 +508,23 @@
     if (!storedData) return null;
 
     const detail = splitStoredData(storedData);
+    const rows = detail.validRows.slice(1);
+    const header = detail.validRows[0] || [];
+    const columns = header.map((value) => String(value || '').toLowerCase());
+    const individual = columns.indexOf('destinatarioindividual') >= 0;
+    const policyIndex = columns.indexOf('poliza');
+    const emailIndex = columns.indexOf('correo');
+    const statusIndex = columns.indexOf('estadoenvio');
+    const policies = [];
+    rows.forEach((row) => {
+      const policy = String(row[policyIndex] || '');
+      if (policies.indexOf(policy) < 0) policies.push(policy);
+    });
     return {
-      valid: Math.max(0, detail.validRows.length - 1),
+      valid: individual ? policies.length : rows.length,
+      processingRows: rows.length,
+      recipients: individual ? rows.filter((row) => String(row[emailIndex] || '').trim()
+        && String(row[statusIndex] || '').toLowerCase() !== 'sin correo').length : rows.length + detail.invalidRows.length,
       invalid: detail.invalidRows.length
     };
   };
@@ -565,7 +580,8 @@
           _executionError: row.error,
           success: counts ? counts.valid : row.success,
           error: counts ? counts.invalid : row.error,
-          records: counts ? counts.valid + counts.invalid : row.records,
+          records: counts ? counts.recipients : row.records,
+          _processingRecords: counts ? counts.processingRows : row.records,
           tipoCarga: loadTypeLabel
         });
       });
@@ -1079,7 +1095,7 @@
             if (freshBlockedMessage) throw new Error(freshBlockedMessage);
 
             const validCount = Math.max(0, splitStoredData(storedData).validRows.length - 1);
-            if (validCount <= 0 || validCount !== Number(freshBatch.records || 0)) {
+            if (validCount <= 0 || validCount !== Number(freshBatch._processingRecords === undefined ? freshBatch.records : freshBatch._processingRecords)) {
               throw new Error('La cantidad de registros válidos del lote no coincide con los mensajes a procesar.');
             }
 
@@ -1255,12 +1271,28 @@
     reader.readAsArrayBuffer(file);
   });
 
+  const normalizeUploadHeader = (value) => {
+    let normalized = String(value || '').trim().toLowerCase();
+    if (typeof normalized.normalize === 'function') {
+      normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+    return normalized.replace(/\s+/g, '');
+  };
+
+  const uploadColumnIndexes = (rows) => {
+    const header = Array.isArray(rows && rows[0]) ? rows[0] : [];
+    return {
+      poliza: header.findIndex((value) => normalizeUploadHeader(value) === 'poliza'),
+      descripcion: header.findIndex((value) => normalizeUploadHeader(value) === 'descripcion')
+    };
+  };
+
   const validateWorkbookRows = (workbookRows) => {
-    const firstHeader = workbookRows[0] && String(workbookRows[0][0] || '').trim();
-    const hasPolicyData = workbookRows.slice(1)
-      .some((row) => String(row && row[0] || '').trim() !== '');
-    if (workbookRows.length < 2 || !firstHeader || !hasPolicyData) {
-      throw new Error('La primera hoja debe incluir una primera columna con el código de póliza y al menos un registro.');
+    const columns = uploadColumnIndexes(workbookRows);
+    const hasPolicyData = columns.poliza >= 0 && workbookRows.slice(1)
+      .some((row) => String(row && row[columns.poliza] || '').trim() !== '');
+    if (workbookRows.length < 2 || columns.poliza < 0 || !hasPolicyData) {
+      throw new Error('La primera hoja debe incluir la columna Poliza y al menos un registro de póliza.');
     }
   };
 
@@ -1378,9 +1410,14 @@
       : String(row && (row.errores || row.mensaje || row.message || row.motivo) || 'La póliza no pudo ser validada.')
   }));
 
-  const getPreprocessorRows = () => parsedUploadRows
-    .filter((row) => Array.isArray(row))
-    .map((row, index) => index === 0 ? ['poliza'] : [row[0]]);
+  const getPreprocessorRows = () => {
+    const columns = uploadColumnIndexes(parsedUploadRows);
+    return parsedUploadRows
+      .filter((row) => Array.isArray(row))
+      .map((row, index) => index === 0
+        ? ['poliza', 'descripcion']
+        : [row[columns.poliza], columns.descripcion >= 0 ? row[columns.descripcion] : '']);
+  };
 
   const validateSelectedFile = () => {
     if (selectedLoadType === null || selectedLoadType === undefined) {
@@ -1433,7 +1470,7 @@
         if (validCount <= 0) {
           message.warning('No se encontraron pólizas válidas. Revise el detalle de validación antes de cargar el archivo.');
         } else {
-          message.success('Validación finalizada: ' + validCount + ' válidas y ' + invalidRows.length + ' no válidas.');
+          message.success('Validación finalizada: ' + validCount + ' filas destinatarias y ' + invalidRows.length + ' pólizas no válidas.');
         }
       })
       .catch((error) => {
@@ -1485,10 +1522,10 @@
         }
 
         if (invalidUploadRows.length) {
-          message.warning('Lote creado con ' + validCount + ' pólizas; '
+          message.warning('Lote creado con ' + validCount + ' filas de detalle; '
             + invalidUploadRows.length + ' quedaron registradas como inconsistencias y no se procesarán.');
         } else {
-          message.success('Lote creado correctamente con ' + validCount + ' pólizas.');
+          message.success('Lote creado correctamente con ' + validCount + ' filas de detalle.');
         }
         setUploadOpen(false);
         clearUploadSelection();
@@ -2189,6 +2226,9 @@
                       Buscar
                     </Button>
                   </Upload>
+                </div>
+                <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+                  Columna requerida: Poliza. Descripcion es opcional.
                 </div>
               </Form.Item>
             </Form>

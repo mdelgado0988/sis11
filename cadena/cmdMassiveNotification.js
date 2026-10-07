@@ -16,6 +16,7 @@ const cliente = String(row.cliente || "").trim();
 const apellidos = String(row.apellidos || "").trim();
 const marca = String(row.marca || "").trim();
 const placa = String(row.placa || "").trim();
+const descripcion_objeto = String((row && (row["descripcion_objeto"] || row["descripcion"])) || "").trim();
 const estadoEnvio = String(row.estadoEnvio || "").trim();
 const rawTestFlag = row.usarCorreoPrueba !== undefined
   ? row.usarCorreoPrueba
@@ -49,13 +50,20 @@ try {
   const contact = contacts.length ? contacts[0] : null;
   if (!contact) return { ok: false, msg: "No se encontró el cliente asociado a la póliza " + poliza + "." };
 
-  const clientEmails = getValidContactEmails(contact);
+  const allClientEmails = getValidContactEmails(contact);
+  const individual = String(row.destinatarioIndividual || "").toUpperCase() === "SI";
+  const rowEmail = String(row.correo || "").trim().toLowerCase();
+  // Legacy batches have one policy row: keep their existing all-address dispatch.
+  // New batches have one address per row: never resend every address for every row.
+  const clientEmails = individual && rowEmail
+    ? allClientEmails.filter(function (email) { return email === rowEmail; })
+    : allClientEmails;
 
   // AXX-1085: una póliza sin correo relacionado no bloquea el lote.
   // La fila se procesa, no se envía correo y queda registrada como "Sin correo".
   if (!clientEmails.length) {
     const skipMessage = "Notificación masiva NO enviada: la póliza " + poliza + " "
-      + "no tiene un correo relacionado válido. Plantilla: " + tipoPlantilla
+      + (individual && rowEmail ? "ya no tiene registrado el correo de esta fila. Plantilla: " : "no tiene un correo relacionado válido. Plantilla: ") + tipoPlantilla
       + (usuario ? ". Usuario de carga: " + usuario : "") + ".";
 
     doCmd({
@@ -97,7 +105,8 @@ try {
     cliente: cliente,
     apellidos: apellidos,
     marca: marca,
-    placa: placa
+    placa: placa,
+    descripcion_objeto: descripcion_objeto
   };
 
   doCmd({
@@ -151,6 +160,7 @@ try {
   const commentMessage = (usarCorreoPrueba ? "Prueba de notificación masiva" : "Notificación masiva")
     + " enviada correctamente a " + clientEmails.length + " correo(s). Plantilla: "
     + tipoPlantilla
+    + ". Correo(s) de la fila: " + clientEmails.join(", ")
     + (usarCorreoPrueba ? ". Destinatario de prueba: " + TEST_RECIPIENT : "")
     + (usuario ? ". Usuario de carga: " + usuario : "")
     + ".";
