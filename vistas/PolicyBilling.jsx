@@ -751,6 +751,9 @@
       const changeDetail = parseJsonObject(change && change.jDetail);
       const cancellationChange = isCancellationChange(change);
       const actualPlanEndorsement = isActualPlanEndorsement(change);
+      const discriminator = String(change && change.Discriminator || '').toUpperCase();
+      const informativeObjectChange = discriminator === 'INSUREDOBJECTCHANGE'
+        || change && change.informative === true;
       return buildInvoiceRow({
         key: `change-${changeId || index}`,
         recordType: 'Endorsement',
@@ -758,7 +761,8 @@
           ? buildCancellationBill(changeDetail)
           : change && change.BillDiff,
         fallback: change && change.Bill,
-        paymentGroup: paymentGroups[changeId],
+        // Informative changes must not inherit the policy payment plan amount.
+        paymentGroup: informativeObjectChange ? {} : paymentGroups[changeId],
         startDate: change && (change.effectiveDate || change.executionDate),
         endDate: changeDetail.policyEnd || (paymentGroups[changeId] && paymentGroups[changeId].end),
         movementType: change && getMovementType(change),
