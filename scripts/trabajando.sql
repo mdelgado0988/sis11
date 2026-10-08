@@ -183,13 +183,13 @@ WHERE c.cramo IN (81,82,83,84)
 
 --reportes endosos de fianzas
 select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
-	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto
+	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto, iestado
 from marepteccia
-where cramo in (81)
-and xnombrep not like '%endoso%'
+where cramo in (6)
+and (xnombrep not like '%endoso%')
 --AND xdpto <> 'SINIESTROS'
---AND xformula1 <> '0'
---AND xformula1 is not null and xformula1 <> '0'
+AND xdpto = 'EMISION'
+AND xnombrep <> 'oferta_automovil'
 order by 1,2
 
 --Reportes de riesgos varios
@@ -208,7 +208,7 @@ select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.
 	inner join adpolcob c on c.crecibo = rec.crecibo and c.isuma = 'S' ) AS oferta2
 
 from marepteccia r
-where r.cramo in (81)
+where r.cramo in (6)
 and r.xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 AND (r.xformula1 is not null and r.xformula1 <> '0' and isnumeric(r.xformula1) = 1)

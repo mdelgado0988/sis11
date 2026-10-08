@@ -27,13 +27,13 @@ const objectDefinitionCode = 'DT_ACCIDENTES_V1';
 const beneficiariesObjectDefinitionCode = 'BENEFICIARIOS_VIDA';
 const hoy = new Date();
 const hoyPanama = toPanamaDate(hoy);
-const dia = hoyPanama.getDate();
+const dia = hoyPanama.getUTCDate();
 const meses = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
-const mes = meses[hoyPanama.getMonth()];
-const anio = hoyPanama.getFullYear();
+const mes = meses[hoyPanama.getUTCMonth()];
+const anio = hoyPanama.getUTCFullYear();
 const celPhoneType = "PHONETYPE2";
 const faxPhoneType = "PHONETYPE4";
 
@@ -66,14 +66,14 @@ setAcreedor();
 //return holder;
 
 const dateIni = toPanamaDate(policy.start);
-const diaIni = dateIni.getDate();
-const mesIni = meses[dateIni.getMonth()];
-const anioIni = dateIni.getFullYear();
+const diaIni = dateIni.getUTCDate();
+const mesIni = meses[dateIni.getUTCMonth()];
+const anioIni = dateIni.getUTCFullYear();
 
 const dateFin = toPanamaDate(policy.end);
-const diaFin = dateFin.getDate();
-const mesFin = meses[dateFin.getMonth()];
-const anioFin = dateFin.getFullYear();
+const diaFin = dateFin.getUTCDate();
+const mesFin = meses[dateFin.getUTCMonth()];
+const anioFin = dateFin.getUTCFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
@@ -91,12 +91,12 @@ resultado.Provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${hold
 resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${holder.Addresses?.[0]?.state}' AND code = '${holder.Addresses?.[0]?.city}'`, "name") ?? "";
 
 //Datos del asegurado
-const fnacimiento = toPanamaDate(insured.birth);
-resultado.DiaNac = fnacimiento.getDate();
-resultado.MesNac = fnacimiento.getMonth();
-resultado.AnioNac = fnacimiento.getFullYear();
+const fnacimiento = toPanamaBirthDate(insured.birth);
+resultado.DiaNac = fnacimiento.getUTCDate();
+resultado.MesNac = fnacimiento.getUTCMonth() + 1;
+resultado.AnioNac = fnacimiento.getUTCFullYear();
 resultado.Asegurado = getNombreCompleto(insured);
-resultado.FNacimiento = toFecha(insured.birth);
+resultado.FNacimiento = toFechaNacimiento(insured.birth);
 resultado.IdentificacionAseg = insured.isPerson == true ? insured.cnp : insured.nif;
 
 //Datos del corredor
@@ -349,8 +349,8 @@ function obtenerPeriodoPoliza(fecha) {
   if (isNaN(fechaParseada.getTime())) return { anio: "", mes: "" };
 
   return {
-    anio: fechaParseada.getFullYear(),
-    mes: meses[fechaParseada.getMonth()] ?? ""
+    anio: fechaParseada.getUTCFullYear(),
+    mes: meses[fechaParseada.getUTCMonth()] ?? ""
   };
 }
 
@@ -468,11 +468,32 @@ function toFecha(value) {
   // Validar fecha inválida
   if (isNaN(date.getTime())) return "";
 
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0'); // meses 0-11
-  const year = date.getFullYear();
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0'); // meses 0-11
+  const year = date.getUTCFullYear();
 
   return `${day}/${month}/${year}`;
+}
+
+function toPanamaBirthDate(value) {
+  const raw = String(value || '').trim();
+  const calendarDate = raw.match(/^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.0+)?)?$/);
+  if (calendarDate) {
+    return new Date(`${calendarDate[1]}T00:00:00.000Z`);
+  }
+
+  return toPanamaDate(value);
+}
+
+function toFechaNacimiento(value) {
+  const raw = String(value || '').trim();
+  const calendarDate = raw.match(/^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.0+)?)?$/);
+  if (calendarDate) {
+    const parts = calendarDate[1].split('-');
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+
+  return toFecha(value);
 }
 
 function getHora(fecha) {
@@ -480,8 +501,8 @@ function getHora(fecha) {
 
   if (isNaN(date)) return "";
 
-  let horas = date.getHours();
-  const minutos = String(date.getMinutes()).padStart(2, "0");
+  let horas = date.getUTCHours();
+  const minutos = String(date.getUTCMinutes()).padStart(2, "0");
   const periodo = horas >= 12 ? "pm" : "am";
 
   horas = horas % 12 || 12;
@@ -498,7 +519,9 @@ function toPanamaDate(value) {
 
   if (isNaN(utcDate.getTime())) return new Date(NaN);
 
-  // Panamá permanece en UTC-5 durante todo el año.
+  // Interpretar siempre el instante como UTC y desplazarlo a Panamá (UTC-5).
+  // Los consumidores deben leer el resultado con getters UTC para no depender
+  // de la zona horaria configurada en el servidor.
   return new Date(utcDate.getTime() - (5 * 60 * 60 * 1000));
 }
 

@@ -37,7 +37,29 @@ Calculations:
         throw 'Contrato CPF: el coaseguro supera la PRIMA emitida. Poliza ' + polId + ', cobertura ' + covId +
               '. Prima emitida ' + primaEmitida + ', coaseguro ' + PrimaCoaseguro + ', a distribuir ' + Prima;
 
-      var rea = doCmd({cmd:'ExeChain',data:{chain:'cmdConfiguracionReaseguroPorSuma',context:JSON.stringify({CodigoContrato:'CPF',Suma:Suma,Prima:Prima,SumaCoaseguro:SumaCoaseguro,PrimaCoaseguro:PrimaCoaseguro,PolizaId:polId,CoberturaId:covId})}});
+      //MSN-000038: coberturas de la poliza con su suma NETA de coaseguro (mismo criterio que el motor: modo 3 por
+      //importes de la cobertura, otros modos por el porcentaje retenido). La cadena suma las que tienen isCoverage = Si
+      //en cfgCoberturaProductoReaFianza y evalua esa sumatoria contra la ultima Capacidad del contrato.
+      var coModo = Number(_pol.coinsurance || 0) || 0;
+      var coRet = _pol.coRetention != null ? Number(_pol.coRetention) : 100;
+      var coCes = _pol.CoinsuranceCessions || [];
+      var covs = _pol.Coverages || [];
+      var Coberturas = [];
+      for (var i = 0; i < covs.length; i++) {
+        var c = covs[i];
+        var neta;
+        if (c.id == covId) neta = Suma;
+        else if (coModo == 3) {
+          var ced = 0;
+          for (var k = 0; k < coCes.length; k++) if (coCes[k].lifeCoverageId == c.id) ced += Number(coCes[k].sumInsuredCeded || 0) || 0;
+          neta = n2(Number(c.limit || 0) - ced);
+        }
+        else if (coModo > 0) neta = n2(Number(c.limit || 0) * coRet / 100);
+        else neta = n2(Number(c.limit || 0));
+        Coberturas.push({codigo: String(c.code), suma: neta});
+      }
+
+      var rea = doCmd({cmd:'ExeChain',data:{chain:'cmdConfiguracionReaseguroPorSuma',context:JSON.stringify({CodigoContrato:'CPF',Suma:Suma,Prima:Prima,SumaCoaseguro:SumaCoaseguro,PrimaCoaseguro:PrimaCoaseguro,PolizaId:polId,CoberturaId:covId,ProductoCodigo:_pol.productCode,Coberturas:Coberturas})}});
       //propagar el motivo real: sin esto un fallo de la cadena llega como "Value cannot be null (Parameter 'o')"
       if (!rea || !rea.ok || !rea.outData)
         throw 'cmdConfiguracionReaseguroPorSuma no pudo calcular la distribucion (contrato CPF, poliza ' + polId + ', cobertura ' + covId + '): ' + (rea ? rea.msg : 'sin respuesta');

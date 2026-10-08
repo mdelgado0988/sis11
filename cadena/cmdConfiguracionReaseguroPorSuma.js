@@ -10,7 +10,14 @@
   *@Note AXX-302: Suma y Prima son la base A DISTRIBUIR, ya neta de coaseguro.
   *        SumaCoaseguro/PrimaCoaseguro son los importes de coaseguro informados (fuente nativa CoCession),
   *        para trazabilidad y validacion. Ausentes o cero => comportamiento identico al anterior.
-  *@Output: { pret, pcp, msret, mscp, mpret, mpcp, mccp, micp, pfp, msfp, mcfp, mifp }
+  *@Note MSN-000038: entradas opcionales ProductoCodigo y Coberturas [{codigo, suma}] (sumas netas de coaseguro de
+  *        todas las coberturas de la poliza). La suma evaluada contra la capacidad es la sumatoria de las coberturas
+  *        con isCoverage = Si en cfgCoberturaProductoReaFianza para ese producto. Si la suma evaluada (o la propia
+  *        cobertura) supera la ultima Capacidad del contrato, cada cobertura deja en el contrato la fraccion
+  *        Capacidad / suma evaluada, repartida RET / CP con la ultima banda, y el excedente va a FAC (suma y prima),
+  *        con la misma proporcion en todas las coberturas. Sin Coberturas => igual que antes, salvo que una suma sobre
+  *        la capacidad ya no va 100% a FAC sino que se topa en la capacidad.
+  *@Output: { pret, pcp, msret, mscp, mpret, mpcp, mccp, micp, pfp, msfp, mpfp, mcfp, mifp, SumaEvaluada, Capacidad, factorContrato }
 */
 
 const CodigoContrato = context.CodigoContrato
@@ -37,16 +44,49 @@ if (Prima < 0)
 let reaConfig;
 setReaConfig();
 
-const config = reaConfig.find(x => Suma >= x.RangoSumaInicial && Suma <= x.RangoSumaFinal);
+//MSN-000038: capacidad = ultimo limite (Capacidad maxima) configurado para el contrato
+const ultimaBanda = reaConfig.reduce((m, x) => (!m || x.Capacidad > m.Capacidad) ? x : m, null);
+const Capacidad = ultimaBanda && !isNaN(ultimaBanda.Capacidad) ? ultimaBanda.Capacidad : 0;
+const SumaEvaluada = getSumaEvaluada();
+const SumaReferencia = Math.max(SumaEvaluada, Suma);
+
+if (Capacidad > 0 && SumaReferencia > Capacidad) {
+  //Excedente a facultativo, manteniendo la proporcion por cobertura en cada linea (RET, CP, FAC)
+  const factorContrato = Capacidad / SumaReferencia;
+  const SumaContrato = n2(Suma * factorContrato);
+  const PrimaContrato = n2(Prima * factorContrato);
+  const xpret = pct(ultimaBanda.PorcentajeRet), xpcp = pct(ultimaBanda.PorcentajeCP),
+        xpccp = pct(ultimaBanda.PorcentajeComision), xpicp = pct(ultimaBanda.PorcentajeImpuesto);
+  let xmsret = n2(xpret * SumaContrato),
+      xmscp = n2(SumaContrato - xmsret),
+      xmsfp = n2(Suma - SumaContrato),
+      xmpret = n2(xpret * PrimaContrato),
+      xmpcp = n2(PrimaContrato - xmpret),
+      xmpfp = n2(Prima - PrimaContrato);
+  let xmccp = n2(xpccp * xmpcp),
+      xmicp = n2(xpicp * xmpcp);
+  return { pret: xpret, pcp: xpcp, msret: xmsret, mscp: xmscp, mpret: xmpret, mpcp: xmpcp, mccp: xmccp, micp: xmicp,
+          pfp: Suma ? Number((xmsfp / Suma).toFixed(6)) : 0,
+          msfp: xmsfp,
+          mpfp: xmpfp,
+          mcfp: 0,
+          mifp: 0,
+          SumaEvaluada, Capacidad, factorContrato: Number(factorContrato.toFixed(6)) }
+}
+
+// El rango se determina con la suma acumulada de todas las coberturas que
+// participan en el reaseguro, pero los importes se calculan para la cobertura actual.
+const config = reaConfig.find(x => SumaReferencia >= x.RangoSumaInicial && SumaReferencia <= x.RangoSumaFinal);
 
 if(!config)
-  return { pret: 0, pcp: 0, msret: 0, mscp: 0, mccp: 0, micp: 0, pfp: 100.00, msfp: Suma, mpfp: Prima, mcfp: 0, mifp: 0 }
+  return { pret: 0, pcp: 0, msret: 0, mscp: 0, mpret: 0, mpcp: 0, mccp: 0, micp: 0, pfp: 100.00, msfp: Suma, mpfp: Prima, mcfp: 0, mifp: 0, SumaEvaluada, Capacidad, factorContrato: 0 }
 
 //return config
-let pret = n2(config.PorcentajeRet / 100),
-      pcp = n2(config.PorcentajeCP / 100),
-      pccp = n2(config.PorcentajeComision / 100),
-      picp = n2(config.PorcentajeImpuesto / 100);
+//MSN-000038: porcentajes sin redondear a 2 decimales (5.5% se leia como 6% y 94.5% como 94%)
+let pret = pct(config.PorcentajeRet),
+      pcp = pct(config.PorcentajeCP),
+      pccp = pct(config.PorcentajeComision),
+      picp = pct(config.PorcentajeImpuesto);
 let msret = n2(pret * Suma), 
       mscp = n2(pcp * Suma), 
       mpret = n2(pret * Prima),
@@ -62,7 +102,36 @@ return { pret, pcp, msret, mscp, mpret, mpcp, mccp, micp,
         msfp: 0,
         mpfp: 0,
         mcfp: 0,
-        mifp: 0 }
+        mifp: 0,
+        SumaEvaluada, Capacidad, factorContrato: 1 }
+
+//MSN-000038: sumatoria (neta de coaseguro) de las coberturas de la poliza con isCoverage = Si para el producto.
+//Sin Coberturas o sin el producto en la tabla => la propia Suma (comportamiento por cobertura).
+function getSumaEvaluada() {
+  const coberturas = Array.isArray(context.Coberturas) ? context.Coberturas : [];
+  const producto = String(context.ProductoCodigo || "").trim();
+  if (!coberturas.length || !producto) return Suma;
+
+  doCmd({cmd :"GetFullTable", data: {table: "cfgCoberturaProductoReaFianza"}});
+  if(!GetFullTable.ok)
+    throw "cmdConfiguracionReaseguroPorSuma: no se pudo leer cfgCoberturaProductoReaFianza: " + GetFullTable.msg;
+
+  const filas = mapearTablaConfig(GetFullTable.outData ?? [])
+    .filter(x => String(x.productCode || "").trim() == producto);
+  if (!filas.length) return Suma;
+
+  const suman = filas
+    .filter(x => String(x.isCoverage || "").trim().toUpperCase() == "SI")
+    .map(x => String(x.coverageCode || "").trim());
+
+  return n2(coberturas
+    .filter(c => suman.includes(String(c.codigo || "").trim()))
+    .reduce((t, c) => t + toNumber(c.suma || 0), 0));
+}
+
+function pct(value) {
+  return Number((toNumber(value) / 100).toFixed(6));
+}
 
 function setReaConfig() {
 
