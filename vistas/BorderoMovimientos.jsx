@@ -26,7 +26,7 @@
    * del ambiente. Ahora todo el texto visible es literal en español.
    */
   const { useState, useEffect } = React;
-  const { Table, Select, Button, DatePicker, Skeleton, Space, Row, Col, Form, Drawer,
+  const { Table, Select, Button, DatePicker, Skeleton, Space, Row, Col, Form, Drawer, Tabs,
           Tag, Tooltip, Empty, Pagination, Input, message } = A;
 
   const VERDE = '#60b13d', VERDE_B = '#4f9336', BORDE = '#cbd1d8', BARRA_B = '#e6ebf2';
@@ -99,7 +99,11 @@
     'ReinstatementChange': 'Rehabilitación',
     'RemoveCoverageChange': 'Baja de cobertura',
     'TemporalStatusChange': 'Cambio de estado temporal',
-    'TermChange': 'Cambio de vigencia'
+    'TermChange': 'Cambio de vigencia',
+    'ProceedOrder': 'Orden de proceder',
+    'ChangeCoverageSurety': 'Cambio de vigencia de cobertura',
+    'CHANGE_COVERAGE_SURETY': 'Cambio de vigencia de cobertura',
+    'CHANGE_INSURED_SUM_SURETY': 'Cambio de suma de cobertura'
   };
 
   /* AXX-300, ronda 1 de corrección — el respaldo NO embellece la clave.
@@ -130,8 +134,7 @@
   }
 
   function etiquetaMovimiento(r){
-    const tp = traducirTipo(r ? r.tipo : '');
-    return r && r.movKey ? (tp + ' · ' + r.movKey) : tp;
+    return traducirTipo(r ? r.tipo : '');
   }
   function claveMovimiento(r){
     return [r.poliza, r.id, r.movKey, fecha(r.fechaEmision), r.cserie].join('|');
@@ -153,9 +156,10 @@
     { t: 'Plan',                      c: 'plan',                w: 100, tipo: 'txt' },
     { t: 'Poliza',                    c: 'poliza',              w: 155, tipo: 'poliza' },
     { t: 'Recibo',                    c: 'recibo',              w: 100, tipo: 'txt' },
-    { t: 'Tipo',                      c: 'tipo',                w: 250, tipo: 'mov' },
-    { t: 'Contratante',               c: 'contratante',         w: 175, tipo: 'txt' },
-    { t: 'Asegurado',                 c: 'asegurado',           w: 175, tipo: 'txt' },
+    { t: 'Tipo',                      c: 'tipo',                w: 220, tipo: 'mov' },
+    { t: 'Id Endoso',                 c: 'changeId',            w: 100, tipo: 'endorsementId' },
+    { t: 'Contratante',               c: 'contratante',         w: 175, tipo: 'ellipsis' },
+    { t: 'Asegurado',                 c: 'asegurado',           w: 175, tipo: 'ellipsis' },
     { t: 'Fecha Emision',             c: 'fechaEmision',        w: 115, tipo: 'fecha' },
     { t: 'Fecha Desde',               c: 'fDesde',              w: 105, tipo: 'fecha' },
     { t: 'Fecha Hasta',               c: 'fHasta',              w: 105, tipo: 'fecha' },
@@ -190,6 +194,19 @@
      nada: la grilla se desbordaba igual. 5.200 -> 4.680 px = -10,00% exacto, sin eliminar
      ni reordenar ninguna de las 34 columnas. */
   const ANCHO_TOTAL = COLUMNAS.reduce(function(a, c){ return a + c.w; }, 0);
+  const COLUMNAS_REASEGURADORES = [
+    { t:'id', c:'id', w:75, tipo:'txt', fixed:'left' }, { t:'Reasegurador', c:'reasegurador', w:220, tipo:'ellipsis' },
+    { t:'Corredor', c:'corredor', w:190, tipo:'ellipsis' }, { t:'Ramo', c:'ramo', w:190, tipo:'ramo' },
+    { t:'Producto', c:'producto', w:170, tipo:'txt' }, { t:'Poliza', c:'poliza', w:155, tipo:'txt' },
+    { t:'Tipo', c:'tipo', w:220, tipo:'mov' }, { t:'Id Endoso', c:'changeId', w:100, tipo:'endorsementId' }, { t:'Contratante', c:'contratante', w:190, tipo:'ellipsis' },
+    { t:'Asegurado', c:'asegurado', w:190, tipo:'ellipsis' }, { t:'Fecha Emision', c:'fechaEmision', w:115, tipo:'fecha' },
+    { t:'Fecha Desde', c:'fDesde', w:105, tipo:'fecha' }, { t:'Fecha Hasta', c:'fHasta', w:105, tipo:'fecha' },
+    { t:'Suma Cedida', c:'sumaCedida', w:130, tipo:'num' }, { t:'Suma a Coaseguro', c:'sumaCoaseguro', w:145, tipo:'num' },
+    { t:'Prima Cedida', c:'primaCedida', w:130, tipo:'num' }, { t:'Prima a Coaseguro', c:'primaCoaseguro', w:145, tipo:'num' },
+    { t:'Comisión', c:'comision', w:120, tipo:'num' }, { t:'Impuesto', c:'impuesto', w:115, tipo:'num' },
+    { t:'Reaseguro por Pagar', c:'reaseguroPorPagar', w:165, tipo:'num' }, { t:'cserie', c:'cserie', w:90, tipo:'txt' }
+  ];
+  const ANCHO_REASEGURADORES = COLUMNAS_REASEGURADORES.reduce(function(a, c){ return a + c.w; }, 0);
 
   /* Anexo de diseño, acotado a lo que este cambio toca (supuesto 5): barra de botones,
      bordes y encabezados de la grilla, densidad compacta, estados de fila y layout. */
@@ -230,6 +247,7 @@
     '.bm-grid .ant-table-tbody>tr.ant-table-row-selected>td,',
     '.bm-grid .ant-table-tbody>tr.bm-row-selected:hover>td,',
     '.bm-grid .ant-table-tbody>tr.ant-table-row-selected:hover>td{background:#86b4ff !important}',
+    '.bm-ellipsis{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.bm-pager{padding:6px 4px 2px 0;text-align:right}',
     '.bm-drawer .ant-form-item{margin-bottom:12px}'
   ].join('\n');
@@ -242,9 +260,12 @@
     const [exportando, setExportando] = useState(false);
     const [abierto, setAbierto] = useState(false);
     const [data, setData] = useState(null);
+    const [dataReaseguradores, setDataReaseguradores] = useState(null);
     const [page, setPage] = useState(1);
     const [size, setSize] = useState(50);
     const [criterio, setCriterio] = useState(null);
+    const [criterioReaseguradores, setCriterioReaseguradores] = useState(null);
+    const [tabActiva, setTabActiva] = useState('movimientos');
     const [seleccion, setSeleccion] = useState(null);
     const [alto, setAlto] = useState(360);
     const cajaRef = React.useRef(null);
@@ -308,19 +329,20 @@
     }
 
     async function consultar(pg, sz, base){
-      const crit = base || criterio || criterioDelFormulario();
+      const esReaseguradores = tabActiva === 'reaseguradores';
+      const crit = base || (esReaseguradores ? criterioReaseguradores : criterio) || criterioDelFormulario();
       if (!crit) return false;
       const ctxObj = { fdesde: crit.fdesde, fhasta: crit.fhasta, ramos: crit.ramos, poliza: crit.poliza || '', page: pg, size: sz };
       setCargando(true);
-      const res = await exe('ExeChain', { chain: 'cmdBorderoMovimientos', context: JSON.stringify(ctxObj) });
+      const res = await exe('ExeChain', { chain: esReaseguradores ? 'cmdBorderoMovimientosReaseguradores' : 'cmdBorderoMovimientos', context: JSON.stringify(ctxObj) });
       setCargando(false);
       if (!res || !res.ok) {
         /* CA-10 — el estado anterior no se pierde y no se inventa un resultado vacío. */
         message.error(mensajeDeError(res));
         return false;
       }
-      setData(res.outData);
-      setCriterio(crit);
+      if (esReaseguradores) { setDataReaseguradores(res.outData); setCriterioReaseguradores(crit); }
+      else { setData(res.outData); setCriterio(crit); }
       setPage(pg); setSize(sz);
       setSeleccion(null);
       return true;
@@ -337,7 +359,9 @@
        consulta y NO relanza la búsqueda. El Drawer queda abierto. */
     function onLimpiar(){
       form.setFieldsValue(defectos());
-      setData(null); setCriterio(null); setPage(1); setSize(50); setSeleccion(null);
+      if (tabActiva === 'reaseguradores') { setDataReaseguradores(null); setCriterioReaseguradores(null); }
+      else { setData(null); setCriterio(null); }
+      setPage(1); setSize(50); setSeleccion(null);
     }
 
     function ejecutarLibreria(fuente){
@@ -376,13 +400,14 @@
        responde el conjunto completo de la búsqueda en el mismo orden, sin paginar. */
     async function onExportar(){
       if (enVuelo.current) return;             /* supuesto 7 — doble clic */
-      const crit = criterio;
+      const esReaseguradores = tabActiva === 'reaseguradores';
+      const crit = esReaseguradores ? criterioReaseguradores : criterio;
       if (!crit) { message.info('Primero realice una búsqueda.'); return; }
       enVuelo.current = true;
       setExportando(true);
       try {
         const ctxObj = { fdesde: crit.fdesde, fhasta: crit.fhasta, ramos: crit.ramos, poliza: crit.poliza || '', exportar: true };
-        const res = await exe('ExeChain', { chain: 'cmdBorderoMovimientos', context: JSON.stringify(ctxObj) });
+        const res = await exe('ExeChain', { chain: esReaseguradores ? 'cmdBorderoMovimientosReaseguradores' : 'cmdBorderoMovimientos', context: JSON.stringify(ctxObj) });
         if (!res || !res.ok) { message.error(mensajeDeError(res)); return; }
         const filas = (res.outData && res.outData.filas) ? res.outData.filas : [];
         /* CA-10 — sin datos no se genera un archivo vacío engañoso. */
@@ -390,11 +415,13 @@
         await asegurarExcel();
         const X = (typeof window !== 'undefined') ? window.XLSX : null;
         if (!X) { message.error('No es posible crear un archivo de Excel en este momento.'); return; }
-        const hoja = X.utils.json_to_sheet(filas.map(filaExportable),
-                                           { header: COLUMNAS.map(function(c){ return c.t; }) });
+        const exportColumns = esReaseguradores ? COLUMNAS_REASEGURADORES : COLUMNAS;
+        const hoja = X.utils.json_to_sheet(filas.map(function(row) {
+          const out = {}; exportColumns.forEach(function(col) { out[col.t] = col.tipo === 'num' ? num(row[col.c]) : (col.tipo === 'fecha' ? fecha(row[col.c]) : (col.tipo === 'ramo' ? nombreRamo(row[col.c]) : (col.tipo === 'mov' ? etiquetaMovimiento(row) : (row[col.c] || '')))); }); return out;
+        }), { header: exportColumns.map(function(c){ return c.t; }) });
         const libro = X.utils.book_new();
-        X.utils.book_append_sheet(libro, hoja, 'Bordero');
-        X.writeFile(libro, 'Bordero-Movimientos-' + crit.fdesde + '_' + crit.fhasta
+        X.utils.book_append_sheet(libro, hoja, esReaseguradores ? 'Reaseguradores' : 'Bordero');
+        X.writeFile(libro, 'Bordero-' + (esReaseguradores ? 'Reaseguradores-' : 'Movimientos-') + crit.fdesde + '_' + crit.fhasta
                             + '-' + new Date().getTime() + '.xlsx');
         message.success('Exportados ' + filas.length + ' movimientos.');
       } catch (e) {
@@ -432,7 +459,7 @@
       };
     }, [cargandoCat]);
 
-    const columnas = COLUMNAS.map(function(col){
+    const columnasPara = function(definiciones) { return definiciones.map(function(col){
       const c = { title: col.t, dataIndex: col.c, width: col.w };
       if (col.fixed) c.fixed = col.fixed;
       if (col.tipo === 'num') {
@@ -446,6 +473,11 @@
       else if (col.tipo === 'fecha') c.render = fecha;
       else if (col.tipo === 'ramo') c.render = function(v){ return nombreRamo(v); };
       else if (col.tipo === 'mov') c.render = function(v, r){ return etiquetaMovimiento(r); };
+      else if (col.tipo === 'endorsementId') c.render = function(v){ return v === null || v === undefined || v === '' ? '-' : v; };
+      else if (col.tipo === 'ellipsis') c.render = function(v){
+        const text = v === null || v === undefined || v === '' ? '-' : String(v);
+        return <Tooltip title={text}><span className='bm-ellipsis'>{text}</span></Tooltip>;
+      };
       else if (col.tipo === 'poliza') c.render = function(v, r){
         /* Un null de identidad no se coerciona: la fila se lista y queda marcada. */
         if (r && r.filaIncompleta === 1) {
@@ -454,11 +486,17 @@
         return v;
       };
       return c;
-    });
+    }); };
+    const columnas = columnasPara(COLUMNAS);
+    const columnasReaseguradores = columnasPara(COLUMNAS_REASEGURADORES);
 
     if (cargandoCat) return <DefaultPage title='Borderó (Nuevo)' icon='file-protect'><Skeleton active /></DefaultPage>;
 
-    const filas = (data && data.filas) ? data.filas : [];
+    const datosActivos = tabActiva === 'reaseguradores' ? dataReaseguradores : data;
+    const criterioActivo = tabActiva === 'reaseguradores' ? criterioReaseguradores : criterio;
+    const filas = (datosActivos && datosActivos.filas) ? datosActivos.filas : [];
+    const columnasActivas = tabActiva === 'reaseguradores' ? columnasReaseguradores : columnas;
+    const anchoActivo = tabActiva === 'reaseguradores' ? ANCHO_REASEGURADORES : ANCHO_TOTAL;
 
     return <DefaultPage title='Borderó (Nuevo)' icon='file-protect'>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
@@ -470,31 +508,39 @@
             <Button type='primary' icon={ <IconoLupa /> } onClick={ function(){ setAbierto(true); } }>
               { 'Filtrar' }
             </Button>
-            <Button loading={ cargando } disabled={ cargando || !criterio }
-                    onClick={ function(){ consultar(1, size, criterio); } }>
+            <Button loading={ cargando } disabled={ cargando || !criterioActivo }
+                    onClick={ function(){ consultar(1, size, criterioActivo); } }>
               { 'Refrescar' }
             </Button>
             <Button className='bm-export' icon={ <IconoDescarga /> }
-                    loading={ exportando } disabled={ exportando || cargando || !criterio }
+                    loading={ exportando } disabled={ exportando || cargando || !criterioActivo }
                     onClick={ onExportar }>
               { 'Exportar' }
             </Button>
           </Space>
           <span style={{ marginLeft: 'auto', marginRight: 4, color: '#5a6673' }}>
-            { data ? (num(data.total) + ' movimientos · ' + num(data.polizas) + ' pólizas') : '' }
+            { datosActivos ? (num(datosActivos.total) + ' movimientos · ' + num(datosActivos.polizas) + ' pólizas') : '' }
           </span>
         </div>
+        <Tabs activeKey={tabActiva} onChange={function(key) {
+          setTabActiva(key); setSeleccion(null);
+          const saved = key === 'reaseguradores' ? criterioReaseguradores : criterio;
+          form.setFieldsValue(saved ? { DateField_fdesde_bor: moment(saved.fdesde), DateField_fhasta_bor: moment(saved.fhasta), ComboBox_cramo_bor: saved.ramos, poliza: saved.poliza } : defectos());
+        }}>
+          <Tabs.TabPane tab='Movimientos' key='movimientos' />
+          <Tabs.TabPane tab='Por reaseguradores' key='reaseguradores' />
+        </Tabs>
 
         <div className='bm-grid' ref={ cajaRef }>
           { cargando
             ? <Skeleton active />
-            : (!data
+            : (!datosActivos
                 ? <Empty description='Presione Filtrar, defina el período y el ramo, y presione Buscar.' />
                 : (filas.length === 0
                     ? <Empty description='Sin movimientos de reaseguro en el período y ramo seleccionados.' />
-                    : <Table size='small' rowKey={ claveMovimiento } dataSource={ filas }
-                        columns={ columnas } pagination={ false }
-                        scroll={{ x: ANCHO_TOTAL, y: alto }}
+                    : <Table size='small' rowKey={ tabActiva === 'reaseguradores' ? 'id' : claveMovimiento } dataSource={ filas }
+                        columns={ columnasActivas } pagination={ false }
+                        scroll={{ x: anchoActivo, y: alto }}
                         rowClassName={ function(r){ return claveMovimiento(r) === seleccion ? 'bm-row-selected' : ''; } }
                         onRow={ function(r){ return { onClick: function(){ setSeleccion(claveMovimiento(r)); } }; } } />
                   )
@@ -505,12 +551,12 @@
         { /* CA-06 / CA-07 — 50 por página por defecto, resueltos en servidor. El paginador
              va aparte a propósito: si se le entrega a la grilla, antd vuelve a recortar en
              memoria las 50 filas de la página y la página 2 sale vacía. */ }
-        { data && filas.length > 0
+        { datosActivos && filas.length > 0
           ? <div className='bm-pager'>
-              <Pagination current={ page } pageSize={ size } total={ num(data.total) }
+              <Pagination current={ page } pageSize={ size } total={ num(datosActivos.total) }
                 showSizeChanger pageSizeOptions={ ['20','50','100','200'] } disabled={ cargando }
-                showTotal={ function(tot){ return tot + ' movimientos · ' + num(data.polizas) + ' pólizas'; } }
-                onChange={ function(p, s){ consultar(s !== size ? 1 : p, s, criterio); } } />
+                showTotal={ function(tot){ return tot + ' movimientos · ' + num(datosActivos.polizas) + ' pólizas'; } }
+                onChange={ function(p, s){ consultar(s !== size ? 1 : p, s, criterioActivo); } } />
             </div>
           : null }
 

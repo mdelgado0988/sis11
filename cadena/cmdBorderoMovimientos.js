@@ -74,7 +74,7 @@ base = base.replace(
 );
 base = base.replace(
   "ch.Discriminator AS chTipo,",
-  "CASE WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'PROCEEDORDER' THEN 'ProceedOrder' WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' THEN 'ChangeCoverageSurety' ELSE ch.Discriminator END AS chTipo,"
+  "CASE WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_INSURED_SUM_SURETY' THEN 'CHANGE_INSURED_SUM_SURETY' WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'PROCEEDORDER' THEN 'ProceedOrder' WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' THEN 'ChangeCoverageSurety' ELSE ch.Discriminator END AS chTipo,"
 );
 tPage = tPage.replace(
   "r.esCancelacion=1 OR r.premiumType='CANCELLATION'",
