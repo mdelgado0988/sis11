@@ -2576,6 +2576,80 @@
   }
 
   function renderSelectedLines(contract, mode) {
+    if (mode === 'movementDistribution') {
+      const rows = getDistributionRows(contract).map(function (row) {
+        const group = (contract.groups || []).find(function (item) {
+          return String(item.contractId) + '-' + String(item.lineId) === row.groupKey;
+        });
+        const movement = (group && group.rows || []).reduce(function (total, item) {
+          // Solo las coberturas que suman participan en la suma del contrato.
+          if (item.counts) total.sum += numberFrom(item, ['sumInsuredMovement']);
+          total.premium += numberFrom(item, ['premiumMovement']);
+          return total;
+        }, { sum: 0, premium: 0 });
+        const factor = Number(row.percentage || 0) / 100;
+        const premium = money(movement.premium * factor);
+        const sum = money(movement.sum * factor);
+        const commissionRate = Number(row.premium || 0) ? Number(row.commission || 0) / Number(row.premium || 0) : 0;
+        const taxRate = Number(row.premium || 0) ? Number(row.tax || 0) / Number(row.premium || 0) : 0;
+        return Object.assign({}, row, {
+          movementGroup: group,
+          sum: sum,
+          premium: premium,
+          commission: money(premium * commissionRate),
+          tax: money(premium * taxRate),
+          reinsuranceBalance: money(premium - (premium * commissionRate) - (premium * taxRate)),
+          // Retención y No Técnica no tienen aceptantes que consultar.
+          canViewReinsurers: !row.isRetention && row.contractLabel !== 'No Técnica'
+        });
+      });
+      const selected = rows.find(function (row) {
+        return row.canViewReinsurers && row.groupKey === selectedReinsuranceLineKey;
+      }) || rows.find(function (row) { return row.canViewReinsurers; });
+      const participants = selected && selected.movementGroup ? getLineParticipants(selected.movementGroup).map(function (item) {
+        const factor = Number(item.split || 0) / 100;
+        return Object.assign({}, item, {
+          sumInsured: money(Number(selected.sum || 0) * factor),
+          premium: money(Number(selected.premium || 0) * factor),
+          commission: money(Number(selected.commission || 0) * factor),
+          tax: money(Number(selected.tax || 0) * factor)
+        });
+      }) : [];
+      const readonlyColumns = colsDistribution.map(function (column) {
+        if (column.dataIndex === 'contractLabel') {
+          return Object.assign({}, column, { render: function (v, row) {
+            return <span className="axx-rea-line-label"><span>{v}</span>{row.canViewReinsurers ? <Button type="text" size="small" className="axx-folder-btn"
+              aria-label={t('Ver reaseguradores')} title={t('Ver reaseguradores')}
+              onClick={function (event) { event.stopPropagation(); setSelectedReinsuranceLineKey(row.groupKey); }}><FolderIcon /></Button> : null}</span>;
+          } });
+        }
+        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
+        if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax' || column.dataIndex === 'reinsuranceBalance') return Object.assign({}, column, { render: function (v) { return fmt(v); } });
+        if (column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
+        return column;
+      });
+      return <div className="axx-rea-line-detail">
+        <Alert type="info" showIcon message={t('Distribución del Movimiento')} description={t('Valores informativos calculados únicamente sobre la porción cambiada por el endoso.')} />
+        <Table size="small" pagination={false} rowKey="key" scroll={{ x: 1250 }} dataSource={rows} columns={readonlyColumns}
+          summary={function (pageData) {
+            const total = function (field) { return money(pageData.reduce(function (sum, row) { return sum + Number(row[field] || 0); }, 0)); };
+            return <Table.Summary><Table.Summary.Row className="axx-rea-total-row">
+              <Table.Summary.Cell index={0}><b>{t('Totales')}</b></Table.Summary.Cell>
+              <Table.Summary.Cell index={1} align="right">{total('percentage').toFixed(4)}</Table.Summary.Cell>
+              <Table.Summary.Cell index={2} align="right">{fmt(total('sum'))}</Table.Summary.Cell>
+              <Table.Summary.Cell index={3} align="right">{fmt(total('premium'))}</Table.Summary.Cell>
+              <Table.Summary.Cell index={4}></Table.Summary.Cell>
+              <Table.Summary.Cell index={5} align="right">{fmt(total('commission'))}</Table.Summary.Cell>
+              <Table.Summary.Cell index={6}></Table.Summary.Cell>
+              <Table.Summary.Cell index={7} align="right">{fmt(total('tax'))}</Table.Summary.Cell>
+              <Table.Summary.Cell index={8} align="right">{fmt(total('reinsuranceBalance'))}</Table.Summary.Cell>
+            </Table.Summary.Row></Table.Summary>;
+          }} />
+        {selected ? <div className="axx-coverage-participants axx-movement-participants"><div className="axx-coverage-participants-title">{t('Aceptantes de la línea')}</div>
+          <Table size="small" pagination={false} rowKey={function (item, index) { return String(item.contactId || '') + '-' + String(item.brokerId || '') + '-' + index; }} dataSource={participants} columns={colsCoberturaAceptantes} />
+        </div> : null}
+      </div>;
+    }
     if (mode === 'distribution') {
       return <Table size="small" pagination={false} rowKey="key" scroll={{ x: 1250 }}
         dataSource={getDistributionRows(contract)} columns={colsDistribution}
@@ -2720,6 +2794,8 @@
 .axx299 .axx-folder-btn:hover { color:#0958d9; background:#e6f4ff; }
 .axx299 .axx-rea-detail-tabs .ant-input-number-input { text-align:right !important; }
 .axx299 .axx-coverage-participants { margin:0 8px 4px 24px; padding:6px; background:#f7f9fb; border:1px solid #d9e2ec; }
+.axx299 .axx-movement-participants { margin:0; padding:0; border:none; background:transparent; }
+.axx299 .axx-movement-participants .axx-coverage-participants-title { margin:4px 0; }
 .axx299 .axx-coverage-participants-title { margin-bottom:4px; color:#334155; font-weight:600; font-size:12px; }
 .axx299 .axx-coverage-participants .ant-table-wrapper { border:1px solid #d9e2ec; }
 .axx299 .axx-rea-actions { display:flex; align-items:center; gap:8px; padding:6px 8px; margin-bottom:6px; background:#e6f4ff; border:1px solid #91caff; border-radius:4px; color:#334155; font-size:12px; }
@@ -2862,7 +2938,7 @@
               )
             },
             {
-              key: 'rea', label: t('Reaseguro del movimiento'), children: (
+              key: 'rea', label: t('Reinsurance'), children: (
                 <div className="axx-panel">
                   <Card bordered={false}>
                     <Alert type="info" showIcon
@@ -2883,6 +2959,9 @@
                           {contractRows.filter(function (row) { return row.key === selectedReinsuranceKey; }).map(function (contract) {
                             return (
                               <Tabs className="axx-rea-detail-tabs" type="card" activeKey={reaDetailTab} onChange={setReaDetailTab}>
+                                <Tabs.TabPane tab={t('Distribución del Movimiento')} key="movementDistribution">
+                                  {renderSelectedLines(contract, 'movementDistribution')}
+                                </Tabs.TabPane>
                                 <Tabs.TabPane tab={t('Distribucion')} key="distribution">
                                   <div className="axx-rea-actions">
                                     <Button type="primary" onClick={guardarDistribucionMemoria}>{t('Guardar')}</Button>

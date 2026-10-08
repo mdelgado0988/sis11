@@ -2448,6 +2448,59 @@
       return reinsuranceMoney(row.isCoinsurance ? 0 : Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0));
     } }
   ];
+  const movementReinsuranceParticipantColumns = [
+    { title: t('Reinsurer'), dataIndex: 'contactId', align: 'left', render: (value, row) => (reinsuranceContacts.find((item) => String(item.id) === String(value)) || {}).name || row.contactName || row.name || '-' },
+    { title: t('Broker'), dataIndex: 'brokerId', align: 'left', render: (value, row) => (reinsuranceBrokers.find((item) => String(item.id) === String(value)) || {}).name || row.brokerName || '-' },
+    { title: t('Split (%)'), dataIndex: 'split', align: 'right', render: (value) => Number(value || 0).toFixed(4) + '%' },
+    { title: t('Sum'), dataIndex: 'sumInsured', align: 'right', render: reinsuranceMoney },
+    { title: t('Premium'), dataIndex: 'premium', align: 'right', render: reinsuranceMoney },
+    { title: t('Commission'), dataIndex: 'commission', align: 'right', render: reinsuranceMoney },
+    { title: t('Tax'), dataIndex: 'tax', align: 'right', render: reinsuranceMoney }
+  ];
+  const renderMovementDistributionTab = (group) => {
+    const movement = (group && group.rows || []).reduce((total, row) => ({
+      sum: total.sum + reinsuranceNumber(row.sumInsuredMovement),
+      premium: total.premium + reinsuranceNumber(row.premiumMovement)
+    }), { sum: 0, premium: 0 });
+    const rows = selectedReinsuranceLines.map((line) => {
+      const factor = reinsuranceNumber(line.percentage) / 100;
+      const premium = moneyValue(movement.premium * factor);
+      const sum = moneyValue(movement.sum * factor);
+      const commissionRate = reinsuranceNumber(line.premium) ? reinsuranceNumber(line.commission) / reinsuranceNumber(line.premium) : 0;
+      const taxRate = reinsuranceNumber(line.premium) ? reinsuranceNumber(line.tax) / reinsuranceNumber(line.premium) : 0;
+      return Object.assign({}, line, {
+        sum,
+        premium,
+        commission: moneyValue(premium * commissionRate),
+        tax: moneyValue(premium * taxRate)
+      });
+    });
+    const selected = rows.find((row) => row.key === reinsuranceLineKey) || rows[0];
+    const participants = selected
+      ? groupReinsuranceParticipants((reinsuranceSnapshot && reinsuranceSnapshot.participants || []).filter((item) => String(item.contractId) === String(selected.contractId) && String(item.lineId || '') === String(selected.lineId || ''))).map((item) => {
+        const factor = reinsuranceNumber(item.split) / 100;
+        return Object.assign({}, item, {
+          sumInsured: moneyValue(reinsuranceNumber(selected.sum) * factor),
+          premium: moneyValue(reinsuranceNumber(selected.premium) * factor),
+          commission: moneyValue(reinsuranceNumber(selected.commission) * factor),
+          tax: moneyValue(reinsuranceNumber(selected.tax) * factor)
+        });
+      })
+      : [];
+    const columns = reinsuranceLineColumns.map((column) => {
+      if (column.dataIndex === 'lineId') return Object.assign({}, column, { render: (value, row) => <span>{value}<Button type="link" size="small" className="proceed-order-folder-button" title={t('View reinsurers')} onClick={(event) => { event.stopPropagation(); setReinsuranceLineKey(row.key); }}><ProceedFolderIcon /></Button></span> });
+      if (column.dataIndex === 'percentage' || column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: (value) => Number(value || 0).toFixed(4) });
+      if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax') return Object.assign({}, column, { render: reinsuranceMoney });
+      if (column.key === 'balance') return Object.assign({}, column, { render: (value, row) => reinsuranceMoney(Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0)) });
+      return column;
+    });
+    return <>
+      <Alert type="info" showIcon message={t('Distribución del Movimiento')} description={t('Valores informativos calculados únicamente sobre la porción cambiada por el endoso.')} />
+      <Table size="small" pagination={false} rowKey="key" dataSource={rows} columns={columns} scroll={{ x: 1490 }} />
+      {selected ? <div className="proceed-order-reinsurance-toolbar"><span>{t('Reinsurers')} - {selected.lineId}</span></div> : null}
+      {selected ? <Table size="small" pagination={false} rowKey={(row, index) => String(row.contactId || '') + '|' + String(row.brokerId || '') + '|' + index} dataSource={participants} columns={movementReinsuranceParticipantColumns} locale={{ emptyText: t('No reinsurers found.') }} /> : null}
+    </>;
+  };
   const renderReinsurancePanel = () => {
     const validation = validateProceedReinsurance();
     const selectedGroup = reinsuranceContractRows.find((group) => group.key === reinsuranceContractKey) || reinsuranceContractRows[0];
@@ -2512,6 +2565,9 @@
               />
               {selectedGroup ? (
                 <Tabs className="proceed-order-reinsurance-detail-tabs" type="card" activeKey={reinsuranceDetailTab} onChange={setReinsuranceDetailTab}>
+                  <TabPane tab={t('Distribución del Movimiento')} key="movementDistribution">
+                    {renderMovementDistributionTab(selectedGroup)}
+                  </TabPane>
                   <TabPane tab={t('Distribution')} key="distribution">
                     <div className="proceed-order-reinsurance-toolbar"><Button type="primary" onClick={saveReinsuranceDistributionInMemory}>{t('Save')}</Button><span>{t('Reinsurance distribution')}</span></div>
                     <Table size="small" pagination={false} rowKey="key" dataSource={selectedReinsuranceLines} columns={reinsuranceLineColumns} scroll={{ x: 1490 }}
