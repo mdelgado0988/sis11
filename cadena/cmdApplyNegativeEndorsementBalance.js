@@ -142,7 +142,7 @@ try {
                 WHERE accountId = ${Number(policyAccount.id)}
                   AND [transaction] = 'Reduction'
                   AND transactionCode = 'TRANSIT'
-                  AND amount = ${sqlMoney(saldo)}
+                  AND amount = ${sqlMoney(amount)}
                 ORDER BY id DESC
             `
         }
@@ -186,7 +186,7 @@ try {
                         )
                         VALUES
                         (
-                            ${sqlMoney(saldo)},
+                            ${sqlMoney(amount)},
                             '${escapeSql(currency)}',
                             'Saldo negativo endoso ${changeId}',
                             NULL,
@@ -230,7 +230,7 @@ try {
                             0,
                             0,
                             'Reduction',
-                            ${sqlMoney(saldo)},
+                            ${sqlMoney(amount)},
                             0,
                             0,
                             @TransferId,

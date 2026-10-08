@@ -14,7 +14,8 @@
  *   accountName?: string,
  *   currency?: string,
  *   policy?: string|number,
- *   holderId?: number
+ *   holderId?: number,
+ *   includeAllTypes?: boolean
  * }
  */
 
@@ -106,12 +107,13 @@ function normalizeInput(source) {
     currency: normalizeText(value.currency).toUpperCase(),
     policy: normalizeText(value.policy),
     holderId: toPositiveInteger(value.holderId),
-    onlyWithBalance: value.showAll !== true && value.onlyWithBalance !== false
+    onlyWithBalance: value.showAll !== true && value.onlyWithBalance !== false,
+    includeAllTypes: value.includeAllTypes === true
   };
 }
 
 function buildFilter(input) {
-  const conditions = ["a.[type] = 'TRANSIT'"];
+  const conditions = [input.includeAllTypes ? '1 = 1' : "a.[type] = 'TRANSIT'"];
 
   if (input.onlyWithBalance) {
     conditions.push(`ROUND((

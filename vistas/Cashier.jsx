@@ -298,6 +298,9 @@
   const [refundMoneyVisible, setRefundMoneyVisible] = React.useState(false);
   const [refundMoneySubmitting, setRefundMoneySubmitting] = React.useState(false);
   const [refundMoneyForm] = Form.useForm();
+  const [refundAccountCreateVisible, setRefundAccountCreateVisible] = React.useState(false);
+  const [refundAccountCreateLoading, setRefundAccountCreateLoading] = React.useState(false);
+  const [refundAccountCreateForm] = Form.useForm();
   const [accountTransferVisible, setAccountTransferVisible] = React.useState(false);
   const [accountTransferForm] = Form.useForm();
   const accountTransferAmount = Form.useWatch('amount', accountTransferForm);
@@ -2707,10 +2710,18 @@
         )
       }
       : null;
-    const selectedPolicyId = Number(selectedAccount.lifePolicyId || selectedAccount.policyId);
-    const needsManualDestination = !Number.isFinite(selectedPolicyId) || selectedPolicyId <= 0;
+    // A refund must always identify the beneficiary's destination account.
+    // For the policy holder, its policy account is the initial destination.
+    const needsManualDestination = true;
+    const isPolicyBeneficiary = Number.isFinite(beneficiaryId)
+      && beneficiaryId > 0
+      && beneficiaryId === Number(selectedAccount.holderId || selectedAccount.contactId)
+      && Number(selectedAccount.lifePolicyId || selectedAccount.policyId) > 0;
+    const defaultDestinationOption = isPolicyBeneficiary
+      ? mapTransitAccountOptions([selectedAccount])[0]
+      : null;
     setRefundNeedsManualDestination(needsManualDestination);
-    setRefundDestinationAccountOptions([]);
+    setRefundDestinationAccountOptions(defaultDestinationOption ? [defaultDestinationOption] : []);
     setRefundBeneficiaryOptions(defaultBeneficiaryOption ? [defaultBeneficiaryOption] : []);
     refundMoneyForm.setFieldsValue({
       currency: currency,
@@ -2719,12 +2730,131 @@
       amount: Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount))),
       paymentMethod: undefined,
       beneficiary: defaultBeneficiaryOption ? beneficiaryId : undefined,
-      accountId: undefined,
+      accountId: defaultDestinationOption ? defaultDestinationOption.value : undefined,
       reference: ''
     });
     setRefundMoneyVisible(true);
     if (needsManualDestination && defaultBeneficiaryOption) {
       loadRefundDestinationAccounts('');
+    }
+  }
+
+  function requiresManualRefundDestination(beneficiaryId, account) {
+    const selectedBeneficiaryId = Number(beneficiaryId);
+    const policyId = Number(account && (account.lifePolicyId || account.policyId));
+    const holderId = Number(account && (account.holderId || account.contactId));
+    return !Number.isFinite(policyId) || policyId <= 0
+      || !Number.isFinite(holderId) || holderId <= 0
+      || selectedBeneficiaryId !== holderId;
+  }
+
+  function openRefundAccountCreateModal() {
+    const beneficiaryId = Number(refundMoneyForm.getFieldValue('beneficiary'));
+    const currency = getTrimmedString(refundMoneyForm.getFieldValue('currency')).toUpperCase();
+    if (!Number.isFinite(beneficiaryId) || beneficiaryId <= 0) {
+      message.warning(t('Select a beneficiary before creating a destination account.'));
+      return;
+    }
+
+    refundAccountCreateForm.setFieldsValue({
+      name: '',
+      currency: currency || undefined
+    });
+    setRefundAccountCreateVisible(true);
+  }
+
+  async function submitRefundAccountCreate(values) {
+    const beneficiaryId = Number(refundMoneyForm.getFieldValue('beneficiary'));
+    const name = getTrimmedString(values && values.name);
+    const currency = getTrimmedString(values && values.currency).toUpperCase();
+    if (!Number.isFinite(beneficiaryId) || beneficiaryId <= 0) {
+      message.error(t('The beneficiary is invalid.'));
+      return;
+    }
+
+    if (!name || !currency) return;
+
+    setRefundAccountCreateLoading(true);
+    try {
+      const suffix = String(Date.now()).slice(-8);
+      const accountNo = `DEV${beneficiaryId}-${suffix}`;
+      const response = await exe('RepoAccount', {
+        operation: 'ADD',
+        entity: {
+          id: 0,
+          holderId: beneficiaryId,
+          lifePolicyId: null,
+          accNo: accountNo,
+          type: 'TRANSIT',
+          currency: currency,
+          investmentPlanCode: null,
+          name: name,
+          contractId: null,
+          code: 'REFUND',
+          bankAccountOpenDate: null,
+          bankAccountType: null,
+          bankCode: null,
+          openingAmount: 0,
+          iban: null,
+          branchCode: null,
+          catalogAccountCode: null,
+          creditId: null,
+          pensionSchemeId: null,
+          checkBookCode: null,
+          fundId: null,
+          pensionAccountType: null,
+          pensionMemberId: null
+        }
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The destination account could not be created.'));
+      }
+
+      let createdAccount = getRows(response)[0]
+        || (response.outData && !Array.isArray(response.outData) ? response.outData : null);
+      let accountId = Number(createdAccount && (createdAccount.id || createdAccount.accountId));
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        const lookupResponse = await exe('RepoAccount', {
+          operation: 'GET',
+          filter: `holderId = ${beneficiaryId} AND accNo = '${escapeSqlString(accountNo)}'`,
+          size: 1,
+          page: 0
+        });
+        if (!lookupResponse || lookupResponse.ok === false) {
+          throw new Error(lookupResponse && lookupResponse.msg
+            ? lookupResponse.msg
+            : t('The destination account could not be recovered after it was created.'));
+        }
+        createdAccount = getRows(lookupResponse)[0] || null;
+        accountId = Number(createdAccount && (createdAccount.id || createdAccount.accountId));
+      }
+      if (!Number.isFinite(accountId) || accountId <= 0) {
+        throw new Error(t('The destination account was created, but its identifier could not be identified.'));
+      }
+
+      const account = {
+        ...createdAccount,
+        id: accountId,
+        holderId: beneficiaryId,
+        name: getTrimmedString(createdAccount && createdAccount.name) || name,
+        accNo: getTrimmedString(createdAccount && createdAccount.accNo) || accountNo,
+        type: getTrimmedString(createdAccount && createdAccount.type) || 'TRANSIT',
+        currency: getTrimmedString(createdAccount && createdAccount.currency) || currency
+      };
+      const option = mapTransitAccountOptions([account])[0];
+      if (option) {
+        setRefundDestinationAccountOptions(current => [option].concat(
+          current.filter(item => Number(item && item.value) !== accountId)
+        ));
+      }
+      refundMoneyForm.setFieldsValue({ accountId: accountId });
+      setRefundAccountCreateVisible(false);
+      refundAccountCreateForm.resetFields();
+      message.success(t('Destination account created successfully.'));
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setRefundAccountCreateLoading(false);
     }
   }
 
@@ -2769,6 +2899,8 @@
     setRefundDestinationAccountOptions([]);
     setRefundDestinationAccountLoading(false);
     setRefundNeedsManualDestination(false);
+    setRefundAccountCreateVisible(false);
+    refundAccountCreateForm.resetFields();
     refundMoneyForm.resetFields();
   }
 
@@ -2924,8 +3056,10 @@
       return;
     }
 
+    const manualDestinationRequired = refundNeedsManualDestination
+      || requiresManualRefundDestination(contactId, selectedAccount);
     const manualDestinationAccountId = Number(values && values.accountId);
-    if (lifePolicyId === null
+    if (manualDestinationRequired
       && (!Number.isFinite(manualDestinationAccountId) || manualDestinationAccountId <= 0)) {
       message.error(t('Select a destination account.'));
       return;
@@ -2933,7 +3067,9 @@
 
     setRefundMoneySubmitting(true);
     try {
-      const requestCommand = lifePolicyId !== null ? 'DoPaymentRequest' : 'DoManualPaymentRequest';
+      const requestCommand = !manualDestinationRequired && lifePolicyId !== null
+        ? 'DoPaymentRequest'
+        : 'DoManualPaymentRequest';
       const requestPayload = {
         contactId: contactId,
         currency: getTrimmedString(values && values.currency),
@@ -2956,7 +3092,7 @@
         CostCenters: null
       };
 
-      if (lifePolicyId !== null) {
+      if (requestCommand === 'DoPaymentRequest') {
         requestPayload.lifePolicyId = lifePolicyId;
       } else {
         requestPayload.accountId = manualDestinationAccountId;
@@ -2984,7 +3120,13 @@
         throw new Error(t('The refund request was created, but its identifier could not be identified.'));
       }
 
-      await createRefundTransfer(values, selectedAccount, lifePolicyId, total, requestId);
+      await createRefundTransfer(
+        values,
+        selectedAccount,
+        requestCommand === 'DoPaymentRequest' ? lifePolicyId : null,
+        total,
+        requestId
+      );
 
       message.success(response.msg || t('Refund request and transfer created successfully.'));
       closeRefundMoneyModal();
@@ -3964,6 +4106,7 @@
         policy: source.policy || '',
         holderId: Number.isFinite(contactId) && contactId > 0 ? contactId : 0,
         currency: transferCurrency || undefined,
+        includeAllTypes: isRefundAccountSearch,
         showAll: true
       })
     })
@@ -4046,6 +4189,7 @@
           policy: '',
           holderId: beneficiaryId,
           currency: currency,
+          includeAllTypes: true,
           showAll: true
         })
       })
@@ -10349,7 +10493,9 @@
                 onChange={value => {
                   refundMoneyForm.setFieldsValue({ accountId: undefined });
                   setRefundDestinationAccountOptions([]);
-                  if (value && refundNeedsManualDestination) {
+                  const needsManualDestination = true;
+                  setRefundNeedsManualDestination(needsManualDestination);
+                  if (value && needsManualDestination) {
                     loadRefundDestinationAccounts('');
                   }
                 }}
@@ -10391,6 +10537,16 @@
                     style={{ width: 40 }}
                   />
                 </Input.Group>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<NewIcon />}
+                  disabled={!refundMoneyForm.getFieldValue('beneficiary')}
+                  onClick={openRefundAccountCreateModal}
+                  style={{ marginTop: 6, paddingLeft: 0 }}
+                >
+                  {t('Create destination account')}
+                </Button>
               </Form.Item>
             )}
 
@@ -10411,6 +10567,37 @@
                   </Tooltip>
                 )}
               />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={t('Create destination account')}
+          open={refundAccountCreateVisible}
+          onCancel={() => {
+            setRefundAccountCreateVisible(false);
+            refundAccountCreateForm.resetFields();
+          }}
+          onOk={() => refundAccountCreateForm.submit()}
+          confirmLoading={refundAccountCreateLoading}
+          okText={t('Create')}
+          cancelText={t('Cancel')}
+          destroyOnClose={false}
+        >
+          <Form form={refundAccountCreateForm} layout="vertical" onFinish={submitRefundAccountCreate}>
+            <Form.Item
+              label={t('Account name')}
+              name="name"
+              rules={[{ required: true, message: t('Enter the account name.') }]}
+            >
+              <Input autoFocus maxLength={120} />
+            </Form.Item>
+            <Form.Item
+              label={t('Currency')}
+              name="currency"
+              rules={[{ required: true, message: t('Select a currency.') }]}
+            >
+              <Select options={currencyOptions} placeholder={t('Currency')} />
             </Form.Item>
           </Form>
         </Modal>
