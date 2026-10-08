@@ -13,6 +13,7 @@
 
 const policyId = context.policyId;
 let policy;
+let product;
 let holder;
 let resultado = {};
 let oaUserData;
@@ -87,6 +88,11 @@ const monedaMonto = resultado.Moneda;
 const sumaMonto = n(policy?.insuredSum ?? 0);
 const sumaEnLetras = resultado.SumaLetras;
 const vigenciaDocumento = obtenerTextoVigencia(resultado.DiasVigencia, oaUserData?.tipo_calendario);
+const diasVigenciaPrincipal = obtenerDiasVigenciaCoberturaBasica();
+const vigenciaPrincipalDocumento = obtenerTextoVigencia(
+  diasVigenciaPrincipal,
+  oaUserData?.tipo_calendario ?? oaUserData?.tipo_vigencia
+);
 resultado.DesdeTexto = `${diaIni} DE ${String(mesIni).toUpperCase()} DEL ${anioIni}`;
 resultado.HastaTexto = `${diaFin} DE ${String(mesFin).toUpperCase()} DEL ${anioFin}`;
 const partesHasta2 = partesFechaPanama(sumarDiasUTC(dateFin, 30)) || { dia: "", mes: 1, anio: "" };
@@ -100,6 +106,7 @@ resultado.FechaFinVicioTexto = partesFinVicio
 resultado.DiasVigenciaTexto = `${vigenciaDocumento.texto} A PARTIR DEL ${resultado.DesdeTexto}`;
 resultado.VigenciaTexto = vigenciaDocumento.texto;
 resultado.VigenciaTexto2 = vigenciaDocumento.textoTitulo;
+resultado.VigenciaPrincipalTexto = vigenciaPrincipalDocumento.texto;
 resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
 resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
 resultado.Prestamo = "";
@@ -167,6 +174,15 @@ function setPolicy() {
   policy = RepoLifePolicy.outData?.[0];
   if(!policy)
     throw new Error(`No se pudo recuperar la póliza: ${RepoLifePolicy.msg}`);
+
+  doCmd({
+    cmd: "RepoProduct",
+    data: {
+      operation: "GET",
+      filter: `code = '${escapeSql(policy.productCode ?? "")}'`
+    }
+  });
+  product = RepoProduct.outData?.[0] ?? null;
 }
 
 function setHolder() {
@@ -422,16 +438,57 @@ function obtenerDiasVigenciaDocumento() {
     : vigenciaPoliza;
 }
 
+function obtenerDiasVigenciaCoberturaBasica() {
+  const vigenciaPoliza = calcularDiasEntre(policy?.start, policy?.end);
+  const coverages = Array.isArray(policy?.Coverages) ? policy.Coverages : [];
+  if (!coverages.length) return vigenciaPoliza;
+
+  const productConfig = leerConfiguracionProducto(product);
+  const configRows = Array.isArray(productConfig?.Coverages)
+    ? productConfig.Coverages
+    : Array.isArray(productConfig?.coverages)
+      ? productConfig.coverages
+      : [];
+
+  const getCoverageCode = row => String(row?.coverageCode ?? row?.code ?? "").trim().toUpperCase();
+  const isBasic = value => {
+    const normalized = String(value ?? "").trim().toUpperCase();
+    return value === true || Number(value) === 1 || normalized === "TRUE" || normalized === "SI" || normalized === "SÍ";
+  };
+  const basicCoverage = coverages.find(coverage => {
+    const config = configRows.find(row => getCoverageCode(row) === String(coverage?.code ?? "").trim().toUpperCase());
+    return config && isBasic(config.basic);
+  });
+
+  return basicCoverage
+    ? calcularDiasEntre(basicCoverage.start, basicCoverage.end)
+    : vigenciaPoliza;
+}
+
+function leerConfiguracionProducto(productRow) {
+  if (!productRow) return null;
+  if (typeof productRow.configJson === "object" && productRow.configJson !== null) return productRow.configJson;
+  if (typeof productRow.configJson === "string" && productRow.configJson.trim() !== "") {
+    try {
+      return JSON.parse(productRow.configJson);
+    } catch (_) {
+      return null;
+    }
+  }
+  return productRow;
+}
+
 function obtenerTextoVigencia(diasVigencia, tipoCalendario) {
   const dias = Number(diasVigencia || 0);
   const tipo = String(Array.isArray(tipoCalendario) ? tipoCalendario[0] : tipoCalendario || '').trim();
+  const tipoNormalizado = tipo.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   let periodo = Math.round(dias);
   let unidad = 'DÍAS';
 
-  if (tipo === '2') {
+  if (tipo === '2' || tipoNormalizado === 'MES' || tipoNormalizado === 'MESES') {
     periodo = Math.round(dias / 30);
     unidad = periodo === 1 ? 'MES' : 'MESES';
-  } else if (tipo === '3') {
+  } else if (tipo === '3' || tipoNormalizado === 'ANO' || tipoNormalizado === 'ANOS' || tipoNormalizado === 'AÑO' || tipoNormalizado === 'AÑOS') {
     periodo = Math.round(dias / 365);
     unidad = periodo === 1 ? 'AÑO' : 'AÑOS';
   } else {

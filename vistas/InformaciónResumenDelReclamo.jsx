@@ -1163,9 +1163,7 @@
     setReserveSaving(true);
     setReserveError('');
     const operationClaim = currentClaimRef.current;
-    const validateObjects = commandName === 'RepoLifeCoveragePayout' && payload.operation === 'ADD'
-      ? readFinancialObjects(operationClaim, payload.entity.lifeCoverageId) : Promise.resolve();
-    return validateObjects.then(() => {
+    return Promise.resolve().then(() => {
       if (!affectedCurrent(operationClaim) || reserveOperationRef.current !== operationId) throw new Error('El siniestro cambió. Recargue la información.');
       return repositoryRequest(commandName, payload);
     }).then((result) => {
@@ -1214,18 +1212,7 @@
       setReserveError(caughtError && caughtError.message ? caughtError.message : 'La reserva no es válida.');
       return Promise.resolve(false);
     }
-    const selectedObjectId = financialObjects.selectedId;
-    return readFinancialObjects(claim, entity.lifeCoverageId).then((objects) => {
-      const selected = objects.find((row) => row.key === selectedObjectId);
-      if (financialObjects.claim !== claim || financialObjects.coverageId !== Number(entity.lifeCoverageId) || !selected) {
-        throw new Error('Seleccione un objeto afectado de esta cobertura antes de registrar la reserva.');
-      }
-      entity.jAffectedObjects = JSON.stringify(selected);
-      return runReserveOperation('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity }, 'Reserva registrada');
-    }).catch((caughtError) => {
-      setReserveError(caughtError && caughtError.message ? caughtError.message : 'La reserva no es válida.');
-      return false;
-    });
+    return runReserveOperation('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity }, 'Reserva registrada');
   };
 
   const submitReserveMovement = () => createReserveMovement(
@@ -2682,6 +2669,11 @@ END CATCH;`;
   };
   const selectFinancialCoverage = (coverageId) => {
     setPaymentCoverageId(coverageId);
+    const claim = currentClaimRef.current;
+    if (String(claim && claim.Policy && claim.Policy.lob || '').trim() === '20') {
+      const available = paymentSpendingAvailable(claim, coverageId, 'IN');
+      setPaymentAmount(Number.isFinite(available) && available > 0 ? String(available) : '');
+    }
     return loadFinancialObjects(coverageId);
   };
   const selectExpenseFinancialCoverage = (coverageId) => {
@@ -7684,7 +7676,6 @@ END CATCH;`;
                   disabled={!editable || reserveSaving || !selectedCoverage}
                   onClick={() => {
                     setReserveError('');
-                    loadFinancialObjects(selectedCoverage.id);
                     setReserveModalOpen(true);
                   }}>Registrar reserva</Button>
                 <Popconfirm
@@ -7724,16 +7715,6 @@ END CATCH;`;
                   value={reserveType} options={[
                     { value: 'IN', label: 'Reserva para pago' }, { value: 'EX', label: 'Reserva para gasto' }
                   ]} onChange={setReserveType} /></div>
-                <div className="resumen-reserve-input"><label>Objeto afectado *</label><Select size="small"
-                  aria-label="Objeto afectado" aria-required="true" allowClear loading={financialObjects.loading}
-                  disabled={!editable || reserveSaving || financialObjects.loading || !selectedCoverage}
-                  value={financialObjects.selectedId == null ? undefined : financialObjects.selectedId}
-                  placeholder="Seleccione un objeto afectado"
-                  options={financialObjects.claim === currentClaimRef.current && financialObjects.coverageId === Number(selectedCoverageId)
-                    ? financialObjects.rows.map((object) => ({ value: object.key, label: financialObjectLabel(object) })) : []}
-                  onChange={(value) => { financialObjects.selectedId = value == null ? null : String(value); notifyFinancialObjects(); }} />
-                  {financialObjects.error ? <div role="alert" className="resumen-reserve-error">{financialObjects.error}</div> : null}
-                </div>
                 <div className="resumen-reserve-input"><label>Monto</label><Input size="small" inputMode="decimal"
                   disabled={!editable || reserveSaving || !selectedCoverage}
                   value={formatMoneyInput(reserveAmount)} onChange={(event) => changeMoneyInput(event, setReserveAmount)} /></div>
@@ -7745,7 +7726,7 @@ END CATCH;`;
                   <Button size="small" disabled={reserveSaving}
                     onClick={() => setReserveModalOpen(false)}>Cancelar</Button>
                   <Button size="small" type="primary" loading={reserveSaving}
-                    disabled={!editable || reserveSaving || !selectedCoverage || financialObjects.loading || !!financialObjects.error || !financialObjects.selectedId}
+                    disabled={!editable || reserveSaving || !selectedCoverage}
                     onClick={submitReserveMovement}>Registrar</Button>
                 </div>
               </div>

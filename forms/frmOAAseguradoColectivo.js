@@ -409,6 +409,13 @@ var me = this;
       .addClass('oa-solo-lectura');
   }
 
+  function deshabilitarAutocompletado($form) {
+    $form.attr('autocomplete', 'off');
+    $form.find('input, select, textarea')
+      .attr('autocomplete', 'off')
+      .attr('data-lpignore', 'true');
+  }
+
   //////////////////////////////////////////////
   // Eventos (delegados: sobreviven al redibujado)
   //////////////////////////////////////////////
@@ -458,6 +465,7 @@ var me = this;
     const listas = await Promise.all(claves.map(k => CATALOGOS[k]()));
     $forms.each(function () {
       const $form = $(this).addClass('frm-oa-colectivo');
+      deshabilitarAutocompletado($form);
       montarBusqueda($form);
       bloquearIdentificadores($form);
       bloquearCalculados($form);

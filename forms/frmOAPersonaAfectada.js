@@ -146,6 +146,13 @@ var me = this;
     });
   }
 
+  function deshabilitarAutocompletado($form) {
+    $form.attr('autocomplete', 'off');
+    $form.find('input, select, textarea')
+      .attr('autocomplete', 'off')
+      .attr('data-lpignore', 'true');
+  }
+
   //////////////////////////////////////////////
   // Búsqueda de contacto
   //////////////////////////////////////////////
@@ -248,6 +255,7 @@ var me = this;
     const [paises, relaciones] = await Promise.all([getPaises(), getRelaciones()]);
     $forms.each(function () {
       const $form = $(this).addClass('frm-oa-persona');
+      deshabilitarAutocompletado($form);
       quitarResaltadoRequerido($form);
       SECCIONES.forEach(s => montarBusqueda($form, s));
       $form.find('select.oa-cat-pais').each(function () { if (paises.length) llenarSelect($(this), paises); });

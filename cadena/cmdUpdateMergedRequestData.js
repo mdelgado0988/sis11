@@ -21,11 +21,12 @@ try {
     cmd: 'DoQuery',
     data: {
       sql: `
-SELECT TOP 1 parentId, claimId
-FROM ClaimPayment
-WHERE id IN (${ids.join(',')})
-  AND parentId IS NOT NULL
-ORDER BY id;`
+SELECT parent.id AS parentId, parent.claimId AS claimId, child.claimId AS childClaimId
+FROM ClaimPayment child
+INNER JOIN ClaimPayment parent ON parent.id = child.parentId
+WHERE child.id IN (${ids.join(',')})
+  AND child.parentId IS NOT NULL
+ORDER BY child.id;`
     }
   });
 
@@ -34,11 +35,20 @@ ORDER BY id;`
     return buildResult(false, parentLookup.msg || 'No fue posible localizar la solicitud principal.');
   }
 
-  const parentRow = getFirstRow(parentLookup.outData);
+  const parentRows = getRows(parentLookup.outData);
+  const parentRow = parentRows[0] || null;
   const requestId = toPositiveInteger(parentRow && parentRow.parentId);
-  const claimId = toPositiveInteger(parentRow && parentRow.claimId);
+  const parentClaimId = toPositiveInteger(parentRow && parentRow.claimId);
+  const childClaimIds = Array.from(new Set(parentRows
+    .map(row => row && row.childClaimId)
+    .map(toPositiveInteger)
+    .filter(id => id > 0)));
+  const claimIds = childClaimIds.length > 0 ? childClaimIds : parentClaimId > 0 ? [parentClaimId] : [];
   if (requestId <= 0) {
     return buildResult(false, 'No se encontró un parentId válido en las solicitudes recibidas.');
+  }
+  if (claimIds.length === 0) {
+    return buildResult(false, `La solicitud principal ${requestId} no tiene un reclamo asociado válido.`);
   }
 
   doCmd({
@@ -70,6 +80,7 @@ WHERE parentId = ${requestId};`
   }
 
   const fieldValues = [];
+  if (parentClaimId <= 0 && claimIds.length === 1) addNumericField(fieldValues, 'claimId', claimIds[0]);
   addStringField(fieldValues, 'paymentMethodCode', mergedData.paymentMethodCode);
   addStringField(fieldValues, 'branch', mergedData.branch);
   addStringField(fieldValues, 'paymentType', mergedData.paymentType);
@@ -93,16 +104,38 @@ WHERE parentId = ${requestId};`
   }
 
   const template = 'Solcitud de Pago.docx';
-  
-  doCmd({
-      "cmd": "GenerateClaimDoc",
-      "data": {
-          "claimId": claimId,
-          "template": template
-      }
-  });
 
-  return buildResult(true, `Solicitud ${requestId} actualizada correctamente.`);
+  const reportName = `Solicitud Fusión No. ${requestId}`;
+  for (const claimId of claimIds) {
+    doCmd({
+      cmd: 'ExeChain',
+      data: {
+        chain: 'cmdGenerateClaimDocument',
+        context: JSON.stringify({
+          claimId: claimId,
+          context: {
+            paymentId: requestId,
+            solicitud: requestId
+          },
+          template: template,
+          reportName: reportName
+        })
+      }
+    });
+
+    const documentResult = typeof ExeChain === 'undefined' ? null : ExeChain;
+    const documentData = documentResult && documentResult.outData && typeof documentResult.outData === 'object'
+      ? documentResult.outData : null;
+    if (!documentResult || documentResult.ok === false || !documentData || documentData.ok !== true) {
+      return buildResult(false, documentData && documentData.msg
+        ? documentData.msg
+        : documentResult && documentResult.msg
+          ? documentResult.msg
+          : `No fue posible generar la solicitud de pago para el reclamo ${claimId}.`);
+    }
+  }
+
+  return buildResult(true, `Solicitud ${requestId} actualizada y generada para ${claimIds.length} reclamo(s).`);
 } catch (error) {
   return buildResult(false, error && error.message ? error.message : String(error));
 }
@@ -131,6 +164,11 @@ function getRequestIds(value) {
 function getFirstRow(value) {
   if (Array.isArray(value)) return value[0] || null;
   return value && typeof value === 'object' ? value : null;
+}
+
+function getRows(value) {
+  if (Array.isArray(value)) return value.filter(row => row && typeof row === 'object');
+  return value && typeof value === 'object' ? [value] : [];
 }
 
 function hasData(data) {

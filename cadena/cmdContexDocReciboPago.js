@@ -79,7 +79,11 @@ const payment = RepoClaimPayment.outData[0];
 if (!payment) {
   return { ok: true, msg: '@No se encontró la solicitud de pago indicada', cumulo: 0 };
 }
-if (Number(payment.claimId) !== Number(claimId)) {
+const mergedChildrenForClaim = Number(payment.id) > 0
+  ? loadPaymentsByParent(payment.id).filter(child => Number(child && child.claimId) === Number(claimId))
+  : [];
+const isMergedRequestForClaim = mergedChildrenForClaim.length > 0;
+if (Number(payment.claimId) !== Number(claimId) && !isMergedRequestForClaim) {
   return { ok: true, msg: '@La solicitud de pago no pertenece al reclamo indicado', cumulo: 0 };
 }
 
