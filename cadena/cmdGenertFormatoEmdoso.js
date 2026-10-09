@@ -297,7 +297,9 @@ function getInsuredObjects(change) {
 
   const lob = String(policy?.lob ?? '').trim();
   const isSurety = ['81', '82', '83', '84'].includes(lob);
-  const objectDefinitionCode = isTechnicalPolicy(policy)
+  const objectDefinitionCode = isAutoPolicy(policy)
+    ? 'DTAUT'
+    : isTechnicalPolicy(policy)
     ? 'DT_RAMO_TECNICO'
     : isLifePolicyLob(lob)
     ? 'DT_ACCIDENTES_V1'
@@ -429,6 +431,10 @@ function isTechnicalPolicy(policy) {
   return ['96', '52'].includes(String(policy?.lob ?? '').trim());
 }
 
+function isAutoPolicy(policy) {
+  return String(policy?.lob ?? '').trim() === '6';
+}
+
 function getTipoAsegurado(policy) {
   const lob = String(policy?.lob ?? '').trim();
   const productCode = String(policy?.productCode ?? '').trim().toUpperCase();
@@ -544,6 +550,19 @@ function esExclusionCobertura(change) {
 function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   if (esEndosoTarjetaProtegida(change)) {
     return reportes.vidaTarjetaProtegida;
+  }
+
+  const autoChangeType = tipoCambioCobertura(change);
+  const esCambioSumaAuto = isAutoPolicy(policy) && (
+    autoChangeType.discriminator === 'CAPITALCHANGE'
+    || (
+      ['COVERAGECHANGE', 'CHANGECOVERAGE'].includes(autoChangeType.discriminator)
+      && autoChangeType.endorsementType === 'CHANGE_INSURED_SUM_SURETY'
+    )
+  );
+
+  if (esCambioSumaAuto) {
+    return 'AdendoAumentoAUTO.docx';
   }
 
   // Los cambios de coberturas deben usar siempre el formato con la seccion
@@ -850,7 +869,7 @@ function setCapitalChangeData(change, policy) {
     return;
     
   const newCapital = change.newCapital ?? 0;
-  const olCapital = change.olCapital ?? (policy.insuredSum ?? 0);
+  const olCapital = change.oldCapital ?? change.olCapital ?? (policy.insuredSum ?? 0);
   policy.newCapital = newCapital;
   policy.olCapital = olCapital;
  
@@ -1011,6 +1030,77 @@ function buildBeneficiaryTemplateData(policyId, beneficiariesUserData) {
 
   return {
     custom: applyChangedBeneficiaries(ExeChain.outData, beneficiariesUserData)
+  };
+}
+
+function loadAutoCatalogs() {
+  return {
+    marcas: loadSuretyCatalog('tbMarcas'),
+    modelos: loadSuretyCatalog('tbModelos'),
+    tipos: loadSuretyCatalog('tblTipoPorRamo'),
+    usos: loadSuretyCatalog('tblUsoPorRamo')
+  };
+}
+
+function autoCatalogText(rows, value, valueIndex, textIndex, predicate) {
+  const code = String(value ?? '').trim();
+  if (!code || !Array.isArray(rows)) return code;
+
+  const row = rows.slice(1).find(item => {
+    if (!Array.isArray(item)) return false;
+    return String(item[valueIndex] ?? '').trim() === code
+      && (!predicate || predicate(item));
+  });
+
+  return String(row?.[textIndex] ?? code).trim();
+}
+
+function buildAutoRisk(userData, catalogs, policy) {
+  const data = userData || {};
+  const lookup = catalogs || {};
+  const lob = String(policy?.lob ?? '').trim();
+  const marca = suretyValue(data, ['cmbMarca']);
+  const modelo = suretyValue(data, ['cmbModelo']);
+  const tipo = suretyValue(data, ['cmbtipo', 'txtTipo']);
+  const uso = suretyValue(data, ['cmbUsoAuto', 'txtUsoAuto']);
+
+  return {
+    ...data,
+    Marca: autoCatalogText(lookup.marcas, marca, 1, 2),
+    CodigoMarca: marca,
+    Modelo: autoCatalogText(
+      lookup.modelos,
+      modelo,
+      2,
+      3,
+      row => String(row[0] ?? '').trim() === lob
+        && String(row[1] ?? '').trim() === String(marca).trim()
+    ),
+    CodigoModelo: modelo,
+    Anio: suretyValue(data, ['txtAnioAuto']),
+    Color: suretyValue(data, ['txtColorAuto']),
+    Chasis: suretyValue(data, ['tbseriechasis']),
+    VIN: suretyValue(data, ['tbVIN']),
+    Motor: suretyValue(data, ['tbseriemotor']),
+    Tipo: autoCatalogText(
+      lookup.tipos,
+      tipo,
+      1,
+      2,
+      row => String(row[0] ?? '').trim() === lob
+    ),
+    CodigoTipo: tipo,
+    Uso: autoCatalogText(
+      lookup.usos,
+      uso,
+      1,
+      2,
+      row => String(row[0] ?? '').trim() === lob
+    ),
+    CodigoUso: uso,
+    Capacidad: suretyValue(data, ['txtPuestosAuto']),
+    Placa: suretyValue(data, ['tbplaca']),
+    SumaAsegurada: suretyValue(data, ['txtSA'])
   };
 }
 
@@ -1307,7 +1397,10 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   const isLife = isLifePolicyLob(policy?.lob);
   const lifeCatalogs = isLife ? loadLifeCatalogs() : null;
   const technicalCatalogs = isTechnicalPolicy(policy) ? loadTechnicalCatalogs() : null;
-  const riesgo = isTechnicalPolicy(policy)
+  const autoCatalogs = isAutoPolicy(policy) ? loadAutoCatalogs() : null;
+  const riesgo = isAutoPolicy(policy)
+    ? buildAutoRisk(insuredData, autoCatalogs, policy)
+    : isTechnicalPolicy(policy)
     ? buildTechnicalRisk(insuredData, technicalCatalogs, countries, procincias)
     : isSuretyPolicy(policy)
       ? buildSuretyRisk(insuredData, suretyCatalogs)
@@ -1377,6 +1470,14 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     return `${dd}/${mm}/${yyyy}`;
   };
 
+  const esCambioCapital = change?.Discriminator === 'CapitalChange';
+  const sumaAnterior = esCambioCapital
+    ? n(change?.oldCapital ?? change?.olCapital ?? policy?.olCapital ?? 0)
+    : 0;
+  const sumaActual = esCambioCapital
+    ? n(change?.newCapital ?? policy?.newCapital ?? 0)
+    : 0;
+
   // Base custom
   const custom = {
     Aseguradora: { NombreSocial: "GLOBAL ASEGURADORA S.A." },
@@ -1385,7 +1486,10 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     NombreRamo: row.NombreRamo || "",
     NombreProducto: row.NombreProducto || "",
 
-    Tomador: { NombreCompleto: holderFullName },
+    Tomador: {
+      NombreCompleto: holderFullName,
+      Identificacion: holder.cnp || holder.nit || "No Tiene"
+    },
 
     Asegurado: {
       NombreCompleto: holderFullName,
@@ -1400,7 +1504,14 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       Linea2: linea2,
       NombrePais: countryName,
       NombreProvincia: sectorName,
-      NombreDistrito : InsuredObject.userData.cmbMunicipio?  (Municipios.find(itm => itm.code === InsuredObject.userData.cmbMunicipio)?.name || String(InsuredObject.userData.cmbMunicipio)): "",
+      NombreDistrito: InsuredObject.userData.cmbMunicipio
+        ? (Municipios.find(itm => itm.code === InsuredObject.userData.cmbMunicipio)?.name
+          || String(InsuredObject.userData.cmbMunicipio))
+        : "",
+      NombreCiudad: InsuredObject.userData.cmbMunicipio
+        ? (Municipios.find(itm => itm.code === InsuredObject.userData.cmbMunicipio)?.name
+          || String(InsuredObject.userData.cmbMunicipio))
+        : "",
     },
 
     Acreedor:{
@@ -1440,7 +1551,9 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     Endoso: {
       Id: change?.code ?? "0",
       Nombre: row.nombreEndoso,
-      DetalleEndoso: change?.note || "Sin Detalles"
+      DetalleEndoso: change?.note || "Sin Detalles",
+      SumaAnterior: sumaAnterior,
+      SumaActual: sumaActual
     },
     AseguradosCambioSuma: obtenerAseguradosCambioSuma(change),
     Riesgo: riesgo

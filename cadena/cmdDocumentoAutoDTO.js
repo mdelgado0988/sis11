@@ -27,18 +27,19 @@ let oaUserData;
 let limites;
 const objectDefinitionCode = 'DTAUT';
 const hoy = new Date();
-const dia = hoy.getDate();
+const hoyPanama = toPanamaDate(hoy);
+const dia = hoyPanama.getUTCDate();
 const meses = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
-const mes = meses[hoy.getMonth()];
-const anio = hoy.getFullYear();
+const mes = meses[hoyPanama.getUTCMonth()];
+const anio = hoyPanama.getUTCFullYear();
 const celPhoneType = "PHONETYPE2";
 const faxPhoneType = "PHONETYPE4";
 const telPhoneType = "PHONETYPE1";
 const emailType = "EMAILTYPE1";
-let currency;
+const monedaDocumento = "B/.";
 
 const dataFrecuenciaPago = [
   { code: 'm', name: 'Mensual' },
@@ -60,17 +61,16 @@ insured = getInsured();
 oaUserData = getInsuredObject();
 limites = getLimites();
 acreedor = getAcreedor();
-currency = getCurrency(policy.currency);
 
-const dateIni = new Date(policy.start);
-const diaIni = dateIni.getDate();
-const mesIni = meses[dateIni.getMonth()];
-const anioIni = dateIni.getFullYear();
+const dateIni = toPanamaDate(policy.start);
+const diaIni = dateIni.getUTCDate();
+const mesIni = meses[dateIni.getUTCMonth()];
+const anioIni = dateIni.getUTCFullYear();
 
-const dateFin = new Date(policy.end);
-const diaFin = dateFin.getDate();
-const mesFin = meses[dateFin.getMonth()];
-const anioFin = dateFin.getFullYear();
+const dateFin = toPanamaDate(policy.end);
+const diaFin = dateFin.getUTCDate();
+const mesFin = meses[dateFin.getUTCMonth()];
+const anioFin = dateFin.getUTCFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
@@ -88,10 +88,10 @@ resultado.Provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${esca
 resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${escapeSql(holder?.Addresses?.[0]?.state ?? "")}' AND code = '${escapeSql(holder?.Addresses?.[0]?.city ?? "")}'`, "name") ?? "";
 
 //Datos del asegurado
-const fnacimiento = parseDateSafe(insured?.birth);
-resultado.DiaNac = fnacimiento ? fnacimiento.getDate() : "";
-resultado.MesNac = fnacimiento ? fnacimiento.getMonth() : "";
-resultado.AnioNac = fnacimiento ? fnacimiento.getFullYear() : "";
+const fnacimiento = toPanamaDate(insured?.birth);
+resultado.DiaNac = isValidDate(fnacimiento) ? fnacimiento.getUTCDate() : "";
+resultado.MesNac = isValidDate(fnacimiento) ? fnacimiento.getUTCMonth() + 1 : "";
+resultado.AnioNac = isValidDate(fnacimiento) ? fnacimiento.getUTCFullYear() : "";
 resultado.Asegurado = getNombreCompleto(insured);
 resultado.FNacimiento = toFecha(insured.birth);
 resultado.IdentificacionAseg = insured.isPerson == true ? insured.cnp : insured.nif;
@@ -132,8 +132,8 @@ resultado.Acreedor = resultado.Acreedor == "" ? "No Tiene" : resultado.Acreedor;
 resultado.Poliza = paramPolicyCode ? paramPolicyCode : policy.code;
 resultado.Certificado = 0;
 resultado.Oferta = policyId;
-resultado.Moneda = policy.currency;
-resultado.symbol = currency?.symbol ?? "";
+resultado.Moneda = monedaDocumento;
+resultado.symbol = monedaDocumento;
 resultado.Suma = n(policy.insuredSum);
 resultado.SumaLetras = numeroALetras(policy.insuredSum ?? 0);
 resultado.Desde = toFecha(policy.start);
@@ -142,6 +142,7 @@ resultado.Hora = getHora(policy.end);
 resultado.Observaciones = policy.description ?? "";
 resultado.Frecuencia = dataFrecuenciaPago.find(x => x.code == policy.periodicity)?.name ?? "";
 resultado.Movimiento = policy.contractYear == 1 ? "Nuevo" : "Renovación"
+resultado.TipoOperacion = toValidNumber(policy.policyVersion) > 0 ? "Renovación" : "Nueva";
 resultado.Prima = n(paramAnualPremium ?? policy.annualPremium ?? 0);
 resultado.Impuesto = n(paramTax ?? policy.tax ?? 0);
 resultado.Total = n(paramAnualTotal ?? policy.annualTotal ?? 0);
@@ -150,17 +151,25 @@ resultado.Cuotas = Array.isArray(paramPayPlan) ? paramPayPlan.length : (Array.is
 
 //Datos de Coberturas
 const tarifaEntrada = parseJsonArray(oaUserData?.hiddenCobtar);
-doCmd({"cmd":"GetFullTable","data":{"table":"cfgCobtarRamoTecnico"}});
+doCmd({"cmd":"GetFullTable","data":{"table":"cfgCobtarAuto"}});
+const configCobtarAuto = GetFullTable.ok
+  ? mapearTablaConfig(GetFullTable.outData ?? [])
+  : [];
 resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : [])
   .sort((a, b) => Number(a.number ?? 0) - Number(b.number ?? 0))
   .map(({ code, name, limit, premium, deductible }) => {
-    const findCoverage = Array.isArray(tarifaEntrada) ? tarifaEntrada.find(x => x.coverageCode == code) : null;
+    const findCoverage = Array.isArray(tarifaEntrada)
+      ? tarifaEntrada.find(x => vEqual(x?.coverageCode) == vEqual(code))
+      : null;
+    const catalogTexts = getCatalogTexts(code, findCoverage, configCobtarAuto);
     const cov = {
+      ...(findCoverage || {}),
+      ...catalogTexts,
       Codigo: code,
       Cobertura: name,
       Limite: n(limit),
       Prima: n(premium),
-      Moneda: policy.currency,
+      Moneda: monedaDocumento,
       DeductibleCov: deductible,
       Evento: limites.find(x => vEqual(x.Producto) == vEqual(policy.productCode) && vEqual(x.Cobertura) == vEqual(code))?.Limite ?? "",
       Porcentaje: findCoverage && findCoverage.Porcentaje ? findCoverage.Porcentaje : 0,
@@ -182,7 +191,13 @@ resultado.Uso = getUso(oaUserData?.cmbUsoAuto ?? oaUserData?.txtUsoAuto ?? "0");
 resultado.Capacidad = oaUserData?.txtPuestosAuto ?? "0";
 resultado.Placa = oaUserData?.tbplaca ?? "";
 resultado.SumaAsegurada = n(oaUserData?.txtSA ?? 0);
-resultado.userData = oaUserData;
+resultado.userData = enrichAutoUserData(oaUserData, configCobtarAuto, {
+  cmbMarcaText: resultado.Marca,
+  cmbModeloText: resultado.Modelo,
+  cmbtipoText: resultado.Tipo,
+  cmbUsoAutoText: resultado.Uso
+});
+resultado.Tarifas = parseJsonArray(resultado.userData.hiddenCobtar);
 
 //Fecha actual
 resultado.DiaFecha = dia;
@@ -193,6 +208,7 @@ resultado.FechaActual = toFecha(hoy);
 resultado.DiaVigenciaIni = diaIni;
 resultado.MesVigenciaIni = mesIni;
 resultado.AnioVigenciaIni = anioIni;
+resultado.AnioPoliza = anioIni;
 resultado.DiaVigenciaFin = diaFin;
 resultado.MesVigenciaFin = mesFin;
 resultado.AnioVigenciaFin = anioFin;
@@ -294,44 +310,94 @@ function getTableValue(tableName, column, row, fieldName) {
 }
 
 function getMarca(value) {
-  doCmd({"cmd":"GetFullTable","data":{"table":"TablaMarcas"}});
+  doCmd({"cmd":"GetFullTable","data":{"table":"tbMarcas"}});
   if (!GetFullTable.ok) return "";
   const rows = normalizeFullTableRows(GetFullTable.outData);
   const match = rows.find(row => {
     if (Array.isArray(row)) {
-      return String(row[0] ?? '').trim() == String(value ?? '').trim();
+      return String(row[1] ?? row[0] ?? '').trim() == String(value ?? '').trim();
     }
 
-    return String(row?.NUMEROMARCA ?? row?.numeromarca ?? row?.code ?? '').trim() == String(value ?? '').trim();
+    return String(row?.NUMEROMARCA ?? row?.numeromarca ?? row?.cmarca ?? row?.CMARCA ?? row?.code ?? '').trim() == String(value ?? '').trim();
   });
 
   if (!match) return "";
 
   if (Array.isArray(match)) {
-    return String(match[1] ?? '').trim();
+    // automovil carga tbMarcas usando columna 1 como codigo y columna 2 como texto.
+    return String(match[2] ?? match[1] ?? '').trim();
   }
 
-  return String(match?.MARCA ?? match?.marca ?? match?.name ?? '').trim();
+  return String(match?.MARCA ?? match?.marca ?? match?.name ?? match?.description ?? '').trim();
+}
+
+function getCatalogTexts(coverageCode, values, configRows) {
+  if (!values || typeof values !== 'object' || !Array.isArray(configRows)) return {};
+
+  const fields = configRows.filter(row =>
+    vEqual(row.productCode) == vEqual(policy.productCode)
+      && vEqual(row.coverageCode) == vEqual(coverageCode)
+      && ['SELECT', 'CATALOG'].includes(vEqual(row.type))
+  );
+
+  const result = {};
+  fields.forEach(field => {
+    const fieldName = String(field.name || '').trim();
+    if (!fieldName || values[fieldName] === undefined) return;
+
+    const rawCatalog = field.catalog;
+    let options = rawCatalog;
+    if (typeof rawCatalog === 'string') {
+      try {
+        options = JSON.parse(rawCatalog
+          .replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":')
+          .replace(/'/g, '"'));
+      } catch (error) {
+        options = [];
+      }
+    }
+
+    if (!Array.isArray(options)) return;
+    const selected = options.find(option => String(option?.code ?? '').trim() == String(values[fieldName] ?? '').trim());
+    result[`${fieldName}Text`] = selected?.name ?? String(values[fieldName] ?? '');
+  });
+
+  return result;
+}
+
+function enrichAutoUserData(source, configRows, catalogFields) {
+  const data = { ...(source || {}), ...(catalogFields || {}) };
+  const entries = parseJsonArray(data.hiddenCobtar);
+
+  if (entries.length) {
+    data.hiddenCobtar = JSON.stringify(entries.map(entry => ({
+      ...entry,
+      ...getCatalogTexts(entry.coverageCode, entry, configRows)
+    })));
+  }
+
+  return data;
 }
 
 function getModelo(cmarca, cmodelo) {
-  doCmd({"cmd":"GetFullTable","data":{"table":"TablaModelos"}});
+  doCmd({"cmd":"GetFullTable","data":{"table":"tbModelos"}});
   if (!GetFullTable.ok) return "";
   const rows = normalizeFullTableRows(GetFullTable.outData);
   const match = rows.find(row => {
     if (Array.isArray(row)) {
-      return String(row[0] ?? '').trim() == String(cmarca ?? '').trim()
-        && String(row[1] ?? '').trim() == String(cmodelo ?? '').trim();
+      // automovil carga tbModelos: ramo[0], marca[1], codigo[2], texto[3].
+      return String(row[1] ?? '').trim() == String(cmarca ?? '').trim()
+        && String(row[2] ?? '').trim() == String(cmodelo ?? '').trim();
     }
 
-    return String(row?.NUMEROMARCA ?? row?.numeromarca ?? row?.marca ?? '').trim() == String(cmarca ?? '').trim()
-      && String(row?.NUMEROMODELO ?? row?.numeromodelo ?? row?.modelo ?? '').trim() == String(cmodelo ?? '').trim();
+    return String(row?.NUMEROMARCA ?? row?.numeromarca ?? row?.cmarca ?? row?.CMARCA ?? row?.marca ?? '').trim() == String(cmarca ?? '').trim()
+      && String(row?.NUMEROMODELO ?? row?.numeromodelo ?? row?.cmodelo ?? row?.CMODELO ?? row?.modelo ?? '').trim() == String(cmodelo ?? '').trim();
   });
 
   if (!match) return "";
 
   if (Array.isArray(match)) {
-    return String(match[2] ?? '').trim();
+    return String(match[3] ?? match[2] ?? '').trim();
   }
 
   return String(match?.NOMBREMODELO ?? match?.nombremodelo ?? match?.name ?? '').trim();
@@ -404,13 +470,14 @@ function mapearTablaConfig(data) {
   if (!data || !data.length) return [];
 
   const headersOriginal = data[0];
+  if (!Array.isArray(headersOriginal)) return [];
 
   // Resolver nombres duplicados
   const headers = [];
   const contador = {};
 
   headersOriginal.forEach(h => {
-    const key = h.trim();
+    const key = String(h ?? '').trim();
 
     if (contador[key]) {
       contador[key]++;
@@ -545,6 +612,10 @@ function parseDateSafe(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function isValidDate(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
 function escapeSql(value) {
   return String(value ?? '').replace(/'/g, "''");
 }
@@ -564,30 +635,67 @@ function getNombreCompleto(contact) {
 function toFecha(value) {
   if (!value) return "";
 
-  const date = (value instanceof Date) ? value : new Date(value);
+  const date = toPanamaDate(value);
 
   // Validar fecha inválida
   if (isNaN(date.getTime())) return "";
 
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0'); // meses 0-11
-  const year = date.getFullYear();
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const year = date.getUTCFullYear();
 
   return `${day}/${month}/${year}`;
 }
 
 function getHora(fecha) {
-  const date = new Date(fecha);
+  const date = toPanamaDate(fecha);
 
   if (isNaN(date)) return "";
 
-  let horas = date.getHours();
-  const minutos = String(date.getMinutes()).padStart(2, "0");
+  let horas = date.getUTCHours();
+  const minutos = String(date.getUTCMinutes()).padStart(2, "0");
   const periodo = horas >= 12 ? "pm" : "am";
 
   horas = horas % 12 || 12;
 
   return `${String(horas).padStart(2, "0")}:${minutos} ${periodo}`;
+}
+
+function toPanamaDate(value) {
+  if (value === null || value === undefined || value === "") return new Date(NaN);
+
+  const utcDate = value instanceof Date
+    ? new Date(value.getTime())
+    : createUtcDate(value);
+
+  if (Number.isNaN(utcDate.getTime())) return new Date(NaN);
+
+  // Panama remains at UTC-5 year-round. Consumers read the shifted value with UTC getters.
+  return new Date(utcDate.getTime() - (5 * 60 * 60 * 1000));
+}
+
+function createUtcDate(value) {
+  const text = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return new Date(`${text}T00:00:00.000Z`);
+  }
+
+  const ymd = text.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+  if (ymd) {
+    return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])));
+  }
+
+  const dmy = text.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+  if (dmy) {
+    return new Date(Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1])));
+  }
+
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
+    return new Date(text);
+  }
+
+  return new Date(`${text}Z`);
 }
 
 function n(value) {

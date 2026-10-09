@@ -189,8 +189,16 @@ where cramo in (6)
 and (xnombrep not like '%endoso%')
 --AND xdpto <> 'SINIESTROS'
 AND xdpto = 'EMISION'
-AND xnombrep <> 'oferta_automovil'
+AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 order by 1,2
+
+select distinct rtrim(xnombrep) xnombrep, xdpto
+from marepteccia
+where cramo in (6)
+and (xnombrep NOT like '%endoso%')
+--AND xdpto <> 'SINIESTROS'
+AND xdpto = 'EMISION'
+AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 
 --Reportes de riesgos varios
 SELECT lob,producto, xnombrep, xdescripcion, CoverageCode, xdpto, ISNULL(oferta, oferta2) oferta 
@@ -213,6 +221,29 @@ and r.xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 AND (r.xformula1 is not null and r.xformula1 <> '0' and isnumeric(r.xformula1) = 1)
 ) t
+order by 1,2
+
+select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
+	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto, iestado,
+	ISNULL((select top (1) p.cproces 
+	from adpoliza p
+	inner join adrecibos r on r.cpoliza = p.cpoliza and r.fanopol = p.fanopol and r.fmespol = p.fmespol
+	inner join adpolcob c on c.crecibo = r.crecibo and c.ccober = rep.xformula1
+	where p.cramo = rep.cramo
+	order by cproces desc),
+	(select top (1) p.cproces 
+	from adpoliza p
+	inner join adrecibos r on r.cpoliza = p.cpoliza and r.fanopol = p.fanopol and r.fmespol = p.fmespol
+	inner join adpolcob c on c.crecibo = r.crecibo
+	where p.cramo = rep.cramo
+	order by cproces desc)
+	)oferta
+from marepteccia rep
+where cramo in (6)
+and (xnombrep not like '%endoso%')
+--AND xdpto <> 'SINIESTROS'
+AND xdpto = 'EMISION'
+AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 order by 1,2
 
 --endoso_orden_cambio, endoso_generico_fianzas, endoso_poliza_fianza_acreedor, endoso_poliza_fianza_descrp
