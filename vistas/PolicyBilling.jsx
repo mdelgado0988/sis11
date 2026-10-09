@@ -586,6 +586,7 @@
         paid,
         pending: receiptAmount - paid,
         startDate: config.startDate || paymentGroup.start,
+        startDateWithoutTimezone: !!config.startDateWithoutTimezone,
         endDate: config.endDate || paymentGroup.end,
         movementType: config.movementType,
         premium: billValues.premium,
@@ -749,6 +750,10 @@
     const changeRows = changes.map((change, index) => {
       const changeId = change && change.id ? String(change.id) : '';
       const changeDetail = parseJsonObject(change && change.jDetail);
+      const changeAdditional = parseJsonObject(change && change.jAdditional);
+      const isCoverageTermChange = String(changeAdditional && changeAdditional.endorsementType || '')
+        .trim()
+        .toUpperCase() === 'CHANGE_COVERAGE_SURETY';
       const cancellationChange = isCancellationChange(change);
       const actualPlanEndorsement = isActualPlanEndorsement(change);
       const discriminator = String(change && change.Discriminator || '').toUpperCase();
@@ -763,7 +768,10 @@
         fallback: change && change.Bill,
         // Informative changes must not inherit the policy payment plan amount.
         paymentGroup: informativeObjectChange ? {} : paymentGroups[changeId],
-        startDate: change && (change.effectiveDate || change.executionDate),
+        startDate: isCoverageTermChange
+          ? (changeDetail.policyStart || (change && (change.effectiveDate || change.executionDate)))
+          : (change && (change.effectiveDate || change.executionDate)),
+        startDateWithoutTimezone: isCoverageTermChange,
         endDate: changeDetail.policyEnd || (paymentGroups[changeId] && paymentGroups[changeId].end),
         movementType: change && getMovementType(change),
         incomeDate: change && change.executionDate,
@@ -817,6 +825,20 @@
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  function formatDateWithoutTimezone(value) {
+    const raw = String(value || '').trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    if (!match) return '-';
+    return `${match[3]}/${match[2]}/${match[1]}`;
+  }
+
+  function isLiteralCoverageTermReinsurance(record) {
+    const type = String(record && record.tipo || '').trim().toUpperCase();
+    return type === 'CHANGECOVERAGESURETY'
+      || type === 'CHANGE_COVERAGE_SURETY'
+      || type === 'PROCEEDORDER';
   }
 
   function formatMoney(value) {
@@ -941,7 +963,7 @@
         const label = translateReinsuranceType(value);
         return <Tooltip title={label}><span className="policy-billing-ellipsis">{label}</span></Tooltip>;
       } },
-      { title: t('Start date'), dataIndex: 'fDesde', key: 'fDesde', width: 105, align: 'center', render: value => formatDate(value) },
+      { title: t('Start date'), dataIndex: 'fDesde', key: 'fDesde', width: 105, align: 'center', render: (value, record) => isLiteralCoverageTermReinsurance(record) ? formatDateWithoutTimezone(value) : formatDate(value) },
       { title: t('End date'), dataIndex: 'fHasta', key: 'fHasta', width: 105, align: 'center', render: value => formatDate(value) },
       {
         title: t('Sums'),
@@ -1148,7 +1170,9 @@
       key: 'startDate',
       width: 105,
       align: 'center',
-      render: value => formatDate(value)
+      render: (value, record) => record && record.startDateWithoutTimezone
+        ? formatDateWithoutTimezone(value)
+        : formatDate(value)
     },
     {
       title: t('End date'),

@@ -2,10 +2,11 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20261006'
-        ,@fend DATE =  '20261006'
+DECLARE  @fstart DATE = '20261001'
+        ,@fend DATE =  '20261030'
 		,@ramo varchar(50) = 81
 		,@producto varchar(50) = null
+		,@poliza VARCHAR(50) = 'FC-001136'
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
@@ -26,7 +27,7 @@ SELECT
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prcp.usuario, '') AS Usuario,
     CONVERT(VARCHAR, CAST(an.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Desde,
-    CONVERT(VARCHAR, CAST(an.[anniversary] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta,
+    CONVERT(VARCHAR, CAST(snap.policyEnd AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta,
     CASE WHEN ISNULL(lp.policyVersion,0) = 0 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
 
     ISNULL(pym.name, '') AS recursopago,
@@ -112,7 +113,8 @@ OUTER APPLY (SELECT
 				js.channel,
 				js.sellerId,
 				js.cessionBeneficiary,
-				js.fiscalNumber
+				js.fiscalNumber,
+                js.policyEnd
 			FROM OPENJSON(an.jSnapshot)
 			WITH (
 				insuredSum    DECIMAL(18,2) '$.insuredSum',
@@ -127,7 +129,8 @@ OUTER APPLY (SELECT
 				channel		  VARCHAR(50) '$.channel',
 				sellerId NUMERIC(11,0) '$.sellerId',
 				fiscalNumber VARCHAR(50) '$.fiscalNumber',
-				cessionBeneficiary NUMERIC(11,0) '$.cessionBeneficiary'
+				cessionBeneficiary NUMERIC(11,0) '$.cessionBeneficiary',
+                policyEnd DATETIME2 '$.end'
 			) js) snap
 
 OUTER APPLY (
@@ -405,6 +408,8 @@ OUTER APPLY (SELECT TOP 1 COALESCE(sc.name, a.state) AS provincia FROM (
 WHERE CAST(lp.activeDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
+AND (@poliza IS NULL OR lp.code = @poliza)
+
 
 UNION ALL
 
@@ -426,8 +431,20 @@ SELECT
     CONVERT(VARCHAR, CAST(ed.executionDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS FechaEmision,
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prc.usuario, '') AS Usuario,
-    CASE WHEN ed.Discriminator = 'CancellationChange' THEN CONVERT(VARCHAR, ed.effectiveDate, 103)
-		 ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) END AS Desde,
+    CASE
+        WHEN ed.Discriminator = 'CoverageChange'
+             AND ISJSON(ed.jAdditional) = 1
+             AND UPPER(LTRIM(RTRIM(JSON_VALUE(ed.jAdditional, '$.endorsementType')))) = 'CHANGE_COVERAGE_SURETY'
+             AND ISJSON(ed.jDetail) = 1
+            THEN CONVERT(VARCHAR, TRY_CONVERT(date, JSON_VALUE(ed.jDetail, '$.policyStart')), 103)
+        WHEN ed.Discriminator = 'CoverageChange'
+             AND ISJSON(ed.jAdditional) = 1
+             AND UPPER(LTRIM(RTRIM(JSON_VALUE(ed.jAdditional, '$.endorsementType')))) IN ('PROCEEDORDER', 'CHANGE_INSURED_SUM_SURETY')
+            THEN CONVERT(VARCHAR, CAST(COALESCE(ed.effectiveDate, ed.executionDate) AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
+        WHEN ed.Discriminator = 'CancellationChange'
+            THEN CONVERT(VARCHAR, CAST(ed.effectiveDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
+        ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
+    END AS Desde,
     CONVERT(VARCHAR, COALESCE(
         TRY_CONVERT(datetime2, CASE WHEN ISJSON(ed.jDetail) = 1 THEN JSON_VALUE(ed.jDetail, '$.policyEnd') END),
         ed.newEnd,
@@ -845,4 +862,5 @@ OUTER APPLY (SELECT TOP 1 COALESCE(sc.name, a.state) AS provincia FROM (
 WHERE CAST(ed.executionDate AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date) BETWEEN CAST(@fstart AS DATE) AND CAST(@fend AS DATE)
 AND (@ramo IS NULL OR lp.lob = @ramo)
 AND (@producto IS NULL OR lp.productCode = @producto)
+AND (@poliza IS NULL OR lp.code = @poliza)
 /*AND ISNULL(mo.Monto,0) <> 0 */

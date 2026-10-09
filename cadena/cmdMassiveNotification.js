@@ -7,6 +7,12 @@ Description: Renders and sends one notification from a validated batch row.
 */
 
 const TEST_RECIPIENT = "Linneth.zuleta@aseguradoraglobal.com.pa";
+const TEST_MODE_ALLOWED_RECIPIENTS = [
+  "lzuleta02@hotmail.com",
+  "lzuleta1977@gmail.com",
+  "michael.delgado@axxis-systems.com",
+  "linneth.zuleta@aseguradoraglobal.com.pa"
+];
 const row = context && context.row ? context.row : {};
 const tipoPlantilla = String(row.tipoPlantilla || "").trim();
 const usuario = String(row.usuario || "").trim();
@@ -133,7 +139,11 @@ try {
   }
   const emailSubject = String(RenderHtmlTemplate.outData.result || "");
 
-  const recipients = usarCorreoPrueba ? clientEmails.map(function () { return TEST_RECIPIENT; }) : clientEmails;
+  const recipients = usarCorreoPrueba
+    ? clientEmails.map(function (email) {
+      return isTestModeAllowedRecipient(email) ? email : TEST_RECIPIENT;
+    })
+    : clientEmails;
   for (let i = 0; i < recipients.length; i++) {
     doCmd({
       cmd: "SendEmail",
@@ -197,6 +207,11 @@ try {
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function isTestModeAllowedRecipient(value) {
+  const email = String(value || "").trim().toLowerCase();
+  return TEST_MODE_ALLOWED_RECIPIENTS.indexOf(email) !== -1;
 }
 
 function getValidContactEmails(contact) {

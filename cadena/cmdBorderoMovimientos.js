@@ -93,6 +93,10 @@ base = base.replace(
   "SELECT mv.*,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' AND ISJSON(emi.emisionSnapshot) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(emi.emisionSnapshot, '$.end')) END, CASE WHEN ISJSON(ch.jDetail) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(ch.jDetail, '$.policyEnd')) END, TODATETIMEOFFSET(CAST(mv.fHastaCession AS datetime2), '+00:00')) AS fHasta,\n    lp.code AS poliza,"
 );
 base = base.replace(
+  "COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,",
+  "COALESCE(CASE WHEN ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') IN ('CHANGE_INSURED_SUM_SURETY', 'PROCEEDORDER') THEN TODATETIMEOFFSET(CAST(ch.effectiveDate AS datetime2), '+00:00') END, CASE WHEN ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' AND ISJSON(ch.jDetail) = 1 THEN JSON_VALUE(ch.jDetail, '$.policyStart') END, CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,"
+);
+base = base.replace(
   "LEFT JOIN Anniversary an ON an.id = mv.anniversaryId\n  LEFT JOIN Contract ct",
   "LEFT JOIN Anniversary an ON an.id = mv.anniversaryId\n  OUTER APPLY (\n    SELECT TOP 1 an0.start AS emisionDesde, an0.jSnapshot AS emisionSnapshot\n    FROM Anniversary an0\n    WHERE an0.lifePolicyId = mv.lifePolicyId\n    ORDER BY CASE WHEN ISNULL(an0.contractYear, 0) = 1 THEN 0 ELSE 1 END, an0.start, an0.id\n  ) emi\n  LEFT JOIN Contract ct"
 );
