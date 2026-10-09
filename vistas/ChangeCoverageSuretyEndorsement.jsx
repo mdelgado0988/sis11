@@ -113,6 +113,30 @@
     }, 0)));
   }
 
+  function coinsurancePercentageForContract(contract) {
+    const direct = coinsurancePercentage();
+    if (direct > 0) return direct;
+    const rows = (baseCessions || []).filter(function (row) {
+      return !contract || String(row.contractId) === String(contract.contractId);
+    });
+    const grossPremium = rows.reduce(function (sum, row) { return sum + Math.abs(coinsuranceNumber(row.premium)); }, 0);
+    const coPremium = rows.reduce(function (sum, row) {
+      return sum + Math.abs(coinsuranceNumber(row.coPremium || row.coCovPremium));
+    }, 0);
+    if (grossPremium > 0 && coPremium > 0) {
+      return Math.max(0, Math.min(100, coPremium / grossPremium * 100));
+    }
+    if (policy && Number(policy.coinsurance) === 1) {
+      const coRetention = coinsuranceNumber(policy.coRetention);
+      return Math.max(0, Math.min(100, 100 - coRetention));
+    }
+    return 0;
+  }
+
+  function reinsuranceBaseFactorForContract(contract) {
+    return (100 - coinsurancePercentageForContract(contract)) / 100;
+  }
+
   function reinsuranceBaseFactor() {
     return (100 - coinsurancePercentage()) / 100;
   }
@@ -136,7 +160,7 @@
   }
 
   function contractCoinsuranceTotals(contract) {
-    const percentage = coinsurancePercentage();
+    const percentage = coinsurancePercentageForContract(contract);
     const grossSum = Number(contract.sum || 0);
     const grossPremium = Number(contract.movement || 0);
     return {
@@ -2515,10 +2539,10 @@
       const inferredCed = groupTotalPremium ? base.premiumCed / groupTotalPremium * 100 : 0;
       const retentionPercentage = configuredRet === null ? inferredRet : configuredRet;
       const cededPercentage = configuredCed === null ? inferredCed : configuredCed;
-      const finalPremiumRet = isRetention ? groupTotalPremium * reinsuranceBaseFactor() * retentionPercentage / 100 : 0;
-      const finalSumRet = isRetention ? groupTotalSum * reinsuranceBaseFactor() * retentionPercentage / 100 : 0;
-      const finalPremiumCed = isCededLine ? groupTotalPremium * reinsuranceBaseFactor() * cededPercentage / 100 : 0;
-      const finalSumCed = isCededLine ? groupTotalSum * reinsuranceBaseFactor() * cededPercentage / 100 : 0;
+      const finalPremiumRet = isRetention ? groupTotalPremium * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100 : 0;
+      const finalSumRet = isRetention ? groupTotalSum * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100 : 0;
+      const finalPremiumCed = isCededLine ? groupTotalPremium * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100 : 0;
+      const finalSumCed = isCededLine ? groupTotalSum * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100 : 0;
       const manualSumField = isRetention ? 'manualRetentionSum' : 'manualCededSum';
       const manualPremiumField = isRetention ? 'manualRetentionPremium' : 'manualCededPremium';
       const displaySum = isCoinsurance ? coinsurance.sum : (totals[manualSumField] !== undefined ? Number(totals[manualSumField]) : (isRetention ? finalSumRet : finalSumCed));
@@ -2535,7 +2559,7 @@
         manualPrefix: isRetention ? 'Retention' : 'Ceded',
         percentageField: isRetention ? 'proportionCed' : 'proportionRe',
         percentageConfigured: isCoinsurance || (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined),
-        percentage: isCoinsurance ? 0 : (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined
+        percentage: isCoinsurance ? coinsurancePercentageForContract(contract) : (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined
           ? Number(totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'])
           : (g ? contractPercentage(g, isRetention ? 'proportionCed' : 'proportionRe') : 0)),
         sum: displaySum,
@@ -2577,23 +2601,33 @@
 
   function renderSelectedLines(contract, mode) {
     if (mode === 'movementDistribution') {
+      const movementTotals = (contract.groups || []).reduce(function (total, group) {
+        total.sum += numberFrom(group.totals, ['sumMovement']);
+        total.premium += numberFrom(group.totals, ['movement']);
+        return total;
+      }, { sum: 0, premium: 0 });
       const rows = getDistributionRows(contract).map(function (row) {
         const group = (contract.groups || []).find(function (item) {
           return String(item.contractId) + '-' + String(item.lineId) === row.groupKey;
         });
-        const movement = (group && group.rows || []).reduce(function (total, item) {
+        const movement = row.isCoinsurance
+          ? movementTotals
+          : (group && group.rows || []).reduce(function (total, item) {
           // Solo las coberturas que suman participan en la suma del contrato.
           if (item.counts) total.sum += numberFrom(item, ['sumInsuredMovement']);
           total.premium += numberFrom(item, ['premiumMovement']);
           return total;
         }, { sum: 0, premium: 0 });
-        const factor = Number(row.percentage || 0) / 100;
+        const factor = row.isCoinsurance
+          ? coinsurancePercentageForContract(contract) / 100
+          : reinsuranceBaseFactorForContract(contract) * Number(row.percentage || 0) / 100;
         const premium = money(movement.premium * factor);
         const sum = money(movement.sum * factor);
         const commissionRate = Number(row.premium || 0) ? Number(row.commission || 0) / Number(row.premium || 0) : 0;
         const taxRate = Number(row.premium || 0) ? Number(row.tax || 0) / Number(row.premium || 0) : 0;
         return Object.assign({}, row, {
           movementGroup: group,
+          percentage: row.isCoinsurance ? 0 : row.percentage,
           sum: sum,
           premium: premium,
           commission: money(premium * commissionRate),
@@ -2635,7 +2669,7 @@
             const total = function (field) { return money(pageData.reduce(function (sum, row) { return sum + Number(row[field] || 0); }, 0)); };
             return <Table.Summary><Table.Summary.Row className="axx-rea-total-row">
               <Table.Summary.Cell index={0}><b>{t('Totales')}</b></Table.Summary.Cell>
-              <Table.Summary.Cell index={1} align="right">{total('percentage').toFixed(4)}</Table.Summary.Cell>
+              <Table.Summary.Cell index={1} align="right">{pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? 0 : Number(row.percentage || 0)); }, 0).toFixed(4)}</Table.Summary.Cell>
               <Table.Summary.Cell index={2} align="right">{fmt(total('sum'))}</Table.Summary.Cell>
               <Table.Summary.Cell index={3} align="right">{fmt(total('premium'))}</Table.Summary.Cell>
               <Table.Summary.Cell index={4}></Table.Summary.Cell>

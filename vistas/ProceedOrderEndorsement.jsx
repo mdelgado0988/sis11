@@ -2462,8 +2462,11 @@
       sum: total.sum + reinsuranceNumber(row.sumInsuredMovement),
       premium: total.premium + reinsuranceNumber(row.premiumMovement)
     }), { sum: 0, premium: 0 });
+    const coinsurancePct = coinsurancePercentage(reinsuranceSnapshot);
     const rows = selectedReinsuranceLines.map((line) => {
-      const factor = reinsuranceNumber(line.percentage) / 100;
+      const factor = String(line.lineId) === 'Coaseguro'
+        ? coinsurancePct / 100
+        : ((100 - coinsurancePct) / 100) * reinsuranceNumber(line.percentage) / 100;
       const premium = moneyValue(movement.premium * factor);
       const sum = moneyValue(movement.sum * factor);
       const commissionRate = reinsuranceNumber(line.premium) ? reinsuranceNumber(line.commission) / reinsuranceNumber(line.premium) : 0;
