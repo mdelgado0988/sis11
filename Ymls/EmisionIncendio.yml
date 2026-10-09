@@ -31,6 +31,12 @@ Lines:
     comments: "'Impuesto sobre primas emitidas ' + _anioMes"
     order: _lineNumber
     condition: _impuestoPrimasIncendio != 0 && (!_cancelacion)
+  - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'Coaseguro',getColumn:_Policy.lob)
+    debit: '_coaseguroPorPagar < 0 ? -_coaseguroPorPagar : 0'
+    credit: '_coaseguroPorPagar > 0 ? _coaseguroPorPagar : 0'
+    comments: "'Coaseguro por pagar de ' + _anioMes"
+    order: _lineNumber
+    condition: _coaseguroPorPagar != 0 && (!_cancelacion)
 # Impuestos.    
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'GastosPrimas',getColumn:_Policy.lob)
     debit: '_gastoPrimaIncendio > 0 ? _gastoPrimaIncendio : 0'
@@ -96,6 +102,12 @@ Lines:
     comments: "'Impuesto sobre primas emitidas ' + _anioMes"
     order: _lineNumber
     condition: _impuestoPrimasIncendio != 0 && (_cancelacion)
+  - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'Coaseguro',getColumn:_Policy.lob)
+    debit: '_coaseguroPorPagar < 0 ? -_coaseguroPorPagar : 0'
+    credit: '_coaseguroPorPagar > 0 ? _coaseguroPorPagar : 0'
+    comments: "'Coaseguro por pagar de ' + _anioMes"
+    order: _lineNumber
+    condition: _coaseguroPorPagar != 0 && (_cancelacion)
 # Impuestos.    
   - account: exe(GetTable,table:'CuentasEmisionIncendio',column:'Cuenta',row:'GastosPrimas',getColumn:_Policy.lob)
     debit: '_gastoPrimaIncendio > 0 ? _gastoPrimaIncendio : 0'

@@ -90,7 +90,7 @@ base = base.replace(
 );
 base = base.replace(
   "SELECT mv.*,\n    lp.code AS poliza,",
-  "SELECT mv.*,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' AND ISJSON(emi.emisionSnapshot) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(emi.emisionSnapshot, '$.end')) END, CASE WHEN ISJSON(ch.jDetail) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(ch.jDetail, '$.policyEnd')) END, TODATETIMEOFFSET(CAST(mv.fHastaCession AS datetime2), '+00:00')) AS fHasta,\n    lp.code AS poliza,"
+  "SELECT mv.*,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,\n    CASE WHEN ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'PROCEEDORDER' AND ISJSON(ch.jDetail) = 1 THEN JSON_VALUE(ch.jDetail, '$.policyEnd')\n         ELSE CONVERT(varchar(50), COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' AND ISJSON(emi.emisionSnapshot) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(emi.emisionSnapshot, '$.end')) END, CASE WHEN ISJSON(ch.jDetail) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(ch.jDetail, '$.policyEnd')) END, TODATETIMEOFFSET(CAST(mv.fHastaCession AS datetime2), '+00:00')), 127)\n    END AS fHasta,\n    lp.code AS poliza,"
 );
 base = base.replace(
   "COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,",

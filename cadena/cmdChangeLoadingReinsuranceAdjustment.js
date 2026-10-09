@@ -78,7 +78,12 @@ function applyLoadingChangeAdjustments(sourceCession, targetCession, emissionBas
   targetCession.loadingCedant = 0;
   targetCession.loadingRe = 0;
   targetCession.nonTechnicalPremium = recalculatedNonTechnical;
-  const netPremium = redondear(toNumber(targetCession?.premium) - toNumber(targetCession?.nonTechnicalPremium));
+  const coPremium = toNumber(targetCession?.coPremium);
+  const netPremium = redondear(
+    toNumber(targetCession?.premium) -
+    coPremium -
+    toNumber(targetCession?.nonTechnicalPremium)
+  );
   targetCession.premiumCedant = redondear(netPremium * sourceProportionCed);
   targetCession.premiumRe = redondear(netPremium * sourceProportionRe);
   targetCession.proportionCed = sourceProportionCed;
@@ -87,7 +92,7 @@ function applyLoadingChangeAdjustments(sourceCession, targetCession, emissionBas
   targetCession.comissionCedantExtra = targetCession.comissionCedant;
   targetCession.tax = redondear(Math.abs(toNumber(targetCession?.premiumRe)) * baseTaxRatio * premiumSign);
 
-  const premiumBase = toNumber(targetCession?.premium);
+  const premiumBase = redondear(toNumber(targetCession?.premium) - coPremium);
   const distributed = redondear(
     toNumber(targetCession.nonTechnicalPremium) +
     toNumber(targetCession.premiumCedant) +

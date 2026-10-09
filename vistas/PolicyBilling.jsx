@@ -588,6 +588,7 @@
         startDate: config.startDate || paymentGroup.start,
         startDateWithoutTimezone: !!config.startDateWithoutTimezone,
         endDate: config.endDate || paymentGroup.end,
+        endDateWithoutTimezone: !!config.endDateWithoutTimezone,
         movementType: config.movementType,
         premium: billValues.premium,
         discounts: billValues.discounts,
@@ -751,9 +752,13 @@
       const changeId = change && change.id ? String(change.id) : '';
       const changeDetail = parseJsonObject(change && change.jDetail);
       const changeAdditional = parseJsonObject(change && change.jAdditional);
+      const endorsementType = String(changeAdditional && changeAdditional.endorsementType || '')
+        .trim()
+        .toUpperCase();
       const isCoverageTermChange = String(changeAdditional && changeAdditional.endorsementType || '')
         .trim()
         .toUpperCase() === 'CHANGE_COVERAGE_SURETY';
+      const isProceedOrder = endorsementType === 'PROCEEDORDER';
       const cancellationChange = isCancellationChange(change);
       const actualPlanEndorsement = isActualPlanEndorsement(change);
       const discriminator = String(change && change.Discriminator || '').toUpperCase();
@@ -773,6 +778,7 @@
           : (change && (change.effectiveDate || change.executionDate)),
         startDateWithoutTimezone: isCoverageTermChange,
         endDate: changeDetail.policyEnd || (paymentGroups[changeId] && paymentGroups[changeId].end),
+        endDateWithoutTimezone: isProceedOrder,
         movementType: change && getMovementType(change),
         incomeDate: change && change.executionDate,
         id: change && change.id,
@@ -839,6 +845,11 @@
     return type === 'CHANGECOVERAGESURETY'
       || type === 'CHANGE_COVERAGE_SURETY'
       || type === 'PROCEEDORDER';
+  }
+
+  function isLiteralProceedOrderEndDateReinsurance(record) {
+    const type = String(record && record.tipo || '').trim().toUpperCase();
+    return type === 'PROCEEDORDER';
   }
 
   function formatMoney(value) {
@@ -964,7 +975,7 @@
         return <Tooltip title={label}><span className="policy-billing-ellipsis">{label}</span></Tooltip>;
       } },
       { title: t('Start date'), dataIndex: 'fDesde', key: 'fDesde', width: 105, align: 'center', render: (value, record) => isLiteralCoverageTermReinsurance(record) ? formatDateWithoutTimezone(value) : formatDate(value) },
-      { title: t('End date'), dataIndex: 'fHasta', key: 'fHasta', width: 105, align: 'center', render: value => formatDate(value) },
+      { title: t('End date'), dataIndex: 'fHasta', key: 'fHasta', width: 105, align: 'center', render: (value, record) => isLiteralProceedOrderEndDateReinsurance(record) ? formatDateWithoutTimezone(value) : formatDate(value) },
       {
         title: t('Sums'),
         children: [
@@ -1180,7 +1191,9 @@
       key: 'endDate',
       width: 105,
       align: 'center',
-      render: value => formatDate(value)
+      render: (value, record) => record && record.endDateWithoutTimezone
+        ? formatDateWithoutTimezone(value)
+        : formatDate(value)
     },
     {
       title: t('Type'),
@@ -1308,7 +1321,11 @@
                 </Descriptions.Item>
                 <Descriptions.Item label={t('Receipt amount')}>{formatMoney(selectedReceipt.receiptAmount)}</Descriptions.Item>
                 <Descriptions.Item label={t('Start date')}>{formatDate(selectedReceipt.startDate)}</Descriptions.Item>
-                <Descriptions.Item label={t('End date')}>{formatDate(selectedReceipt.endDate)}</Descriptions.Item>
+                <Descriptions.Item label={t('End date')}>
+                  {selectedReceipt.endDateWithoutTimezone
+                    ? formatDateWithoutTimezone(selectedReceipt.endDate)
+                    : formatDate(selectedReceipt.endDate)}
+                </Descriptions.Item>
                 <Descriptions.Item label={t('Premium')}>{formatMoney(selectedReceipt.premium)}</Descriptions.Item>
                 <Descriptions.Item label={t('Discounts')}>{formatMoney(selectedReceipt.discounts)}</Descriptions.Item>
                 <Descriptions.Item label={t('Surcharges')}>{formatMoney(selectedReceipt.surcharges)}</Descriptions.Item>

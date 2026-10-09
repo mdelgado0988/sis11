@@ -65,10 +65,14 @@ try {
     amounts = getEndorsementAmounts(policy, change, id, tipo);
   }
 
+  amounts = applyCoinsuranceAccounting(policy, tipo, id, amounts);
+
   const {
     primaPorCobrar,
     prima,
     impuestoPrimasIncendio,
+    coaseguroPorPagar,
+    coaseguroPrima,
     gastoPrimaIncendio,
     cancelacion,
     renovacion,
@@ -85,7 +89,7 @@ try {
     cessions.reduce((total, item) => total + toNumber(item.comissionCedant), 0)
   );
   const reaseguroPorPagar = toDecimal(reaseguroCedido - reaseguroComision);
-  const hasPremiumMovement = [primaPorCobrar, prima, impuestoPrimasIncendio, gastoPrimaIncendio]
+  const hasPremiumMovement = [primaPorCobrar, prima, impuestoPrimasIncendio, gastoPrimaIncendio, coaseguroPorPagar]
     .some((value) => toDecimal(value) !== 0);
   const hasReinsuranceMovement = [reaseguroCedido, reaseguroComision, reaseguroPorPagar]
     .some((value) => toDecimal(value) !== 0);
@@ -123,6 +127,7 @@ try {
     primaPorCobrar: toDecimal(primaPorCobrar),
     prima: toDecimal(prima),
     impuestoPrimasIncendio: toDecimal(impuestoPrimasIncendio),
+    coaseguroPorPagar: toDecimal(coaseguroPorPagar),
     gastoPrimaIncendio: toDecimal(gastoPrimaIncendio),
     cancellationTax: toDecimal(cancellationTax),
     nonCancellationTax: toDecimal(nonCancellationTax),
@@ -180,7 +185,7 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
   const prima = sumCoveragePremiums(policy.Coverages, policy.coverages);
   const taxRows = asArray(policy.TaxGenerated);
   const impuestoPrimasIncendio = taxRows.length > 0
-    ? getLatestQuoteTax(taxRows)
+    ? getLatestInsuranceTax(taxRows)
     : toDecimal(policy.tax);
 
   return {
@@ -199,12 +204,77 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
  * Returns the tax from the latest issuance or renewal tax movement.
  * QUOTE and PREQUOTE apply to issuance; ANNIVERSARY applies to renewals.
  */
-function getLatestQuoteTax(rows) {
+function getLatestInsuranceTax(rows) {
   const quotationRows = asArray(rows)
-    .filter(row => row && ['QUOTE', 'PREQUOTE', 'ANNIVERSARY'].includes(String(row.action || '').toUpperCase()))
+    .filter(row => row
+      && ['QUOTE', 'PREQUOTE', 'ANNIVERSARY'].includes(String(row.action || '').toUpperCase())
+      && normalizeKey(row.taxName) === 'IMPUESTO DE SEGUROS')
     .sort((left, right) => toPositiveInteger(right.id) - toPositiveInteger(left.id));
 
   return quotationRows.length > 0 ? toNumber(quotationRows[0].amount) : 0;
+}
+
+function applyCoinsuranceAccounting(policy, tipo, changeId, amounts) {
+  const grossPremium = toDecimal(amounts && amounts.prima);
+  if (!policy || Number(policy.coinsurance || 0) !== 1 || grossPremium === 0) {
+    return { ...amounts, coaseguroPorPagar: 0, coaseguroPrima: 0 };
+  }
+
+  const coinsurance = getCoinsuranceAmounts(policy.id, tipo, changeId, grossPremium);
+  const netPremium = toDecimal(grossPremium - coinsurance.premium);
+  const movementTax = toDecimal(amounts.impuestoPrimasIncendio);
+  const coTax = grossPremium !== 0
+    ? toDecimal(movementTax * coinsurance.premium / grossPremium)
+    : 0;
+  const insuranceTax = toDecimal(movementTax - coTax);
+
+  return {
+    ...amounts,
+    prima: netPremium,
+    impuestoPrimasIncendio: insuranceTax,
+    gastoPrimaIncendio: getGastoPrima(policy, netPremium),
+    primaPorCobrar: toDecimal(grossPremium + movementTax),
+    coaseguroPorPagar: toDecimal(coinsurance.premium + coTax),
+    coaseguroPrima: toDecimal(coinsurance.premium)
+  };
+}
+
+function getCoinsuranceAmounts(policyId, tipo, changeId, grossPremium) {
+  const activeRows = getCoCessions(
+    `lifePolicyId=${policyId} AND parentCoCession IS NULL AND overwritten=0`
+  );
+  const isMovement = tipo !== 0 && tipo !== 2;
+  const currentRows = isMovement
+    ? activeRows.filter(row => Number(row.changeId || 0) === Number(changeId))
+    : activeRows;
+  const previousRows = isMovement
+    ? getCoCessions(
+      `lifePolicyId=${policyId} AND parentCoCession IS NULL AND overwritten=1 AND changeId IS NULL`
+    )
+    : [];
+
+  const currentPremium = currentRows.reduce(
+    (total, row) => total + toNumber(row.premiumCeded),
+    0
+  );
+  const previousPremium = previousRows.reduce(
+    (total, row) => total + toNumber(row.premiumCeded),
+    0
+  );
+  const percentage = currentRows.length > 0
+    ? currentRows.reduce((total, row) => total + toNumber(row.percentage), 0)
+    : activeRows.reduce((total, row) => total + toNumber(row.percentage), 0);
+  const movementPremium = isMovement && currentRows.length > 0
+    ? currentPremium - previousPremium
+    : currentPremium;
+  const premium = movementPremium !== 0
+    ? toDecimal(movementPremium)
+    : toDecimal(grossPremium * percentage / 100);
+
+  return {
+    premium: premium,
+    percentage: percentage
+  };
 }
 
 /**
@@ -491,6 +561,23 @@ function getCessions(filter) {
     throw new Error(response && response.msg
       ? response.msg
       : 'No fue posible recuperar las cesiones de reaseguro');
+  }
+
+  return asArray(response.outData).filter(item => item && typeof item === 'object');
+}
+
+function getCoCessions(filter) {
+  doCmd({
+    cmd: 'RepoCoCession',
+    data: {
+      operation: 'GET',
+      filter: filter
+    }
+  });
+
+  const response = typeof RepoCoCession === 'undefined' ? null : RepoCoCession;
+  if (!response || response.ok === false) {
+    return [];
   }
 
   return asArray(response.outData).filter(item => item && typeof item === 'object');
