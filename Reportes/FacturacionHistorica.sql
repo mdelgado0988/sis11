@@ -441,6 +441,8 @@ SELECT
              AND ISJSON(ed.jAdditional) = 1
              AND UPPER(LTRIM(RTRIM(JSON_VALUE(ed.jAdditional, '$.endorsementType')))) IN ('PROCEEDORDER', 'CHANGE_INSURED_SUM_SURETY')
             THEN CONVERT(VARCHAR, CAST(COALESCE(ed.effectiveDate, ed.executionDate) AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
+        WHEN ed.Discriminator = 'LoadingChange'
+            THEN CONVERT(VARCHAR, CAST(ed.effectiveDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
         WHEN ed.Discriminator = 'CancellationChange'
             THEN CONVERT(VARCHAR, CAST(ed.effectiveDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
         ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)

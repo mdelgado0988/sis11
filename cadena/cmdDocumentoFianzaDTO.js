@@ -495,10 +495,11 @@ function obtenerTextoVigencia(diasVigencia, tipoCalendario) {
     unidad = periodo === 1 ? 'DÍA' : 'DÍAS';
   }
 
+  const periodoTexto = periodo.toLocaleString('en-US', { maximumFractionDigits: 0, useGrouping: true });
   return {
     periodo,
-    texto: `${periodo} ${unidad}`,
-    textoTitulo: `${periodo} ${unidad.charAt(0) + unidad.slice(1).toLowerCase()}`
+    texto: `${periodoTexto} ${unidad}`,
+    textoTitulo: `${periodoTexto} ${unidad.charAt(0) + unidad.slice(1).toLowerCase()}`
   };
 }
 

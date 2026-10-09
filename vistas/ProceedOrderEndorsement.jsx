@@ -2423,6 +2423,7 @@
     </>;
   };
   const ProceedFolderIcon = () => <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 5.5A1.5 1.5 0 0 1 4.5 4h5l2 2h8A1.5 1.5 0 0 1 21 7.5v11A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5v-13Zm2 2v10.5h14V8.5h-8.33l-2-2H5Z" /></svg>;
+  const isReinsuranceRetentionLine = (row) => ['retencion', 'retención'].includes(String(row && row.lineId || '').trim().toLowerCase());
   const isReinsuranceReadonlyLine = (row) => String(row && row.lineId) === 'Coaseguro';
   const reinsuranceLineColumns = [
     { title: t('Line'), dataIndex: 'lineId', key: 'lineId', width: 180, align: 'left',
@@ -2445,7 +2446,7 @@
     { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 140, align: 'right',
       render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={105} onCommit={(next) => updateReinsuranceLine(row.key, 'tax', next)} /> },
     { title: t('Balance'), key: 'balance', width: 140, align: 'right', render: (value, row) => {
-      return reinsuranceMoney(row.isCoinsurance ? 0 : Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0));
+      return reinsuranceMoney(isReinsuranceRetentionLine(row) || row.isCoinsurance ? 0 : Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0));
     } }
   ];
   const movementReinsuranceParticipantColumns = [
@@ -2494,7 +2495,7 @@
       if (column.dataIndex === 'lineId') return Object.assign({}, column, { render: (value, row) => <span>{value}<Button type="link" size="small" className="proceed-order-folder-button" title={t('View reinsurers')} onClick={(event) => { event.stopPropagation(); setReinsuranceLineKey(row.key); }}><ProceedFolderIcon /></Button></span> });
       if (column.dataIndex === 'percentage' || column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: (value) => Number(value || 0).toFixed(4) });
       if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax') return Object.assign({}, column, { render: reinsuranceMoney });
-      if (column.key === 'balance') return Object.assign({}, column, { render: (value, row) => reinsuranceMoney(Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0)) });
+      if (column.key === 'balance') return Object.assign({}, column, { render: (value, row) => reinsuranceMoney(isReinsuranceRetentionLine(row) || row.isCoinsurance ? 0 : Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0)) });
       return column;
     });
     return <>

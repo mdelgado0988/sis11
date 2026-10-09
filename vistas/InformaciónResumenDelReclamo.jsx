@@ -3430,7 +3430,9 @@ END CATCH;`;
       const linked = (claim.Payouts || []).find((item) => Number(item.id) === Number(row.payoutId));
       if (linked && Number(linked.claimId) !== Number(claim.id)) return false;
       const coverageId = firstValue(row.coverageId, row.lifeCoverageId, linked && linked.lifeCoverageId);
-      if (coverageId == null) throw new Error('Hay pagos sin cobertura verificable; revise su asociación en la vista nativa.');
+      // Los pagos históricos sin cobertura ni movimiento asociado no deben
+      // bloquear el cálculo del saldo de otra cobertura.
+      if (coverageId == null) return false;
       return Number(coverageId) === Number(payout.lifeCoverageId);
     });
     if (history.some((row) => numericValue(row.grossAmount) === null || !Number.isSafeInteger(Number(row.payoutId))

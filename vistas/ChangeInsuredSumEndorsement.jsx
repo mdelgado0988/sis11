@@ -3018,7 +3018,7 @@
           ? Number(totals.taxPercentage)
           : ((finalPremiumCed || finalPremiumRet) ? Number((displayTax / (finalPremiumCed || finalPremiumRet) * 100).toFixed(2)) : 0))),
         tax: displayTax,
-        reinsuranceBalance: isCoinsurance ? 0 : money(finalPremiumCed - displayCommission),
+        reinsuranceBalance: isRetention || isCoinsurance ? 0 : money(finalPremiumCed - displayCommission),
         movementPremium: premium
       };
     });
@@ -3073,7 +3073,7 @@
           premium: premium,
           commission: money(premium * commissionRate),
           tax: money(premium * taxRate),
-          reinsuranceBalance: money(premium - (premium * commissionRate) - (premium * taxRate)),
+          reinsuranceBalance: row.isRetention ? 0 : money(premium - (premium * commissionRate) - (premium * taxRate)),
           // Retención y No Técnica no tienen aceptantes que consultar.
           canViewReinsurers: !row.isRetention && row.contractLabel !== 'No Técnica'
         });

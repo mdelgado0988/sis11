@@ -98,6 +98,13 @@ resultado.AnioNac = fnacimiento.getUTCFullYear();
 resultado.Asegurado = getNombreCompleto(insured);
 resultado.FNacimiento = toFechaNacimiento(insured.birth);
 resultado.IdentificacionAseg = insured.isPerson == true ? insured.cnp : insured.nif;
+resultado.DireccionAseg = axxDireccionCompleta(insured.Addresses?.[0]);
+resultado.TelefonoAseg = insured.phone ?? "";
+resultado.PaisAseg = getCatalogValue("RepoCountryCatalog", `code = '${insured.Addresses?.[0]?.country}'`, "name") ?? "";
+resultado.CiudadAseg = getCatalogValue("RepoCityCatalog", `stateCode = '${insured.Addresses?.[0]?.state}' AND code = '${insured.Addresses?.[0]?.city}'`, "name") ?? "";
+resultado.CelularAseg = insured.Phones?.find(x => x.type == celPhoneType)?.num ?? "";
+resultado.EmailAseg = insured.email ?? "";
+resultado.ProvinciaAseg = getCatalogValue("RepoStateCatalog", `countryCode = '${insured.Addresses?.[0]?.country}' AND code = '${insured.Addresses?.[0]?.state}'`, "name") ?? "";
 
 //Datos del corredor
 resultado.Corredor = getNombreCompleto(seller);
