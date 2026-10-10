@@ -15,7 +15,7 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 52
+where t.cramo = 31
 --and t.cplan = 'P10' 
 and t.cendoso = 36
 --and t.ccober = 25
@@ -252,9 +252,9 @@ GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 select cramo, ccausa, xcausa from macausasin where cramo = 71
 
 
-declare @cuenta varchar(9) = '640.01.01.01.00.03.01.00.000'
+declare @cuenta varchar(9) = '410.01.01.02.00.15.04.00.000'
 select * 
 from SisGlobal_AG01..catalogonic
 where cdgocont like '%'+@cuenta+'%'
 and tipocuen = '2'
-AND desccont like '%tradicion%'
+AND desccont like '%frau%'
