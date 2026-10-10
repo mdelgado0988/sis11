@@ -5,11 +5,14 @@
  * @author Noel Obando
  * @created 2025-12-26
  * @name cmdEmisionIncendioContext
- * @version 1.1
+ * @version 1.2
  * @purpose Builds accounting context data for fire issuance and endorsements.
  * @param context.id Policy, change or anniversary identifier.
  * @param context.tipo 0: issuance, 1: cancellation, 2: renewal, 3: insured sum change,
  *                     4: insured object change, 5: loading change, 6: coverage change.
+ * @changes 1.2 (MSN-000056) Resolves the accounts of every template line from the table
+ *          CuentasEmisionGeneral: the column "<ramo>-<producto>" when it has a value for
+ *          the line, otherwise the column of the ramo. Returned as cuenta<Linea> fields.
  */
 
 try {
@@ -122,8 +125,10 @@ try {
     ? String(policy.Product.name)
     : '';
   const policyCode = String(policy.code || '');
+  const cuentas = getCuentasContables(policy);
 
   return [{
+    ...cuentas,
     primaPorCobrar: toDecimal(primaPorCobrar),
     prima: toDecimal(prima),
     impuestoPrimasIncendio: toDecimal(impuestoPrimasIncendio),
@@ -374,6 +379,58 @@ function getNombreRamo(policy) {
   const nombre = String(ramo && ramo.name || '').trim();
 
   return nombre.replace(/^\s*[^-]+\s*-\s*/, '').trim();
+}
+
+/**
+ * Resolves the account of each template line from CuentasEmisionGeneral.
+ * Rows are the template lines (column "Cuenta"); columns are the ramo code
+ * ("52") or a product of that ramo ("52-FRAUDE"). A product cell with a value
+ * wins; an empty or missing product cell falls back to the ramo column.
+ */
+function getCuentasContables(policy) {
+  const tableName = 'CuentasEmisionGeneral';
+  const lines = {
+    cuentaPrimaxCobrar: 'PrimaxCobrar',
+    cuentaPrima: 'Prima',
+    cuentaImpuestoPrimas: 'ImpuestoPrimas',
+    cuentaCoaseguro: 'Coaseguro',
+    cuentaGastosPrimas: 'GastosPrimas',
+    cuentaDaniosxPagar: 'DaniosxPagar',
+    cuentaComision: 'Comision',
+    cuentaReservasxPagar: 'ReservasxPagar',
+    cuentaReaseguroCedido: 'ReaseguroCedido',
+    cuentaReaseguroComision: 'ReaseguroComision',
+    cuentaReaseguroxPagar: 'ReaseguroxPagar'
+  };
+
+  doCmd({
+    cmd: 'GetFullTable',
+    data: { table: tableName }
+  });
+
+  const response = typeof GetFullTable === 'undefined' ? null : GetFullTable;
+  const rows = response && response.ok !== false && response.outData
+    ? JSON.parse(JSON.stringify(response.outData))
+    : [];
+  if (!Array.isArray(rows) || rows.length < 2) {
+    throw new Error(`No se encontró la tabla de cuentas ${tableName}`);
+  }
+
+  const header = asArray(rows[0]).map(normalizeKey);
+  const lob = String(policy && policy.lob || '').trim();
+  const product = String(policy && (policy.productCode || (policy.Product && policy.Product.code)) || '').trim();
+  const lobIndex = lob ? header.indexOf(normalizeKey(lob)) : -1;
+  const productIndex = lob && product ? header.indexOf(normalizeKey(`${lob}-${product}`)) : -1;
+
+  const result = {};
+  Object.keys(lines).forEach(field => {
+    const row = rows.find(item => Array.isArray(item) && normalizeKey(item[0]) === normalizeKey(lines[field]));
+    const productAccount = row && productIndex > 0 ? String(row[productIndex] || '').trim() : '';
+    const lobAccount = row && lobIndex > 0 ? String(row[lobIndex] || '').trim() : '';
+    result[field] = productAccount || lobAccount;
+  });
+
+  return result;
 }
 
 function getEmissionCode(lob) {
