@@ -12,12 +12,20 @@
  * @note Cancellation changes do not generate BillDiff, so the calculation must use Bill and jDetail only.
  */
 
+/*
+ * AXX-4041 / MSN-000059 - Polizas plurianuales de prima unica.
+ * El detalle que arma el sistema toma la vigencia del aniversario (policyEnd a un anio,
+ * policyDuration 365). En estos productos la prima cubre TODA la vigencia, asi que el
+ * detalle se rehace de inicio a fin de la poliza, igual que cmdGetCancellationPremium.
+ */
+const productosPrimaVigenciaTotal = ["APAM1", "APAM2"];
+
 try {
   const contexto = normalizeContext(context);
 
   //doCmd({cmd: "GetPing", data: { contexto: JSON.stringify(context) }});
   
-  const detail = parseJson(contexto?.jDetail) ?? {};
+  const detail = ajustarVigenciaTotal(contexto, parseJson(contexto?.jDetail) ?? {});
   const billSummary = buildBillSummary(contexto, detail);
   const coverageRows = buildCoverageRows(detail);
 
@@ -65,6 +73,75 @@ function persistAdjustedDetail(contexto, adjustedDetail) {
   if (!SetField?.ok) {
     throw new Error(SetField?.msg || "No fue posible actualizar jDetail");
   }
+}
+
+function ajustarVigenciaTotal(contexto, detail) {
+  const policyId = toPositiveInt(contexto?.lifePolicyId ?? 0);
+
+  if (policyId <= 0) {
+    return detail;
+  }
+
+  doCmd({
+    cmd: "LoadEntity",
+    data: {
+      entity: "LifePolicy",
+      fields: "id, start, [end], productCode",
+      filter: `id = ${policyId}`,
+      noTracking: true
+    }
+  });
+
+  const policy = LoadEntity?.ok ? LoadEntity?.outData : null;
+  if (!policy || !productosPrimaVigenciaTotal.includes(normalizeText(policy?.productCode).toUpperCase())) {
+    return detail;
+  }
+
+  const inicio = fechaDeNegocio(policy?.start);
+  const fin = fechaDeNegocio(policy?.end);
+  const fechaCambio = fechaDeNegocio(detail?.changeDate ?? contexto?.effectiveDate);
+
+  if (!inicio || !fin || !fechaCambio) {
+    return detail;
+  }
+
+  const policyDuration = Math.max(diasEntre(inicio, fin), 0);
+  const remainingDays = Math.min(Math.max(diasEntre(fechaCambio, fin), 0), policyDuration);
+
+  return {
+    ...detail,
+    policyStart: inicio,
+    policyEnd: fin,
+    policyDuration,
+    remainingDays,
+    prorate: policyDuration === 0 ? 0 : remainingDays / policyDuration
+  };
+}
+
+// Dia de calendario: "AAAA-MM-DD" y la medianoche exacta se toman tal cual;
+// una fecha con hora se lleva a Panama (UTC-5), como en cmdGetCancellationPremium.
+function fechaDeNegocio(value) {
+  const raw = normalizeText(value);
+  if (!raw) {
+    return "";
+  }
+
+  const dia = raw.match(/^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.0+)?(?:Z|[+-]00:?00)?)?$/i);
+  if (dia) {
+    return dia[1];
+  }
+
+  const conZona = /z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw);
+  const fecha = new Date(conZona ? raw : raw + "Z");
+  if (Number.isNaN(fecha.getTime())) {
+    return "";
+  }
+
+  return new Date(fecha.getTime() - (5 * 60 * 60 * 1000)).toISOString().substring(0, 10);
+}
+
+function diasEntre(desde, hasta) {
+  return Math.round((Date.parse(hasta + "T00:00:00Z") - Date.parse(desde + "T00:00:00Z")) / 86400000);
 }
 
 function normalizeContext(source) {

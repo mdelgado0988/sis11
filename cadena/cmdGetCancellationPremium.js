@@ -11,6 +11,15 @@
  * @Output: Array
  */
 
+/*
+ * AXX-4030 / MSN-000059 - Polizas plurianuales de prima unica.
+ * En estos productos la tarifa cobra la prima de TODA la vigencia (cobertura 163:
+ * 6.53 x meses de vigencia), no la de un anio. La prima original se prorratea entonces
+ * sobre inicio -> fin de la poliza, no sobre el registro de aniversario (365 dias).
+ * El resto de productos conserva la ventana del aniversario sin cambios.
+ */
+const productosPrimaVigenciaTotal = ["APAM1", "APAM2"];
+
 try {
 
   //doCmd({cmd: "GetPing", data: { contexto: JSON.stringify(context) } });
@@ -101,7 +110,12 @@ function normalizeChangeDate(value) {
     throw new Error("La fecha de cancelacion es requerida");
   }
 
-  return raw;
+  // AXX-4041 / MSN-000059 - La formula de cancelacion del producto pasa la fecha del
+  // endoso como fecha de calendario a medianoche exacta ("2026-10-01T00:00:00Z"). No es
+  // un instante: convertirla a Panama la movia al dia anterior (50 dias en vez de 51).
+  // Se toma el dia tal cual; una fecha con hora real sigue pasando por Panama.
+  const medianoche = raw.match(/^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.0+)?(?:Z|[+-]00:?00)?$/i);
+  return medianoche ? medianoche[1] : raw;
 }
 
 function loadPolicy(pol) {
@@ -111,7 +125,7 @@ function loadPolicy(pol) {
     cmd: "LoadEntity",
     data: {
       entity: "LifePolicy",
-      fields: "id, start, [end], anualPremium, tax, anualTotal, currency",
+      fields: "id, start, [end], anualPremium, tax, anualTotal, currency, productCode",
       filter: `id = ${policyId}`,
       noTracking: true
     }
@@ -224,8 +238,9 @@ function buildAnniversaryMovement(policy, anniversaries, cancellationDate) {
 
   const source = getFinancialSource(anniversary?.jsnapshot ?? anniversary ?? policy);
 
-  const start = anniversary?.start ?? policy?.start;
-  const end = anniversary?.anniversary ?? policy?.end;
+  const primaDeTodaLaVigencia = productosPrimaVigenciaTotal.includes(normalizeText(policy?.productCode).toUpperCase());
+  const start = primaDeTodaLaVigencia ? policy?.start : (anniversary?.start ?? policy?.start);
+  const end = primaDeTodaLaVigencia ? policy?.end : (anniversary?.anniversary ?? policy?.end);
 
   if (!start || !end) {
     return null;

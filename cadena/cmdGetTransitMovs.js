@@ -31,7 +31,7 @@ try {
   const masterSql = `
 SELECT
     a.[id],
-    a.[holderId],
+    ${input.holderId || 'a.[holderId]'} AS [holderId],
     a.[lifePolicyId],
     a.[accNo],
     a.[type],
@@ -41,20 +41,18 @@ SELECT
     pol.[code] AS [policyCode],
     LTRIM(RTRIM(CONCAT(ISNULL(con.[name], ''), ' ', ISNULL(con.[surname1], ''), ' ', ISNULL(con.[surname2], '')))) AS [contactName],
     ISNULL(requests.[pendingRefundAmount], 0) AS [pendingRefundAmount],
-    CASE
-      WHEN ISNULL(SUM(ISNULL(am.[amount], 0)), 0) - ISNULL(requests.[pendingRefundAmount], 0) < 0 THEN 0
-      ELSE ISNULL(SUM(ISNULL(am.[amount], 0)), 0) - ISNULL(requests.[pendingRefundAmount], 0)
-    END AS [availableBalance],
+    CASE WHEN ISNULL(SUM(ISNULL(am.[amount], 0)), 0) - ISNULL(requests.[pendingRefundAmount], 0) < 0 THEN 0 ELSE ISNULL(SUM(ISNULL(am.[amount], 0)), 0) - ISNULL(requests.[pendingRefundAmount], 0) END AS [availableBalance],
     COUNT(am.[id]) AS [movementCount],
     ISNULL(SUM(ISNULL(am.[amount], 0)), 0) AS [movementBalance]
 FROM [Account] a
-LEFT JOIN [Contact] con ON con.[id] = a.[holderId]
+LEFT JOIN [Contact] con ON con.[id] = ${input.holderId || 'a.[holderId]'}
 LEFT JOIN [LifePolicy] pol ON pol.[id] = a.[lifePolicyId]
 OUTER APPLY (
     SELECT SUM(ISNULL(cp.[total], 0)) AS [pendingRefundAmount]
     FROM [ClaimPayment] cp
     WHERE cp.[sourceAccountId] = a.[id]
       AND cp.[claimId] IS NULL
+      AND (${input.holderId} = 0 OR cp.[contactId] = ${input.holderId})
       AND (cp.[producer] IS NULL OR (
         UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
         AND ISNULL(cp.[paymentType], '') = '15'
@@ -64,7 +62,7 @@ OUTER APPLY (
 ) requests
 LEFT JOIN [AccountMov] am
     ON am.[accountId] = a.[id]
-   AND ${movementPredicate('am', input)}
+   AND ${movementPredicate('am', {})}
 WHERE ${filter}
 GROUP BY
     a.[id], a.[holderId], a.[lifePolicyId], a.[accNo], a.[type], a.[currency],
@@ -91,7 +89,7 @@ OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
   }));
 
   const countSql = `SELECT COUNT(1) AS [total] FROM [Account] a
-LEFT JOIN [Contact] con ON con.[id] = a.[holderId]
+LEFT JOIN [Contact] con ON con.[id] = ${input.holderId || 'a.[holderId]'}
 LEFT JOIN [LifePolicy] pol ON pol.[id] = a.[lifePolicyId]
 WHERE ${filter};`;
 
@@ -143,22 +141,24 @@ function buildFilter(input) {
       ISNULL((SELECT SUM(ISNULL(ab.[amount], 0))
         FROM [AccountMov] ab
         WHERE ab.[accountId] = a.[id]
-          AND ${movementPredicate('ab', input)}), 0)
+          AND ${movementPredicate('ab', {})}), 0)
       - ISNULL((SELECT SUM(ISNULL(cp.[total], 0))
         FROM [ClaimPayment] cp
         WHERE cp.[sourceAccountId] = a.[id]
           AND cp.[claimId] IS NULL
+      AND (${input.holderId} = 0 OR cp.[contactId] = ${input.holderId})
           AND (cp.[producer] IS NULL OR (
             UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
             AND ISNULL(cp.[paymentType], '') = '15'
           ))
           AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(a.[currency], ''))
           AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')), 0)
-    ), 2) > 0`);
+    ), 2) <> 0`);
   }
 
+  if (input.cancellations) { conditions.push("EXISTS (SELECT 1 FROM [AccountMov] cm WHERE cm.[accountId]=a.[id] AND cm.[transaction]='Cancellation')"); }
   if (input.holderId > 0) {
-    conditions.push(`a.[holderId] = ${input.holderId}`);
+    conditions.push(`EXISTS (SELECT 1 FROM [AccountMov] contactMovement WHERE contactMovement.[accountId]=a.[id] AND ${movementPredicate('contactMovement', input)})`);
   }
 
   if (input.transferId > 0) {
@@ -224,6 +224,21 @@ ORDER BY am.[accountId], am.[date], am.[id];`;
 }
 
 function movementPredicate(alias, input) {
+  const parts = [];
+  if (input && input.holderId > 0) {
+    // Persisted contact on the movement wins; legacy movements retain account-holder lookup.
+    parts.push(`EXISTS (SELECT 1 FROM [Transfer] contactTransfer JOIN [Account] contactAccount ON contactAccount.[id]=${alias}.[accountId]
+      OUTER APPLY (SELECT TOP 1 TRY_CONVERT(int,JSON_VALUE(j.[value],'$.userData[0]')) AS contactId
+        FROM OPENJSON(CASE WHEN ISJSON(contactTransfer.[jIncomeTypeForm])=1 THEN contactTransfer.[jIncomeTypeForm] ELSE '[]' END) j
+        WHERE JSON_VALUE(j.[value],'$.name')='hiddenCodigoCliente') storedContact
+      WHERE contactTransfer.[id]=${alias}.[transferId]
+        AND COALESCE(storedContact.contactId,contactAccount.[holderId])=${input.holderId})`);
+  }
+  parts.push(baseMovementPredicate(alias,input));
+  return parts.join(' AND ');
+}
+
+function baseMovementPredicate(alias, input) {
   if (input && input.cancellations === true) {
     return `ISNULL(${alias}.[transaction], '') = 'Cancellation'`;
   }
