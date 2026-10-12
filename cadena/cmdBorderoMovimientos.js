@@ -40,8 +40,9 @@ function esFecha(s) {
 var errs = [];
 if (!esFecha(fdesde)) { errs.push('Fecha Inicial es obligatoria y debe tener formato YYYY-MM-DD.'); }
 if (!esFecha(fhasta)) { errs.push('Fecha Final es obligatoria y debe tener formato YYYY-MM-DD.'); }
-if (errs.length === 0 && fdesde > fhasta) { errs.push('La Fecha Inicial debe ser menor o igual a la Fecha Final.'); }
 var tieneRamo = Array.isArray(ramos) && ramos.length > 0;
+/* La poliza identifica por si sola el alcance: el periodo no restringe su historial. */
+if (errs.length === 0 && !poliza && fdesde > fhasta) { errs.push('La Fecha Inicial debe ser menor o igual a la Fecha Final.'); }
 if (!tieneRamo && !poliza) { errs.push('Debe seleccionar al menos un Ramo o indicar una Póliza.'); }
 if (errs.length > 0) { throw errs.join(' '); }
 
@@ -203,12 +204,19 @@ base = base.replace("SUM(CASE WHEN d.bucket='CP'  THEN d.dSiRe ELSE 0 END) AS su
 base = base.replace("SUM(CASE WHEN d.bucket='EX'  THEN d.dSiRe ELSE 0 END) AS sumaExcedente", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='EX' THEN d.dSiRe ELSE 0 END) AS sumaExcedente");
 base = base.replace("SUM(CASE WHEN d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS sumaFacultativa", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS sumaFacultativa");
 
-var win = "'" + fdesde + "' AND '" + fhasta + "'";
-var scope = lobPred + " AND " + polizaPred + " AND ("
-  + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND ch.executionDate >= '" + fdesde + "' AND ch.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
-  + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND an.executionDate >= '" + fdesde + "' AND an.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
-  + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) OR (lp.activeDate IS NULL AND lp.created >= '" + fdesde + "' AND lp.created < DATEADD(day, 1, '" + fhasta + "'))))"
-  + "))";
+var scope = lobPred + " AND " + polizaPred;
+if (!poliza) {
+  scope += " AND ("
+    + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND ch.executionDate >= '" + fdesde + "' AND ch.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
+    + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND an.executionDate >= '" + fdesde + "' AND an.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
+    + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) OR (lp.activeDate IS NULL AND lp.created >= '" + fdesde + "' AND lp.created < DATEADD(day, 1, '" + fhasta + "'))))"
+    + "))";
+}
+
+function omitePeriodoPorPoliza(s) {
+  if (!poliza) { return s; }
+  return s.replace(/WHERE CAST\(r\.fechaEmision AS date\) BETWEEN '[^']+' AND '[^']+'/g, 'WHERE 1=1');
+}
 
 function arma(tpl, scopePred, skip, take) {
   var s = base + tpl;
@@ -221,7 +229,7 @@ function arma(tpl, scopePred, skip, take) {
   s = s.split('@@VIGPRED@@').join(' AND r.polizaSinEmitir = 0 AND r.endosoNoEjecutado = 0');
   s = s.split('@@SKIP@@').join(String(skip));
   s = s.split('@@TAKE@@').join(String(take));
-  return s;
+  return omitePeriodoPorPoliza(s);
 }
 
 /* El ledger se materializa una sola vez. @scope no crea objetos ni indices y #ord/#dlt/#res
@@ -257,7 +265,7 @@ function armaMaterializada(tpl, skip, take) {
   s = s.split('@@VIGPRED@@').join(' AND r.polizaSinEmitir = 0 AND r.endosoNoEjecutado = 0');
   s = s.split('@@SKIP@@').join(String(skip));
   s = s.split('@@TAKE@@').join(String(take));
-  return s;
+  return omitePeriodoPorPoliza(s);
 }
 
 function asignaJsonDesdeCte(cteSql, inicioSelect, variable, sinArreglo) {

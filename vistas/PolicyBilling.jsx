@@ -244,8 +244,12 @@
   }
 
   function getReinsuranceContext() {
-    const from = apiDate(policy && (policy.created || policy.start || policy.activeDate));
-    const to = apiDate(policy && policy.end) || new Date().toISOString().substring(0, 10);
+    const initialDate = apiDate(policy && (policy.created || policy.start || policy.activeDate));
+    const finalDate = apiDate(policy && policy.end) || new Date().toISOString().substring(0, 10);
+    // Algunas polizas historicas pueden tener la fecha tecnica posterior a la vigencia.
+    // El bordero requiere un rango cronologico aun cuando se consulta una sola poliza.
+    const from = initialDate && finalDate && initialDate > finalDate ? finalDate : initialDate;
+    const to = initialDate && finalDate && initialDate > finalDate ? initialDate : finalDate;
     return {
       fdesde: from || to,
       fhasta: to,
