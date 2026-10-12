@@ -13,6 +13,8 @@ let policy;
 let policyId = window.location.href.split('/')[5] ?? 3357;
 let contact;
 let polizaConfirmada = false;
+let policyLoadPromise;
+let saveReplayPending = false;
 const isEndorsment = window.location.href.includes('tab12');
 
 function polizaEmitidaParaUbicacion() {
@@ -85,6 +87,7 @@ const camposEditablesEnEndoso = new Set([
 ]);
 const camposConRestriccion = [
     'txtEdadSuscripcion',
+    'txtSumaAsegurada',
     'txtSumaExcedente',
     'txtPeso',
     'txtAltura',
@@ -106,12 +109,15 @@ const camposConRestriccion = [
     'txtMotivoRenovacion'
 ];
 
+const gapRequiredFields = ["txtMontoMensual", "txtValorFinal", "txtValorFaltante", "txtTasaInteres", "txtValorActual"];
+
 const requiredData = [
     { productCode: "P10", fields: ["cmbOcupacion"] },
     { productCode: "P20", fields: ["cmbOcupacion"] },
     { productCode: "P30", fields: ["cmbOcupacion"] },
     { productCode: "P50", fields: ["cmbOcupacion"] },
-    { productCode: "GAP", fields: ["txtMontoMensual", "txtValorFinal", "txtValorFaltante", "txtTasaInteres", "txtValorActual"] }
+    { productCode: "GAP", fields: gapRequiredFields },
+    { productCode: "GAPVI", fields: gapRequiredFields }
 ]
 
 const cobtarVida = [
@@ -120,7 +126,7 @@ const cobtarVida = [
     { lob: 71, cobtar: "cfgCobtarVidaIndividual"  }
 ]
 
-const ramoValores = ['20'];
+const ramoValores = ['20', '71'];
 
 $(function () {
   initForm();
@@ -1833,8 +1839,11 @@ function setDefaultData(){
         .val(calcularEdad(contact.birth))
         .prop("readonly", true)
         .addClass("readonly-style");
-    $("#txtSumaAsegurada").val(n2(policy.insuredSum));    
-    $("#txtSumaAsegurada").addClass("readonly-style");
+    aplicarSumaPolizaSiCorresponde();
+    $("#txtSumaAsegurada")
+        .prop("readonly", esPolizaEmitida())
+        .toggleClass("readonly-style", esPolizaEmitida())
+        .css({ pointerEvents: '', backgroundColor: '', color: '' });
     $("#CodigoCategoriaActividad").addClass("readonly-style");
 
     //busco el código del producto de policy en el arreglo requiredData para obtener los campos requeridos de dicho producto y marcar dichos campos como requeridos en la interfaz
@@ -1857,6 +1866,90 @@ function setDefaultData(){
     bindCalculoValorFaltante();
     actualizarValorFaltante();
 
+}
+
+function valorSumaFormulario(value) {
+    let text = String(value ?? '').trim().replace(/\s+/g, '');
+    if (!text) return 0;
+
+    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(text)) {
+        text = text.replace(/\./g, '').replace(',', '.');
+    } else {
+        text = text.replace(/,/g, '');
+    }
+
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function aplicarSumaPolizaSiCorresponde() {
+    const $suma = $("#txtSumaAsegurada");
+    const sumaPoliza = Number(policy?.insuredSum);
+
+    if (!$suma.length || !Number.isFinite(sumaPoliza)) return false;
+
+    const sumaFormulario = valorSumaFormulario($suma.val());
+    if (sumaFormulario !== null && sumaFormulario !== 0) return false;
+
+    const formatted = n2(sumaPoliza);
+    $suma
+        .val(formatted)
+        .attr('user-data', formatted)
+        .trigger('input')
+        .trigger('change');
+    return true;
+}
+
+function esAccionGuardar(button) {
+    const $button = $(button).closest('button, input[type="submit"], input[type="button"]');
+    if (!$button.length) return false;
+
+    const text = [
+        $button.text(),
+        $button.val(),
+        $button.attr('aria-label'),
+        $button.attr('title'),
+        $button.attr('id'),
+        $button.attr('name')
+    ].join(' ').toLowerCase();
+
+    return /guardar|save|grabar|registrar/.test(text);
+}
+
+function protegerGuardadoMientrasCargaSuma() {
+    const handlerKey = '__dtAccidentesSaveGuard';
+    if (window[handlerKey]) {
+        document.removeEventListener('click', window[handlerKey], true);
+    }
+
+    const handler = function (event) {
+        if (policy || !policyLoadPromise || !esAccionGuardar(event.target)) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (saveReplayPending) return;
+
+        const button = $(event.target).closest('button, input[type="submit"], input[type="button"]').get(0);
+        if (!button) return;
+
+        saveReplayPending = true;
+        const wasDisabled = button.disabled;
+        button.disabled = true;
+
+        policyLoadPromise.then(function () {
+            aplicarSumaPolizaSiCorresponde();
+            button.disabled = wasDisabled;
+            saveReplayPending = false;
+            button.click();
+        }).catch(function () {
+            button.disabled = wasDisabled;
+            saveReplayPending = false;
+            me.message.error('No fue posible cargar la suma asegurada de la póliza.');
+        });
+    };
+
+    window[handlerKey] = handler;
+    document.addEventListener('click', handler, true);
 }
 
 function bindCalculoValorFaltante() {
@@ -1959,8 +2052,11 @@ async function initForm() {
 
     if ($hidden.length) {     
 
-        //Cargamos información
-        policy = await getPolicy();
+        // La suma se aplica tan pronto llega la póliza; las demás cargas no la retrasan.
+        policyLoadPromise = getPolicy();
+        protegerGuardadoMientrasCargaSuma();
+        policy = await policyLoadPromise;
+        aplicarSumaPolizaSiCorresponde();
         contact = await getContact(policy.MainInsured?.contactId ?? 0);     
         await cargarUbicacionAsegurado();
 

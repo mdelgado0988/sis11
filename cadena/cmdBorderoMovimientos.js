@@ -74,7 +74,7 @@ base = base.replace(
 );
 base = base.replace(
   "ch.Discriminator AS chTipo,",
-  "CASE WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_INSURED_SUM_SURETY' THEN 'CHANGE_INSURED_SUM_SURETY' WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'PROCEEDORDER' THEN 'ProceedOrder' WHEN ch.Discriminator = 'CoverageChange' AND ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' THEN 'ChangeCoverageSurety' ELSE ch.Discriminator END AS chTipo,"
+  "CASE WHEN ch.Discriminator = 'CoverageChange' AND JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'CHANGE_INSURED_SUM_SURETY' THEN 'CHANGE_INSURED_SUM_SURETY' WHEN ch.Discriminator = 'CoverageChange' AND JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'PROCEEDORDER' THEN 'ProceedOrder' WHEN ch.Discriminator = 'CoverageChange' AND JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' THEN 'ChangeCoverageSurety' ELSE ch.Discriminator END AS chTipo,"
 );
 tPage = tPage.replace(
   "r.esCancelacion=1 OR r.premiumType='CANCELLATION'",
@@ -90,11 +90,11 @@ base = base.replace(
 );
 base = base.replace(
   "SELECT mv.*,\n    lp.code AS poliza,",
-  "SELECT mv.*,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,\n    CASE WHEN ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'PROCEEDORDER' AND ISJSON(ch.jDetail) = 1 THEN JSON_VALUE(ch.jDetail, '$.policyEnd')\n         ELSE CONVERT(varchar(50), COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' AND ISJSON(emi.emisionSnapshot) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(emi.emisionSnapshot, '$.end')) END, CASE WHEN ISJSON(ch.jDetail) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(ch.jDetail, '$.policyEnd')) END, TODATETIMEOFFSET(CAST(mv.fHastaCession AS datetime2), '+00:00')), 127)\n    END AS fHasta,\n    lp.code AS poliza,"
+  "SELECT mv.*,\n    COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,\n    CASE WHEN JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'PROCEEDORDER' AND ISJSON(ch.jDetail) = 1 THEN JSON_VALUE(CASE WHEN ISJSON(ch.jDetail) = 1 THEN ch.jDetail ELSE '{}' END, '$.policyEnd')\n         ELSE CONVERT(varchar(50), COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' AND ISJSON(emi.emisionSnapshot) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(CASE WHEN ISJSON(emi.emisionSnapshot) = 1 THEN emi.emisionSnapshot ELSE '{}' END, '$.end')) END, CASE WHEN ISJSON(ch.jDetail) = 1 THEN TRY_CONVERT(datetimeoffset, JSON_VALUE(CASE WHEN ISJSON(ch.jDetail) = 1 THEN ch.jDetail ELSE '{}' END, '$.policyEnd')) END, TODATETIMEOFFSET(CAST(mv.fHastaCession AS datetime2), '+00:00')), 127)\n    END AS fHasta,\n    lp.code AS poliza,"
 );
 base = base.replace(
   "COALESCE(CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,",
-  "COALESCE(CASE WHEN ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') IN ('CHANGE_INSURED_SUM_SURETY', 'PROCEEDORDER') THEN TODATETIMEOFFSET(CAST(ch.effectiveDate AS datetime2), '+00:00') END, CASE WHEN ISJSON(ch.jAdditional) = 1 AND JSON_VALUE(ch.jAdditional, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' AND ISJSON(ch.jDetail) = 1 THEN JSON_VALUE(ch.jDetail, '$.policyStart') END, CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,"
+  "COALESCE(CASE WHEN JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') IN ('CHANGE_INSURED_SUM_SURETY', 'PROCEEDORDER') THEN TODATETIMEOFFSET(CAST(ch.effectiveDate AS datetime2), '+00:00') END, CASE WHEN JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' AND ISJSON(ch.jDetail) = 1 THEN JSON_VALUE(CASE WHEN ISJSON(ch.jDetail) = 1 THEN ch.jDetail ELSE '{}' END, '$.policyStart') END, CASE WHEN mv.movKey LIKE 'EMI:%' THEN TODATETIMEOFFSET(CAST(emi.emisionDesde AS datetime2), '+00:00') END, TODATETIMEOFFSET(CAST(mv.fDesdeCession AS datetime2), '+00:00')) AS fDesde,"
 );
 base = base.replace(
   "LEFT JOIN Anniversary an ON an.id = mv.anniversaryId\n  LEFT JOIN Contract ct",
@@ -205,10 +205,10 @@ base = base.replace("SUM(CASE WHEN d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS su
 
 var win = "'" + fdesde + "' AND '" + fhasta + "'";
 var scope = lobPred + " AND " + polizaPred + " AND ("
-  + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND CAST(ch.executionDate AS date) BETWEEN " + win + "))"
-  + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND CAST(an.executionDate AS date) BETWEEN " + win + "))"
-  + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND CAST(ISNULL(lp.activeDate, lp.created) AS date) BETWEEN " + win + "))"
-  + ")";
+  + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND ch.executionDate >= '" + fdesde + "' AND ch.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
+  + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND an.executionDate >= '" + fdesde + "' AND an.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
+  + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) OR (lp.activeDate IS NULL AND lp.created >= '" + fdesde + "' AND lp.created < DATEADD(day, 1, '" + fhasta + "'))))"
+  + "))";
 
 function arma(tpl, scopePred, skip, take) {
   var s = base + tpl;
@@ -224,42 +224,100 @@ function arma(tpl, scopePred, skip, take) {
   return s;
 }
 
-doCmd({ cmd: 'DoQuery', data: { sql: arma(tCount, scope, 0, 0), timeout: 300 } });
-if (!DoQuery.ok) { throw 'Error al contar movimientos: ' + DoQuery.msg; }
-var cab = DoQuery.outData && DoQuery.outData.length > 0 ? DoQuery.outData[0] : null;
-var total = cab ? cab.total : 0;
-var polizas = cab ? cab.polizas : 0;
-var sinFecha = cab ? cab.sinFecha : 0;
-var incompletas = cab ? cab.incompletas : 0;
-var conNulos = cab ? cab.conNulos : 0;
-var excSinEmitir = cab ? cab.excPolizaSinEmitir : 0;
-var excNoEjecutado = cab ? cab.excEndosoNoEjecutado : 0;
-var excluidos = cab ? cab.excluidos : 0;
-var totalSinFiltrar = cab ? cab.totalSinFiltrar : 0;
+/* El ledger se materializa una sola vez. @scope no crea objetos ni indices y #ord/#dlt/#res
+   solo viven durante este batch; la grilla y la conciliacion leen exactamente los mismos deltas. */
+var pmodeMarker = '),\npmode AS (';
+var mvMarker = 'mv AS (';
+var pmodeAt = base.indexOf(pmodeMarker);
+var mvAt = base.indexOf(mvMarker);
+if (pmodeAt < 0 || mvAt < 0) { throw 'No se pudo preparar el ledger materializado del borderó.'; }
 
-if (exportar) { page = 1; size = (total > 0 ? total : 1); if (size > 50000) { size = 50000; } }
-var skip = (page - 1) * size;
-doCmd({ cmd: 'DoQuery', data: { sql: arma(tPage, scope, skip, size), timeout: 300 } });
+var baseConScope = base.replace(
+  'SELECT DISTINCT c.lifePolicyId FROM Cession c WHERE @@SCOPE@@',
+  'SELECT lifePolicyId FROM @scope'
+);
+pmodeAt = baseConScope.indexOf(pmodeMarker);
+mvAt = baseConScope.indexOf(mvMarker);
+var cargaOrd = baseConScope.substring(0, pmodeAt) + ')\nSELECT * INTO #ord FROM ord;\n';
+var tramoPmodeDeltas = baseConScope.substring(pmodeAt + 3, mvAt)
+  .replace(/INNER JOIN scope sc/g, 'INNER JOIN @scope sc')
+  .replace(/,\s*$/, '');
+var cargaDeltas = 'WITH ord AS (SELECT * FROM #ord),\n'
+  + tramoPmodeDeltas
+  + '\nSELECT * INTO #dlt FROM dlt;\n';
+var cargaResultados = 'WITH dlt AS (SELECT * FROM #dlt),\n'
+  + baseConScope.substring(mvAt)
+  + '\nSELECT * INTO #res FROM res;\n';
+
+function armaMaterializada(tpl, skip, take) {
+  var s = tpl.replace('FROM res r', 'FROM #res r');
+  s = s.split('@@FROM@@').join(fdesde);
+  s = s.split('@@TO@@').join(fhasta);
+  s = s.split('@@LOBPRED@@').join(tieneRamo ? ' AND r.lob IN (' + lobIn + ')' : '');
+  s = s.split('@@VIGPRED@@').join(' AND r.polizaSinEmitir = 0 AND r.endosoNoEjecutado = 0');
+  s = s.split('@@SKIP@@').join(String(skip));
+  s = s.split('@@TAKE@@').join(String(take));
+  return s;
+}
+
+function asignaJsonDesdeCte(cteSql, inicioSelect, variable, sinArreglo) {
+  var at = cteSql.indexOf(inicioSelect);
+  if (at < 0) { throw 'No se pudo preparar la conciliación materializada del borderó.'; }
+  return cteSql.substring(0, at)
+    + 'SELECT ' + variable + ' = (' + cteSql.substring(at)
+    + ' FOR JSON PATH' + (sinArreglo ? ', WITHOUT_ARRAY_WRAPPER' : '') + ');\n';
+}
+
+var toma = exportar ? 50000 : size;
+if (exportar) { page = 1; }
+var skip = (page - 1) * toma;
+var pageSql = armaMaterializada(tPage, skip, toma);
+var countSql = armaMaterializada(tCount, 0, 0);
+var reconBase = 'WITH dlt AS (SELECT * FROM #dlt), ord AS (SELECT * FROM #ord)'
+  + tRecon.replace(/INNER JOIN scope sc/g, 'INNER JOIN @scope sc');
+var recSumBase = 'WITH dlt AS (SELECT * FROM #dlt), ord AS (SELECT * FROM #ord)'
+  + tRecSum.replace(/INNER JOIN scope sc/g, 'INNER JOIN @scope sc');
+
+var loteSql = 'DECLARE @scope TABLE (lifePolicyId int NOT NULL);\n'
+  + 'INSERT INTO @scope (lifePolicyId) SELECT DISTINCT c.lifePolicyId FROM Cession c WHERE ' + scope + ';\n'
+  + 'DECLARE @filasJson nvarchar(max), @cabeceraJson nvarchar(max), @conciliacionJson nvarchar(max), @controlesJson nvarchar(max);\n'
+  + cargaOrd
+  + cargaDeltas
+  + cargaResultados
+  + 'SELECT @filasJson = (' + pageSql + ' FOR JSON PATH);\n'
+  + 'SELECT @cabeceraJson = (' + countSql + ' FOR JSON PATH, WITHOUT_ARRAY_WRAPPER);\n'
+  + asignaJsonDesdeCte(recSumBase, 'SELECT COUNT(*) AS polizas,', '@controlesJson', true)
+  + asignaJsonDesdeCte(reconBase, 'SELECT e.lifePolicyId,', '@conciliacionJson', false)
+  + 'SELECT @filasJson AS filasJson, @cabeceraJson AS cabeceraJson, @conciliacionJson AS conciliacionJson, @controlesJson AS controlesJson;';
+loteSql = loteSql.split('@@SUMACOB@@').join(sumCoveragePredicate);
+
+doCmd({ cmd: 'DoQuery', data: { sql: loteSql, timeout: 300 } });
 if (!DoQuery.ok) { throw 'Error al obtener movimientos: ' + DoQuery.msg; }
-var filas = DoQuery.outData || [];
-
-/* Conciliacion (CA17). Se corre sobre las mismas polizas del periodo, no sobre la pagina,
-   para que el resultado no dependa de por donde se este paginando. El estado se calcula
-   por una via independiente de la resta de deltas: la ultima generacion por particion. */
-doCmd({ cmd: 'DoQuery', data: { sql: arma(tRecSum, scope, 0, 0), timeout: 300 } });
-if (!DoQuery.ok) { throw 'Error al conciliar: ' + DoQuery.msg; }
-var resu = DoQuery.outData && DoQuery.outData.length > 0 ? DoQuery.outData[0] : null;
-var descuadres = resu ? resu.descuadres : 0;
-var ctrlNegativo = resu ? resu.estadoNegativo : 0;
-var ctrlProporcion = resu ? resu.fallaProporcion : 0;
-var ctrlVigente = resu ? resu.fallaVigente : 0;
-var ctrlPrimaVigente = resu ? resu.fallaPrimaVigente : 0;
-var ctrlTelescopico = resu ? resu.fallaTelescopica : 0;
-var ctrlNoAplicable = resu ? resu.sinControlVigente : 0;
-
-doCmd({ cmd: 'DoQuery', data: { sql: arma(tRecon, scope, 0, 0), timeout: 300 } });
-if (!DoQuery.ok) { throw 'Error al conciliar (detalle): ' + DoQuery.msg; }
-var conciliacion = DoQuery.outData || [];
+var lote = DoQuery.outData && DoQuery.outData.length > 0 ? DoQuery.outData[0] : {};
+function leerJson(value, fallback) {
+  try { return value ? JSON.parse(value) : fallback; } catch (e) { return fallback; }
+}
+var filas = leerJson(lote.filasJson, []);
+var cab = leerJson(lote.cabeceraJson, {});
+var resu = leerJson(lote.controlesJson, {});
+var conciliacion = leerJson(lote.conciliacionJson, []);
+var total = cab.total || 0;
+var polizas = cab.polizas || 0;
+var sinFecha = cab.sinFecha || 0;
+var incompletas = cab.incompletas || 0;
+var conNulos = cab.conNulos || 0;
+var excSinEmitir = cab.excPolizaSinEmitir || 0;
+var excNoEjecutado = cab.excEndosoNoEjecutado || 0;
+var excluidos = cab.excluidos || 0;
+var totalSinFiltrar = cab.totalSinFiltrar || 0;
+var descuadres = resu.descuadres || 0;
+var ctrlNegativo = resu.estadoNegativo || 0;
+var ctrlProporcion = resu.fallaProporcion || 0;
+var ctrlVigente = resu.fallaVigente || 0;
+var ctrlPrimaVigente = resu.fallaPrimaVigente || 0;
+var ctrlTelescopico = resu.fallaTelescopica || 0;
+var ctrlNoAplicable = resu.sinControlVigente || 0;
+if (exportar) { size = total > 0 ? total : 1; if (size > 50000) { size = 50000; } }
 
 return {
   filas: filas,

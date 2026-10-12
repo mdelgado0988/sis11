@@ -189,9 +189,7 @@ function getCancellationAmounts(policy, change) {
 function getIssuanceOrRenewalAmounts(policy, tipo) {
   const prima = sumCoveragePremiums(policy.Coverages, policy.coverages);
   const taxRows = asArray(policy.TaxGenerated);
-  const impuestoPrimasIncendio = taxRows.length > 0
-    ? getLatestInsuranceTax(taxRows)
-    : toDecimal(policy.tax);
+  const impuestoPrimasIncendio = getIssuanceInsuranceTax(policy, prima, taxRows);
 
   return {
     prima: prima,
@@ -209,6 +207,19 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
  * Returns the tax from the latest issuance or renewal tax movement.
  * QUOTE and PREQUOTE apply to issuance; ANNIVERSARY applies to renewals.
  */
+function getIssuanceInsuranceTax(policy, grossPremium, rows) {
+  // En fianzas el impuesto total siempre es 5% de la prima bruta. No debe
+  // depender de una fila individual de TaxGenerated, porque con coaseguro
+  // esas filas representan porciones de las participantes.
+  if (isSurety(policy)) {
+    return toDecimal(toNumber(grossPremium) * 0.05);
+  }
+
+  return rows.length > 0
+    ? getLatestInsuranceTax(rows)
+    : toDecimal(policy && policy.tax);
+}
+
 function getLatestInsuranceTax(rows) {
   const quotationRows = asArray(rows)
     .filter(row => row
@@ -221,11 +232,14 @@ function getLatestInsuranceTax(rows) {
 
 function applyCoinsuranceAccounting(policy, tipo, changeId, amounts) {
   const grossPremium = toDecimal(amounts && amounts.prima);
-  if (!policy || Number(policy.coinsurance || 0) !== 1 || grossPremium === 0) {
+  if (!policy || grossPremium === 0) {
     return { ...amounts, coaseguroPorPagar: 0, coaseguroPrima: 0 };
   }
 
   const coinsurance = getCoinsuranceAmounts(policy.id, tipo, changeId, grossPremium);
+  if (!coinsurance.hasCessions || coinsurance.premium === 0) {
+    return { ...amounts, coaseguroPorPagar: 0, coaseguroPrima: 0 };
+  }
   const netPremium = toDecimal(grossPremium - coinsurance.premium);
   const movementTax = toDecimal(amounts.impuestoPrimasIncendio);
   const coTax = grossPremium !== 0
@@ -278,8 +292,15 @@ function getCoinsuranceAmounts(policyId, tipo, changeId, grossPremium) {
 
   return {
     premium: premium,
-    percentage: percentage
+    percentage: percentage,
+    // Los valores 1 y 2 de LifePolicy.coinsurance solo identifican el tipo
+    // de coaseguro. La distribución contable se activa por las cesiones.
+    hasCessions: currentRows.length > 0 || activeRows.length > 0
   };
+}
+
+function isSurety(policy) {
+  return ['81', '82', '83', '84'].includes(String(policy && policy.lob || '').trim());
 }
 
 /**

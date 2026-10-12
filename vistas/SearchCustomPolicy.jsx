@@ -200,7 +200,6 @@
   const [lobs, setLobs] = useState([]);
   const [products, setProducts] = useState([]);
   const [currencies, setCurrencies] = useState([]);
-  const [organizations, setOrganizations] = useState([]);
   const [selections, setSelections] = useState([]);
   const [opts, setOpts] = useState({ group: [], holder: [], seller: [], holding: [] });
   const [contactSearchBy, setContactSearchBy] = useState('name');
@@ -381,7 +380,6 @@
       setProducts(list);
     });
     exe('RepoCurrency', { operation: 'GET' }).then((r) => { if (r && r.ok) setCurrencies(r.outData || []); });
-    exe('RepoOrganization', { operation: 'GET' }).then((r) => { if (r && r.ok) setOrganizations(r.outData || []); });
   };
 
   const loadSelections = () => {
@@ -590,11 +588,6 @@
     const item = (catalog || []).filter((x) => x && (x.code == value || x.id == value))[0];
     return item && (item.name || item.description || item.code || item.id);
   };
-  const getBranchName = (r) => {
-    const branch = r && (r.Branch || r.branch);
-    return (branch && (branch.name || branch.description || branch.code)) ||
-      getCatalogName(r && r.organizationId, organizations) || (r && r.branchCode) || '-';
-  };
   const getLobName = (r) => {
     const lob = r && (r.Lob || r.lobObject);
     return (lob && (lob.name || lob.description || lob.code)) || getCatalogName(r && r.lob, lobs) || (r && r.lob) || '-';
@@ -624,7 +617,6 @@
     return value || '-';
   };
   const columns = [
-    { title: 'Sucursal', key: 'branch', render: (v, r) => <span className="msn19-sucursal">{getBranchName(r)}</span> },
     { title: 'Id Póliza', dataIndex: 'id', width: 90, align: 'center', render: (v, r) => <a href={'#/lifePolicy/' + r.id}>{v}</a> },
     { title: 'Póliza', dataIndex: 'code', width: 194, render: (v, r) => <span style={{ display: 'flex', alignItems: 'center' }}><a className="msn19-poliza" href={'#/lifePolicy/' + r.id}>{v || '-'}</a>{copyButton(v)}</span> },
     { title: 'Ramo', key: 'lobName', width: 190, render: (v, r) => {
@@ -669,7 +661,6 @@
     '.msn19 .ant-table-thead>tr>th::before{display:none !important;}' +
     '.msn19 .ant-table-selection-column{display:none !important;}' +
     '.msn19 .ant-table-tbody>tr>td{border-right:none !important;border-bottom:1px solid #cbd1d8 !important;font-size:12px;line-height:18px;padding:5px 8px !important;white-space:nowrap;}' +
-    '.msn19 .msn19-sucursal{color:#0958d9;font-weight:600;}' +
     '.msn19 .msn19-poliza{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
     '.msn19 .msn19-catalogo{display:block;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
     '.msn19 .msn19-asegurado{display:block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +

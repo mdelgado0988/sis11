@@ -5,7 +5,7 @@
  * @name cmdActualizarValoresRenovacionGAP
  * @purpose Accumulates the monthly GAP value in the renewal offer form.
  * @context { offerPolicyId }
- * @scope Only lob 20 and product GAP.
+ * @scope GAP (lob 20) and GAPVI (lob 71).
  */
 
 try {
@@ -17,12 +17,12 @@ try {
   const offerIds = [offerPolicyId];
 
   if (!offerIds.length) {
-    return { ok: true, updated: 0, skipped: 0, msg: 'No se encontró una oferta GAP del ramo 20.' };
+    return { ok: true, updated: 0, skipped: 0, msg: 'No se encontró una oferta GAP o GAPVI.' };
   }
 
   const policies = loadGapOffers(offerIds);
   if (!policies.length) {
-    return { ok: true, updated: 0, skipped: offerIds.length, msg: 'El lote no contiene ofertas GAP del ramo 20.' };
+    return { ok: true, updated: 0, skipped: offerIds.length, msg: 'El lote no contiene ofertas GAP o GAPVI.' };
   }
 
   const definitionId = loadObjectDefinitionId();
@@ -51,7 +51,8 @@ try {
     const valorActual = parseAmount(getFieldValue(fields.valorActual));
     const montoMensual = parseAmount(getFieldValue(fields.montoMensual));
     const valorFinal = parseAmount(getFieldValue(fields.valorFinal));
-    const nuevoValorActual = valorActual + montoMensual;
+    const mesesVigencia = isGapVi(policy) ? getRoundedTermMonths(policy.start, policy.end) : 1;
+    const nuevoValorActual = valorActual + (montoMensual * mesesVigencia);
     const nuevoValorFaltante = valorFinal - nuevoValorActual;
 
     setFieldValue(fields.valorActual, formatNumericValue(nuevoValorActual));
@@ -76,7 +77,7 @@ try {
     ok: true,
     updated: updated,
     skipped: skipped,
-    msg: `Se actualizaron ${updated} oferta(s) GAP del ramo 20.`
+    msg: `Se actualizaron ${updated} oferta(s) GAP/GAPVI.`
   };
 } catch (error) {
   const message = error && error.message ? error.message : String(error);
@@ -88,8 +89,8 @@ function loadGapOffers(offerIds) {
     cmd: 'LoadEntities',
     data: {
       entity: 'LifePolicy',
-      fields: 'id,lob,productCode',
-      filter: `id in (${offerIds.join(',')}) AND lob = 20 AND productCode = 'GAP'`,
+      fields: 'id,lob,productCode,[start],[end]',
+      filter: `id in (${offerIds.join(',')}) AND ((lob = 20 AND productCode = 'GAP') OR (lob = 71 AND productCode = 'GAPVI'))`,
       noTracking: true
     }
   });
@@ -180,6 +181,37 @@ function parseAmount(value) {
 
 function formatNumericValue(value) {
   return Number(Number(value || 0).toFixed(2)).toString();
+}
+
+function isGapVi(policy) {
+  return Number(policy && policy.lob) === 71
+    && String(policy && policy.productCode || '').toUpperCase() === 'GAPVI';
+}
+
+function getRoundedTermMonths(start, end) {
+  const startDate = parseDateOnly(start);
+  const endDate = parseDateOnly(end);
+  if (!startDate || !endDate || endDate <= startDate) return 1;
+
+  const days = (endDate.getTime() - startDate.getTime()) / 86400000;
+  // GAPVI se expresa en meses enteros: una anualidad de 365 o 366 días es 12 meses.
+  return Math.max(1, Math.round(days / 30.4375));
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month
+    && parsed.getUTCDate() === day
+    ? parsed
+    : null;
 }
 
 function escapeSql(value) {
