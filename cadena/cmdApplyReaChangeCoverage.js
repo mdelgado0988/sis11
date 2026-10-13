@@ -90,6 +90,7 @@ try {
   additional = {};
 }
 const snapshot = additional.reinsuranceSnapshot || {};
+const isLoadingEndorsement = txt(additional.endorsementType).toUpperCase() === 'LOADING';
 const preserveActiveReinsurance = additional.preserveActiveReinsurance === true;
 // Solo el cambio de suma por cobertura persiste una fotografía limitada a
 // las coberturas que sobreviven en jNewCoverages. Los demás endosos siguen
@@ -594,6 +595,7 @@ const finalCessions = positiveBaseCessions.map(function (source) {
   const requested = preserveActiveReinsurance ? null : rowsByKey[keyOf(source)];
   const coverage = coverageByCode[txt(source.coverageCode)] || coverageById[Number(source.coverageId || 0)];
   if (requested) {
+    if (isLoadingEndorsement) result.premiumType = 'CHANGE';
     result.premium = money(num(source.premium) + num(requested.premiumMovement));
     result.sumInsured = money(num(source.sumInsured) + num(requested.sumInsuredMovement));
     result.sumInsuredCedant = money(requested.sumInsuredCedant);
@@ -683,6 +685,7 @@ requestedRows.forEach(function (requested) {
   created.coverageCode = requested.coverageCode;
   created.coverageId = coverage.id || created.coverageId;
   created.cover = coverage.name || created.cover;
+  if (isLoadingEndorsement) created.premiumType = 'CHANGE';
   created.start = coverage.start || created.start;
   created.end = coverage.end || created.end;
   created.sumInsured = money(requested.sumInsuredMovement);

@@ -96,7 +96,7 @@ OUTER APPLY (SELECT TOP (1) 1 Tiene
 			 FROM PayPlan pl
 			 WHERE pl.lifePolicyId = p.id
 			 AND pl.cancellationDate IS NULL
-			 AND ISNULL(NULLIF(pl.expected, 0), pl.minimum) - ISNULL(pl.payed, 0) > 0) tpl
+			 AND pl.payed = 0 AND pl.minimum > 0) tpl
 
 LEFT JOIN PaymentMethodCatalog pm ON pm.code = p.paymentMethod
 
@@ -124,8 +124,8 @@ OUTER APPLY (
         SUM(ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0)) AS Pendiente,
 
         SUM(CASE
-              WHEN pp.dueDate > @Fecha
-               AND DATEDIFF(DAY, @Fecha, pp.dueDate) BETWEEN 1 AND 30
+              WHEN YEAR(pp.dueDate) = YEAR(@Fecha)
+               AND MONTH(pp.dueDate) = MONTH(@Fecha)
                AND ISNULL(pp.payed, 0) < ISNULL(NULLIF(pp.expected, 0), pp.minimum)
               THEN (ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0))
               ELSE 0
@@ -164,14 +164,24 @@ OUTER APPLY (
         END) AS [120],
 
         SUM(CASE
-              WHEN pp.dueDate > DATEADD(DAY, 30, @Fecha)
+              WHEN pp.dueDate > @Fecha
+               AND NOT (
+                    YEAR(pp.dueDate) = YEAR(@Fecha)
+                    AND MONTH(pp.dueDate) = MONTH(@Fecha)
+               )
                AND ISNULL(pp.payed, 0) < ISNULL(NULLIF(pp.expected, 0), pp.minimum)
               THEN (ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0))
               ELSE 0
         END) AS [Por vencer],
 
         SUM(CASE
-              WHEN pp.dueDate <= @Fecha
+              WHEN (
+                    pp.dueDate <= @Fecha
+                    OR (
+                        YEAR(pp.dueDate) = YEAR(@Fecha)
+                        AND MONTH(pp.dueDate) = MONTH(@Fecha)
+                    )
+                  )
                AND ISNULL(pp.payed, 0) < ISNULL(NULLIF(pp.expected, 0), pp.minimum)
               THEN (ISNULL(NULLIF(pp.expected,0), pp.minimum) - ISNULL(pp.payed,0))
               ELSE 0
