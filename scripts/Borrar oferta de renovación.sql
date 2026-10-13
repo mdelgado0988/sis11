@@ -1,8 +1,8 @@
 USE SIS11
 GO
 
-declare @polizaId  int = 1616
-	, @loteId int = 318
+declare @polizaId  int = 4003
+	, @loteId int = 721
 delete from TaxGenerated where LifePolicyid in (@polizaId);
 delete from LifeCoverage where LifePolicyid in (@polizaId);
 delete from Insured where LifePolicyid in (@polizaId);

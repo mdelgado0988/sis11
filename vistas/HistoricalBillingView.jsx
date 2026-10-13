@@ -1580,16 +1580,8 @@
     const daysOverdue = Math.floor((today - dueDate) / (24 * 60 * 60 * 1000));
 
     if (daysOverdue <= 0) {
-      const currentMonth = today.getMonth();
-      const currentYear = today.getFullYear();
-      const nextMonthDate = new Date(currentYear, currentMonth + 1, 1);
-      const isDueThisMonth = dueDate.getFullYear() === currentYear
-        && dueDate.getMonth() === currentMonth
-        && dueDate >= today;
-      const isDueNextMonthOrLater = dueDate >= nextMonthDate;
-
-      if (isDueThisMonth) amounts.dueSoon = pending;
-      else if (isDueNextMonthOrLater) amounts.current = pending;
+      // Toda cuota pendiente con vencimiento actual o futuro esta por vencer.
+      amounts.dueSoon = pending;
     } else {
       amounts.overdue = pending;
       // Aging ranges are intentionally non-overlapping: 30-60, 61-90, 91-120, and >120.
