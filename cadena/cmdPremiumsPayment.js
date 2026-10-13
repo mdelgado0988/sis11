@@ -21,7 +21,7 @@
  * @notes:
  *   - The payment is distributed by policy without validating a payer or fiscal receipt.
  *   - Each policy amount is applied to its pending installments in due-date order.
- *   - Supplementary payments are registered directly in the selected policy transit account.
+ *   - Supplementary payments settle eligible installments before any remainder goes to transit.
  *   - When sourceTransitAccountId is provided, a second negative transfer is created and executed
  *     against the transit account after the premium allocation succeeds.
  *   - The transfer entity can be provided by the payment form to preserve split-payment details.
@@ -54,36 +54,41 @@ try {
     }
   }
 
-  const details = [];
-  for (const payment of payments) {
+  // AXX-823: settle eligible debt across selected policies before transit.
+  // AXX-823: both cashier inputs describe money to apply to eligible debt.
+  // Merge repeated policies before allocation so an installment is never paid twice.
+  const combinedPayments = [];
+  payments.concat(supplementaryPayments).forEach(payment => {
+    const existing = combinedPayments.find(item => item.policyId === payment.policyId);
+    if (existing) existing.amount = roundMoney(existing.amount + payment.amount);
+    else combinedPayments.push({ policyId: payment.policyId, amount: payment.amount });
+  });
+  const details = combinedPayments.map(payment => {
     const policy = loadPolicy(payment.policyId);
-    const payPlan = loadPayPlan(policy.id);
-    const allocation = distributePayment(payPlan, payment.amount);
-
-    if (allocation.transitAmount > 0) {
-      ensureTransitAccount(policy);
+    return { policy, amount: payment.amount, payPlan: loadPayPlan(policy.id) };
+  });
+  details.forEach(item => {
+    item.allocation = distributePayment(item.payPlan, item.amount);
+  });
+  // Keep the requested amounts where possible; move only their unused excess.
+  for (const source of details) {
+    for (const target of details) {
+      if (source.allocation.transitAmount <= 0) break;
+      if (source === target) continue;
+      const available = roundMoney(target.payPlan.reduce((sum, row) =>
+        sum + Math.max(0, getMoney(row.minimum) - getMoney(row.payed)), 0)
+        - target.allocation.appliedAmount);
+      const moved = roundMoney(Math.min(source.allocation.transitAmount, available));
+      if (moved <= 0) continue;
+      source.amount = roundMoney(source.amount - moved);
+      source.allocation = distributePayment(source.payPlan, source.amount);
+      target.amount = roundMoney(target.amount + moved);
+      target.allocation = distributePayment(target.payPlan, target.amount);
     }
-
-    details.push({
-      policy: policy,
-      amount: payment.amount,
-      allocation: allocation
-    });
   }
-
-  for (const supplementaryPayment of supplementaryPayments) {
-    const policy = loadPolicy(supplementaryPayment.policyId);
-    ensureTransitAccount(policy);
-    details.push({
-      policy: policy,
-      amount: supplementaryPayment.amount,
-      allocation: {
-        installments: [],
-        appliedAmount: 0,
-        transitAmount: supplementaryPayment.amount
-      }
-    });
-  }
+  details.forEach(item => {
+    if (item.allocation.transitAmount > 0) ensureTransitAccount(item.policy);
+  });
 
   const totals = calculateTotals(details);
   validateTotals(totalAmount, totals);
@@ -102,8 +107,10 @@ try {
       : 'No fue posible aplicar el pago.');
   }
 
+  const allocationId = getAllocationId(DoPaymentAllocation && DoPaymentAllocation.outData)
+    || loadAllocationIdByTransferId(transfer && transfer.id);
   const transitTransfer = sourceTransitAccountId > 0
-    ? createTransitDebitTransfer(input, workspaceId, totalAmount, sourceTransitAccountId, details)
+    ? createTransitDebitTransfer(input, workspaceId, totalAmount, sourceTransitAccountId, details, allocationId)
     : null;
 
   return {
@@ -472,7 +479,7 @@ function createTransfer(input, workspaceId, amount) {
   return getRows(DoTransfer.outData)[0] || transfer;
 }
 
-function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId, details) {
+function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId, details, allocationId) {
   const currency = getTrimmedString(input && input.currency) || 'USD';
   const paymentMethodName = getOtherPaymentMethodName();
   const sourceEntity = input && input.transferEntity && typeof input.transferEntity === 'object'
@@ -484,6 +491,7 @@ function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId
     .filter(code => code.length > 0)));
   const concept = `Pago de póliza ${policyCodes.join(', ')} (de TRÁNSITO)`;
   const transferAmount = roundMoney(amount);
+  const relatedAllocationId = getPositiveInteger(allocationId);
 
   const entity = {
     currency: currency,
@@ -514,7 +522,7 @@ function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId
     status: 0,
     executed: false,
     isExternal: true,
-    sourceExternal: null,
+    sourceExternal: relatedAllocationId > 0 ? `ALLOCATION:${relatedAllocationId}` : null,
     allocationId: null,
     Allocation: null,
     operatingAccountId: 0,
@@ -633,6 +641,46 @@ function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, deta
     Transfers: [transfer],
     Premiums: premiums
   };
+}
+
+function getAllocationId(value) {
+  const row = getRows(value)[0] || {};
+  const nestedAllocation = row && row.Allocation;
+  const candidates = [
+    row && row.allocationId,
+    row && row.id,
+    nestedAllocation && nestedAllocation.id,
+    nestedAllocation && nestedAllocation.allocationId
+  ];
+
+  for (const candidate of candidates) {
+    const id = getPositiveInteger(candidate);
+    if (id > 0) return id;
+  }
+
+  return 0;
+}
+
+function loadAllocationIdByTransferId(transferId) {
+  const id = getPositiveInteger(transferId);
+  if (id <= 0) return 0;
+
+  doCmd({
+    cmd: 'RepoTransfer',
+    data: {
+      operation: 'GET',
+      filter: `id = ${id}`,
+      include: ['Allocation'],
+      size: 1,
+      page: 0
+    }
+  });
+
+  if (!RepoTransfer || RepoTransfer.ok === false) return 0;
+  const row = getRows(RepoTransfer.outData)[0] || {};
+  return getPositiveInteger(row.allocationId)
+    || getPositiveInteger(row.Allocation && row.Allocation.id)
+    || getPositiveInteger(row.Allocation && row.Allocation.allocationId);
 }
 
 function getRows(value) {

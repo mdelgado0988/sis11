@@ -8464,11 +8464,56 @@
           transferWorkspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null
         };
 
-    exe(reversalCommand, reversalPayload)
-      .then(response => {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id) || null;
+    const loadTransitDebit = allocationId > 0 && workspaceId > 0
+      ? exe('RepoTransfer', {
+          operation: 'GET',
+          filter: `transferWorkspaceId = ${workspaceId} AND sourceExternal = 'ALLOCATION:${allocationId}'`,
+          size: 25,
+          page: 0
+        }).then(response => {
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg ? response.msg : t('The related transit movement could not be loaded.'));
+          }
+
+          return getRows(response).find(item =>
+            Number(item && item.id) > 0
+            && Number(item && item.amount) < 0
+            && Boolean(item && item.executed)
+            && !item.reversalDate
+          ) || null;
+        })
+      : Promise.resolve(null);
+
+    loadTransitDebit
+      .then(transitDebit => exe(reversalCommand, reversalPayload).then(response => ({ response, transitDebit })))
+      .then(({ response, transitDebit }) => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg ? response.msg : t('The payment could not be reverted.'));
         }
+
+        if (transitDebit) {
+          return exe('UndoTransfer', {
+            transferId: Number(transitDebit.id),
+            reversalCause: cause,
+            reversalSubcause: subcause,
+            jReversalFormValues: reversalFormValues,
+            creditFundsToAccountId: null,
+            workspaceId: workspaceId,
+            transferWorkspaceId: workspaceId
+          }).then(transitResponse => {
+            if (!transitResponse || transitResponse.ok === false) {
+              throw new Error(transitResponse && transitResponse.msg
+                ? transitResponse.msg
+                : t('The related transit movement could not be reverted.'));
+            }
+            return response;
+          });
+        }
+
+        return response;
+      })
+      .then(response => {
 
         message.success(response.msg || t('Payment reverted successfully.'));
         setReversalVisible(false);
