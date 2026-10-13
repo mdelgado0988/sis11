@@ -714,13 +714,14 @@
       React.createElement('path', { d: actionPaths[props.name] })));
   // Only verified API fields are mapped; unknown columns remain blank.
   const columns = [
-    { title: 'Acciones', key: 'document', width: 155, render: (value, row) => (
+    { title: 'Acciones', key: 'document', width: 135, render: (value, row) => (
       <Button className="fusion-requests-action" disabled={documentOpening || loading || merging || mergeVisible || exporting} loading={documentOpening} onClick={() => openPaymentDocument(row)}><ActionIcon name="document" />Solicitud</Button>
     ) },
     { title: 'Id', dataIndex: 'id', width: 75, align: 'center' },
+    { title: 'No. Siniestro', dataIndex: 'claimId', width: 100, align: 'center' },
     { title: 'Beneficiario', dataIndex: 'beneficiaryName', width: 220, render: ellipsisDisplay },
-    { title: 'Fecha', dataIndex: 'date', width: 120, align: 'center', render: dateOnly },
-    { title: 'Origen', dataIndex: 'producer', width: 100, align: 'center', render: mergedDisplay },
+    { title: 'Fecha', dataIndex: 'date', width: 100, align: 'center', render: dateOnly },
+    { title: 'Origen', dataIndex: 'producer', width: 80, align: 'center', ellipsis: true, render: mergedEllipsisDisplay },
     { title: 'Ref', dataIndex: 'reference', width: 200, render: mergedDisplay },
     { title: 'Método de pago', dataIndex: 'paymentMethodCode', width: 140, render: value => ellipsisDisplay(catalogLabel('paymentMethodCode', value)) },
     { title: 'Concepto', dataIndex: 'concept', width: 220, ellipsis: true, render: mergedEllipsisDisplay },
@@ -860,7 +861,7 @@
                 toggleRowSelection(row);
               }
             })}
-            scroll={{ x: 1200, y: tableScrollY }} loading={loading} pagination={{ current: page, pageSize: pageSize, total: total, showSizeChanger: false, disabled: loading || merging || mergeVisible, onChange: nextPage => loadPayments(nextPage), showTotal: count => count + ' solicitudes' }}
+            scroll={{ x: 1445, y: tableScrollY }} loading={loading} pagination={{ current: page, pageSize: pageSize, total: total, showSizeChanger: false, disabled: loading || merging || mergeVisible, onChange: nextPage => loadPayments(nextPage), showTotal: count => count + ' solicitudes' }}
             locale={{ emptyText: <div className="fusion-requests-empty">{error ? 'Consulta no disponible.' : loading ? 'Consultando solicitudes…' : 'No hay solicitudes pendientes para mostrar.'}</div> }} />
         </div>
         <Drawer title="Filtro de pagos" placement="right" visible={filtersVisible} width={560}
