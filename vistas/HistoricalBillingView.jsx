@@ -1579,9 +1579,12 @@
     const today = getLocalDateOnly(new Date());
     const daysOverdue = Math.floor((today - dueDate) / (24 * 60 * 60 * 1000));
 
-    if (daysOverdue <= 0) {
-      // Toda cuota pendiente con vencimiento actual o futuro esta por vencer.
-      amounts.dueSoon = pending;
+    if (dueDate.getFullYear() === today.getFullYear() && dueDate.getMonth() === today.getMonth()) {
+      // Current means the pending installment due in the current calendar month.
+      amounts.current = pending;
+      amounts.overdue = pending;
+    } else if (daysOverdue <= 0) {
+      // Future installments are calculated below as Pending minus Overdue.
     } else {
       amounts.overdue = pending;
       // Aging ranges are intentionally non-overlapping: 30-60, 61-90, 91-120, and >120.
@@ -1590,6 +1593,7 @@
       else if (daysOverdue >= 91 && daysOverdue <= 120) amounts.m90a120 = pending;
       else if (daysOverdue > 120) amounts.mmas120 = pending;
     }
+    amounts.dueSoon = Math.max(0, pending - amounts.overdue);
     return amounts;
   };
   const getPolicyCurrency = policy => {

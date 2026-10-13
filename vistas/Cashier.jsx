@@ -3500,7 +3500,7 @@
           label: getTrimmedString(item && item.name),
           formId: Number(item && item.formId) > 0 ? Number(item.formId) : 0
         })).filter(item => item.value));
-        const cashierPaymentMethodCodes = ['1', 'CH', 'TCD', 'OT'];
+        const cashierPaymentMethodCodes = ['DEP', 'CH', 'TCD', 'OT'];
         setPaymentMethodOptions(paymentMethods
           .filter(item => cashierPaymentMethodCodes.indexOf(getTrimmedString(item && item.code)) >= 0)
           .map(item => ({
