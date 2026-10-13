@@ -4202,7 +4202,7 @@ function renderCoaseguradores() {
           <td class="num">${coaseguroFormato(row.commission)}</td>
           <td class="num">${coaseguroFormato(row.tax)}</td>
         </tr>`).join("")}
-        <tr class="coaseguro-compania"><td class="acciones-coasegurador"></td><td class="col-participante" title="Compañía">&#128100; Compañía</td><td>${Number(policy?.coinsurance) === 1 ? "Sí" : "No"}</td><td>${formatearNumero(companyPercentage)}</td><td>${coaseguroFormato(base.sumInsured - placedSum)}</td><td>${coaseguroFormato(base.premium - placedPremium)}</td><td>0.00</td><td>0.00</td></tr>
+        <tr class="coaseguro-compania"><td class="acciones-coasegurador"></td><td class="col-participante" title="ASEGURADORA GLOBAL, S.A.">&#128100; ASEGURADORA GLOBAL, S.A.</td><td>${Number(policy?.coinsurance) === 1 ? "Sí" : "No"}</td><td>${formatearNumero(companyPercentage)}</td><td>${coaseguroFormato(base.sumInsured - placedSum)}</td><td>${coaseguroFormato(base.premium - placedPremium)}</td><td>0.00</td><td>0.00</td></tr>
       </tbody>
     </table></div>
     <div class="resumen-card" style="margin-top:10px;">Suma total: <strong>${coaseguroFormato(base.sumInsured)}</strong> &nbsp; Prima total: <strong>${coaseguroFormato(base.premium)}</strong></div>

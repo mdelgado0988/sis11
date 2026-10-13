@@ -152,6 +152,14 @@
           border-color: #d46b08 !important;
         }
 
+        .policy-renew-notification .ant-notification-notice-description {
+          display: block !important;
+          margin-top: 4px !important;
+          color: #595959 !important;
+          line-height: 1.45 !important;
+          white-space: normal !important;
+        }
+
         .policy-renew-action-group {
           display: inline-flex;
           vertical-align: middle;
@@ -2710,12 +2718,17 @@
           : '';
         const context = `{ loteId: ${params.loteId}${processContext}, currentPage:1, pageSize:1}`;
 
-        exe("ExeChain",{
+        return exe("ExeChain",{
             chain: "cmdResultRenewQuoteBatchList",
             context: context
         })
         .then(r => {
           const response = Array.isArray(r) ? (r[0] || {}) : r;
+          if (!response || response.ok === false) {
+            throw new Error(response && response.msg
+              ? response.msg
+              : 'No fue posible consultar los resultados del proceso.');
+          }
 
           const outData = response.outData || {};
           const resultData = Array.isArray(outData.data)
@@ -2725,7 +2738,11 @@
 
           if (response.ok && resultTotal > 0) {
             const processName = params.processType === 'issuance' ? 'emisión' : 'cotización';
-            notification.warning({ message: `Errores en el proceso de ${processName}`, description: `Se registraron errores relacionados al proceso de ${processName}; haga clic en Ver Errores para verificar más detalles.`, duration: 7 });
+            showBatchNotification('warning', {
+              message: `Errores en el proceso de ${processName}`,
+              description: `Se registraron errores relacionados al proceso de ${processName}; haga clic en Ver Errores para verificar más detalles.`,
+              duration: 7
+            });
             const errorPagination = { current: 1, pageSize: paginationResults.pageSize || 25, total: resultTotal };
             setPaginationResults(errorPagination);
             setResultsModalVisible(true);
@@ -2736,11 +2753,19 @@
               processBatchId: params.processBatchId,
               processType: params.processType
             });
+            return true;
           }
+
+          return false;
 
         })
         .catch(error => {
-          notification.error({ message: 'Error', description: error.toString(), duration: 10 });
+          showBatchNotification('error', {
+            message: 'Error',
+            description: error && error.message ? error.message : String(error),
+            duration: 10
+          });
+          return null;
         })
         .finally(() => {
           setLoadingResults(false);
@@ -3480,11 +3505,20 @@
       }
 
       function showBatchInfo(config) {
-        const input = config || {};
-        const safeDescription = String(input.description || '');
+        showBatchNotification('info', config);
+      }
 
-        notification.info({
+      function showBatchNotification(type, config) {
+        const input = config || {};
+        const fallbackDescription = 'No se recibieron detalles adicionales.';
+        const safeDescription = String(input.description === undefined || input.description === null
+          ? ''
+          : input.description).trim() || fallbackDescription;
+        const notify = notification[type] || notification.info;
+
+        notify({
           ...input,
+          className: `${input.className || ''} policy-renew-notification`.trim(),
           description: (
             <div style={{ display: 'block', color: '#595959', whiteSpace: 'normal' }}>
               {safeDescription}
@@ -3564,16 +3598,24 @@
                 finishProcess
                   .then(() => {
                     setProcessActive(false);
-                    const completionMessage = processType === 'issuance'
-                      ? 'Proceso de emisión finalizado, verifique los resultados.'
-                      : 'Proceso de cotización finalizado, verifique los resultados.';
-                    showBatchInfo({
-                      message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
-                      description: completionMessage || 'El proceso finalizó correctamente.',
-                      duration: 3
-                    });
                     handleRefreshDetail();
-                    showErrors({ loteId: loteId, processBatchId: validBatchId, processType: processType });
+                    return showErrors({
+                      loteId: loteId,
+                      processBatchId: validBatchId,
+                      processType: processType
+                    });
+                  })
+                  .then(hasErrors => {
+                    if (hasErrors === false) {
+                      const completionMessage = processType === 'issuance'
+                        ? 'Proceso de emisión finalizado, verifique los resultados.'
+                        : 'Proceso de cotización finalizado, verifique los resultados.';
+                      showBatchInfo({
+                        message: processType === 'issuance' ? 'Lote de emisión' : 'Lote de tarificación',
+                        description: completionMessage || 'El proceso finalizó correctamente.',
+                        duration: 3
+                      });
+                    }
                   })
                   .catch(error => {
                     setProcessActive(false);
