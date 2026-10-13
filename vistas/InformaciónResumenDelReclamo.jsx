@@ -203,6 +203,623 @@
       </A.Modal>
     </div>;
   }, []);
+  // Repair Orders tab (MSN-000062, 2026-10-12): port of the native claim tab ClaimRepairOrders (11.2.264, DEV-1294..1300).
+  // The low-code engine cannot load native components, so the tab is rebuilt here with the same commands and rules:
+  // quote requests, order detail with priced lines, confirmation, settlements, exceptional closures, comparison and PDF.
+  const ClaimRepairOrdersTab = React.useMemo(() => {
+    const message = A.message;
+    const Tag = A.Tag;
+    const Table = A.Table;
+    const Button = A.Button;
+    const Select = A.Select;
+    const Input = A.Input;
+    const InputNumber = A.InputNumber;
+    const Tooltip = A.Tooltip;
+    const Popconfirm = A.Popconfirm;
+    const Modal = A.Modal;
+    const Drawer = A.Drawer;
+    const Descriptions = A.Descriptions;
+    const Alert = A.Alert;
+    const Spin = A.Spin;
+    const Tabs = A.Tabs;
+    const DatePicker = A.DatePicker;
+    const Checkbox = A.Checkbox;
+    const CONFIRM_DELETE = '¿Está seguro de que desea eliminar este registro?';
+
+    const RoIcon = function RoIcon(props) {
+      const paths = {
+        plus: 'M12 5v14M5 12h14',
+        compare: 'M4 4h7v16H4zM13 4h7v16h-7zM6.5 9h2M15.5 9h2M6.5 13h2M15.5 13h2',
+        reload: 'M20 7v5h-5M4 17a8 8 0 0 0 14 2M20 7A8 8 0 0 0 6 4L3 7',
+        edit: 'M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4',
+        pdf: 'M14 2H5v20h14V7l-5-5Zm0 0v6h5M8 13h8M8 17h5',
+        delete: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7',
+        check: 'M4 12l5 5L20 6',
+        save: 'M5 3h11l3 3v15H5V3Zm3 0v6h8V3M8 21v-7h8v7',
+        stop: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM5.6 5.6l12.8 12.8'
+      };
+      return <span role="img" aria-hidden="true" className="anticon">
+        <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" focusable="false"><path d={paths[props.name]} /></svg>
+      </span>;
+    };
+    const money = (value, currency) => {
+      const code = String(currency || 'USD').substring(0, 3);
+      const amount = Number(value);
+      try {
+        return new Intl.NumberFormat((window.localStorage && window.localStorage.isoCode) || 'en-US',
+          { style: 'currency', currency: code, minimumFractionDigits: 2 }).format(amount);
+      } catch (failure) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(amount);
+      }
+    };
+    const dateTime = (value) => {
+      if (!value) return '';
+      const text = String(value);
+      // Repository timestamps without an offset are UTC; date-only values are calendar dates.
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text) || /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? moment(text) : moment.utc(text).local();
+      return parsed.isValid() ? parsed.format(/^\d{4}-\d{2}-\d{2}$/.test(text) ? 'DD/MM/YYYY' : 'DD/MM/YYYY HH:mm') : text;
+    };
+    const statusTag = (status) => {
+      switch (status) {
+        case 'DRAFT': return <Tag>Borrador</Tag>;
+        case 'ACTIVE': return <Tag color="blue">Activa</Tag>;
+        case 'LIQUIDATED': return <Tag color="green">Liquidada</Tag>;
+        case 'CANCELLED': return <Tag color="red">Cancelada</Tag>;
+        default: return <Tag>{status}</Tag>;
+      }
+    };
+    const providerSubType = (config) => config && config.Main ? config.Main.repairOrderProviderSubType : undefined;
+
+    // Editable quote lines: category -> article cascade of the provider subtype catalog, prices from GetRepairOrderPrice.
+    const RepairLinesEditor = function RepairLinesEditor(props) {
+      const [categories, setCategories] = React.useState([]);
+      const [articles, setArticles] = React.useState({});
+      const lines = props.value || [];
+      const currency = props.currency;
+      React.useEffect(() => {
+        // Untagged parent categories belong to the default MEDICAL root.
+        const subTypeFilter = props.subType
+          ? props.subType === 'MEDICAL' ? "(category='MEDICAL' OR category IS NULL OR category='')" : "category='" + props.subType + "'"
+          : '1=1';
+        exe('RepoCpt', { operation: 'GET', filter: 'level=1 AND ' + subTypeFilter }).then((r) => {
+          if (r.ok) setCategories(r.outData);
+          else message.error(r.msg);
+        });
+      }, [props.subType]);
+      const loadArticles = (categoryCode) => {
+        if (!categoryCode || articles[categoryCode]) return;
+        exe('RepoCpt', { operation: 'GET', filter: "parent='" + categoryCode + "' AND level=0" }).then((r) => {
+          if (r.ok) setArticles((cache) => { const next = Object.assign({}, cache); next[categoryCode] = r.outData; return next; });
+          else message.error(r.msg);
+        });
+      };
+      const emit = (updated) => { if (props.onChange) props.onChange(updated); };
+      const change = (index, patch) => emit(lines.map((line, i) => (i === index ? Object.assign({}, line, patch) : line)));
+      const recompute = (line) => {
+        const qty = line.qty || 0;
+        const quotedPrice = line.quotedPrice || 0;
+        return Object.assign({}, line, {
+          overAgreed: line.agreedPrice != null && quotedPrice > line.agreedPrice,
+          overPublic: line.publicPrice != null && quotedPrice > line.publicPrice,
+          total: Math.round(qty * quotedPrice * 100) / 100
+        });
+      };
+      const onAdd = () => emit(lines.concat([{ qty: 1 }]));
+      const onDelete = (index) => emit(lines.filter((line, i) => i !== index));
+      const onCategoryChange = (index, categoryCode) => {
+        loadArticles(categoryCode);
+        change(index, { categoryCode: categoryCode, cptCode: undefined, description: undefined, publicPrice: null,
+          agreedPrice: null, quotedPrice: null, priceSource: undefined, total: 0 });
+      };
+      const onArticleChange = (index, cptCode) => {
+        const line = lines[index];
+        const article = (articles[line.categoryCode] || []).find((p) => p.code === cptCode);
+        change(index, { cptCode: cptCode, description: article ? article.description : undefined });
+        if (!cptCode || !props.providerCode) return;
+        // Reference prices and the proposed quoted price (chain aware, agreed price fallback).
+        exe('GetRepairOrderPrice', { claimId: props.claimId, providerCode: props.providerCode, cptCode: cptCode, qty: line.qty || 1 }).then((r) => {
+          if (r.ok) {
+            const d = r.outData;
+            if (d.warning) message.warning(d.warning);
+            const priced = recompute(Object.assign({}, line, {
+              cptCode: cptCode, description: article ? article.description : line.description,
+              publicPrice: d.publicPrice, agreedPrice: d.agreedPrice, quotedPrice: d.resolvedPrice, priceSource: d.source
+            }));
+            emit(lines.map((p, i) => (i === index ? priced : p)));
+          } else message.error(r.msg);
+        });
+      };
+      const onQtyChange = (index, qty) => change(index, recompute(Object.assign({}, lines[index], { qty: qty })));
+      const onQuotedChange = (index, quotedPrice) => change(index, recompute(Object.assign({}, lines[index], { quotedPrice: quotedPrice, priceSource: 'MANUAL' })));
+      const total = lines.reduce((sum, line) => sum + (line.total || 0), 0);
+      const readOnly = props.disabled;
+      return (
+        <div className={props.className || ''}>
+          {!readOnly ? <Button type="link" icon={<RoIcon name="plus" />} onClick={onAdd}>Agregar artículo</Button> : null}
+          <Table className={props.tableClassName} dataSource={lines.map((line, index) => Object.assign({}, line, { key: index }))} pagination={false} size="small" scroll={{ x: true }}>
+            <Table.Column dataIndex="categoryCode" title="Categoría" width={190} render={(v, r, index) => (readOnly ? v : (
+              <Select value={v} onChange={(value) => onCategoryChange(index, value)} style={{ width: 180 }} showSearch
+                optionFilterProp="children" placeholder="Categoría">
+                {categories.map((p) => <Select.Option key={p.code} value={p.code}>{p.description || p.code}</Select.Option>)}
+              </Select>))} />
+            <Table.Column dataIndex="cptCode" title="Artículo / Descripción" width={300} render={(v, r, index) => (readOnly ? <Tooltip title={[v, r.description].filter(Boolean).join(' - ')}><span className="resumen-repair-order-description">{[v, r.description].filter(Boolean).join(' - ') || '-'}</span></Tooltip> : (
+              <Select value={v} onChange={(value) => onArticleChange(index, value)} style={{ width: 290 }} showSearch
+                optionFilterProp="children" placeholder="Artículo" onDropdownVisibleChange={() => loadArticles(r.categoryCode)}>
+                {(articles[r.categoryCode] || []).map((p) => <Select.Option key={p.code} value={p.code}>{p.code} {p.description}</Select.Option>)}
+              </Select>))} />
+            <Table.Column dataIndex="qty" title="Cantidad" width={90} render={(v, r, index) => (readOnly ? v
+              : <InputNumber min={0} value={v} onChange={(value) => onQtyChange(index, value)} style={{ width: 80 }} />)} />
+            <Table.Column dataIndex="publicPrice" title={<span className="resumen-repair-order-amount">Precio público</span>} render={(v) => <span className="resumen-repair-order-amount">{v == null ? '-' : money(v, currency)}</span>} />
+            <Table.Column dataIndex="agreedPrice" title={<span className="resumen-repair-order-amount">Precio convenido</span>} render={(v) => <span className="resumen-repair-order-amount">{v == null ? '-' : money(v, currency)}</span>} />
+            <Table.Column dataIndex="quotedPrice" title={<span className="resumen-repair-order-amount">Precio cotizado</span>} width={200} render={(v, r, index) => (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
+                {readOnly ? <span className="resumen-repair-order-amount">{money(v || 0, currency)}</span> : <InputNumber min={0} value={v} onChange={(value) => onQuotedChange(index, value)} style={{ width: 100 }} />}
+                {r.overPublic ? <Tooltip title="El precio cotizado supera el precio público"><Tag color="red" style={{ marginLeft: 5 }}>Sobre público</Tag></Tooltip>
+                  : r.overAgreed ? <Tooltip title="El precio cotizado supera el precio convenido"><Tag color="orange" style={{ marginLeft: 5 }}>Sobre convenido</Tag></Tooltip>
+                  : null}
+              </div>)} />
+            <Table.Column dataIndex="priceSource" title="Origen" width={80} render={(v) => (v ? <Tag>{v}</Tag> : '-')} />
+            <Table.Column dataIndex="total" title={<span className="resumen-repair-order-amount">Total</span>} render={(v) => <span className="resumen-repair-order-amount">{money(v || 0, currency)}</span>} />
+            {!readOnly ? <Table.Column key="actions" title="Acciones" render={(v, r, index) => (
+              <Popconfirm title={CONFIRM_DELETE} onConfirm={() => onDelete(index)}>
+                <Button type="link" icon={<RoIcon name="delete" />} aria-label="Eliminar artículo" />
+              </Popconfirm>)} /> : null}
+          </Table>
+          <div style={{ textAlign: 'right', marginTop: 5, fontWeight: 'bold' }}>Total: {money(total, currency)}</div>
+        </div>
+      );
+    };
+
+    // Quote request: one coverage with available reserve, one or more providers, independent lines per provider.
+    // Saving creates one DRAFT repair order per provider sharing the requestId of the first one.
+    const RepairOrderRequest = function RepairOrderRequest(props) {
+      const [coverageId, setCoverageId] = React.useState();
+      const [providers, setProviders] = React.useState([]);
+      const [selectedProviders, setSelectedProviders] = React.useState([]);
+      const [linesByProvider, setLinesByProvider] = React.useState({});
+      const [searching, setSearching] = React.useState(false);
+      const [saving, setSaving] = React.useState(false);
+      const subType = providerSubType(props.config);
+      const currency = props.claim && props.claim.Policy ? props.claim.Policy.currency : undefined;
+      React.useEffect(() => {
+        if (props.visible) {
+          setCoverageId(undefined);
+          setSelectedProviders([]);
+          setLinesByProvider({});
+        }
+      }, [props.visible]);
+      // Coverages with remaining reserve > 0 (sum of reserved over the claim's indemnity payouts).
+      const eligibleCoverages = (() => {
+        const claim = props.claim;
+        if (!claim || !claim.Policy) return [];
+        const byCoverage = {};
+        (claim.Payouts || []).filter((p) => p.reserveType !== 'EX')
+          .forEach((p) => { byCoverage[p.lifeCoverageId] = (byCoverage[p.lifeCoverageId] || 0) + p.reserved; });
+        return Object.keys(byCoverage).filter((id) => byCoverage[id] > 0).map((id) => {
+          const coverage = (claim.Policy.Coverages || []).find((c) => c.id === +id);
+          return { id: +id, name: coverage ? coverage.name : id, available: byCoverage[id] };
+        });
+      })();
+      const onSearchProviders = (q) => {
+        setSearching(true);
+        exe('SearchProviders', { subType: subType, q: q }).then((r) => {
+          setSearching(false);
+          if (r.ok) setProviders(r.outData);
+          else message.error(r.msg);
+        });
+      };
+      const onProvidersChange = (values) => {
+        setSelectedProviders(values.map((v) => {
+          const known = selectedProviders.find((p) => p.code === v.key) || providers.find((p) => p.code === v.key);
+          return { code: v.key, name: known ? known.name : v.label };
+        }));
+      };
+      const onSave = () => {
+        if (!coverageId) { message.error('Seleccione una cobertura con reserva disponible'); return; }
+        if (selectedProviders.length === 0) { message.error('Seleccione al menos un proveedor'); return; }
+        const missing = selectedProviders.filter((p) => !(linesByProvider[p.code] || []).length);
+        if (missing.length > 0) {
+          message.error('Agregue al menos un artículo para ' + missing.map((p) => p.name).join(', '));
+          return;
+        }
+        setSaving(true);
+        // Sequential ADDs so every quote of the request shares the first response's requestId.
+        const save = (index, requestId) => {
+          if (index === selectedProviders.length) {
+            setSaving(false);
+            message.success('Solicitud de cotización guardada');
+            if (props.onCreated) props.onCreated();
+            return;
+          }
+          const provider = selectedProviders[index];
+          const entity = {
+            claimId: props.claim.id, coverageId: coverageId, providerCode: provider.code, requestId: requestId,
+            jLines: JSON.stringify(linesByProvider[provider.code] || [])
+          };
+          exe('RepoRepairOrder', { operation: 'ADD', entity: entity }).then((r) => {
+            if (r.ok) save(index + 1, r.outData[0].requestId);
+            else { setSaving(false); message.error(provider.name + ': ' + r.msg); }
+          });
+        };
+        save(0, undefined);
+      };
+      return (
+        <Modal title="Nueva solicitud de cotización de orden de reparación" visible={props.visible} onCancel={props.onCancel}
+          onOk={onSave} okText="Guardar cotizaciones" cancelText="Cancelar"
+          okButtonProps={{ disabled: eligibleCoverages.length === 0, loading: saving }} width={1150}
+          wrapClassName="resumen-repair-order-request-modal">
+          {!subType ? <Alert type="warning" showIcon style={{ marginBottom: 10 }}
+            message="Configure Main.repairOrderProviderSubType en el producto para habilitar el catálogo de talleres" /> : null}
+          {eligibleCoverages.length === 0
+            ? <Alert type="error" showIcon message="Se requiere una cobertura con reserva activa y saldo disponible para crear una cotización" />
+            : <div>
+              <div style={{ marginBottom: 10 }}>
+                <div>Cobertura</div>
+                <Select value={coverageId} onChange={(v) => setCoverageId(v)} style={{ width: 400 }} placeholder="Cobertura con reserva disponible">
+                  {eligibleCoverages.map((p) => <Select.Option key={p.id} value={p.id}>{p.name} (Disponible: {money(p.available, currency)})</Select.Option>)}
+                </Select>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <div>Proveedores</div>
+                <Select mode="multiple" labelInValue value={selectedProviders.map((p) => ({ key: p.code, label: p.name + ' (' + p.code + ')' }))}
+                  onChange={onProvidersChange} onSearch={onSearchProviders} filterOption={false}
+                  notFoundContent={searching ? <Spin size="small" /> : null} style={{ width: '100%' }}
+                  placeholder="Buscar por nombre, número de licencia, CNP, estado o ciudad">
+                  {providers.map((p) => <Select.Option key={p.code} value={p.code}>
+                    {p.name} ({p.code}) {p.city ? '- ' + p.city : ''} {p.state ? '- ' + p.state : ''}
+                  </Select.Option>)}
+                </Select>
+              </div>
+              {selectedProviders.length > 0 ? <Tabs>
+                {selectedProviders.map((provider) => <Tabs.TabPane tab={provider.name} key={provider.code}>
+                  <RepairLinesEditor claimId={props.claim.id} providerCode={provider.code} currency={currency} subType={subType}
+                    value={linesByProvider[provider.code] || []}
+                    onChange={(lines) => setLinesByProvider((state) => { const next = Object.assign({}, state); next[provider.code] = lines; return next; })}
+                    className="resumen-repair-order-request-lines" tableClassName="resumen-repair-order-lines-table" />
+                </Tabs.TabPane>)}
+              </Tabs> : null}
+            </div>}
+        </Modal>
+      );
+    };
+
+    // Order detail: draft editing and confirmation, settlement ledger, exceptional closures and quote PDF.
+    const RepairOrderDetail = function RepairOrderDetail(props) {
+      const [order, setOrder] = React.useState(null);
+      const [lines, setLines] = React.useState([]);
+      const [settlements, setSettlements] = React.useState([]);
+      const [loading, setLoading] = React.useState(false);
+      const [settlementVisible, setSettlementVisible] = React.useState(false);
+      const [amount, setAmount] = React.useState();
+      const [invoiceNumber, setInvoiceNumber] = React.useState();
+      const [invoiceDate, setInvoiceDate] = React.useState();
+      const [closeAction, setCloseAction] = React.useState();
+      const [closeReason, setCloseReason] = React.useState();
+      const subType = providerSubType(props.config);
+      const load = (orderId) => {
+        setLoading(true);
+        exe('RepoRepairOrder', { operation: 'GET', filter: 'id=' + orderId, include: ['Provider'] }).then((r) => {
+          setLoading(false);
+          if (r.ok && r.outData.length > 0) {
+            setOrder(r.outData[0]);
+            setLines(r.outData[0].jLines ? JSON.parse(r.outData[0].jLines) : []);
+          } else message.error(r.msg);
+        });
+        exe('GetRepairOrderSettlements', { repairOrderId: orderId }).then((r) => {
+          if (r.ok) setSettlements(r.outData);
+          else message.error(r.msg);
+        });
+      };
+      React.useEffect(() => {
+        if (props.visible && props.orderId) load(props.orderId);
+      }, [props.visible, props.orderId]);
+      const changed = () => {
+        load(props.orderId);
+        if (props.onChanged) props.onChanged();
+      };
+      const run = (cmd, data, after) => {
+        setLoading(true);
+        exe(cmd, data).then((r) => {
+          setLoading(false);
+          if (r.ok) { after(r); changed(); }
+          else message.error(r.msg);
+        });
+      };
+      const onSaveDraft = () => run('RepoRepairOrder',
+        { operation: 'UPDATE', entity: Object.assign({}, order, { jLines: JSON.stringify(lines), Provider: undefined }) },
+        (r) => message.success(r.msg));
+      const onConfirm = () => run('ConfirmRepairOrder', { repairOrderId: order.id }, (r) => message.success(r.msg));
+      const onPrint = () => run('GenerateRepairOrderDoc', { repairOrderIds: [order.id] },
+        () => message.success('PDF de la cotización generado en la pestaña Documentos del siniestro'));
+      const onAddSettlement = () => {
+        if (!amount || !invoiceNumber || !invoiceDate) {
+          message.error('Capture el monto, el número de factura y la fecha de factura');
+          return;
+        }
+        run('SettleRepairOrder', { operation: 'ADD', repairOrderId: order.id, amount: amount, invoiceNumber: invoiceNumber,
+          invoiceDate: invoiceDate.format('YYYY-MM-DD') }, (r) => {
+          message.success(r.msg);
+          setSettlementVisible(false); setAmount(undefined); setInvoiceNumber(undefined); setInvoiceDate(undefined);
+        });
+      };
+      const onConfirmSettlement = (settlementId) => run('SettleRepairOrder', { operation: 'CONFIRM', settlementId: settlementId }, (r) => message.success(r.msg));
+      const onDeleteSettlement = (settlementId) => run('SettleRepairOrder', { operation: 'DELETE', settlementId: settlementId }, (r) => message.success(r.msg));
+      const onClose = () => {
+        if (!closeReason) { message.error('El motivo es obligatorio'); return; }
+        run('CloseRepairOrder', { repairOrderId: order.id, action: closeAction, reason: closeReason }, (r) => {
+          message.success(r.msg);
+          setCloseAction(undefined); setCloseReason(undefined);
+        });
+      };
+      const settlementStatus = (r) => (r.status === 'CONFIRMED' ? <Tag color="green">Confirmada</Tag> : <Tag color="orange">Pendiente</Tag>);
+      const settlementType = (r) => {
+        switch (r.type) {
+          case 'PAYMENT': return <Tag color="blue">Pago</Tag>;
+          case 'WRITE_OFF': return <Tag color="purple">Cancelación de saldo</Tag>;
+          case 'CANCELLATION': return <Tag color="red">Cancelación</Tag>;
+          default: return <Tag>{r.type}</Tag>;
+        }
+      };
+      const hasConfirmedPayments = settlements.some((p) => p.type === 'PAYMENT' && p.status === 'CONFIRMED');
+      if (!order) return <Drawer title="Orden de reparación" visible={props.visible} onClose={props.onClose} width={1150}
+        wrapClassName="resumen-repair-order-drawer">{null}</Drawer>;
+      const isDraft = order.status === 'DRAFT';
+      const isActive = order.status === 'ACTIVE';
+      return (
+        <Drawer title={'Orden de reparación RO-' + order.id} visible={props.visible} onClose={props.onClose} width={1150}
+          wrapClassName="resumen-repair-order-drawer">
+          <Descriptions className="resumen-repair-order-summary" size="small" column={4} bordered>
+            <Descriptions.Item label="Estado">{statusTag(order.status)}</Descriptions.Item>
+            <Descriptions.Item label="Proveedor">{order.Provider ? order.Provider.name : order.providerCode}</Descriptions.Item>
+            <Descriptions.Item label="Moneda">{order.currency}</Descriptions.Item>
+            <Descriptions.Item label="Total cotizado">{money(order.total, order.currency)}</Descriptions.Item>
+            <Descriptions.Item label="Monto aprobado">{order.approvedAmount == null ? '-' : money(order.approvedAmount, order.currency)}</Descriptions.Item>
+            <Descriptions.Item label="Monto liquidado">{money(order.settledAmount, order.currency)}</Descriptions.Item>
+            <Descriptions.Item label="Saldo disponible">{order.approvedAmount == null ? '-' : <b>{money(order.balance, order.currency)}</b>}</Descriptions.Item>
+            <Descriptions.Item label="Confirmada">{order.confirmedOn ? dateTime(order.confirmedOn) + ' (' + order.confirmedBy + ')' : '-'}</Descriptions.Item>
+            {order.closeReason ? <Descriptions.Item label="Motivo de cierre">{order.closeReason}</Descriptions.Item> : null}
+          </Descriptions>
+          <div className="resumen-repair-order-actions">
+            <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={() => load(order.id)}>Recargar</Button>
+            <Button size="small" type="primary" icon={<RoIcon name="pdf" />} onClick={onPrint}>Imprimir cotización</Button>
+            {isDraft ? <Button size="small" type="primary" icon={<RoIcon name="save" />} onClick={onSaveDraft}>Guardar borrador</Button> : null}
+            {isDraft ? <Popconfirm title="Al confirmar, la orden de reparación se activa y el monto aprobado queda fijo. ¿Continuar?"
+              onConfirm={onConfirm} okText="Sí" cancelText="No">
+              <Button size="small" type="primary" icon={<RoIcon name="check" />}>Confirmar orden</Button>
+            </Popconfirm> : null}
+            {isActive && !hasConfirmedPayments ? <Button size="small" danger icon={<RoIcon name="stop" />} onClick={() => setCloseAction('CANCEL')}>Cancelar orden</Button> : null}
+            {isActive && hasConfirmedPayments ? <Button size="small" danger icon={<RoIcon name="stop" />} onClick={() => setCloseAction('WRITE_OFF')}>Cancelar saldo restante</Button> : null}
+          </div>
+          <RepairLinesEditor claimId={order.claimId} providerCode={order.providerCode} currency={order.currency} subType={subType}
+            value={lines} onChange={setLines} disabled={!isDraft} className="resumen-repair-order-lines"
+            tableClassName="resumen-repair-order-lines-table" />
+          {/* Liquidaciones temporalmente ocultas: conservar la implementación hasta definir su flujo de ClaimPayment. */}
+          {/*
+          {!isDraft ? <div style={{ marginTop: 15 }}>
+            <h3>Liquidaciones</h3>
+            {isActive ? <Button type="link" icon={<RoIcon name="check" />} onClick={() => setSettlementVisible(true)} disabled={order.balance <= 0}>Nueva liquidación</Button> : null}
+            <Table dataSource={settlements} rowKey="id" loading={loading} size="small" pagination={false}>
+              <Table.Column dataIndex="id" title="Id" />
+              <Table.Column dataIndex="type" title="Tipo" render={(v, r) => settlementType(r)} />
+              <Table.Column dataIndex="amount" title="Monto" render={(v) => money(v, order.currency)} />
+              <Table.Column dataIndex="invoiceNumber" title="Factura" />
+              <Table.Column dataIndex="invoiceDate" title="Fecha de factura" render={(v) => (v ? dateTime(v) : '-')} />
+              <Table.Column dataIndex="status" title="Estado" render={(v, r) => settlementStatus(r)} />
+              <Table.Column dataIndex="claimPaymentId" title="Pago" render={(v, r) => (v ? v + ' (' + (r.ClaimPayment ? r.ClaimPayment.entityState : '') + ')' : '-')} />
+              <Table.Column dataIndex="reason" title="Motivo" render={(v) => v || '-'} />
+              <Table.Column dataIndex="user" title="Usuario" />
+              <Table.Column dataIndex="confirmedOn" title="Confirmada" render={(v, r) => (v ? dateTime(v) + ' (' + r.confirmedBy + ')' : '-')} />
+              <Table.Column key="actions" title="Acciones" render={(v, r) => (r.status === 'PENDING' ? <div style={{ whiteSpace: 'nowrap' }}>
+                <Popconfirm title="Al confirmar se consume la reserva y se solicita el pago a Finanzas. ¿Continuar?"
+                  onConfirm={() => onConfirmSettlement(r.id)} okText="Sí" cancelText="No">
+                  <Button type="link" icon={<RoIcon name="check" />}>Confirmar</Button>
+                </Popconfirm>
+                <Popconfirm title={CONFIRM_DELETE} onConfirm={() => onDeleteSettlement(r.id)} okText="Sí" cancelText="No">
+                  <Button type="link" icon={<RoIcon name="delete" />} aria-label="Eliminar liquidación" />
+                </Popconfirm>
+              </div> : null)} />
+            </Table>
+          </div> : null}
+          <Modal title="Nueva liquidación" visible={settlementVisible} onCancel={() => setSettlementVisible(false)} onOk={onAddSettlement}
+            okText="Aceptar" cancelText="Cancelar" okButtonProps={{ loading: loading }}>
+            <div style={{ marginBottom: 8 }}>
+              <div>Monto</div>
+              <InputNumber min={0} value={amount} onChange={setAmount} style={{ width: '100%' }} />
+              <div style={{ color: 'gray' }}>
+                Monto máximo liquidable: {money(order.balance, order.currency)}
+                {amount > 0 && amount <= order.balance ? <span> | Saldo proyectado: {money(order.balance - amount, order.currency)}
+                  {order.balance - amount === 0 ? ' (Liquidación total)' : ''}</span> : null}
+              </div>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <div>Número de factura</div>
+              <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+            </div>
+            <div>
+              <div>Fecha de factura</div>
+              <DatePicker value={invoiceDate} onChange={setInvoiceDate} format="DD/MM/YYYY" style={{ width: '100%' }} />
+            </div>
+          </Modal>
+          */}
+          <Modal title={closeAction === 'CANCEL' ? 'Cancelar orden' : 'Cancelar saldo restante'} visible={!!closeAction}
+            onCancel={() => setCloseAction(undefined)} onOk={onClose} okText="Aceptar" cancelText="Cancelar" okButtonProps={{ danger: true, loading: loading }}>
+            <p>{closeAction === 'CANCEL'
+              ? 'La orden se cancelará y su saldo disponible quedará en cero. No se generará ningún pago.'
+              : 'El saldo restante quedará en cero y la orden se liquidará. No se generará ningún pago.'}</p>
+            <div>Motivo</div>
+            <Input.TextArea value={closeReason} onChange={(e) => setCloseReason(e.target.value)} rows={3} />
+          </Modal>
+        </Drawer>
+      );
+    };
+
+    // Side-by-side comparison of the quotes of one request, aligned by article; a missing article is "not quoted".
+    const RepairOrderCompare = function RepairOrderCompare(props) {
+      const orders = props.orders || [];
+      const currency = orders.length > 0 ? orders[0].currency : undefined;
+      const parsed = orders.map((order) => ({
+        order: order, provider: order.Provider ? order.Provider.name : order.providerCode,
+        lines: order.jLines ? JSON.parse(order.jLines) : []
+      }));
+      const cptCodes = Array.from(new Set(parsed.reduce((all, p) => all.concat(p.lines.map((l) => l.cptCode)), [])));
+      const rows = cptCodes.map((cptCode) => {
+        const byOrder = parsed.map((p) => p.lines.find((l) => l.cptCode === cptCode) || null);
+        const baseline = Math.min.apply(null, byOrder.filter((l) => l).map((l) => l.quotedPrice || 0));
+        const row = { key: cptCode, cptCode: cptCode, description: (byOrder.find((l) => l) || {}).description, baseline: baseline };
+        byOrder.forEach((line, i) => { row['order' + i] = line; });
+        return row;
+      });
+      const totals = parsed.map((p) => p.lines.reduce((sum, l) => sum + (l.total || 0), 0));
+      const minTotal = Math.min.apply(null, totals);
+      const renderCell = (line, row) => {
+        if (!line) return <Tag>No cotizado</Tag>;
+        const delta = (line.quotedPrice || 0) - row.baseline;
+        const deltaPct = row.baseline > 0 ? (delta / row.baseline) * 100 : 0;
+        return (
+          <div style={{ whiteSpace: 'nowrap' }}>
+            {line.qty} x {money(line.quotedPrice || 0, currency)} = <b>{money(line.total || 0, currency)}</b>
+            {delta > 0 ? <div style={{ color: '#fa541c' }}>+{money(delta, currency)} (+{deltaPct.toFixed(1)}%)</div>
+              : <div style={{ color: '#52c41a' }}>Mejor precio</div>}
+          </div>
+        );
+      };
+      return (
+        <Modal title="Comparación de cotizaciones" visible={props.visible} onCancel={props.onClose} onOk={props.onClose} width={1150} footer={null}>
+          <Table dataSource={rows} pagination={false} size="small" scroll={{ x: true }}>
+            <Table.Column dataIndex="cptCode" title="Artículo" fixed="left" />
+            <Table.Column dataIndex="description" title="Descripción" />
+            {parsed.map((p, i) => <Table.Column key={'order' + i} dataIndex={'order' + i} title={p.provider + ' (RO-' + p.order.id + ')'}
+              render={(line, row) => renderCell(line, row)} />)}
+          </Table>
+          <div style={{ marginTop: 12, display: 'flex', gap: 25, flexWrap: 'wrap' }}>
+            {parsed.map((p, i) => <div key={i}><b>{p.provider}</b>: {money(totals[i], currency)}{' '}
+              {totals[i] === minTotal ? <Tag color="green">Menor total</Tag> : null}</div>)}
+          </div>
+        </Modal>
+      );
+    };
+
+    // The tab: quotes/orders grouped by quote request (newest request first).
+    return function ClaimRepairOrders(props) {
+      const [data, setData] = React.useState([]);
+      const [loading, setLoading] = React.useState(false);
+      const [requestVisible, setRequestVisible] = React.useState(false);
+      const [detailOrderId, setDetailOrderId] = React.useState();
+      const [selectedRows, setSelectedRows] = React.useState([]);
+      const [compareVisible, setCompareVisible] = React.useState(false);
+      const load = () => {
+        if (!props.claim) return;
+        setLoading(true);
+        exe('RepoRepairOrder', { operation: 'GET', filter: 'claimId=' + props.claim.id, include: ['Provider'] }).then((r) => {
+          setLoading(false);
+          if (r.ok) {
+            setData(r.outData.slice().sort((a, b) => (a.requestId === b.requestId ? a.id - b.id : b.id - a.id)));
+            setSelectedRows([]);
+          } else message.error(r.msg);
+        });
+      };
+      React.useEffect(() => { if (props.claim) load(); }, [props.claim]);
+      const onDelete = (record) => {
+        setLoading(true);
+        exe('RepoRepairOrder', { operation: 'DELETE', entity: { id: record.id } }).then((r) => {
+          setLoading(false);
+          if (r.ok) load();
+          else message.error(r.msg);
+        });
+      };
+      const onPrint = (record) => {
+        setLoading(true);
+        exe('GenerateRepairOrderDoc', { repairOrderIds: [record.id] }).then((r) => {
+          setLoading(false);
+          if (r.ok) message.success('PDF de la cotización generado en la pestaña Documentos del siniestro');
+          else message.error(r.msg);
+        });
+      };
+      const onCompare = () => {
+        if (selectedRows.length < 2) { message.error('Seleccione al menos dos cotizaciones de la misma solicitud'); return; }
+        if (Array.from(new Set(selectedRows.map((p) => p.requestId))).length > 1) {
+          message.error('Solo se pueden comparar cotizaciones de la misma solicitud');
+          return;
+        }
+        setCompareVisible(true);
+      };
+      const coverageName = (coverageId) => {
+        const coverage = props.claim && props.claim.Policy && (props.claim.Policy.Coverages || []).find((c) => c.id === coverageId);
+        return coverage ? coverage.name : coverageId;
+      };
+      const isSelected = (record) => selectedRows.some((item) => item.id === record.id);
+      const toggleSelected = (record, selected) => {
+        setSelectedRows((current) => selected
+          ? current.some((item) => item.id === record.id) ? current : current.concat(record)
+          : current.filter((item) => item.id !== record.id));
+      };
+      const toggleAll = (selected) => setSelectedRows(selected ? data.slice() : []);
+      const allSelected = data.length > 0 && selectedRows.length === data.length;
+      return (
+        <div className="resumen-repair-orders">
+          <div className="resumen-coverage-toolbar">
+            <div className="resumen-reserve-actions">
+              <Button size="small" type="primary" icon={<RoIcon name="plus" />} onClick={() => setRequestVisible(true)}>Nueva solicitud de cotización</Button>
+              <Button size="small" type="primary" icon={<RoIcon name="compare" />} onClick={onCompare} disabled={selectedRows.length < 2}>Comparar</Button>
+              <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={load}>Recargar</Button>
+            </div>
+          </div>
+          <div className="resumen-table-wrap resumen-repair-orders-table-wrap">
+            <table className="resumen-data-table resumen-repair-orders-table">
+              <thead><tr>
+                <th className="resumen-repair-orders-select"><Checkbox checked={allSelected} indeterminate={selectedRows.length > 0 && !allSelected}
+                  onChange={(event) => toggleAll(event.target.checked)} aria-label="Seleccionar todas las órdenes" /></th>
+                <th className="resumen-repair-orders-id">Id</th><th className="resumen-repair-orders-request">Solicitud</th><th className="resumen-repair-orders-provider">Proveedor</th>
+                <th className="resumen-repair-orders-coverage">Cobertura</th><th className="resumen-repair-orders-status">Estado</th><th className="resumen-cell-number">Total cotizado</th>
+                <th className="resumen-cell-number">Aprobado</th><th className="resumen-cell-number">Liquidado</th><th className="resumen-cell-number">Saldo</th>
+                <th className="resumen-repair-orders-created">Creada</th><th className="resumen-repair-orders-actions">Acciones</th>
+              </tr></thead>
+              <tbody>{data.length ? data.map((record) => {
+                const selected = isSelected(record);
+                const provider = record.Provider && record.Provider.name || record.providerCode || '-';
+                const coverage = coverageName(record.coverageId);
+                return <tr key={record.id} tabIndex="0" className={selected ? 'resumen-row-selected' : ''}
+                  onClick={() => toggleSelected(record, !selected)} onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleSelected(record, !selected); }
+                  }}>
+                  <td className="resumen-repair-orders-select"><Checkbox checked={selected} onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => toggleSelected(record, event.target.checked)} aria-label={'Seleccionar RO-' + record.id} /></td>
+                  <td className="resumen-repair-orders-id">RO-{record.id}</td>
+                  <td className="resumen-repair-orders-request"><Tooltip title={record.requestId}><span className="resumen-cell-ellipsis">{record.requestId ? String(record.requestId).substring(0, 8) : '-'}</span></Tooltip></td>
+                  <td className="resumen-repair-orders-provider"><Tooltip title={provider}><span className="resumen-cell-ellipsis">{provider}</span></Tooltip></td>
+                  <td className="resumen-repair-orders-coverage"><Tooltip title={coverage}><span className="resumen-cell-ellipsis">{coverage}</span></Tooltip></td>
+                  <td className="resumen-repair-orders-status">{statusTag(record.status)}</td>
+                  <td className="resumen-cell-number">{money(record.total, record.currency)}</td>
+                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : money(record.approvedAmount, record.currency)}</td>
+                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : money(record.settledAmount, record.currency)}</td>
+                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : money(record.balance, record.currency)}</td>
+                  <td className="resumen-repair-orders-created">{dateTime(record.created)}</td>
+                  <td className="resumen-repair-orders-actions"><div className="resumen-repair-orders-action-list">
+                    <Button type="link" icon={<RoIcon name="edit" />} aria-label={'Abrir RO-' + record.id}
+                      onClick={(event) => { event.stopPropagation(); setDetailOrderId(record.id); }} />
+                    <Button type="link" icon={<RoIcon name="pdf" />} aria-label={'PDF RO-' + record.id}
+                      onClick={(event) => { event.stopPropagation(); onPrint(record); }} />
+                    <Popconfirm title={CONFIRM_DELETE} onConfirm={() => onDelete(record)} disabled={record.status !== 'DRAFT'} okText="Sí" cancelText="No">
+                      <Button type="link" icon={<RoIcon name="delete" />} aria-label={'Eliminar RO-' + record.id} disabled={record.status !== 'DRAFT'}
+                        onClick={(event) => event.stopPropagation()} />
+                    </Popconfirm>
+                  </div></td>
+                </tr>;
+              }) : <tr><td className="resumen-empty-row" colSpan="12">No hay órdenes de reparación registradas para este siniestro.</td></tr>}</tbody>
+            </table>
+          </div>
+          <RepairOrderRequest claim={props.claim} config={props.config} visible={requestVisible}
+            onCancel={() => setRequestVisible(false)} onCreated={() => { setRequestVisible(false); load(); }} />
+          <RepairOrderDetail claim={props.claim} config={props.config} orderId={detailOrderId} visible={!!detailOrderId}
+            onClose={() => { setDetailOrderId(undefined); load(); }}
+            onChanged={() => (props.onChanged ? props.onChanged() : undefined)} />
+          <RepairOrderCompare orders={selectedRows} visible={compareVisible} onClose={() => setCompareVisible(false)} />
+        </div>
+      );
+    };
+  }, []);
+
   const Card = A.Card;
   const Collapse = A.Collapse;
   const Panel = Collapse.Panel;
@@ -1518,8 +2135,7 @@
         beneficiary: firstValue(payment && payment.beneficiaryName,
           payment && personName(payment.Beneficiary), payment && payment.contactName,
           personName(policyBeneficiaryContact), policyBeneficiary && policyBeneficiary.name) || null,
-        affectedObject: (() => { try { const object = JSON.parse(payout.jAffectedObjects || 'null');
-          return object && !Array.isArray(object) ? financialObjectLabel(object) : null; } catch (error) { return null; } })(),
+        affectedObject: payoutAffectedObject(payout.jAffectedObjects),
         checkRequestId: payment && payment.id != null ? payment.id : null,
         additionalBeneficiary: paymentAdditionalBeneficiary(payment, payoutId),
         payment: payment
@@ -2682,6 +3298,20 @@ END CATCH;`;
   };
   const financialObjectLabel = (object) => String(object && object.description || 'Objeto afectado')
     + ' — ' + String(object && object.key || 'Sin identificador');
+  const affectedObjectEntries = (raw) => {
+    if (!raw) return [];
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return Array.isArray(parsed) ? parsed.filter((entry) => entry && typeof entry === 'object')
+        : parsed && typeof parsed === 'object' ? [parsed] : [];
+    } catch (error) { return []; }
+  };
+  const affectedFormEntry = (entries) => (entries || []).find((entry) =>
+    typeof entry.key === 'string' && /^AffectedObject_\d+_\d+_\d+$/.test(entry.key));
+  const payoutAffectedObject = (raw) => {
+    const object = affectedFormEntry(affectedObjectEntries(raw));
+    return object ? financialObjectLabel(object) : null;
+  };
 
   const paymentSpendingAvailable = (claim, coverageId, bucket) => {
     if (!claim || !Array.isArray(claim.Payouts)) return null;
@@ -3028,6 +3658,12 @@ END CATCH;`;
       setPaymentError(caughtError && caughtError.message ? caughtError.message : 'El pago no es válido.');
       return Promise.resolve(false);
     }
+    const paymentSession = paymentCatalogRef.current;
+    if (paymentSession && paymentCatalogCurrent(paymentSession) && paymentSession.purchaseOrdersEnabled
+      && paymentSession.purchaseOrderMode && (!paymentSession.purchaseOrderIds || !paymentSession.purchaseOrderIds.length)) {
+      setPaymentError('Seleccione al menos una orden de compra antes de registrar el pago.');
+      return Promise.resolve(false);
+    }
     const context = startPaymentOperation();
     if (!context) return Promise.resolve(false);
     let createdId = null;
@@ -3042,6 +3678,8 @@ END CATCH;`;
       const deathError = collectiveDeathPaymentError(objectClaim, selected);
       if (deathError) throw new Error(deathError);
       entity.jAffectedObjects = JSON.stringify(selected);
+      const purchaseOrderAssociations = payoutAffectedObjectsWithPurchaseOrders(entity, paymentCatalogRef.current);
+      if (purchaseOrderAssociations) entity.jAffectedObjects = purchaseOrderAssociations;
       return repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity });
     })
       .then((result) => {
@@ -3165,6 +3803,90 @@ END CATCH;`;
     const disabled = config.Main && config.Main.disabledBeneficiaryTypes || [];
     return PAYMENT_TYPES.filter((item) => !Array.isArray(disabled) || disabled.indexOf(item.value) === -1);
   };
+  const selectedPurchaseOrderTotal = (session) => {
+    if (!session || !Array.isArray(session.purchaseOrderIds) || !Array.isArray(session.purchaseOrders)) return 0;
+    const selected = new Set(session.purchaseOrderIds.map((id) => String(id)));
+    return roundMoney(session.purchaseOrders.reduce((total, order) => {
+      if (!selected.has(String(order.id))) return total;
+      const amount = numericValue(order.total);
+      return total + (amount === null ? 0 : amount);
+    }, 0));
+  };
+  const selectedPaymentPurchaseOrders = (session) => {
+    if (!session || !session.purchaseOrderMode || !Array.isArray(session.purchaseOrderIds)) return [];
+    const selected = new Set(session.purchaseOrderIds.map((id) => String(id)));
+    const orders = (session.purchaseOrders || []).filter((order) => selected.has(String(order && order.id)));
+    if (orders.length !== selected.size || orders.some((order) => !order || order.status !== 'ACTIVE'
+      || Number(order.claimId) !== Number(session.claimId) || Number(order.coverageId) !== Number(session.coverageId))) {
+      throw new Error('Una de las órdenes de compra seleccionadas ya no está disponible para esta cobertura.');
+    }
+    return orders;
+  };
+  const purchaseOrderAffectedEntry = (order) => {
+    const id = numericValue(order && order.id);
+    if (id === null || id <= 0) throw new Error('La orden de compra seleccionada no es válida.');
+    const provider = firstValue(order.Provider && order.Provider.name, order.providerName, order.providerCode, 'Taller no disponible');
+    return {
+      key: 'RepairOrder_' + id,
+      associationType: 'REPAIR_ORDER',
+      repairOrderId: id,
+      description: 'Orden de compra RO-' + id,
+      provider: String(provider),
+      totalQuoted: numericValue(order.total) || 0,
+      coverageId: numericValue(order.coverageId)
+    };
+  };
+  const payoutAffectedObjectsWithPurchaseOrders = (payout, session) => {
+    const orders = selectedPaymentPurchaseOrders(session);
+    if (!orders.length) return null;
+    const existing = affectedObjectEntries(payout && payout.jAffectedObjects);
+    const seen = new Set(existing.map((entry) => String(entry && entry.key || '')));
+    orders.forEach((order) => {
+      const entry = purchaseOrderAffectedEntry(order);
+      if (!seen.has(entry.key)) { existing.push(entry); seen.add(entry.key); }
+    });
+    return JSON.stringify(existing);
+  };
+  const applyPurchaseOrderAmount = (session) => {
+    if (!session || !session.purchaseOrderMode || !session.purchaseOrderIds || session.purchaseOrderIds.length === 0) return false;
+    session.amount = String(selectedPurchaseOrderTotal(session));
+    if (session.payoutId == null && session.reserveType === 'IN') setPaymentAmount(session.amount);
+    return true;
+  };
+  const loadPaymentPurchaseOrders = (session) => {
+    if (!session || !paymentCatalogCurrent(session) || !session.purchaseOrdersEnabled) return Promise.resolve();
+    const claimId = numericValue(session.claimId), coverageId = numericValue(session.coverageId);
+    if (claimId === null || coverageId === null) return Promise.resolve();
+    session.purchaseOrdersLoading = true; session.purchaseOrdersError = ''; notifyPaymentCatalog();
+    return repositoryRequest('RepoRepairOrder', { operation: 'GET', include: ['Provider'],
+      filter: "claimId=" + claimId + " AND coverageId=" + coverageId + " AND status='ACTIVE'" })
+      .then((result) => {
+        if (!paymentCatalogCurrent(session)) return;
+        if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar las órdenes de compra activas.');
+        session.purchaseOrders = result.outData.filter((order) => order && Number(order.claimId) === claimId
+          && Number(order.coverageId) === coverageId && order.status === 'ACTIVE');
+      }).catch((caught) => {
+        if (paymentCatalogCurrent(session)) session.purchaseOrdersError = caught && caught.message
+          ? caught.message : 'No fue posible cargar las órdenes de compra activas.';
+      }).then(() => {
+        if (paymentCatalogCurrent(session)) { session.purchaseOrdersLoading = false; notifyPaymentCatalog(); }
+      });
+  };
+  const setPaymentPurchaseOrderMode = (checked) => {
+    const session = paymentCatalogRef.current;
+    if (!session || !paymentCatalogCurrent(session) || paymentSavingRef.current || !session.purchaseOrdersEnabled) return;
+    session.purchaseOrderMode = !!checked;
+    if (!session.purchaseOrderMode) session.purchaseOrderIds = [];
+    notifyPaymentCatalog();
+  };
+  const selectPaymentPurchaseOrders = (values) => {
+    const session = paymentCatalogRef.current;
+    if (!session || !paymentCatalogCurrent(session) || paymentSavingRef.current || !session.purchaseOrdersEnabled) return;
+    const permitted = new Set((session.purchaseOrders || []).map((order) => String(order.id)));
+    session.purchaseOrderIds = Array.from(new Set((values || []).map((value) => String(value)).filter((value) => permitted.has(value))));
+    applyPurchaseOrderAmount(session);
+    notifyPaymentCatalog();
+  };
   const paymentBeneficiaryOptions = () => {
     const session = paymentCatalogRef.current;
     return session ? session.beneficiaries.map((row) => ({
@@ -3237,11 +3959,16 @@ END CATCH;`;
       accountVersion: 0, sourceAccountVersion: 0, payoutId: payoutId, settlementError: '', type: 'BEN', beneficiaries: [], accounts: [],
       sourceAccounts: [], paymentTypes: [], methods: [], loading: false, sourceAccountLoading: false, methodsLoading: true,
       error: '', sourceAccountError: '', methodsError: '', method: claim.paymentMethodCode || null, reserveType: requestedReserveType,
-      paymentType: null, sourceAccountId: null, additionalBeneficiary: '', managementType: 'DIRECT' };
+      paymentType: null, sourceAccountId: null, additionalBeneficiary: '', managementType: 'DIRECT',
+      purchaseOrdersEnabled: false, purchaseOrderMode: false, purchaseOrdersLoading: false,
+      purchaseOrdersError: '', purchaseOrders: [], purchaseOrderIds: [] };
     paymentCatalogRef.current = session;
     notifyPaymentCatalog();
     return Promise.resolve().then(() => {
       session.config = paymentConfig();
+      session.purchaseOrdersEnabled = requestedReserveType === 'IN' && !!(session.config.Main && session.config.Main.claimRepairOrdersTabVisible)
+        && !repairOrdersDisabled;
+      session.purchaseOrderMode = session.purchaseOrdersEnabled;
       if (payoutId != null) {
         try { nativeSettlementAmount(claim, (claim.Payouts || []).find((row) => Number(row.id) === Number(payoutId))); }
         catch (caught) { session.settlementError = caught.message; }
@@ -3250,7 +3977,7 @@ END CATCH;`;
       if (session.config.Claim && session.config.Claim.defaultPaymentValues) throw new Error('La configuración Claim.defaultPaymentValues requiere adaptación antes de ejecutar la solicitud.');
       const type = paymentTypeOptions()[0];
       if (!type) throw new Error('No hay tipos de beneficiario habilitados.');
-      return Promise.all([loadPaymentBeneficiaries(type.value), repositoryRequest('RepoPaymentMethodCatalog', { operation: 'GET' }).then((result) => {
+      return Promise.all([loadPaymentBeneficiaries(type.value), session.purchaseOrdersEnabled ? loadPaymentPurchaseOrders(session) : Promise.resolve(), repositoryRequest('RepoPaymentMethodCatalog', { operation: 'GET' }).then((result) => {
         if (!paymentCatalogCurrent(session)) return;
         if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar los métodos de pago.');
         session.methods = result.outData.filter((row) => row && (!row.module || row.module === 'PAYMENT')
@@ -3465,6 +4192,7 @@ END CATCH;`;
       const beneficiary = session.beneficiaries.find((row) => Number(row.contactId) === session.contactId);
       const quote = nativeSettlementQuote(session.claim, payout, session.type, beneficiary, session.contactId);
       session.maximum = quote.maximum; session.amount = quote.maximum > 0 ? String(quote.maximum) : '';
+      applyPurchaseOrderAmount(session);
       session.settlementError = quote.maximum > 0 || !session.contactId ? '' : 'No hay importe disponible para este beneficiario y movimiento.';
     } catch (error) { session.maximum = 0; session.amount = ''; session.settlementError = error.message; }
   };
@@ -3599,6 +4327,12 @@ END CATCH;`;
       || String(paymentType).trim() === '') {
       return Promise.reject(new Error('La solicitud fue creada, pero no se pudieron resolver Tipo de pago y Cuenta de origen.'));
     }
+    const payout = currentClaimRef.current && (currentClaimRef.current.Payouts || [])
+      .find((row) => Number(row && row.id) === Number(payoutId));
+    const session = paymentCatalogRef.current;
+    let affectedObjects;
+    try { affectedObjects = payoutAffectedObjectsWithPurchaseOrders(payout, session); }
+    catch (error) { return Promise.reject(error); }
     return resolveClaimPaymentId(result, claimId, payoutId).then((paymentId) => {
       return repositoryRequest('SetField', {
         entity: 'ClaimPayment',
@@ -3610,7 +4344,20 @@ END CATCH;`;
           throw new Error(updateResult && updateResult.msg
             ? updateResult.msg : 'No fue posible guardar Tipo de pago y Cuenta de origen.');
         }
-        return paymentId;
+        if (!affectedObjects) return paymentId;
+        return repositoryRequest('SetField', {
+          entity: 'LifeCoveragePayout',
+          entityId: payoutId,
+          fieldValue: 'jAffectedObjects = ' + paymentFieldLiteral(affectedObjects),
+          raw: true
+        }).then((payoutUpdate) => {
+          if (!payoutUpdate || payoutUpdate.ok === false) {
+            throw new Error(payoutUpdate && payoutUpdate.msg
+              ? payoutUpdate.msg : 'La solicitud fue creada, pero no se pudieron asociar las órdenes de compra.');
+          }
+          if (payout) payout.jAffectedObjects = affectedObjects;
+          return paymentId;
+        });
       });
     });
   };
@@ -6174,11 +6921,36 @@ END CATCH;`;
       fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>;
   };
 
+  // Repair Orders tab: same switch as the native claim screen (Main.claimRepairOrdersTabVisible of the claim's product),
+  // disabled by a Claim.disabledTabs rule named 'repairOrders' in the profile, like the native tab.
+  const repairOrdersConfig = React.useMemo(() => {
+    const claim = currentClaimRef.current;
+    const raw = claim && claim.Policy && claim.Policy.Product && claim.Policy.Product.configJson;
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (failure) { return null; }
+  }, [currentClaimRef.current]);
+  const repairOrdersVisible = !newClaimMode && !!(repairOrdersConfig && repairOrdersConfig.Main
+    && repairOrdersConfig.Main.claimRepairOrdersTabVisible);
+  const repairOrdersDisabled = repairOrdersVisible && (() => {
+    const profile = window.global && window.global.configProfile && window.global.configProfile.Claim || {};
+    if (!Array.isArray(profile.disabledTabs)) return false;
+    return profile.disabledTabs.some((rule) => {
+      if (!rule || rule.name !== 'repairOrders') return false;
+      if (!rule.condition) return true;
+      const expression = typeof rule.condition === 'string'
+        ? rule.condition.replace(/_cla\b/g, 'cla').replace(/_pol\b/g, 'pol') : '_';
+      return /_/.test(expression) || evaluateCustomFormCondition(expression, currentClaimRef.current, true);
+    });
+  })();
+  React.useEffect(() => {
+    if (activeTab === 'repairOrders' && (!repairOrdersVisible || repairOrdersDisabled)) setActiveTab('general');
+  }, [activeTab, repairOrdersVisible, repairOrdersDisabled]);
   const tabItems = [
     ['general', 'Datos Generales'], ['custom', 'Personalizada'], ['affected', 'Objeto Afectado'], ['coverage', 'Cobertura / Reservas'],
+  ].concat(repairOrdersVisible ? [['repairOrders', 'Órdenes de Reparación', repairOrdersDisabled]] : []).concat([
     ['payments', 'Pagos'], ['expenses', 'Gastos'], ['recoveries', 'Recuperaciones'],
     ['documents', 'Documentos'], ['comments', 'Comentarios']
-  ];
+  ]);
 
   const SectionTitle = ({ children, className }) => (
     <h3 className={'resumen-section-title ' + (className || '')}>
@@ -6550,7 +7322,10 @@ END CATCH;`;
             placeholder="Seleccione una cobertura"
             options={config.coverages.filter((row) => row.available !== null && row.available > 0)
               .map((row) => ({ value: row.id, label: row.name + ' — ' + formatAmount(row.available) }))}
-            onChange={config.setCoverageId} /></div>
+            onChange={(value) => {
+              config.setCoverageId(value);
+              if (config.key === 'payments') openPaymentCatalogs(value, null, 'IN');
+            }} /></div>
           {['payments', 'expenses'].includes(config.key) ? <div className="resumen-reserve-input">
             <label>Objeto afectado *</label>
             <Select size="small" aria-label="Objeto afectado" aria-required="true" allowClear
@@ -6561,6 +7336,25 @@ END CATCH;`;
                 ? financialObjects.rows.map((object) => ({ value: object.key, label: financialObjectLabel(object) })) : []}
               onChange={(value) => selectFinancialObject(value, config.key)} />
             {financialObjects.error ? <div role="alert" className="resumen-reserve-error">{financialObjects.error}</div> : null}
+          </div> : null}
+          {config.key === 'payments' && paymentCatalog && paymentCatalog.purchaseOrdersEnabled ? <div className="resumen-reserve-input resumen-purchase-order">
+            <Checkbox checked={paymentCatalog.purchaseOrderMode} disabled={paymentSaving}
+              onChange={(event) => setPaymentPurchaseOrderMode(event.target.checked)}>¿Orden de compra?</Checkbox>
+            {paymentCatalog.purchaseOrderMode ? <React.Fragment>
+              <Select size="small" mode="multiple" optionLabelProp="label" loading={paymentCatalog.purchaseOrdersLoading}
+                disabled={paymentSaving || paymentCatalog.purchaseOrdersLoading} value={paymentCatalog.purchaseOrderIds}
+                placeholder="Seleccione una o más órdenes de la cobertura" onChange={selectPaymentPurchaseOrders}>
+                {(paymentCatalog.purchaseOrders || []).map((order) => {
+                  const provider = order.Provider && order.Provider.name || order.providerCode || 'Taller no disponible';
+                  const currency = order.currency || paymentCatalog.claim.Policy && paymentCatalog.claim.Policy.currency || '';
+                  return <Select.Option key={order.id} value={String(order.id)} label={'RO-' + order.id}>
+                    <div className="resumen-purchase-order-option"><strong>{provider}</strong>
+                      <span>RO-{order.id} · Total cotizado: {currency} {formatAmount(order.total || 0)}</span></div>
+                  </Select.Option>;
+                })}
+              </Select>
+              {paymentCatalog.purchaseOrdersError ? <div role="alert" className="resumen-reserve-error">{paymentCatalog.purchaseOrdersError}</div> : null}
+            </React.Fragment> : null}
           </div> : null}
           <div className="resumen-reserve-input"><label>Monto</label><Input size="small" inputMode="decimal"
             disabled={!editable || paymentSaving} value={formatMoneyInput(config.amount)}
@@ -6574,7 +7368,9 @@ END CATCH;`;
           <div className="resumen-reserve-actions">
             <Button size="small" disabled={paymentSaving} onClick={() => config.setReserveOpen(false)}>Cancelar</Button>
             <Button size="small" type="primary" loading={paymentSaving} disabled={!editable || paymentSaving
-              || ['payments', 'expenses'].includes(config.key) && (financialObjects.loading || !!financialObjects.error || !financialObjects.selectedId)}
+              || ['payments', 'expenses'].includes(config.key) && (financialObjects.loading || !!financialObjects.error || !financialObjects.selectedId)
+              || config.key === 'payments' && paymentCatalog && paymentCatalog.purchaseOrdersEnabled
+                && paymentCatalog.purchaseOrderMode && !paymentCatalog.purchaseOrderIds.length}
               onClick={config.createReserve}>Registrar</Button>
           </div>
         </div>
@@ -7074,6 +7870,16 @@ END CATCH;`;
       .resumen-shell .resumen-checks{display:flex;align-items:center;gap:16px;min-height:24px}
       .resumen-shell .resumen-checks .ant-checkbox-wrapper{color:var(--rz-muted);font-size:12px}
       .resumen-shell .ant-checkbox-wrapper-disabled,.resumen-shell .ant-checkbox-disabled+span{color:#b6bfc9!important;opacity:1}
+      .resumen-shell .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-inner{width:16px;height:16px;border:1px solid #8f9aa7!important;border-radius:3px;background:#fff}
+      .resumen-shell .ant-checkbox:hover .ant-checkbox-inner,.resumen-shell .ant-checkbox-wrapper:hover .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox:hover .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-wrapper:hover .ant-checkbox-inner{border-color:#8da9c2!important}
+      .resumen-shell .ant-checkbox-checked .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-checked .ant-checkbox-inner{border-color:#1677ff!important;background:#1677ff}
+      .resumen-shell .ant-checkbox-input:focus+.ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-input:focus+.ant-checkbox-inner{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.2)}
+      .resumen-shell .ant-checkbox-disabled .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-disabled .ant-checkbox-inner{border-color:#b8c4d1!important;background:#f5f5f5}
+      .resumen-shell .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input),.resumen-affected-modal .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input){appearance:none;width:16px;height:16px;margin:0;vertical-align:-3px;border:1px solid #8f9aa7;border-radius:3px;background:#fff;cursor:pointer}
+      .resumen-shell .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):hover,.resumen-affected-modal .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):hover{border-color:#8da9c2}
+      .resumen-shell .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):focus,.resumen-affected-modal .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):focus{border-color:#1677ff;box-shadow:0 0 0 2px rgba(22,119,255,.2);outline:0}
+      .resumen-shell .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):checked,.resumen-affected-modal .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):checked{border-color:#1677ff;background:#1677ff;box-shadow:inset 0 0 0 3px #fff}
+      .resumen-shell .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):disabled,.resumen-affected-modal .resumen-custom-form input[type=checkbox]:not(.ant-checkbox-input):disabled{border-color:#b8c4d1;background:#f5f5f5;cursor:not-allowed}
       .resumen-shell .resumen-inline{display:flex;gap:6px;min-width:0}
       .resumen-shell .resumen-inline>*{flex:1 1 0;min-width:0}
       .resumen-new-claim-search{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px;margin-bottom:14px}
@@ -7157,6 +7963,54 @@ END CATCH;`;
       .resumen-shell .resumen-data-table .resumen-grid-amount-negative{color:#cf1322}
       .resumen-shell .resumen-data-table .resumen-grid-amount-zero{color:#262626;font-weight:400}
       .resumen-shell .resumen-empty-row{text-align:center!important;color:var(--rz-muted);padding:18px!important}
+      .resumen-shell .resumen-repair-orders{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;gap:7px}
+      .resumen-shell .resumen-repair-orders .resumen-coverage-toolbar{justify-content:flex-start;margin:0}
+      .resumen-shell .resumen-repair-orders .resumen-reserve-actions{flex-wrap:wrap}
+      .resumen-shell .resumen-repair-orders-table-wrap{flex:1 1 auto;min-height:180px;max-height:none;overflow:auto}
+      .resumen-shell .resumen-repair-orders-table{min-width:1240px;table-layout:fixed}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-select{width:40px;max-width:40px;text-align:center}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-id{width:64px;max-width:64px}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-request{width:100px;max-width:100px}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-provider{width:190px;max-width:190px}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-coverage{width:185px;max-width:185px}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-status{width:100px;max-width:100px}
+      .resumen-shell .resumen-repair-orders-table .resumen-cell-number{width:120px;max-width:120px}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-created{width:145px;max-width:145px}
+      .resumen-shell .resumen-repair-orders-table .resumen-repair-orders-actions{width:105px;max-width:105px;text-align:center}
+      .resumen-shell .resumen-repair-orders-table .resumen-cell-ellipsis{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .resumen-shell .resumen-repair-orders-action-list{display:flex;align-items:center;justify-content:center;gap:2px;white-space:nowrap}
+      .resumen-shell .resumen-repair-orders-action-list .ant-btn{min-width:24px;height:24px;padding:2px 4px}
+      .resumen-repair-order-drawer .ant-drawer-content{background:#fff}
+      .resumen-repair-order-drawer .ant-drawer-header{padding:11px 16px;background:#f8fbff;border-bottom:1px solid #cbd1d8}
+      .resumen-repair-order-drawer .ant-drawer-title{color:#183153;font-size:14px;font-weight:700}
+      .resumen-repair-order-drawer .ant-drawer-body{padding:14px 16px;background:#fff}
+      .resumen-repair-order-summary{margin-bottom:10px}
+      .resumen-repair-order-summary .ant-descriptions-view{overflow:hidden;border:1px solid #cbd1d8!important;border-radius:6px}
+      .resumen-repair-order-summary .ant-descriptions-bordered .ant-descriptions-item-label{padding:6px 9px;color:#262626;background:#aeb6c0!important;border-color:#cbd1d8!important;font-size:12px;font-weight:700}
+      .resumen-repair-order-summary .ant-descriptions-bordered .ant-descriptions-item-content{padding:6px 9px;color:#183153;background:#fff;border-color:#cbd1d8!important;font-size:12px}
+      .resumen-repair-order-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 10px;padding:7px 8px;border:1px solid #cbd1d8;border-radius:6px;background:#f8fbff}
+      .resumen-repair-order-lines-table{border:1px solid #cbd1d8!important;border-radius:6px;overflow:hidden}
+      .resumen-repair-order-lines-table .ant-table{font-size:12px;color:#183153}
+      .resumen-repair-order-lines-table .ant-table-thead>tr>th{padding:5px 8px;background:#bfbfbf!important;color:#262626;border-right:1px solid #cbd1d8!important;border-bottom:1px solid #cbd1d8!important;font-weight:700;white-space:nowrap}
+      .resumen-repair-order-lines-table .ant-table-thead>tr>th:last-child{border-right:0}
+      .resumen-repair-order-lines-table .ant-table-tbody>tr>td{padding:5px 8px;border-right:0!important;border-bottom:1px solid #cbd1d8!important;vertical-align:middle;white-space:nowrap}
+      .resumen-repair-order-lines-table .ant-table-tbody>tr:last-child>td{border-bottom:0}
+      .resumen-repair-order-lines-table .ant-table-tbody>tr:hover>td{background:#b7d7ff}
+      .resumen-repair-order-lines-table .ant-tag{margin-right:0}
+      .resumen-repair-order-description{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .resumen-repair-order-amount{display:block;text-align:right;font-variant-numeric:tabular-nums}
+      .resumen-repair-order-lines>div:last-child{margin-top:7px!important;padding-right:2px;color:#183153;font-size:12px}
+      .resumen-repair-order-request-modal .ant-modal-content{border:1px solid #b8c4d1;border-radius:6px;overflow:hidden}
+      .resumen-repair-order-request-modal .ant-modal-header{padding:10px 16px;border-bottom:1px solid #d9e2ec;background:#f8fbff}
+      .resumen-repair-order-request-modal .ant-modal-title{color:#183153;font-size:14px;font-weight:600}
+      .resumen-repair-order-request-modal .ant-modal-body{padding:14px 16px;background:#fff}
+      .resumen-repair-order-request-modal .ant-modal-footer{padding:10px 16px;border-top:1px solid #d9e2ec;background:#fff}
+      .resumen-repair-order-request-modal .ant-input,.resumen-repair-order-request-modal .ant-input-number,.resumen-repair-order-request-modal .ant-select-selection,.resumen-repair-order-request-modal .ant-select-selector{border:1px solid #b8c4d1!important;border-radius:6px!important}
+      .resumen-repair-order-request-modal .ant-input:hover,.resumen-repair-order-request-modal .ant-input-number:hover,.resumen-repair-order-request-modal .ant-select:hover .ant-select-selection,.resumen-repair-order-request-modal .ant-select:hover .ant-select-selector{border-color:#8da9c2!important}
+      .resumen-repair-order-request-modal .ant-input:focus,.resumen-repair-order-request-modal .ant-input-number-focused,.resumen-repair-order-request-modal .ant-select-focused .ant-select-selection,.resumen-repair-order-request-modal .ant-select-focused .ant-select-selector{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.2)!important}
+      .resumen-repair-order-request-modal .ant-input[disabled],.resumen-repair-order-request-modal .ant-input-number-disabled,.resumen-repair-order-request-modal .ant-select-disabled .ant-select-selection,.resumen-repair-order-request-modal .ant-select-disabled .ant-select-selector{border-color:#b8c4d1!important;background:#f5f5f5!important}
+      .resumen-repair-order-request-lines{margin-top:2px}
+      .resumen-repair-order-request-lines>.ant-btn-link{height:28px;margin-bottom:5px;padding:4px 8px}
       .resumen-shell .resumen-reserve-panel{flex:0 0 auto;display:flex;justify-content:flex-end}
       .resumen-shell .resumen-reserve-actions{display:flex;gap:7px;white-space:nowrap}
       .resumen-shell .resumen-financial-approve.ant-btn:not([disabled]){color:#fff;background:#389e0d;border-color:#389e0d}
@@ -7171,6 +8025,14 @@ END CATCH;`;
       .resumen-reserve-modal .resumen-reserve-input>.ant-input,.resumen-reserve-modal .resumen-reserve-input>.ant-select .ant-select-selector{border-color:#aebfd4!important;border-radius:5px}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input:hover,.resumen-reserve-modal .resumen-reserve-input>.ant-select:hover .ant-select-selector{border-color:#8da9c2!important}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input:focus,.resumen-reserve-modal .resumen-reserve-input>.ant-select-focused .ant-select-selector{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.12)!important}
+      .resumen-reserve-modal .resumen-purchase-order{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;gap:16px;padding:0;border:0;background:transparent}
+      .resumen-reserve-modal .resumen-purchase-order>.ant-checkbox-wrapper{display:inline-flex;align-items:center;gap:6px;width:max-content;margin:0;color:#183153;font-size:12px;font-weight:600;line-height:18px;white-space:nowrap}
+      .resumen-reserve-modal .resumen-purchase-order>.ant-select{width:100%;min-width:0}
+      .resumen-reserve-modal .resumen-purchase-order>.resumen-reserve-error{grid-column:2}
+      .resumen-reserve-modal .resumen-purchase-order .ant-select-selection,.resumen-reserve-modal .resumen-purchase-order .ant-select-selector{min-height:30px;border-color:#b8c4d1!important;border-radius:6px!important}
+      .resumen-purchase-order-option{display:flex;flex-direction:column;gap:2px;min-width:0;padding:1px 0}
+      .resumen-purchase-order-option strong{color:#183153;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .resumen-purchase-order-option span{color:#60708a;font-size:11px}
       .resumen-reserve-modal .resumen-reserve-error{grid-column:1/-1;padding:7px 10px;color:#9f2d2d;background:#fff1f0;border:1px solid #ffccc7;border-radius:5px;font-size:12px}
       .resumen-reserve-modal .resumen-reserve-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;padding-top:4px}
       .resumen-reinsurance-modal .ant-modal-content{border:1px solid #b8c4d1;border-radius:6px;overflow:hidden}
@@ -7450,9 +8312,9 @@ END CATCH;`;
       <nav className="resumen-tabs" aria-label="Secciones del siniestro">
         {tabItems.map((tab) => (
           <button type="button" key={tab[0]}
-            disabled={newClaimMode && tab[0] !== 'general'}
+            disabled={(newClaimMode && tab[0] !== 'general') || tab[2] === true}
             className={(activeTab === tab[0] ? 'resumen-tab resumen-tab-active' : 'resumen-tab')
-              + (newClaimMode && tab[0] !== 'general' ? ' resumen-tab-disabled' : '')}
+              + ((newClaimMode && tab[0] !== 'general') || tab[2] === true ? ' resumen-tab-disabled' : '')}
             onClick={() => changeActiveTab(tab[0])}>{tab[1]}</button>
         ))}
       </nav>
@@ -7745,7 +8607,7 @@ END CATCH;`;
                     <td>{displayValue(item.id)}</td><td>{displayValue(formatDate(item.date))}</td>
                     <td>{signed < 0 ? 'Disminución' : 'Aumento'}</td>
                     <td>{String(item.reserveType || '').toUpperCase() === 'EX' ? 'Gasto' : 'Pago'}</td>
-                    <td>{(() => { try { const object = JSON.parse(item.jAffectedObjects || 'null'); return object ? financialObjectLabel(object) : EMPTY_VALUE; } catch (error) { return EMPTY_VALUE; } })()}</td>
+                    <td>{payoutAffectedObject(item.jAffectedObjects) || EMPTY_VALUE}</td>
                     <td className="resumen-cell-number">{formatGridAmount(signed)}</td>
                     <td>{displayValue(item.concept)}</td><td>{displayValue(item.user)}</td>
                     <td>{Number(item.status) === 2 ? 'Cerrada' : 'Activa'}</td>
@@ -7769,7 +8631,9 @@ END CATCH;`;
           reserveOpen: paymentReserveModalOpen, setReserveOpen: setPaymentReserveModalOpen,
           checkOpen: checkRequestModalOpen, setCheckOpen: setCheckRequestModalOpen,
           openReserve: () => {
-            selectFinancialCoverage(selectedCoverage ? selectedCoverage.id : coverageRows.length === 1 ? coverageRows[0].id : null);
+            const coverageId = selectedCoverage ? selectedCoverage.id : coverageRows.length === 1 ? coverageRows[0].id : null;
+            selectFinancialCoverage(coverageId);
+            if (coverageId != null) openPaymentCatalogs(coverageId, null, 'IN');
             setPaymentError('');
             setPaymentReserveModalOpen(true);
           },
@@ -7832,6 +8696,11 @@ END CATCH;`;
             </Modal>
           </section>
 
+        ) : activeTab === 'repairOrders' ? (
+          <section className="resumen-repair-orders" aria-label="Órdenes de Reparación del siniestro">
+            <SectionTitle>Órdenes de Reparación</SectionTitle>
+            <ClaimRepairOrdersTab claim={currentClaimRef.current} config={repairOrdersConfig} onChanged={refreshClaim} />
+          </section>
         ) : activeTab === 'documents' ? (
           <section className="resumen-documents" aria-label="Documentos del siniestro">
             <Alert type="info" showIcon message="Notas informativas" description="Los archivos enviados a approvals@axxis-systems.com con el ID de la solicitud como asunto se adjuntarán automáticamente aquí." />

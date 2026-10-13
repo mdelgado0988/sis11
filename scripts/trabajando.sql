@@ -15,8 +15,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 31
---and t.cplan = 'P10' 
+where t.cramo = 6
+--and t.cplan = 'PLAN10' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 52
+declare @ramoXY int = 6
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -188,7 +188,7 @@ from marepteccia
 where cramo in (6)
 and (xnombrep NOT like '%endoso%')
 --AND xdpto <> 'SINIESTROS'
-AND xdpto = 'EMISION'
+AND xdpto = 'SINIESTROS'
 AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 
 --Reportes de riesgos varios
@@ -249,12 +249,15 @@ INNER JOIN maplanes pl ON pl.cramo = c.cramo AND pl.cplan = c.cplan
 GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 
 
-select cramo, ccausa, xcausa from macausasin where cramo = 71
+select cramo, ccausa, xcausa from macausasin where cramo = 6
 
 
-declare @cuenta varchar(9) = '410.01.01.02.00.15.04.00.000'
+declare @cuenta varchar(9) = '130.01.01.02.00.20.04.00.000'
 select * 
 from SisGlobal_AG01..catalogonic
 where cdgocont like '%'+@cuenta+'%'
 and tipocuen = '2'
-AND desccont like '%frau%'
+AND desccont like '%varios%'
+
+select ccobertura, xdescripcion_l from macoberturas where cramo = 6
+and ccobertura in ('101','12','14','20','21')

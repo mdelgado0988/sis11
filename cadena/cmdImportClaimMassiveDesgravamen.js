@@ -275,7 +275,14 @@ function findContact(value, label, personOnly) {
       rows = candidates.filter(c => norm(contactName(c)) === norm(value));
     }
   }
-  if (personOnly) rows = rows.filter(c => !(Number(c.isPerson) === 0 || c.isPerson === false));
+  if (personOnly) {
+    const naturalPersons = rows.filter(c => !(Number(c.isPerson) === 0 || c.isPerson === false));
+    if (!naturalPersons.length && rows.length) {
+      errors.push(`${label} '${value}' corresponde al contacto ${rows.map(c => c.id).join(", ")}, pero está registrado como persona jurídica (isPerson = 0). El asegurado debe ser una persona natural.`);
+      return null;
+    }
+    rows = naturalPersons;
+  }
   if (rows.length === 1) return Object.assign(rows[0], { fullName: contactName(rows[0]) });
   errors.push(rows.length > 1
     ? `${label} '${value}' es ambiguo (contactos ${rows.map(c => c.id).join(", ")}); use el código del contacto.`
