@@ -58,6 +58,13 @@ resultado.AFavor = oaUserData?.nombre ?? "No Definido";
 resultado.Descripcion = oaUserData?.desc_objeto_afianzado ?? "";
 resultado.Secuestrante = oaUserData?.secuestrante ?? "";
 resultado.FechaActoPublico = toFecha(oaUserData?.f_acto_publico);
+const partesFechaActoPublico = partesFechaPanama(fechaComoUTC(oaUserData?.f_acto_publico));
+resultado.FechaActoPubTexto = partesFechaActoPublico
+  ? `${partesFechaActoPublico.dia} DEL MES DE ${String(meses[partesFechaActoPublico.mes - 1]).toUpperCase()} DE ${partesFechaActoPublico.anio}`
+  : "";
+resultado.FechaActoPubTexto2 = partesFechaActoPublico
+  ? `${partesFechaActoPublico.dia} del mes de ${String(meses[partesFechaActoPublico.mes - 1]).toLowerCase()} de ${partesFechaActoPublico.anio}`
+  : "";
 resultado.ActoPublico = oaUserData?.n_acto_publico ?? "";
 resultado.Moneda = "B/.";
 resultado.Suma = n(policy.insuredSum);
@@ -106,11 +113,12 @@ resultado.FechaFinVicioTexto = partesFinVicio
 resultado.DiasVigenciaTexto = `${vigenciaDocumento.texto} A PARTIR DEL ${resultado.DesdeTexto}`;
 resultado.VigenciaTexto = vigenciaDocumento.texto;
 resultado.VigenciaTexto2 = vigenciaDocumento.textoTitulo;
+resultado.VigenciaTexto3 = vigenciaDocumento.textoTitulo.toLowerCase();
 resultado.VigenciaPrincipalTexto = vigenciaPrincipalDocumento.texto;
 resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
 resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
 resultado.Prestamo = "";
-resultado.TipoLicitacion = "";
+resultado.TipoLicitacion = getTipoLicitacionTexto(oaUserData?.tipo_licitacion);
 
 resultado.NombreEncargado = "";
 resultado.TituloEncargado = "";
@@ -137,6 +145,7 @@ resultado.Hasta = toFecha(policy?.end);
 //Objeto asegurado: identificacion del contacto A Favor y numero de licitacion
 resultado.IdentificacionAFavor = getIdentificacionAFavor();
 resultado.Licitacion = oaUserData?.n_licitacion ?? "";
+resultado.TextoLicitacion = `${resultado.TipoLicitacion} No: ${resultado.Licitacion}`.trim();
 
 //Datos economicos de la poliza
 resultado.Prima = n(policy?.annualPremium ?? 0);
@@ -576,6 +585,20 @@ function getCatalogValue(catalogName, filter, fieldName) {
   const catalogResult = globalThis[catalogName];
   if (!catalogResult?.ok) return "";
   return catalogResult?.outData?.[0]?.[fieldName] ?? "";
+}
+
+function getTipoLicitacionTexto(value) {
+  const code = String(value ?? '').trim();
+  if (!code) return '';
+
+  doCmd({ cmd: 'GetFullTable', data: { table: 'tipolicitacion' } });
+  const catalogResult = globalThis.GetFullTable;
+  const rows = catalogResult?.ok && Array.isArray(catalogResult.outData)
+    ? catalogResult.outData
+    : [];
+  const row = rows.slice(1).find(item => String(item?.[0] ?? '').trim() === code);
+
+  return String(row?.[1] ?? code).trim();
 }
 
 //AXX-2418 (GLOBUAT-268): dirección completa del contacto en los documentos (Barriada, Ubicación y Corregimiento), sin perder ni sustituir componentes.

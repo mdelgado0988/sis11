@@ -16,7 +16,7 @@ inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
 where t.cramo = 6
---and t.cplan = 'PLAN10' 
+--and t.cplan = '6_22' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -183,7 +183,7 @@ AND xdpto = 'EMISION'
 AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 order by 1,2
 
-select distinct rtrim(xnombrep) xnombrep, xdpto
+select distinct rtrim(xnombrep) xnombrep, cramo, cplan, xdpto
 from marepteccia
 where cramo in (6)
 and (xnombrep NOT like '%endoso%')
