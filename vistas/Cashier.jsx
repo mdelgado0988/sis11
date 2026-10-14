@@ -7067,6 +7067,20 @@
     );
   }
 
+  function openSupervisorDetailedCashDeskAuditReport() {
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('Select a cash desk first.'));
+      return;
+    }
+
+    window.open(
+      `${window.location.origin}/#/reportview/rptArqueoDeCajaDetallado/workspaceId=${workspaceId}&transferId=0`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }
+
   function getMovementEditDestinationOption(item) {
     const account = item && item.DestinationAccount;
     const accountId = Number(item && item.destinationAccountId || account && (account.id || account.accountId) || 0);
@@ -9099,19 +9113,24 @@
               items: [
                 {
                   key: 'cash-desk-audit',
-                  label: t('Cash count'),
+                  label: 'Arqueo de Caja (En pantalla)',
                   onClick: openCashDeskAudit
                 },
                 {
                   key: 'detailed-cash-desk-audit',
-                  label: t('Cash Closing Reportt'),
+                  label: 'Informe de Cierre de Caja',
                   onClick: openDetailedCashDeskAuditReport
+                },
+                {
+                  key: 'supervisor-detailed-cash-desk-audit',
+                  label: 'Arqueo de Caja Detallado',
+                  onClick: openSupervisorDetailedCashDeskAuditReport
                 }
               ]
             }}
           >
             <Button className="cashier-supervisor-outline-button" icon={<FileTextOutlined />} disabled={!selectedCashierRow}>
-              {t('Cash count')}
+              Reportes de Caja
             </Button>
           </Dropdown>
         </Space>

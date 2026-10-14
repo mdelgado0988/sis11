@@ -82,6 +82,7 @@ try {
   // that are optional in the policy start at zero and overwrite this value
   // only when they are actually quoted below.
   setCoverageFormulaDefaults();
+  setCoverageParameterDefaults();
 
   if (isCapitalChange) {
     if (newCapital <= 0) {
@@ -267,6 +268,18 @@ function setCoverageFormulaDefaults() {
 
   coverageCodes.forEach(code => {
     oaUserData[`SUMA${code}`] = 0;
+  });
+}
+
+function setCoverageParameterDefaults() {
+  (oaUserData.cobtar || []).forEach(item => {
+    const coverageCode = String(item.COVERAGECODE ?? '').trim();
+    if (!coverageCode) return;
+
+    Object.entries(item).forEach(([key, value]) => {
+      if (key === 'COVERAGECODE') return;
+      oaUserData[`${sanitizeKey(key)}_${coverageCode}`] = value;
+    });
   });
 }
 

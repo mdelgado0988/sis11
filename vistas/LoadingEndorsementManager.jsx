@@ -480,6 +480,14 @@
         };
         const mergeReinsuranceContracts = function(simulation){
             const groups = {};
+            const distributionLineKey = function(value){
+                const line = String(value || '').trim().toUpperCase();
+                if(line.indexOf('RETEN') >= 0 || line === 'RET') return 'retention';
+                if(line.indexOf('EXCEDENTE') >= 0 || line.indexOf('EXCESS') >= 0 || line === 'EX1') return 'excess';
+                if(line.indexOf('FAC') >= 0) return 'facultative';
+                if(line.indexOf('FRONT') >= 0 || line === 'FRO') return 'fronting';
+                return 'quota';
+            };
             (simulation && simulation.contracts || []).forEach(function(source){
                 const key = String(source.contractId || '');
                 if(!groups[key]) groups[key] = Object.assign({}, source, {
@@ -490,7 +498,11 @@
                     return Object.assign({}, row, { lineId: row.lineId || source.lineId || '' });
                 }));
                 target.participants = target.participants.concat((source.participants || []).map(function(participant){
-                    return Object.assign({}, participant, { lineId: participant.lineId || source.lineId || '' });
+                    const lineId = participant.lineId || source.lineId || '';
+                    return Object.assign({}, participant, {
+                        lineId: lineId,
+                        distributionLineKey: participant.distributionLineKey || distributionLineKey(lineId)
+                    });
                 }));
                 if(!target.manualDistribution && source.manualDistribution) target.manualDistribution = source.manualDistribution;
             });
@@ -546,38 +558,59 @@
             const invalid = contracts.some(function(group){
                 const manualDistribution = group.manualDistribution || [];
                 if(manualDistribution.length){
-                    const quota = manualDistribution.find(function(line){ return line.key === 'quota'; });
-                    const rows = group.rows || [];
                     const participants = group.participants || [];
-                    const coverageInvalid = rows.some(function(row){
-                        if(Math.abs(Number(row.premiumRe || 0)) <= 0.01) return false;
-                        const rowParticipants = participants.filter(function(participant){
-                            const sameLine = !participant.lineId || !row.lineId
-                                || String(participant.lineId).trim().toUpperCase() === String(row.lineId).trim().toUpperCase();
-                            return Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0)
-                                || (sameLine && String(participant.coverageCode || '') === String(row.coverageCode || ''));
+                    const participantLineKey = function(participant){
+                        if(participant.distributionLineKey) return String(participant.distributionLineKey);
+                        const line = String(participant.lineId || '').trim().toUpperCase();
+                        if(line.indexOf('FAC') >= 0) return 'facultative';
+                        if(line.indexOf('EXCEDENTE') >= 0 || line.indexOf('EXCESS') >= 0 || line === 'EX1') return 'excess';
+                        if(line.indexOf('FRONT') >= 0 || line === 'FRO') return 'fronting';
+                        return 'quota';
+                    };
+                    // Participants are displayed and edited grouped by line,
+                    // so confirmation must validate the same aggregate instead
+                    // of requiring one participant set per coverage.
+                    return manualDistribution.some(function(line){
+                        if(['retention', 'nonTechnical', 'coinsurance'].indexOf(line.key) >= 0) return false;
+                        const expectedPremium = Number(line.premium || 0);
+                        const expectedSum = Number(line.sum || 0);
+                        const expectedCommission = Number(line.commission || 0);
+                        const expectedTax = Number(line.tax || 0);
+                        if(Math.abs(expectedPremium) <= 0.01 && Math.abs(expectedSum) <= 0.01) return false;
+                        const rawLineParticipants = participants.filter(function(participant){
+                            return participantLineKey(participant) === String(line.key);
                         });
-                        const split = rowParticipants.reduce(function(total, participant){ return total + Number(participant.split || 0); }, 0);
-                        const premium = rowParticipants.reduce(function(total, participant){ return total + Number(participant.premium || 0); }, 0);
-                        return !rowParticipants.length || rowParticipants.some(function(participant){ return !participant.contactId; })
+                        const groupedParticipants = {};
+                        rawLineParticipants.forEach(function(participant){
+                            const key = String(participant._participantKey || (String(participant.contactId || '') + '|' + String(participant.brokerId || '')));
+                            if(!groupedParticipants[key]){
+                                groupedParticipants[key] = Object.assign({}, participant, {
+                                    split: Number(participant.split || 0), sumInsured:0, premium:0, commission:0, tax:0
+                                });
+                            }
+                            groupedParticipants[key].sumInsured += Number(participant.sumInsured || 0);
+                            groupedParticipants[key].premium += Number(participant.premium || 0);
+                            groupedParticipants[key].commission += Number(participant.commission || 0);
+                            groupedParticipants[key].tax += Number(participant.tax || 0);
+                        });
+                        const lineParticipants = Object.keys(groupedParticipants).map(function(key){ return groupedParticipants[key]; });
+                        const split = lineParticipants.reduce(function(total, participant){ return total + Number(participant.split || 0); }, 0);
+                        const sum = lineParticipants.reduce(function(total, participant){ return total + Number(participant.sumInsured || 0); }, 0);
+                        const premium = lineParticipants.reduce(function(total, participant){ return total + Number(participant.premium || 0); }, 0);
+                        const commission = lineParticipants.reduce(function(total, participant){ return total + Number(participant.commission || 0); }, 0);
+                        const tax = lineParticipants.reduce(function(total, participant){ return total + Number(participant.tax || 0); }, 0);
+                        return !lineParticipants.length || lineParticipants.some(function(participant){ return !participant.contactId; })
                             || Math.abs(split - 100) > 0.01
-                            || Math.abs(premium - Number(row.premiumRe || 0)) > 0.01;
+                            || Math.abs(sum - expectedSum) > 0.01
+                            || Math.abs(premium - expectedPremium) > 0.01
+                            || Math.abs(commission - expectedCommission) > 0.01
+                            || Math.abs(tax - expectedTax) > 0.01;
                     });
-                    const cededPremium = rows.reduce(function(total, row){ return total + Number(row.premiumRe || 0); }, 0);
-                    const cededSum = rows.reduce(function(total, row){ return total + Number(row.sumInsuredRe || 0); }, 0);
-                    const cededCommission = rows.reduce(function(total, row){ return total + Number(row.commission || 0); }, 0);
-                    const cededTax = rows.reduce(function(total, row){ return total + Number(row.tax || 0); }, 0);
-                    return coverageInvalid || (quota && (
-                        Math.abs(cededPremium - Number(quota.premium || 0)) > 0.01
-                        || Math.abs(cededSum - Number(quota.sum || 0)) > 0.01
-                        || Math.abs(cededCommission - Number(quota.commission || 0)) > 0.01
-                        || Math.abs(cededTax - Number(quota.tax || 0)) > 0.01
-                    ));
                 }
                 const lines = group.rows || [];
                 const participants = group.participants || [];
                 const linesInvalid = lines.some(function(row){
-                    return Math.abs((Number(row.premiumCedant || 0) + Number(row.premiumRe || 0)) - Number(row.premiumMovement || 0)) > 0.01;
+                    return Math.abs((Number(row.premiumCedant || 0) + Number(row.premiumRe || 0) + Number(row.nonTechnicalPremium || 0)) - Number(row.premiumMovement || 0)) > 0.01;
                 });
                 const participantsInvalid = lines.some(function(row){
                     if(Math.abs(Number(row.premiumRe || 0)) <= 0.01) return false;
@@ -668,20 +701,34 @@
                 });
                 if(group) group.manualDistribution = distribution;
                 if(group){
-                    const quota = distribution.find(function(line){ return line.key === 'quota'; });
-                    if(quota){
-                        const rows = group.rows || [];
-                        const premiumWeights = rows.map(function(row){ return Math.abs(Number(row.premiumRe || 0)); });
-                        const sumWeights = rows.map(function(row){ return Math.abs(Number(row.sumInsuredRe || 0)); });
+                    const lineKeyForRow = function(row){
+                        const line = String(row.lineId || '').trim().toUpperCase();
+                        if(line.indexOf('FAC') >= 0) return 'facultative';
+                        if(line.indexOf('EXCEDENTE') >= 0 || line.indexOf('EXCESS') >= 0 || line === 'EX1') return 'excess';
+                        if(line.indexOf('FRONT') >= 0 || line === 'FRO') return 'fronting';
+                        return 'quota';
+                    };
+                    const rowsByLine = {};
+                    (group.rows || []).forEach(function(row){
+                        const key = lineKeyForRow(row);
+                        if(!rowsByLine[key]) rowsByLine[key] = [];
+                        rowsByLine[key].push(row);
+                    });
+                    Object.keys(rowsByLine).forEach(function(lineKey){
+                        const line = distribution.find(function(item){ return item.key === lineKey; });
+                        const lineRows = rowsByLine[lineKey];
+                        if(!line) return;
+                        const premiumWeights = lineRows.map(function(row){ return Math.abs(Number(row.premiumRe || 0)); });
+                        const sumWeights = lineRows.map(function(row){ return Math.abs(Number(row.sumInsuredRe || 0)); });
                         const premiumWeightTotal = premiumWeights.reduce(function(total, value){ return total + value; }, 0);
                         const sumWeightTotal = sumWeights.reduce(function(total, value){ return total + value; }, 0);
                         let premiumAssigned = 0;
                         let sumAssigned = 0;
-                        rows.forEach(function(row, index){
-                            const premiumShare = premiumWeightTotal > 0 ? premiumWeights[index] / premiumWeightTotal : (rows.length ? 1 / rows.length : 0);
-                            const sumShare = sumWeightTotal > 0 ? sumWeights[index] / sumWeightTotal : (rows.length ? 1 / rows.length : 0);
-                            const premiumRe = index === rows.length - 1 ? Number(quota.premium || 0) - premiumAssigned : Number((Number(quota.premium || 0) * premiumShare).toFixed(2));
-                            const sumRe = index === rows.length - 1 ? Number(quota.sum || 0) - sumAssigned : Number((Number(quota.sum || 0) * sumShare).toFixed(2));
+                        lineRows.forEach(function(row, index){
+                            const premiumShare = premiumWeightTotal > 0 ? premiumWeights[index] / premiumWeightTotal : (lineRows.length ? 1 / lineRows.length : 0);
+                            const sumShare = sumWeightTotal > 0 ? sumWeights[index] / sumWeightTotal : (lineRows.length ? 1 / lineRows.length : 0);
+                            const premiumRe = index === lineRows.length - 1 ? Number(line.premium || 0) - premiumAssigned : Number((Number(line.premium || 0) * premiumShare).toFixed(2));
+                            const sumRe = index === lineRows.length - 1 ? Number(line.sum || 0) - sumAssigned : Number((Number(line.sum || 0) * sumShare).toFixed(2));
                             const premiumMovement = Number(row.premiumMovement || 0);
                             const sumMovement = Number(row.sumInsuredMovement || 0);
                             row.premiumRe = Number(premiumRe.toFixed(2));
@@ -690,8 +737,10 @@
                             row.sumInsuredCedant = Number((sumMovement - row.sumInsuredRe).toFixed(2));
                             row.proportionRe = premiumMovement ? Number((row.premiumRe / premiumMovement).toFixed(6)) : Number(row.proportionRe || 0);
                             row.proportionCed = premiumMovement ? Number((row.premiumCedant / premiumMovement).toFixed(6)) : Number(row.proportionCed || 0);
-                            row.commission = Number((Number(quota.commission || 0) * (Number(quota.premium || 0) ? Math.abs(row.premiumRe) / Math.abs(Number(quota.premium || 0)) : 0)).toFixed(2));
-                            row.tax = Number((Number(quota.tax || 0) * (Number(quota.premium || 0) ? Math.abs(row.premiumRe) / Math.abs(Number(quota.premium || 0)) : 0)).toFixed(2));
+                            const linePremium = Number(line.premium || 0);
+                            const lineShare = linePremium ? Math.abs(row.premiumRe) / Math.abs(linePremium) : 0;
+                            row.commission = Number((Number(line.commission || 0) * lineShare).toFixed(2));
+                            row.tax = Number((Number(line.tax || 0) * lineShare).toFixed(2));
                             premiumAssigned += row.premiumRe;
                             sumAssigned += row.sumInsuredRe;
                             (group.participants || []).filter(function(participant){
@@ -700,6 +749,7 @@
                                 return Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0)
                                     || (sameLine && String(participant.coverageCode || '') === String(row.coverageCode || ''));
                             }).forEach(function(participant){
+                                participant.distributionLineKey = lineKey;
                                 const split = Number(participant.split || 0) / 100;
                                 participant.sumInsured = Number((row.sumInsuredRe * split).toFixed(2));
                                 participant.premium = Number((row.premiumRe * split).toFixed(2));
@@ -707,7 +757,7 @@
                                 participant.tax = Number((row.tax * split).toFixed(2));
                             });
                         });
-                    }
+                    });
                 }
                 return next;
             });
@@ -1300,8 +1350,6 @@
                     })
                 }
                 
-                const validation = await exe('ChangeLoading', dto);
-                if(!validation.ok) throw validation.msg;
                 return confirm({
                     title: 'Validaciones OK',
                     content: '¿Desea confirmar la ejecución del endoso?',
@@ -1315,7 +1363,10 @@
                                 if(!change.ok) throw change.msg;
                                 changeId = Number(change.outData.id || 0);
                                 await persistMaximumCoveragePolicyEnd(changeId, jNewCoverages);
-                                await approveEndorsementWorkflow(change.outData.processId);
+                                // El trigger del endoso avanza el workflow automáticamente;
+                                // no ejecutar GotoStep(APROVED) desde esta vista para evitar
+                                // una segunda generación del documento.
+                                // await approveEndorsementWorkflow(change.outData.processId);
                                 if(reinsuranceSnapshot.distribution.length){
                                     const reinsuranceResponse = await exe('ExeChain', {
                                         chain:'cmdApplyReaChangeCoverage',
@@ -1331,6 +1382,8 @@
                                     }
                                     reinsurancePrepared = true;
                                 }
+                                // El documento del endoso lo genera el trigger de ExeChangeLoading;
+                                // esta vista no debe invocar cmdGenertFormatoEmdoso nuevamente.
                                 const executeResult = await exe('ExeChangeLoading', {changeId: changeId, operation: "EXECUTE", exeNow: true });
                                 if(!executeResult.ok) throw executeResult.msg;                                
                                 reinsuranceExecuted = true;
@@ -1843,6 +1896,13 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 if(line.indexOf('FRONT') >= 0 || line === 'FRO') return 'fronting';
                 return 'quota';
             };
+            // Only lines present in the selected contract may carry a saved
+            // distribution. This prevents stale values from activating lines
+            // such as Facultativo when the contract only has Cuota Parte.
+            const configuredLineKinds = {};
+            (policyRows && policyRows.length ? policyRows : source || []).forEach(function(row){
+                configuredLineKinds[lineKind(row.lineId || row.lineName || row.contractName)] = true;
+            });
             const lineTotals = {
                 retention:{ sum:0, premium:0, commission:0, tax:0 },
                 quota:{ sum:0, premium:0, commission:0, tax:0 },
@@ -1852,6 +1912,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             };
             const addLineValue = function(target, row, isMovement){
                 const kind = lineKind(row.lineId || row.lineName || row.contractName);
+                if(kind !== 'retention' && !configuredLineKinds[kind]) return;
                 const line = lineTotals[kind] || lineTotals.quota;
                 // Retention is stored inside each cession, usually on the
                 // Cuota Parte row, not necessarily as a separate lineId.
@@ -1876,6 +1937,11 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const lineName = source && source[0] && (source[0].contractName || source[0].lineName || source[0].lineId) || 'Cuota Parte';
             const lineDefinition = function(key, label, canViewReinsurers){
                 const line = lineTotals[key];
+                if(key !== 'retention' && !configuredLineKinds[key]){
+                    return { key:key, contractLabel:label, percentage:0, sum:0, premium:0,
+                        commissionPct:0, commission:0, taxPct:0, tax:0, balance:0,
+                        canViewReinsurers:false, readOnly:true, inactive:true };
+                }
                 const percentage = distributedPremium ? line.premium / distributedPremium * 100 : 0;
                 return {
                     key:key, contractLabel:label, percentage:percentage,
@@ -1923,7 +1989,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             };
             return storedLines && storedLines.length ? storedLines.map(function(row){
                 const definition = distribution.find(function(item){ return item.key === row.key; }) || {};
-                return recalculate(Object.assign({}, definition, row));
+                // Ignore previously saved values for lines no longer present
+                // in the selected contract configuration.
+                return definition.inactive ? definition : recalculate(Object.assign({}, definition, row));
             }) : distribution.map(recalculate);
         };
         const [lines, setLines] = useState(function(){ return buildLines(data, policyRows, savedLines); });
