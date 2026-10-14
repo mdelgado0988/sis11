@@ -65,6 +65,9 @@ resultado.FechaActoPubTexto = partesFechaActoPublico
 resultado.FechaActoPubTexto2 = partesFechaActoPublico
   ? `${partesFechaActoPublico.dia} del mes de ${String(meses[partesFechaActoPublico.mes - 1]).toLowerCase()} de ${partesFechaActoPublico.anio}`
   : "";
+resultado.FechaActoPubTexto3 = partesFechaActoPublico
+  ? `${partesFechaActoPublico.dia} DE ${String(meses[partesFechaActoPublico.mes - 1]).toUpperCase()} DE ${partesFechaActoPublico.anio}`
+  : "";
 resultado.ActoPublico = oaUserData?.n_acto_publico ?? "";
 resultado.Moneda = "B/.";
 resultado.Suma = n(policy.insuredSum);

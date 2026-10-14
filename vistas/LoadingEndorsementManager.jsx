@@ -1727,6 +1727,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             total.premium += movementLines[key].premium;
             return total;
         }, { sum:0, premium:0 });
+        // El movimiento debe conservar la distribucion vigente de la poliza.
+        // Los importes siguen siendo los del endoso; los porcentajes se obtienen
+        // de las cesiones persistidas, no de la composicion del movimiento.
+        const policyLinePremium = {
+            retention:0, quota:0, excess:0, facultative:0, fronting:0
+        };
+        (policyRows || []).forEach(function(row){
+            policyLinePremium.retention += Math.abs(Number(row.premiumCedant || 0));
+            const kind = lineKind(row.lineId || row.lineName || row.contractName);
+            if(kind !== 'retention' && policyLinePremium[kind] !== undefined){
+                policyLinePremium[kind] += Math.abs(Number(row.premiumRe || 0));
+            }
+        });
+        const policyBasePremium = Object.keys(policyLinePremium).reduce(function(total, key){
+            return total + policyLinePremium[key];
+        }, 0);
         const coinsurancePercentage = Math.max(0, Math.min(100, (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0)));
         const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
         const coinsuranceRate = function(field){
@@ -1740,7 +1756,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         };
         const lineDefinition = function(key, label, canViewReinsurers){
             const line = movementLines[key];
-            const percentage = movementBase.premium ? line.premium / movementBase.premium * 100 : 0;
+            const percentage = policyBasePremium
+                ? policyLinePremium[key] / policyBasePremium * 100
+                : (movementBase.premium ? line.premium / movementBase.premium * 100 : 0);
             return { key:key, contractLabel:label, percentage:percentage,
                 commissionPct:line.premium ? line.commission / line.premium * 100 : 0,
                 taxPct:line.premium ? line.tax / line.premium * 100 : 0,

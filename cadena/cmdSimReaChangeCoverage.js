@@ -164,16 +164,11 @@ for (let i = 0; i < base.length; i++) {
   const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
   const commissionRate = Number(c.premium) === 0 ? 0 : commissionBase / Number(c.premium);
   const counts = sums[code] === true;
-  // Vida Colectivo (ramo 20): los recargos/descuentos se aplican
-  // exclusivamente a la cesion de Cuota Parte, sin afectar retencion
-  // ni Excedente.
-  const movementAppliesToLine = !(txt(policy.lob) === '20' && lineUp !== 'CUOTA PARTE');
-  const lineDv = movementAppliesToLine ? dv : 0;
-  const linePv = movementAppliesToLine ? pv : 0;
-  const isCollectiveLife = txt(policy.lob) === '20';
+  const lineDv = dv;
+  const linePv = pv;
   // La variacion final incluye el recargo/descuento aplicado a la cobertura.
-  const cedant = isCollectiveLife ? 0 : money(lineDv * pCed);
-  const re = isCollectiveLife ? lineDv : money(lineDv * pRe);
+  const cedant = money(lineDv * pCed);
+  const re = money(lineDv * pRe);
   const commission = money(lineDv * commissionRate);
   const nonTechnical = money(lineDv - cedant - re);
   grp.rows.push({

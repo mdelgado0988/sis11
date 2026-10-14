@@ -2606,10 +2606,21 @@
         total.premium += numberFrom(group.totals, ['movement']);
         return total;
       }, { sum: 0, premium: 0 });
-      const rows = getDistributionRows(contract).map(function (row) {
+      const finalDistributionRows = getDistributionRows(contract);
+      // El movimiento conserva la distribucion vigente de la poliza.
+      // Solo cambia el importe aplicado, no el porcentaje de cada linea.
+      const finalDistributionPremium = finalDistributionRows.reduce(function (total, row) {
+        return total + (row.isCoinsurance ? 0 : Math.abs(Number(row.premium || 0)));
+      }, 0);
+      const rows = finalDistributionRows.map(function (row) {
         const group = (contract.groups || []).find(function (item) {
           return String(item.contractId) + '-' + String(item.lineId) === row.groupKey;
         });
+        const policyPercentage = row.isCoinsurance
+          ? 0
+          : (finalDistributionPremium
+            ? Math.abs(Number(row.premium || 0)) / finalDistributionPremium * 100
+            : Number(row.percentage || 0));
         const movement = row.isCoinsurance
           ? movementTotals
           : (group && group.rows || []).reduce(function (total, item) {
@@ -2620,14 +2631,14 @@
         }, { sum: 0, premium: 0 });
         const factor = row.isCoinsurance
           ? coinsurancePercentageForContract(contract) / 100
-          : reinsuranceBaseFactorForContract(contract) * Number(row.percentage || 0) / 100;
+          : reinsuranceBaseFactorForContract(contract) * policyPercentage / 100;
         const premium = money(movement.premium * factor);
         const sum = money(movement.sum * factor);
         const commissionRate = Number(row.premium || 0) ? Number(row.commission || 0) / Number(row.premium || 0) : 0;
         const taxRate = Number(row.premium || 0) ? Number(row.tax || 0) / Number(row.premium || 0) : 0;
         return Object.assign({}, row, {
           movementGroup: group,
-          percentage: row.isCoinsurance ? 0 : row.percentage,
+          percentage: policyPercentage,
           sum: sum,
           premium: premium,
           commission: money(premium * commissionRate),
