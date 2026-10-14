@@ -15,6 +15,20 @@ var poliza = ctx.poliza ? String(ctx.poliza).trim() : '';
 var page = parseInt(ctx.page, 10); if (!(page > 0)) page = 1;
 var size = parseInt(ctx.size, 10); if (!(size > 0)) size = 50;
 if (size > 500) size = 500;
+var sortField = String(ctx.sortField || '').trim();
+var sortDirection = String(ctx.sortDirection || '').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+var sortColumns = {
+  producto: 'producto',
+  tipo: 'tipo',
+  contratante: 'contratante',
+  asegurado: 'asegurado',
+  fechaEmision: 'fechaEmision',
+  fDesde: 'fDesde',
+  fHasta: 'fHasta'
+};
+var orderSql = sortColumns[sortField]
+  ? sortColumns[sortField] + ' ' + sortDirection + ', id ASC'
+  : 'poliza ASC, fechaEmision ASC, id ASC';
 var exportar = ctx.exportar === true || String(ctx.exportar) === 'true';
 
 function validDate(value) {
@@ -43,9 +57,11 @@ var sql = "\nWITH src AS (\n"
   + " WHERE lp.activeDate IS NOT NULL" + lobFilter + policyFilter + "\n"
   + "   AND ((c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch0 WHERE ch0.id=c.changeId AND ch0.status=1 AND CAST(ch0.executionDate AS date) BETWEEN " + fromTo + "))\n"
   + "     OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an0 WHERE an0.id=c.anniversaryId AND CAST(an0.executionDate AS date) BETWEEN " + fromTo + "))\n"
+  + "     OR (c.premiumType='ANNIVERSARY' AND c.anniversaryId IS NULL AND CAST(lp.activeDate AS date) BETWEEN " + fromTo + ")\n"
   + "     OR (c.premiumType='NEW' AND CAST(ISNULL(lp.activeDate, lp.created) AS date) BETWEEN " + fromTo + "))\n"
   + "), ord AS (\n"
   + " SELECT s.*,\n"
+  + "   ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId,s.contractId,s.coverageId,s.lineId,CASE WHEN s.premiumType IN ('NEW','ANNIVERSARY') THEN 1 ELSE 0 END ORDER BY s.cessionId,s.partId) AS newNo,\n"
   + "   LAG(s.sumInsured,1,0) OVER (PARTITION BY s.lifePolicyId,s.contractId,s.coverageId,s.lineId,s.reinsurerId,ISNULL(s.brokerId,0) ORDER BY s.cessionId,s.partId) AS prevSum,\n"
   + "   LAG(s.premium,1,0) OVER (PARTITION BY s.lifePolicyId,s.contractId,s.coverageId,s.lineId,s.reinsurerId,ISNULL(s.brokerId,0) ORDER BY s.cessionId,s.partId) AS prevPremium,\n"
   + "   LAG(s.commission,1,0) OVER (PARTITION BY s.lifePolicyId,s.contractId,s.coverageId,s.lineId,s.reinsurerId,ISNULL(s.brokerId,0) ORDER BY s.cessionId,s.partId) AS prevCommission,\n"
@@ -66,18 +82,19 @@ var sql = "\nWITH src AS (\n"
   + " SELECT d.lifePolicyId,d.contractId,d.changeId,d.anniversaryId,d.LoB,d.reinsurerId,d.brokerId,\n"
   + "   MIN(d.cessionId) AS minId, MIN(d.holderName) AS holderName, MIN(d.insuredId) AS insuredId, MIN(d.participantName) AS participantName,\n"
   + "   MIN(d.cessionStart) AS cessionStart, MAX(d.cessionEnd) AS cessionEnd, MIN(d.premiumType) AS premiumType,\n"
+  + "   MIN(CASE WHEN d.premiumType='ANNIVERSARY' AND d.anniversaryId IS NULL THEN d.newNo ELSE 0 END) AS anniversaryNo,\n"
   + "   MAX(CASE WHEN d.dSum>0 OR d.dPremium>0 THEN 1 ELSE 0 END) AS hasPositive,\n"
   + "   SUM(d.dSum) AS sumaCedida, SUM(d.dCoSum) AS sumaCoaseguro, SUM(d.dPremium) AS primaCedida,\n"
   + "   SUM(d.dCoPremium) AS primaCoaseguro, SUM(d.dCommission) AS comision, SUM(d.dTax) AS impuesto\n"
   + " FROM delta d\n"
-  + " GROUP BY d.lifePolicyId,d.contractId,d.changeId,d.anniversaryId,d.LoB,d.reinsurerId,d.brokerId\n"
+  + " GROUP BY d.lifePolicyId,d.contractId,d.changeId,d.anniversaryId,d.LoB,d.reinsurerId,d.brokerId,CASE WHEN d.premiumType='ANNIVERSARY' AND d.anniversaryId IS NULL THEN d.newNo ELSE 0 END\n"
   + " HAVING SUM(d.dSum)<>0 OR SUM(d.dPremium)<>0 OR SUM(d.dCommission)<>0 OR SUM(d.dTax)<>0 OR SUM(d.dCoSum)<>0 OR SUM(d.dCoPremium)<>0\n"
   + "), result AS (\n"
   + " SELECT ROW_NUMBER() OVER (ORDER BY lp.code, COALESCE(ch.executionDate,an.executionDate,lp.activeDate,lp.created), g.minId) AS id,\n"
   + "   COALESCE(NULLIF(rr.name,''),NULLIF(rr.surname2,''),NULLIF(g.participantName,''),CASE WHEN g.reinsurerId IS NULL THEN '-' ELSE CONCAT('#',g.reinsurerId) END) AS reasegurador,\n"
   + "   COALESCE(NULLIF(br.name,''),NULLIF(br.surname2,''),CASE WHEN g.brokerId IS NULL THEN '-' ELSE CONCAT('#',g.brokerId) END) AS corredor, g.LoB AS ramo, lp.productCode AS producto, lp.code AS poliza,\n"
-  + "   CASE WHEN g.changeId IS NULL AND g.anniversaryId IS NULL THEN 'EMISION'\n"
-  + "        WHEN g.anniversaryId IS NOT NULL THEN 'ANIVERSARIO'\n"
+  + "   CASE WHEN g.anniversaryId IS NOT NULL OR g.premiumType='ANNIVERSARY' THEN 'ANIVERSARIO'\n"
+  + "        WHEN g.changeId IS NULL THEN 'EMISION'\n"
   + "        WHEN g.premiumType='CANCELLATION' AND g.hasPositive=0 THEN 'CANCELACION'\n"
   + "        WHEN ch.Discriminator='CoverageChange' AND ISJSON(ch.jAdditional)=1 AND JSON_VALUE(ch.jAdditional,'$.endorsementType')='CHANGE_INSURED_SUM_SURETY' THEN 'CHANGE_INSURED_SUM_SURETY'\n"
   + "        WHEN ch.Discriminator='CoverageChange' AND ISJSON(ch.jAdditional)=1 AND JSON_VALUE(ch.jAdditional,'$.endorsementType')='PROCEEDORDER' THEN 'ProceedOrder'\n"
@@ -85,6 +102,7 @@ var sql = "\nWITH src AS (\n"
   + "        ELSE ISNULL(ch.Discriminator,'ENDOSO') END AS tipo,\n"
   + "   CASE WHEN g.changeId IS NOT NULL THEN CONCAT('CHG:',g.changeId)\n"
   + "        WHEN g.anniversaryId IS NOT NULL THEN CONCAT('ANN:',g.anniversaryId)\n"
+  + "        WHEN g.premiumType='ANNIVERSARY' THEN CONCAT('ANN:',g.anniversaryNo)\n"
   + "        ELSE 'EMI:1' END AS movKey,\n"
   + "   g.holderName AS contratante, LTRIM(RTRIM(ISNULL(ins.name,'')+' '+ISNULL(ins.surname1,'')+' '+ISNULL(ins.surname2,''))) AS asegurado,\n"
   + "   COALESCE(ch.executionDate,an.executionDate,lp.activeDate,lp.created) AS fechaEmision,\n"
@@ -108,6 +126,6 @@ var summary = DoQuery.outData && DoQuery.outData[0] || {};
 var total = Number(summary.total || 0);
 if (exportar) size = Math.min(Math.max(total, 1), 50000);
 var skip = (page - 1) * size;
-doCmd({ cmd:'DoQuery', data:{ sql:sql + 'SELECT * FROM result ORDER BY poliza,fechaEmision,id OFFSET ' + skip + ' ROWS FETCH NEXT ' + size + ' ROWS ONLY', timeout:300 } });
+doCmd({ cmd:'DoQuery', data:{ sql:sql + 'SELECT * FROM result ORDER BY ' + orderSql + ' OFFSET ' + skip + ' ROWS FETCH NEXT ' + size + ' ROWS ONLY', timeout:300 } });
 if (!DoQuery || !DoQuery.ok) throw 'No fue posible obtener el borderó por reasegurador: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'sin detalle');
 return { filas:DoQuery.outData || [],total:total,polizas:Number(summary.polizas || 0),page:page,size:size,paginas:size ? Math.ceil(total/size) : 0,exportacion:exportar };

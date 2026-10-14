@@ -72,7 +72,7 @@
      Montos, códigos e ids NO se traducen: la clave del movimiento va tal cual. */
   const TIPO_MOV_ES = {
     'EMISION': 'Emisión',
-    'ANIVERSARIO': 'Aniversario',
+    'ANIVERSARIO': 'Renovación',
     'CANCELACION': 'Cancelación',
     'RETIRO DE CESION': 'Retiro de cesión',
     'ENDOSO': 'Endoso',
@@ -153,16 +153,16 @@
   const COLUMNAS = [
     { t: 'id',                        c: 'id',                  w: 75,  tipo: 'txt', fixed: 'left' },
     { t: 'Ramo',                      c: 'lob',                 w: 210, tipo: 'ramo' },
-    { t: 'Plan',                      c: 'plan',                w: 100, tipo: 'txt' },
+    { t: 'Plan',                      c: 'plan',                s: 'producto',          w: 100, tipo: 'txt' },
     { t: 'Poliza',                    c: 'poliza',              w: 155, tipo: 'poliza' },
     { t: 'Recibo',                    c: 'recibo',              w: 100, tipo: 'txt' },
-    { t: 'Tipo',                      c: 'tipo',                w: 220, tipo: 'mov' },
+    { t: 'Tipo',                      c: 'tipo',                s: 'tipo',              w: 220, tipo: 'mov' },
     { t: 'Id Endoso',                 c: 'changeId',            w: 100, tipo: 'endorsementId' },
-    { t: 'Contratante',               c: 'contratante',         w: 175, tipo: 'ellipsis' },
-    { t: 'Asegurado',                 c: 'asegurado',           w: 175, tipo: 'ellipsis' },
-    { t: 'Fecha Emision',             c: 'fechaEmision',        w: 115, tipo: 'fecha' },
-    { t: 'Fecha Desde',               c: 'fDesde',              w: 105, tipo: 'fecha' },
-    { t: 'Fecha Hasta',               c: 'fHasta',              w: 105, tipo: 'fecha' },
+    { t: 'Contratante',               c: 'contratante', s: 'contratante',        w: 175, tipo: 'ellipsis' },
+    { t: 'Asegurado',                 c: 'asegurado',   s: 'asegurado',          w: 175, tipo: 'ellipsis' },
+    { t: 'Fecha Emision',             c: 'fechaEmision',s: 'fechaEmision',        w: 115, tipo: 'fecha' },
+    { t: 'Fecha Desde',               c: 'fDesde',      s: 'fDesde',              w: 105, tipo: 'fecha' },
+    { t: 'Fecha Hasta',               c: 'fHasta',      s: 'fHasta',              w: 105, tipo: 'fecha' },
     { t: 'Suma Asegurada 100%',       c: 'sumaAsegurada100',    w: 150, tipo: 'num' },
     { t: 'Suma Retenida',             c: 'sumaRetenida',        w: 125, tipo: 'num' },
     { t: 'Suma Cedida',               c: 'sumaCedida',          w: 125, tipo: 'num' },
@@ -197,10 +197,10 @@
   const COLUMNAS_REASEGURADORES = [
     { t:'id', c:'id', w:75, tipo:'txt', fixed:'left' }, { t:'Reasegurador', c:'reasegurador', w:220, tipo:'ellipsis' },
     { t:'Corredor', c:'corredor', w:190, tipo:'ellipsis' }, { t:'Ramo', c:'ramo', w:190, tipo:'ramo' },
-    { t:'Producto', c:'producto', w:170, tipo:'txt' }, { t:'Poliza', c:'poliza', w:155, tipo:'txt' },
-    { t:'Tipo', c:'tipo', w:220, tipo:'mov' }, { t:'Id Endoso', c:'changeId', w:100, tipo:'endorsementId' }, { t:'Contratante', c:'contratante', w:190, tipo:'ellipsis' },
-    { t:'Asegurado', c:'asegurado', w:190, tipo:'ellipsis' }, { t:'Fecha Emision', c:'fechaEmision', w:115, tipo:'fecha' },
-    { t:'Fecha Desde', c:'fDesde', w:105, tipo:'fecha' }, { t:'Fecha Hasta', c:'fHasta', w:105, tipo:'fecha' },
+    { t:'Producto', c:'producto', s:'producto', w:170, tipo:'txt' }, { t:'Poliza', c:'poliza', w:155, tipo:'txt' },
+    { t:'Tipo', c:'tipo', s:'tipo', w:220, tipo:'mov' }, { t:'Id Endoso', c:'changeId', w:100, tipo:'endorsementId' }, { t:'Contratante', c:'contratante', s:'contratante', w:190, tipo:'ellipsis' },
+    { t:'Asegurado', c:'asegurado', s:'asegurado', w:190, tipo:'ellipsis' }, { t:'Fecha Emision', c:'fechaEmision', s:'fechaEmision', w:115, tipo:'fecha' },
+    { t:'Fecha Desde', c:'fDesde', s:'fDesde', w:105, tipo:'fecha' }, { t:'Fecha Hasta', c:'fHasta', s:'fHasta', w:105, tipo:'fecha' },
     { t:'Suma Cedida', c:'sumaCedida', w:130, tipo:'num' }, { t:'Suma a Coaseguro', c:'sumaCoaseguro', w:145, tipo:'num' },
     { t:'Prima Cedida', c:'primaCedida', w:130, tipo:'num' }, { t:'Prima a Coaseguro', c:'primaCoaseguro', w:145, tipo:'num' },
     { t:'Comisión', c:'comision', w:120, tipo:'num' }, { t:'Impuesto', c:'impuesto', w:115, tipo:'num' },
@@ -266,6 +266,7 @@
     const [criterio, setCriterio] = useState(null);
     const [criterioReaseguradores, setCriterioReaseguradores] = useState(null);
     const [tabActiva, setTabActiva] = useState('movimientos');
+    const [orden, setOrden] = useState(null);
     const [seleccion, setSeleccion] = useState(null);
     const [alto, setAlto] = useState(360);
     const cajaRef = React.useRef(null);
@@ -328,11 +329,13 @@
       return limpio || 'No se pudo obtener el borderó.';
     }
 
-    async function consultar(pg, sz, base){
+    async function consultar(pg, sz, base, ordenOverride){
       const esReaseguradores = tabActiva === 'reaseguradores';
       const crit = base || (esReaseguradores ? criterioReaseguradores : criterio) || criterioDelFormulario();
       if (!crit) return false;
-      const ctxObj = { fdesde: crit.fdesde, fhasta: crit.fhasta, ramos: crit.ramos, poliza: crit.poliza || '', page: pg, size: sz };
+      const ord = ordenOverride === undefined ? orden : ordenOverride;
+      const ctxObj = { fdesde: crit.fdesde, fhasta: crit.fhasta, ramos: crit.ramos, poliza: crit.poliza || '', page: pg, size: sz,
+        sortField: ord && ord.campo ? ord.campo : '', sortDirection: ord && ord.direccion ? ord.direccion : '' };
       setCargando(true);
       const res = await exe('ExeChain', { chain: esReaseguradores ? 'cmdBorderoMovimientosReaseguradores' : 'cmdBorderoMovimientos', context: JSON.stringify(ctxObj) });
       setCargando(false);
@@ -362,6 +365,7 @@
       if (tabActiva === 'reaseguradores') { setDataReaseguradores(null); setCriterioReaseguradores(null); }
       else { setData(null); setCriterio(null); }
       setPage(1); setSize(50); setSeleccion(null);
+      setOrden(null);
     }
 
     function ejecutarLibreria(fuente){
@@ -406,7 +410,8 @@
       enVuelo.current = true;
       setExportando(true);
       try {
-        const ctxObj = { fdesde: crit.fdesde, fhasta: crit.fhasta, ramos: crit.ramos, poliza: crit.poliza || '', exportar: true };
+        const ctxObj = { fdesde: crit.fdesde, fhasta: crit.fhasta, ramos: crit.ramos, poliza: crit.poliza || '', exportar: true,
+          sortField: orden && orden.campo ? orden.campo : '', sortDirection: orden && orden.direccion ? orden.direccion : '' };
         const res = await exe('ExeChain', { chain: esReaseguradores ? 'cmdBorderoMovimientosReaseguradores' : 'cmdBorderoMovimientos', context: JSON.stringify(ctxObj) });
         if (!res || !res.ok) { message.error(mensajeDeError(res)); return; }
         const filas = (res.outData && res.outData.filas) ? res.outData.filas : [];
@@ -460,7 +465,11 @@
     }, [cargandoCat]);
 
     const columnasPara = function(definiciones) { return definiciones.map(function(col){
-      const c = { title: col.t, dataIndex: col.c, width: col.w };
+      const c = { title: col.t, dataIndex: col.c, key: col.s || col.c, width: col.w };
+      if (col.s) {
+        c.sorter = true;
+        c.sortOrder = orden && orden.campo === col.s ? (orden.direccion === 'asc' ? 'ascend' : 'descend') : undefined;
+      }
       if (col.fixed) c.fixed = col.fixed;
       if (col.tipo === 'num') {
         c.align = 'right';
@@ -542,6 +551,14 @@
                         columns={ columnasActivas } pagination={ false }
                         scroll={{ x: anchoActivo, y: alto }}
                         rowClassName={ function(r){ return claveMovimiento(r) === seleccion ? 'bm-row-selected' : ''; } }
+                        onChange={ function(p, f, sorter){
+                          const campo = sorter && (sorter.columnKey || sorter.field);
+                          if (!campo) return;
+                          const direccion = sorter.order === 'descend' ? 'desc' : 'asc';
+                          const nuevaOrden = { campo: campo, direccion: direccion };
+                          setOrden(nuevaOrden);
+                          consultar(1, size, criterioActivo, nuevaOrden);
+                        } }
                         onRow={ function(r){ return { onClick: function(){ setSeleccion(claveMovimiento(r)); } }; } } />
                   )
               )
@@ -574,11 +591,11 @@
           <Form form={ form } layout='vertical'>
             <Form.Item label='Fecha Inicial' name='DateField_fdesde_bor'
                        rules={[{ required: true, message: 'Fecha Inicial es obligatoria' }]}>
-              <DatePicker style={{ width: '100%' }} format='YYYY-MM-DD' allowClear={ false } />
+              <DatePicker style={{ width: '100%' }} format='YYYY-MM-DD' allowClear={false} />
             </Form.Item>
             <Form.Item label='Fecha Final' name='DateField_fhasta_bor'
                        rules={[{ required: true, message: 'Fecha Final es obligatoria' }]}>
-              <DatePicker style={{ width: '100%' }} format='YYYY-MM-DD' allowClear={ false } />
+              <DatePicker style={{ width: '100%' }} format='YYYY-MM-DD' allowClear={false} />
             </Form.Item>
             <Form.Item label='Ramo' name='ComboBox_cramo_bor'
                        rules={[{ required: false }]}>

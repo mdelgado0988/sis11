@@ -4080,6 +4080,7 @@ async function loadCoCessions() {
       showColumnsIfEmpty: false
     });
     coCessions = Array.isArray(result?.outData) ? result.outData : [];
+    sincronizarLiderazgoCoaseguro();
   } catch (error) {
     coCessions = [];
     mostrarNotificacion(`No se pudo cargar el coaseguro: ${error?.msg || error}`, "warning");
@@ -4240,13 +4241,22 @@ function renderCoaseguradores() {
     $select.prop("disabled", true);
     showLoading("Actualizando liderazgo de la compañía...");
     try {
-      const resultado = await actualizarCoinsuranceLifePolicy(companiaEsLider ? 1 : 2);
+      if (companiaEsLider) {
+        coCessions.forEach(row => { row.leader = false; });
+        policy.coinsurance = 1;
+      } else {
+        sincronizarLiderazgoCoaseguro();
+      }
+      const resultado = await actualizarCoinsuranceLifePolicy(policy.coinsurance);
       if (!resultado?.ok) {
         mostrarNotificacion(`No se pudo actualizar el liderazgo de la compañía: ${resultado?.msg || "Error"}`, "warning");
         $select.val(companiaEsLider ? "no" : "si");
         return;
       }
-      policy.coinsurance = companiaEsLider ? 1 : 2;
+      const guardado = await guardarCoaseguradores(false);
+      if (!guardado?.ok) {
+        throw new Error(guardado.msg || "No se pudo guardar el liderazgo de los coaseguradores");
+      }
       mostrarNotificacion(`La compañía se marcó como ${companiaEsLider ? "líder" : "no líder"}.`, "success");
       renderCoaseguradores();
     } catch (error) {
@@ -4438,13 +4448,13 @@ function abrirModalAgregarCoasegurador(index = null) {
       };
       const anterior = [...coCessions];
       if (index === null) coCessions.push(nuevo); else coCessions[index] = nuevo;
+      sincronizarLiderazgoCoaseguro(contactId, esLider);
       showLoading("Guardando coasegurador...");
       try {
-        const liderazgo = await actualizarCoinsuranceLifePolicy(esLider ? 1 : 2);
+        const liderazgo = await actualizarCoinsuranceLifePolicy(policy.coinsurance);
         if (!liderazgo?.ok) throw new Error(liderazgo?.msg || "No se pudo actualizar el liderazgo");
         const guardado = await guardarCoaseguradores(false);
         if (!guardado?.ok) throw new Error(guardado?.msg || "No se pudo guardar el coasegurador");
-        policy.coinsurance = esLider ? 1 : 2;
         cerrarModal();
         sincronizarControlesCoaseguro();
         renderCoaseguradores();
@@ -4459,12 +4469,33 @@ function abrirModalAgregarCoasegurador(index = null) {
     });
 }
 
+function sincronizarLiderazgoCoaseguro(contactId = null, participanteEsLider = false) {
+  const selectedId = Number(contactId || 0);
+
+  if (participanteEsLider && selectedId > 0) {
+    coCessions.forEach(row => {
+      row.leader = Number(row.contactId) === selectedId;
+    });
+    policy.coinsurance = 2;
+    return;
+  }
+
+  const leaderIndex = coCessions.findIndex(row => row.leader === true || Number(row.leader) === 1);
+  if (leaderIndex >= 0) {
+    coCessions.forEach((row, index) => { row.leader = index === leaderIndex; });
+    policy.coinsurance = 2;
+  } else {
+    policy.coinsurance = 1;
+  }
+}
+
 async function actualizarCoinsuranceLifePolicy(valor) {
   return await me.exe("DoQuery", { sql: `UPDATE LifePolicy SET coinsurance = ${Number(valor) === 1 ? 1 : 2} WHERE id = ${parseInt(policyId, 10)}` });
 }
 
 async function guardarCoaseguradores() {
   try {
+    sincronizarLiderazgoCoaseguro();
     const inserts = coCessions.map(row => `INSERT INTO CoCession (lifePolicyId, contactId, sumInsured, premium, sumInsuredCeded, premiumCeded, commission, percentage, created, leader, currency, liquidationId, paidOnCollection, parentCoCession, brokerCommission, tax, changeId, overwritten, allocationId, lifeCoverageId, brokerId) VALUES (${parseInt(policyId, 10)}, ${parseInt(row.contactId, 10)}, ${coaseguroMonto(row.sumInsured)}, ${coaseguroMonto(row.premium)}, ${coaseguroMonto(row.sumInsuredCeded)}, ${coaseguroMonto(row.premiumCeded)}, ${coaseguroMonto(row.commission)}, ${coaseguroPorcentaje(row.percentage)}, GETDATE(), ${row.leader ? 1 : 0}, '${String(row.currency || "USD").replace(/'/g, "''")}', NULL, 0, NULL, 0, ${coaseguroMonto(row.tax)}, NULL, 0, NULL, NULL, NULL);`).join("\n");
     return await me.exe("DoQuery", { sql: `SET XACT_ABORT ON; BEGIN TRANSACTION; DELETE FROM CoCession WHERE lifePolicyId = ${parseInt(policyId, 10)}; ${inserts} COMMIT TRANSACTION;` });
   } catch (error) {

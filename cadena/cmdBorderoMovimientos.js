@@ -20,6 +20,21 @@ var poliza = ctx.poliza ? String(ctx.poliza).trim() : '';
 var page = parseInt(ctx.page, 10); if (!(page > 0)) { page = 1; }
 var size = parseInt(ctx.size, 10); if (!(size > 0)) { size = 50; }
 if (size > 500) { size = 500; }
+var sortField = String(ctx.sortField || '').trim();
+var sortDirection = String(ctx.sortDirection || '').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+var sortColumns = {
+  producto: 'r.planProd',
+  tipo: 'tipo',
+  contratante: 'r.holderName',
+  asegurado: 'r.asegurado',
+  fechaEmision: 'r.fechaEmision',
+  fDesde: 'r.fDesde',
+  fHasta: 'r.fHasta'
+};
+var sortExpression = sortColumns[sortField];
+var orderSql = sortExpression
+  ? sortExpression + ' ' + sortDirection + ', r.minId ASC'
+  : 'r.poliza ASC, r.fechaEmision ASC, r.minId ASC';
 /* AXX-271 - modo exportacion. La grilla sigue topeada en 500 por pagina; la exportacion
    pide el conjunto COMPLETO de la busqueda, con los mismos filtros y el mismo orden,
    resuelto en servidor. El tamano NO lo elige el cliente: se fija al total contado. */
@@ -69,6 +84,7 @@ tPage = tPage.replace(
   "r.primaCedida + r.primaFacultativa - r.comisionContractual - r.comisionFacultativa\n        - r.impuesto - r.impuestoFacultativo",
   "r.primaCedida - r.comisionContractual - r.impuesto"
 );
+tPage = tPage.replace('ORDER BY r.poliza, r.fechaEmision, r.minId', 'ORDER BY ' + orderSql);
 
 /* La compensación permanece intacta. Solo se separa la marca usada para el
    título: un grupo con una línea positiva no se presenta visualmente como
@@ -82,6 +98,14 @@ base = base.replace(
 base = base.replace(
   "ch.Discriminator AS chTipo,",
   "CASE WHEN ch.Discriminator = 'CoverageChange' AND JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'CHANGE_INSURED_SUM_SURETY' THEN 'CHANGE_INSURED_SUM_SURETY' WHEN ch.Discriminator = 'CoverageChange' AND JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'PROCEEDORDER' THEN 'ProceedOrder' WHEN ch.Discriminator = 'CoverageChange' AND JSON_VALUE(CASE WHEN ISJSON(ch.jAdditional) = 1 THEN ch.jAdditional ELSE '{}' END, '$.endorsementType') = 'CHANGE_COVERAGE_SURETY' THEN 'ChangeCoverageSurety' ELSE ch.Discriminator END AS chTipo,"
+);
+base = base.replace(
+  "CASE WHEN s.premiumType='NEW' THEN 1 ELSE 0 END ORDER BY s.ordId)",
+  "CASE WHEN s.premiumType IN ('NEW','ANNIVERSARY') THEN 1 ELSE 0 END ORDER BY s.ordId)"
+);
+base = base.replace(
+  "WHEN o.anniversaryId IS NOT NULL THEN 'ANN:'+CAST(o.anniversaryId AS varchar(20))",
+  "WHEN o.anniversaryId IS NOT NULL OR o.premiumType = 'ANNIVERSARY' THEN 'ANN:'+CAST(COALESCE(o.anniversaryId, o.newNo) AS varchar(20))"
 );
 tPage = tPage.replace(
   "r.esCancelacion=1 OR r.premiumType='CANCELLATION'",
@@ -215,6 +239,7 @@ if (!poliza) {
   scope += " AND ("
     + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND ch.executionDate >= '" + fdesde + "' AND ch.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
     + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND an.executionDate >= '" + fdesde + "' AND an.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
+    + " OR (c.premiumType = 'ANNIVERSARY' AND c.anniversaryId IS NULL AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) )"
     + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) OR (lp.activeDate IS NULL AND lp.created >= '" + fdesde + "' AND lp.created < DATEADD(day, 1, '" + fhasta + "'))))"
     + "))";
 }
