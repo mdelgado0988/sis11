@@ -782,7 +782,8 @@
           : (change && (change.effectiveDate || change.executionDate)),
         startDateWithoutTimezone: isCoverageTermChange,
         endDate: changeDetail.policyEnd || (paymentGroups[changeId] && paymentGroups[changeId].end),
-        endDateWithoutTimezone: isProceedOrder,
+        // policyEnd comes from jDetail as a calendar date without time zone.
+        endDateWithoutTimezone: isProceedOrder || !!changeDetail.policyEnd,
         movementType: change && getMovementType(change),
         incomeDate: change && change.executionDate,
         id: change && change.id,

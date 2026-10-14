@@ -27,6 +27,36 @@ function polizaEmitidaParaUbicacion() {
         || active === true || active === 1 || String(active).toLowerCase() === 'true' || String(active) === '1';
 }
 
+function permiteFechaActoPublico() {
+    const ramo = String(policy?.lob ?? '').trim();
+    const producto = String(policy?.productCode ?? '').trim().toUpperCase();
+    return (ramo === '81' && producto === '81PROPUESTA')
+        || (ramo === '83' && ['GPESPECIAL', 'PROP_GA', 'PROPUESTA'].includes(producto));
+}
+
+function formatearFechaPanama(fecha) {
+    const texto = String(fecha ?? '').trim();
+    if (!texto) return '';
+
+    const valorNormalizado = /^\d{4}-\d{2}-\d{2}$/.test(texto)
+        ? `${texto}T00:00:00Z`
+        : /(?:Z|[+-]\d{2}:?\d{2})$/i.test(texto)
+            ? texto
+            : `${texto}Z`;
+    const utc = new Date(valorNormalizado);
+    if (Number.isNaN(utc.getTime())) return '';
+
+    const panama = new Date(utc.getTime() - (5 * 60 * 60 * 1000));
+    return `${panama.getUTCFullYear()}-${String(panama.getUTCMonth() + 1).padStart(2, '0')}-${String(panama.getUTCDate()).padStart(2, '0')}`;
+}
+
+function cargarFechaActoPublico() {
+    if (polizaEmitidaParaUbicacion() || !permiteFechaActoPublico()) return;
+
+    const fecha = formatearFechaPanama(policy?.start);
+    if (fecha) $('#f_acto_publico').val(fecha).trigger('change');
+}
+
 async function cargarUbicacionAsegurado() {
     const $hidden = $('#hiddenUbicacion');
     if (!$hidden.length || polizaEmitidaParaUbicacion()) return;
@@ -1422,11 +1452,6 @@ function aplicarRestriccionesEndosoFianza() {
         }
     });
 
-    const ramo = String(policy?.lob ?? '').trim();
-    const producto = String(policy?.productCode ?? '').trim().toUpperCase();
-    const permiteFechaActo = (ramo === '81' && producto === '81PROPUESTA')
-        || (ramo === '83' && ['PROPUESTA', 'PROP_GA', 'GPESPECIAL'].includes(producto));
-
     const camposEditables = [
         '#txtNumeroContratoFianza',
         '#text-1770999106315',
@@ -1435,7 +1460,7 @@ function aplicarRestriccionesEndosoFianza() {
         '#desc_objeto_afianzado',
         '#cmbEstadoFianza'
     ];
-    if (permiteFechaActo) camposEditables.push('#f_acto_publico');
+    if (permiteFechaActoPublico()) camposEditables.push('#f_acto_publico');
     // En cualquier endoso el beneficiario puede cambiarse mediante el
     // autocompletado de Nombre. Los campos relacionados se completan solos.
     if (isEndorsementFianza) camposEditables.push('#nombre');
@@ -2161,6 +2186,7 @@ const onDocumentReady = async () => {
     
     policy = await getPolicyData(policyId);
     await cargarUbicacionAsegurado();
+    cargarFechaActoPublico();
     
     $('#policyStart').val(policy.Start);
     $('#policyEnd').val(policy.End);

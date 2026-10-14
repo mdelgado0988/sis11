@@ -2,11 +2,11 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20261001'
-        ,@fend DATE =  '20261030'
-		,@ramo varchar(50) = 81
-		,@producto varchar(50) = null
-		,@poliza VARCHAR(50) = 'FC-001136'
+DECLARE  @fstart DATE = '20261013'
+        ,@fend DATE =  '20261013'
+		,@ramo varchar(50) = 20
+		,@producto varchar(50) = 'vid-desemp'
+		,@poliza VARCHAR(50) = null
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
@@ -32,7 +32,7 @@ SELECT
 
     ISNULL(pym.name, '') AS recursopago,
     CASE WHEN lp.lob='81' THEN COALESCE(axxPay.name,
- CASE LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity))) 
+ CASE LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity)))
 		WHEN 'y' THEN 'Anual'
 		WHEN 'y1' THEN 'Anual'
         WHEN 'm' THEN 'Mensual'
@@ -115,7 +115,7 @@ OUTER APPLY (SELECT
 				js.cessionBeneficiary,
 				js.fiscalNumber,
                 js.policyEnd
-			FROM OPENJSON(an.jSnapshot)
+			FROM OPENJSON(CASE WHEN ISJSON(an.jSnapshot) = 1 THEN an.jSnapshot ELSE '{}' END)
 			WITH (
 				insuredSum    DECIMAL(18,2) '$.insuredSum',
 				surcharges    DECIMAL(18,2) '$.surcharges',
@@ -135,12 +135,12 @@ OUTER APPLY (SELECT
 
 OUTER APPLY (
     SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN ISNULL(cov.insuredSum,0) ELSE 0 END) AS sumaAseg
-    FROM OPENJSON(an.jSnapshot)
+    FROM OPENJSON(CASE WHEN ISJSON(an.jSnapshot) = 1 THEN an.jSnapshot ELSE '{}' END)
     WITH (
         Coverages NVARCHAR(MAX) '$.Coverages' AS JSON
     ) snapCoverages
 
-    OUTER APPLY OPENJSON(snapCoverages.Coverages)
+    OUTER APPLY OPENJSON(CASE WHEN ISJSON(snapCoverages.Coverages) = 1 THEN snapCoverages.Coverages ELSE '[]' END)
     WITH (
         coverageCode INT '$.code',
         insuredSum DECIMAL(18,2) '$.limit'
@@ -148,16 +148,14 @@ OUTER APPLY (
 
     OUTER APPLY (
         SELECT TOP 1
-            JSON_VALUE(RowData,'$[0]') AS lobCode,
-            JSON_VALUE(RowData,'$[1]') AS productCode,
-            JSON_VALUE(RowData,'$[3]') AS coverageCode,
-            JSON_VALUE(RowData,'$[5]') AS isCoverage
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END AS lobCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END AS productCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END AS coverageCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[5]') END AS isCoverage
         FROM (
             SELECT [key] AS RowNumber, value AS RowData
             FROM [Table]
-            CROSS APPLY OPENJSON(
-                SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
-            )
+            CROSS APPLY OPENJSON(CASE WHEN CHARINDEX('[[', data) > 0 AND ISJSON(SUBSTRING(data, CHARINDEX('[[', data), LEN(data))) = 1 THEN SUBSTRING(data, CHARINDEX('[[', data), LEN(data)) ELSE '[]' END)
             WHERE name = CASE lp.lob
                 WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
                 WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
@@ -173,9 +171,10 @@ OUTER APPLY (
             END
         ) x
         WHERE RowNumber > 0
-          AND JSON_VALUE(RowData,'$[0]') = lp.lob
-          AND JSON_VALUE(RowData,'$[1]') = lp.productCode
-          AND JSON_VALUE(RowData,'$[3]') = CAST(cov.coverageCode AS VARCHAR(50))
+          AND ISJSON(RowData) = 1
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END = lp.lob
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END = lp.productCode
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END = CAST(cov.coverageCode AS VARCHAR(50))
     ) cfg
 ) sumaAseg
 /* FIN - información de la póliza según snapshot  */
@@ -230,8 +229,8 @@ OUTER APPLY (
 /*-- Referido: nombre desde tabla*/
 OUTER APPLY (
     SELECT TOP 1
-        CAST(JSON_VALUE(r2.value, '$[0]') AS VARCHAR(100)) AS ReferidoId,
-        JSON_VALUE(r2.value, '$[1]') AS ReferidoName
+        CAST(CASE WHEN ISJSON(r2.value) = 1 THEN JSON_VALUE(r2.value, '$[0]') END AS VARCHAR(100)) AS ReferidoId,
+        CASE WHEN ISJSON(r2.value) = 1 THEN JSON_VALUE(r2.value, '$[1]') END AS ReferidoName
     FROM dbo.[Table] tblRef
     CROSS APPLY OPENJSON(
         CASE 
@@ -242,7 +241,7 @@ OUTER APPLY (
     WHERE tblRef.name = 'tblReferido'
       AND r2.[key] > 0
       AND ISJSON(r2.value) = 1
-      AND CAST(JSON_VALUE(r2.value, '$[0]') AS VARCHAR(100)) = re.selectReferido_valor
+      AND CAST(CASE WHEN ISJSON(r2.value) = 1 THEN JSON_VALUE(r2.value, '$[0]') END AS VARCHAR(100)) = re.selectReferido_valor
 ) refe
 
 /*-- Número de Préstamo*/
@@ -363,35 +362,35 @@ OUTER APPLY (
     WHERE bf.id = lp.cessionBeneficiary
 ) bf
 
-OUTER APPLY (SELECT TOP 1 ch.jSnapshot FROM [Change] ch WHERE ch.lifePolicyId=lp.id AND ch.status=1 AND JSON_QUERY(ch.jSnapshot,'$.InsuredObjects') IS NOT NULL ORDER BY ch.executionDate,ch.id) axxHistory
-OUTER APPLY (SELECT COALESCE(JSON_QUERY(an.jSnapshot,'$.InsuredObjects'),JSON_QUERY(axxHistory.jSnapshot,'$.InsuredObjects'),(SELECT io.jValues FROM InsuredObject io WHERE io.lifePolicyId=lp.id ORDER BY io.id FOR JSON PATH)) objects) axxObjects
+OUTER APPLY (SELECT TOP 1 ch.jSnapshot FROM [Change] ch WHERE ch.lifePolicyId=lp.id AND ch.status=1 AND JSON_QUERY(CASE WHEN ISJSON(ch.jSnapshot) = 1 THEN ch.jSnapshot ELSE '{}' END,'$.InsuredObjects') IS NOT NULL ORDER BY ch.executionDate,ch.id) axxHistory
+OUTER APPLY (SELECT COALESCE(JSON_QUERY(CASE WHEN ISJSON(an.jSnapshot) = 1 THEN an.jSnapshot ELSE '{}' END,'$.InsuredObjects'),JSON_QUERY(CASE WHEN ISJSON(axxHistory.jSnapshot) = 1 THEN axxHistory.jSnapshot ELSE '{}' END,'$.InsuredObjects'),(SELECT io.jValues FROM InsuredObject io WHERE io.lifePolicyId=lp.id ORDER BY io.id FOR JSON PATH)) objects) axxObjects
 OUTER APPLY (SELECT TOP 1 fld.description
  FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
- CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) WITH (jValues nvarchar(max) '$.jValues') vals
  CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
  WITH (name nvarchar(100) '$.name',description nvarchar(max) '$.userData[0]') fld
  WHERE fld.name='desc_objeto_afianzado' ORDER BY TRY_CONVERT(int,obj.[key])) axxObject
-OUTER APPLY (SELECT TOP 1 JSON_VALUE(custom.value,'$.name') name
- FROM OPENJSON(prod.configJson,'$.Premium.periodicity') opt
+OUTER APPLY (SELECT TOP 1 CASE WHEN ISJSON(custom.value) = 1 THEN JSON_VALUE(custom.value,'$.name') END name
+ FROM OPENJSON(CASE WHEN ISJSON(prod.configJson) = 1 THEN prod.configJson ELSE '{}' END,'$.Premium.periodicity') opt
  CROSS APPLY OPENJSON(CASE WHEN opt.type=5 THEN opt.value ELSE '{}' END,'$.custom') custom
- WHERE LOWER(JSON_VALUE(custom.value,'$.expression'))=LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity)))) axxPay
+ WHERE LOWER(CASE WHEN ISJSON(custom.value) = 1 THEN JSON_VALUE(custom.value,'$.expression') END)=LOWER(TRIM(COALESCE(snap.periodicity,lp.periodicity)))) axxPay
 OUTER APPLY (SELECT TOP 1 NULLIF(LTRIM(RTRIM(fld.nameValue)),'') name
  FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
- CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) WITH (jValues nvarchar(max) '$.jValues') vals
  CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
  WITH (fieldName nvarchar(100) '$.name',nameValue nvarchar(max) '$.userData[0]') fld
  WHERE fld.fieldName='nombre' AND NULLIF(LTRIM(RTRIM(fld.nameValue)),'') IS NOT NULL
  ORDER BY TRY_CONVERT(int,obj.[key])) axxBondBeneficiary
 /* MSN-000046: Provincia Poliza = provincia.descripcion del hidden hiddenUbicacion del objeto asegurado */
 OUTER APPLY (SELECT TOP 1 u.provincia FROM (
-   SELECT 0 AS src, TRY_CONVERT(int, obj.[key]) AS k, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '') AS provincia
+   SELECT 0 AS src, TRY_CONVERT(int, obj.[key]) AS k, NULLIF(LTRIM(RTRIM(JSON_VALUE(CASE WHEN ISJSON(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END)) = 1 THEN COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END) END, '$.provincia.descripcion'))), '') AS provincia
      FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects) = 1 THEN axxObjects.objects ELSE '[]' END) obj
-     CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues', jValuesJson nvarchar(max) '$.jValues' AS JSON) vals
+     CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) WITH (jValues nvarchar(max) '$.jValues', jValuesJson nvarchar(max) '$.jValues' AS JSON) vals
      CROSS APPLY OPENJSON(COALESCE(vals.jValuesJson, CASE WHEN ISJSON(vals.jValues) = 1 THEN vals.jValues END, '[]'))
      WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
     WHERE fld.name = 'hiddenUbicacion'
    UNION ALL
-   SELECT 1, io.id, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '')
+   SELECT 1, io.id, NULLIF(LTRIM(RTRIM(JSON_VALUE(CASE WHEN ISJSON(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END)) = 1 THEN COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END) END, '$.provincia.descripcion'))), '')
      FROM InsuredObject io
      CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END)
      WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
@@ -434,12 +433,12 @@ SELECT
     CASE
         WHEN ed.Discriminator = 'CoverageChange'
              AND ISJSON(ed.jAdditional) = 1
-             AND UPPER(LTRIM(RTRIM(JSON_VALUE(ed.jAdditional, '$.endorsementType')))) = 'CHANGE_COVERAGE_SURETY'
+             AND UPPER(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END))) = 'CHANGE_COVERAGE_SURETY'
              AND ISJSON(ed.jDetail) = 1
-            THEN CONVERT(VARCHAR, TRY_CONVERT(date, JSON_VALUE(ed.jDetail, '$.policyStart')), 103)
+            THEN CONVERT(VARCHAR, TRY_CONVERT(date, CASE WHEN ISJSON(ed.jDetail) = 1 THEN JSON_VALUE(ed.jDetail, '$.policyStart') END), 103)
         WHEN ed.Discriminator = 'CoverageChange'
              AND ISJSON(ed.jAdditional) = 1
-             AND UPPER(LTRIM(RTRIM(JSON_VALUE(ed.jAdditional, '$.endorsementType')))) IN ('PROCEEDORDER', 'CHANGE_INSURED_SUM_SURETY')
+             AND UPPER(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END))) IN ('PROCEEDORDER', 'CHANGE_INSURED_SUM_SURETY')
             THEN CONVERT(VARCHAR, CAST(COALESCE(ed.effectiveDate, ed.executionDate) AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
         WHEN ed.Discriminator = 'LoadingChange'
             THEN CONVERT(VARCHAR, CAST(ed.effectiveDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
@@ -462,11 +461,11 @@ SELECT
 		WHEN ed.Discriminator = 'ClauseChange' THEN 'Cambio de Cláusula'
 		WHEN ed.Discriminator = 'ContingentBeneficiaryChange' THEN 'Cambio de Beneficiario Contingente'
 		WHEN ed.Discriminator = 'CoverageChange' THEN COALESCE(
-			CASE UPPER(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END)))
+			CASE UPPER(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END END)))
 				WHEN 'PROCEEDORDER' THEN 'Orden de proceder'
 				WHEN 'CHANGE_INSURED_SUM_SURETY' THEN 'Cambio de Suma Asegurada'
 				WHEN 'CHANGE_COVERAGE_SURETY' THEN 'Cambio de Vigencia'
-				ELSE NULLIF(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END)), '')
+				ELSE NULLIF(LTRIM(RTRIM(CASE WHEN ISJSON(ed.jAdditional) = 1 THEN CASE WHEN ISJSON(ed.jAdditional) = 1 THEN JSON_VALUE(ed.jAdditional, '$.endorsementType') END END)), '')
 			END,
 			'Cambio de Cobertura'
 		)
@@ -491,7 +490,7 @@ SELECT
 	END AS Tipo
     ,ISNULL(pym.name, '') AS recursopago
     ,CASE WHEN lp.lob='81' THEN COALESCE(axxPay.name,
- CASE LOWER(TRIM(COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity))) 
+ CASE LOWER(TRIM(COALESCE(bed.periodicity,CASE WHEN ISJSON(ed.jSnapshot) = 1 THEN JSON_VALUE(ed.jSnapshot,'$.periodicity') END,lp.periodicity)))
 	WHEN 'y' THEN 'Anual'
 	WHEN 'y1' THEN 'Anual'
     WHEN 'm' THEN 'Mensual'
@@ -499,7 +498,7 @@ SELECT
     WHEN 'b' THEN 'Bimensual'
     WHEN 's' THEN 'Semestral'
     WHEN 'q' THEN 'Trimestral'
- ELSE COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity) END)
+ ELSE COALESCE(bed.periodicity,CASE WHEN ISJSON(ed.jSnapshot) = 1 THEN JSON_VALUE(ed.jSnapshot,'$.periodicity') END,lp.periodicity) END)
  ELSE CASE SUBSTRING(TRIM(ISNULL(bed.periodicity, lp.periodicity)),1,1)
         WHEN 'y' THEN 'Anual'
 		WHEN 'y1' THEN 'Anual'
@@ -584,7 +583,7 @@ OUTER APPLY (SELECT
 				js.tax,
 				js.fee,
 				js.anualTotal
-			FROM OPENJSON(ed.jSnapshot)
+			FROM OPENJSON(CASE WHEN ISJSON(ed.jSnapshot) = 1 THEN ed.jSnapshot ELSE '{}' END)
 			WITH (
 				surcharges    DECIMAL(18,2) '$.surcharges',
 				discounts     DECIMAL(18,2) '$.discounts',
@@ -604,7 +603,7 @@ CROSS APPLY (SELECT CASE WHEN ed.Discriminator = 'CancellationChange' THEN ISNUL
 
 OUTER APPLY (
     SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN ISNULL(cov.insuredSum,0) ELSE 0 END) AS sumaAseg
-    FROM OPENJSON(ed.jNewCoverages)
+    FROM OPENJSON(CASE WHEN ISJSON(ed.jNewCoverages) = 1 THEN ed.jNewCoverages ELSE '[]' END)
     WITH (
         coverageCode INT '$.code',
         insuredSum DECIMAL(18,2) '$.limit'
@@ -612,16 +611,14 @@ OUTER APPLY (
 		
     OUTER APPLY (
         SELECT TOP 1
-            JSON_VALUE(RowData,'$[0]') AS lobCode,
-            JSON_VALUE(RowData,'$[1]') AS productCode,
-            JSON_VALUE(RowData,'$[3]') AS coverageCode,
-            JSON_VALUE(RowData,'$[5]') AS isCoverage
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END AS lobCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END AS productCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END AS coverageCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[5]') END AS isCoverage
         FROM (
             SELECT [key] AS RowNumber, value AS RowData
             FROM [Table]
-            CROSS APPLY OPENJSON(
-                SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
-            )
+            CROSS APPLY OPENJSON(CASE WHEN CHARINDEX('[[', data) > 0 AND ISJSON(SUBSTRING(data, CHARINDEX('[[', data), LEN(data))) = 1 THEN SUBSTRING(data, CHARINDEX('[[', data), LEN(data)) ELSE '[]' END)
             WHERE name = CASE lp.lob
                 WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
                 WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
@@ -637,15 +634,16 @@ OUTER APPLY (
             END
         ) x
         WHERE RowNumber > 0
-          AND JSON_VALUE(RowData,'$[0]') = lp.lob
-          AND JSON_VALUE(RowData,'$[1]') = lp.productCode
-          AND JSON_VALUE(RowData,'$[3]') = CAST(cov.coverageCode AS VARCHAR(50))
+          AND ISJSON(RowData) = 1
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END = lp.lob
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END = lp.productCode
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END = CAST(cov.coverageCode AS VARCHAR(50))
     ) cfg
 ) sumaAsegNew
 
 OUTER APPLY (
     SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 'true') THEN ISNULL(cov.insuredSum,0) ELSE 0 END) AS sumaAseg
-    FROM OPENJSON(ed.jOldCoverages)
+    FROM OPENJSON(CASE WHEN ISJSON(ed.jOldCoverages) = 1 THEN ed.jOldCoverages ELSE '[]' END)
     WITH (
         coverageCode INT '$.code',
         insuredSum DECIMAL(18,2) '$.limit'
@@ -653,16 +651,14 @@ OUTER APPLY (
 		
     OUTER APPLY (
         SELECT TOP 1
-            JSON_VALUE(RowData,'$[0]') AS lobCode,
-            JSON_VALUE(RowData,'$[1]') AS productCode,
-            JSON_VALUE(RowData,'$[3]') AS coverageCode,
-            JSON_VALUE(RowData,'$[5]') AS isCoverage
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END AS lobCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END AS productCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END AS coverageCode,
+            CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[5]') END AS isCoverage
         FROM (
             SELECT [key] AS RowNumber, value AS RowData
             FROM [Table]
-            CROSS APPLY OPENJSON(
-                SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
-            )
+            CROSS APPLY OPENJSON(CASE WHEN CHARINDEX('[[', data) > 0 AND ISJSON(SUBSTRING(data, CHARINDEX('[[', data), LEN(data))) = 1 THEN SUBSTRING(data, CHARINDEX('[[', data), LEN(data)) ELSE '[]' END)
             WHERE name = CASE lp.lob
                 WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
                 WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
@@ -678,9 +674,10 @@ OUTER APPLY (
             END
         ) x
         WHERE RowNumber > 0
-          AND JSON_VALUE(RowData,'$[0]') = lp.lob
-          AND JSON_VALUE(RowData,'$[1]') = lp.productCode
-          AND JSON_VALUE(RowData,'$[3]') = CAST(cov.coverageCode AS VARCHAR(50))
+          AND ISJSON(RowData) = 1
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END = lp.lob
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END = lp.productCode
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END = CAST(cov.coverageCode AS VARCHAR(50))
     ) cfg
 ) sumaAsegOld
 
@@ -688,16 +685,14 @@ OUTER APPLY (SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 't
 			 FROM LifeCoverage cov
 			 OUTER APPLY (
 				SELECT TOP 1
-					JSON_VALUE(RowData,'$[0]') AS lobCode,
-					JSON_VALUE(RowData,'$[1]') AS productCode,
-					JSON_VALUE(RowData,'$[3]') AS coverageCode,
-					JSON_VALUE(RowData,'$[5]') AS isCoverage
+					CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END AS lobCode,
+					CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END AS productCode,
+					CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END AS coverageCode,
+					CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[5]') END AS isCoverage
 				FROM (
 					SELECT [key] AS RowNumber, value AS RowData
 					FROM [Table]
-					CROSS APPLY OPENJSON(
-						SUBSTRING(data, CHARINDEX('[[', data), LEN(data))
-					)
+					CROSS APPLY OPENJSON(CASE WHEN CHARINDEX('[[', data) > 0 AND ISJSON(SUBSTRING(data, CHARINDEX('[[', data), LEN(data))) = 1 THEN SUBSTRING(data, CHARINDEX('[[', data), LEN(data)) ELSE '[]' END)
 					WHERE name = CASE lp.lob
 					    WHEN '96' THEN 'cfgCoberturaProductoReaTecnicos'
 					    WHEN '20' THEN 'cfgCoberturaProductoReaVidaColectivo'
@@ -713,9 +708,10 @@ OUTER APPLY (SELECT SUM(CASE WHEN cfg.isCoverage IN ('1', 'Si', 'si', 'TRUE', 't
 					END
 				) x
 				WHERE RowNumber > 0
-				  AND JSON_VALUE(RowData,'$[0]') = lp.lob
-				  AND JSON_VALUE(RowData,'$[1]') = lp.productCode
-				  AND JSON_VALUE(RowData,'$[3]') = CAST(cov.code AS VARCHAR(50))
+				  AND ISJSON(RowData) = 1
+          AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[0]') END = lp.lob
+				  AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[1]') END = lp.productCode
+				  AND CASE WHEN ISJSON(RowData) = 1 THEN JSON_VALUE(RowData,'$[3]') END = CAST(cov.code AS VARCHAR(50))
 			) cfg
 			WHERE cov.lifePolicyId = lp.id) sumaAsegCancela
 
@@ -724,39 +720,39 @@ OUTER APPLY (SELECT MAX(datos.cmbTipoObjeto_valor) cmbTipoObjeto_valor
 					, MAX(datos.selectReferido_valor) selectReferido_valor
 					, MAX(datos.txtNoPrestamo_valor) txtNoPrestamo_valor
 					, MAX(datos.txtNoGarantia_valor) txtNoGarantia_valor
-			FROM OPENJSON(ed.jNewInsuredObjects) obj
-			CROSS APPLY OPENJSON(obj.value) jValues
+			FROM OPENJSON(CASE WHEN ISJSON(ed.jNewInsuredObjects) = 1 THEN ed.jNewInsuredObjects ELSE '[]' END) obj
+			CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) jValues
 			OUTER APPLY (SELECT 
 
 							MAX(CASE 
-								WHEN JSON_VALUE(v.value, '$.name') = 'selectReferido'
-								THEN JSON_VALUE(v.value, '$.userData[0]')
+								WHEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.name') END = 'selectReferido'
+								THEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.userData[0]') END
 							END) AS selectReferido_valor,
 							
 							MAX(CASE 
-								WHEN JSON_VALUE(v.value, '$.name') = 'txtNoPrestamo'
-								THEN JSON_VALUE(v.value, '$.userData[0]')
+								WHEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.name') END = 'txtNoPrestamo'
+								THEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.userData[0]') END
 							END) AS txtNoPrestamo_valor,
 
 							MAX(CASE 
-								WHEN JSON_VALUE(v.value, '$.name') = 'txtNoGarantia'
-								THEN JSON_VALUE(v.value, '$.userData[0]')
+								WHEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.name') END = 'txtNoGarantia'
+								THEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.userData[0]') END
 							END) AS txtNoGarantia_valor,
 
 							MAX(CASE 
-								WHEN JSON_VALUE(v.value, '$.name') = 'cmbTipoObjeto'
-								THEN JSON_VALUE(v.value, '$.userData[0]')
+								WHEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.name') END = 'cmbTipoObjeto'
+								THEN CASE WHEN ISJSON(v.value) = 1 THEN JSON_VALUE(v.value, '$.userData[0]') END
 							END) AS cmbTipoObjeto_valor
 
-						FROM OPENJSON(jValues.value) v
+						FROM OPENJSON(CASE WHEN ISJSON(jValues.value) = 1 THEN jValues.value ELSE '[]' END) v
 					) datos
 			WHERE jValues.[key] = 'jValues') oa
 
 /* Referido: nombre desde tabla */
 OUTER APPLY (
     SELECT TOP 1
-        CAST(JSON_VALUE(r2.value, '$[0]') AS VARCHAR(100)) AS ReferidoId,
-        JSON_VALUE(r2.value, '$[1]') AS ReferidoName
+        CAST(CASE WHEN ISJSON(r2.value) = 1 THEN JSON_VALUE(r2.value, '$[0]') END AS VARCHAR(100)) AS ReferidoId,
+        CASE WHEN ISJSON(r2.value) = 1 THEN JSON_VALUE(r2.value, '$[1]') END AS ReferidoName
     FROM dbo.[Table] tblRef
     CROSS APPLY OPENJSON(
         CASE 
@@ -767,7 +763,7 @@ OUTER APPLY (
     WHERE tblRef.name = 'tblReferido'
       AND r2.[key] > 0
       AND ISJSON(r2.value) = 1
-      AND CAST(JSON_VALUE(r2.value, '$[0]') AS VARCHAR(100)) = oa.selectReferido_valor
+      AND CAST(CASE WHEN ISJSON(r2.value) = 1 THEN JSON_VALUE(r2.value, '$[0]') END AS VARCHAR(100)) = oa.selectReferido_valor
 ) refe
 
 /* Clase de Riesgo*/
@@ -819,35 +815,35 @@ OUTER APPLY (
     WHERE bf.id = ISNULL(ed.newCessionBeneficiary, lp.cessionBeneficiary)
 ) bf
 
-OUTER APPLY (SELECT TOP 1 ch.jSnapshot FROM [Change] ch WHERE ch.lifePolicyId=lp.id AND ch.status=1 AND (ch.executionDate>ed.executionDate OR (ch.executionDate=ed.executionDate AND ch.id>ed.id)) AND JSON_QUERY(ch.jSnapshot,'$.InsuredObjects') IS NOT NULL ORDER BY ch.executionDate,ch.id) axxHistory
-OUTER APPLY (SELECT COALESCE(NULLIF(ed.jNewInsuredObjects,''),JSON_QUERY(axxHistory.jSnapshot,'$.InsuredObjects'),(SELECT io.jValues FROM InsuredObject io WHERE io.lifePolicyId=lp.id ORDER BY io.id FOR JSON PATH),JSON_QUERY(ed.jSnapshot,'$.InsuredObjects')) objects) axxObjects
+OUTER APPLY (SELECT TOP 1 ch.jSnapshot FROM [Change] ch WHERE ch.lifePolicyId=lp.id AND ch.status=1 AND (ch.executionDate>ed.executionDate OR (ch.executionDate=ed.executionDate AND ch.id>ed.id)) AND JSON_QUERY(CASE WHEN ISJSON(ch.jSnapshot) = 1 THEN ch.jSnapshot ELSE '{}' END,'$.InsuredObjects') IS NOT NULL ORDER BY ch.executionDate,ch.id) axxHistory
+OUTER APPLY (SELECT COALESCE(NULLIF(ed.jNewInsuredObjects,''),JSON_QUERY(CASE WHEN ISJSON(axxHistory.jSnapshot) = 1 THEN axxHistory.jSnapshot ELSE '{}' END,'$.InsuredObjects'),(SELECT io.jValues FROM InsuredObject io WHERE io.lifePolicyId=lp.id ORDER BY io.id FOR JSON PATH),JSON_QUERY(CASE WHEN ISJSON(ed.jSnapshot) = 1 THEN ed.jSnapshot ELSE '{}' END,'$.InsuredObjects')) objects) axxObjects
 OUTER APPLY (SELECT TOP 1 fld.description
  FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
- CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) WITH (jValues nvarchar(max) '$.jValues') vals
  CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
  WITH (name nvarchar(100) '$.name',description nvarchar(max) '$.userData[0]') fld
  WHERE fld.name='desc_objeto_afianzado' ORDER BY TRY_CONVERT(int,obj.[key])) axxObject
-OUTER APPLY (SELECT TOP 1 JSON_VALUE(custom.value,'$.name') name
- FROM OPENJSON(prod.configJson,'$.Premium.periodicity') opt
+OUTER APPLY (SELECT TOP 1 CASE WHEN ISJSON(custom.value) = 1 THEN JSON_VALUE(custom.value,'$.name') END name
+ FROM OPENJSON(CASE WHEN ISJSON(prod.configJson) = 1 THEN prod.configJson ELSE '{}' END,'$.Premium.periodicity') opt
  CROSS APPLY OPENJSON(CASE WHEN opt.type=5 THEN opt.value ELSE '{}' END,'$.custom') custom
- WHERE LOWER(JSON_VALUE(custom.value,'$.expression'))=LOWER(TRIM(COALESCE(bed.periodicity,JSON_VALUE(ed.jSnapshot,'$.periodicity'),lp.periodicity)))) axxPay
+ WHERE LOWER(CASE WHEN ISJSON(custom.value) = 1 THEN JSON_VALUE(custom.value,'$.expression') END)=LOWER(TRIM(COALESCE(bed.periodicity,CASE WHEN ISJSON(ed.jSnapshot) = 1 THEN JSON_VALUE(ed.jSnapshot,'$.periodicity') END,lp.periodicity)))) axxPay
 OUTER APPLY (SELECT TOP 1 NULLIF(LTRIM(RTRIM(fld.nameValue)),'') name
  FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects)=1 THEN axxObjects.objects ELSE '[]' END) obj
- CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues') vals
+ CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) WITH (jValues nvarchar(max) '$.jValues') vals
  CROSS APPLY OPENJSON(CASE WHEN ISJSON(vals.jValues)=1 THEN vals.jValues ELSE '[]' END)
  WITH (fieldName nvarchar(100) '$.name',nameValue nvarchar(max) '$.userData[0]') fld
  WHERE fld.fieldName='nombre' AND NULLIF(LTRIM(RTRIM(fld.nameValue)),'') IS NOT NULL
  ORDER BY TRY_CONVERT(int,obj.[key])) axxBondBeneficiary
 /* MSN-000046: Provincia Poliza = provincia.descripcion del hidden hiddenUbicacion del objeto asegurado */
 OUTER APPLY (SELECT TOP 1 u.provincia FROM (
-   SELECT 0 AS src, TRY_CONVERT(int, obj.[key]) AS k, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '') AS provincia
+   SELECT 0 AS src, TRY_CONVERT(int, obj.[key]) AS k, NULLIF(LTRIM(RTRIM(JSON_VALUE(CASE WHEN ISJSON(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END)) = 1 THEN COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END) END, '$.provincia.descripcion'))), '') AS provincia
      FROM OPENJSON(CASE WHEN ISJSON(axxObjects.objects) = 1 THEN axxObjects.objects ELSE '[]' END) obj
-     CROSS APPLY OPENJSON(obj.value) WITH (jValues nvarchar(max) '$.jValues', jValuesJson nvarchar(max) '$.jValues' AS JSON) vals
+     CROSS APPLY OPENJSON(CASE WHEN ISJSON(obj.value) = 1 THEN obj.value ELSE '[]' END) WITH (jValues nvarchar(max) '$.jValues', jValuesJson nvarchar(max) '$.jValues' AS JSON) vals
      CROSS APPLY OPENJSON(COALESCE(vals.jValuesJson, CASE WHEN ISJSON(vals.jValues) = 1 THEN vals.jValues END, '[]'))
      WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld
     WHERE fld.name = 'hiddenUbicacion'
    UNION ALL
-   SELECT 1, io.id, NULLIF(LTRIM(RTRIM(JSON_VALUE(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END), '$.provincia.descripcion'))), '')
+   SELECT 1, io.id, NULLIF(LTRIM(RTRIM(JSON_VALUE(CASE WHEN ISJSON(COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END)) = 1 THEN COALESCE(fld.udj, CASE WHEN ISJSON(fld.ud) = 1 THEN fld.ud END) END, '$.provincia.descripcion'))), '')
      FROM InsuredObject io
      CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END)
      WITH (name nvarchar(100) '$.name', ud nvarchar(max) '$.userData[0]', udj nvarchar(max) '$.userData[0]' AS JSON) fld

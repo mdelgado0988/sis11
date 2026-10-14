@@ -189,7 +189,7 @@ try {
   };    
   
   //Asegurado.DireccionCompleta = AseguradoAddress.NombrePais + " " + AseguradoAddress.NombreProvincia + " " + AseguradoAddress.NombreMunicipio + " " + AseguradoAddress.Linea1 + " " + AseguradoAddress.Linea2;
-  Asegurado.DireccionCompleta = AseguradoAddress.Linea1;
+  Asegurado.DireccionCompleta = axxDireccionCompleta(dataAseguradoAddress, [AseguradoAddress.NombreMunicipio]); //AXX-2418
     
   //Obteniendo los teléfonos del asegurado
   doCmd({cmd:"LoadEntities",data:{entity:"ContactPhone",operatiion:"GET",filter:"ContactId = " + Asegurado.ContactId + " and type = 'PHONETYPE2'",fields:vfieldsAseguradoPhone}});
@@ -240,21 +240,6 @@ try {
     NumPagos: 0,
     MontoCuota: 0
   };
-
-   if(Cotizacion.Cuotas){
-    const counts = Cotizacion.Cuotas.reduce((acc, item) => {
-      const key = item.numberInYear;
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-
-    const cantidadUnicos = Cotizacion.Cuotas.filter(
-      item => counts[item.numberInYear] === 1
-    ).length;
-
-     AcuerdoPago.NumPagos = cantidadUnicos;
-
-  }
 
   const dataFrecuenciaPago = [
     { code: 'm', name: 'Mensual' },
@@ -346,4 +331,24 @@ function formateaNumero(v) {
 
 function safeString(value) {
   return value === null || value === undefined ? "" : String(value);
+}
+
+//AXX-2418 (GLOBUAT-268): dirección completa del contacto en los documentos (Barriada, Ubicación y Corregimiento), sin perder ni sustituir componentes.
+function axxDireccionCompleta(addr, extras) {
+  var a = addr || {};
+  var partes = [a.address1, a.address2, axxNombreCorregimiento(a.sector)].concat(extras || []);
+  var salida = [];
+  partes.forEach(function (p) {
+    var v = String(p == null ? "" : p).trim();
+    var repetido = salida.some(function (x) { return x.toUpperCase() == v.toUpperCase(); });
+    if (v && !repetido) salida.push(v);
+  });
+  return salida.join(", ");
+}
+function axxNombreCorregimiento(sector) {
+  var id = Number(sector || 0);
+  if (!(id > 0)) return "";
+  doCmd({cmd:"RepoSectorCatalog",data:{operation:"GET",filter:"id=" + id,size:1}});
+  var fila = RepoSectorCatalog && RepoSectorCatalog.outData && RepoSectorCatalog.outData[0];
+  return fila && fila.name ? String(fila.name) : "";
 }
