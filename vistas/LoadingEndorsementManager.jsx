@@ -433,24 +433,68 @@
         const reinsuranceContracts = function(){
             const groups = {};
             configuredReinsuranceCessions().forEach(function(cession){
-                const key = String(cession.contractId || '') + '|' + String(cession.lineId || '');
+                const key = String(cession.contractId || '');
                 if(!groups[key]) groups[key] = {
-                    key:key, policyCode:cession.policyCode || (policySnapshot && policySnapshot.code) || '',
-                    contractId:cession.contractId, lineId:cession.lineId,
+                    key:key + '|', policyCode:cession.policyCode || (policySnapshot && policySnapshot.code) || '',
+                    contractId:cession.contractId, lineId:'',
                     premium:0, sumInsured:0, premiumCedant:0, sumInsuredCedant:0,
-                    premiumRe:0, sumInsuredRe:0, commission:0, tax:0
+                    premiumRe:0, sumInsuredRe:0, commission:0, tax:0,
+                    _sumCoverageKeys:{}
                 };
                 const group = groups[key];
-                group.premium += Number(cession.premium || 0);
-                group.sumInsured += Number(cession.sumInsured || 0);
+                const coverageKey = String(configuredCoverageCode(cession) || cession.coverageCode || cession.coverageId || cession.cover || cession.id || '');
+                const firstCoverageRow = !group._sumCoverageKeys[coverageKey];
+                if(firstCoverageRow){
+                    group.premium += Number(cession.premium || 0);
+                    group._sumCoverageKeys[coverageKey] = true;
+                }
+                // Match frmDistribucionReaseguro: only isCoverage=SI rows
+                // contribute to insured sums; repeated coverage rows are counted once.
+                if(isReinsuranceCoverage(cession)){
+                    if(firstCoverageRow){
+                        group.sumInsured += Number(cession.sumInsured || 0);
+                    }
+                    group.sumInsuredCedant += Number(cession.sumInsuredCedant || 0);
+                    group.sumInsuredRe += Number(cession.sumInsuredRe || 0);
+                }
                 group.premiumCedant += Number(cession.premiumCedant || 0);
-                group.sumInsuredCedant += Number(cession.sumInsuredCedant || 0);
                 group.premiumRe += Number(cession.premiumRe || 0);
-                group.sumInsuredRe += Number(cession.sumInsuredRe || 0);
                 group.commission += Number(cession.comissionCedant || 0);
                 group.tax += Number(cession.tax || 0);
             });
-            return Object.keys(groups).map(function(key){ return groups[key]; });
+            const directCoinsurancePercentage = (coinsuranceCessions || []).reduce(function(total, row){
+                return total + Number(row.percentage || 0);
+            }, 0);
+            const grossPremium = configuredReinsuranceCessions().reduce(function(total, row){ return total + Math.abs(Number(row.premium || 0)); }, 0);
+            const coinsurancePremium = configuredReinsuranceCessions().reduce(function(total, row){ return total + Math.abs(Number(row.coPremium || row.coCovPremium || 0)); }, 0);
+            const coinsurancePercentage = Math.max(0, Math.min(100, directCoinsurancePercentage || (grossPremium ? coinsurancePremium / grossPremium * 100 : 0)));
+            const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
+            return Object.keys(groups).map(function(key){
+                const group = groups[key];
+                ['premium','sumInsured','premiumCedant','sumInsuredCedant','premiumRe','sumInsuredRe','commission','tax'].forEach(function(field){
+                    group[field] = Number((group[field] * reinsuranceFactor).toFixed(2));
+                });
+                delete group._sumCoverageKeys;
+                return group;
+            });
+        };
+        const mergeReinsuranceContracts = function(simulation){
+            const groups = {};
+            (simulation && simulation.contracts || []).forEach(function(source){
+                const key = String(source.contractId || '');
+                if(!groups[key]) groups[key] = Object.assign({}, source, {
+                    key:key + '|', lineId:'', rows:[], participants:[], manualDistribution:null
+                });
+                const target = groups[key];
+                target.rows = target.rows.concat((source.rows || []).map(function(row){
+                    return Object.assign({}, row, { lineId: row.lineId || source.lineId || '' });
+                }));
+                target.participants = target.participants.concat((source.participants || []).map(function(participant){
+                    return Object.assign({}, participant, { lineId: participant.lineId || source.lineId || '' });
+                }));
+                if(!target.manualDistribution && source.manualDistribution) target.manualDistribution = source.manualDistribution;
+            });
+            return Object.assign({}, simulation, { contracts:Object.keys(groups).map(function(key){ return groups[key]; }) });
         };
         const reinsuranceMovementRows = function(){
             return (coverages || []).map(function(coverage){
@@ -481,6 +525,7 @@
                 let simulation = response.outData;
                 if(typeof simulation === 'string') simulation = JSON.parse(simulation);
                 if(Array.isArray(simulation)) simulation = simulation[0] || {};
+                simulation = mergeReinsuranceContracts(simulation);
                 setReinsuranceSimulation(simulation);
                 setReinsuranceDraft(JSON.parse(JSON.stringify(simulation)));
                 setActiveWorkspaceTab('loadings');
@@ -507,8 +552,10 @@
                     const coverageInvalid = rows.some(function(row){
                         if(Math.abs(Number(row.premiumRe || 0)) <= 0.01) return false;
                         const rowParticipants = participants.filter(function(participant){
-                            return String(participant.coverageCode || '') === String(row.coverageCode || '')
-                                || Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0);
+                            const sameLine = !participant.lineId || !row.lineId
+                                || String(participant.lineId).trim().toUpperCase() === String(row.lineId).trim().toUpperCase();
+                            return Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0)
+                                || (sameLine && String(participant.coverageCode || '') === String(row.coverageCode || ''));
                         });
                         const split = rowParticipants.reduce(function(total, participant){ return total + Number(participant.split || 0); }, 0);
                         const premium = rowParticipants.reduce(function(total, participant){ return total + Number(participant.premium || 0); }, 0);
@@ -535,8 +582,10 @@
                 const participantsInvalid = lines.some(function(row){
                     if(Math.abs(Number(row.premiumRe || 0)) <= 0.01) return false;
                     const rowParticipants = participants.filter(function(participant){
-                        return String(participant.coverageCode || '') === String(row.coverageCode || '')
-                            || Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0);
+                        const sameLine = !participant.lineId || !row.lineId
+                            || String(participant.lineId).trim().toUpperCase() === String(row.lineId).trim().toUpperCase();
+                        return Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0)
+                            || (sameLine && String(participant.coverageCode || '') === String(row.coverageCode || ''));
                     });
                     const participantSplit = rowParticipants.reduce(function(total, participant){ return total + Number(participant.split || 0); }, 0);
                     const participantPremium = rowParticipants.reduce(function(total, participant){ return total + Number(participant.premium || 0); }, 0);
@@ -646,8 +695,10 @@
                             premiumAssigned += row.premiumRe;
                             sumAssigned += row.sumInsuredRe;
                             (group.participants || []).filter(function(participant){
-                                return String(participant.coverageCode || '') === String(row.coverageCode || '')
-                                    || Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0);
+                                const sameLine = !participant.lineId || !row.lineId
+                                    || String(participant.lineId).trim().toUpperCase() === String(row.lineId).trim().toUpperCase();
+                                return Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0)
+                                    || (sameLine && String(participant.coverageCode || '') === String(row.coverageCode || ''));
                             }).forEach(function(participant){
                                 const split = Number(participant.split || 0) / 100;
                                 participant.sumInsured = Number((row.sumInsuredRe * split).toFixed(2));
@@ -853,22 +904,25 @@
                 const retention = manual.find(function(line){ return line.key === 'retention'; });
                 const sourceRows = (baseCessions || []).filter(function(cession){
                     return String(cession.contractId || '') === String(group.contractId || '')
-                        && String(cession.lineId || '') === String(group.lineId || '');
+                        && (!group.lineId || String(cession.lineId || '') === String(group.lineId || ''));
                 });
-                const finalContractPremium = rows.reduce(function(total, row){
-                    const sourceRow = sourceRows.find(function(cession){
-                        return String(cession.coverageCode || cession.coverageId || '') === String(row.coverageCode || '')
+                const sourceForRow = function(row){
+                    return sourceRows.find(function(cession){
+                        const sameLine = !row.lineId || !cession.lineId
+                            || String(row.lineId).trim().toUpperCase() === String(cession.lineId).trim().toUpperCase();
+                        const sameCoverage = String(cession.coverageCode || cession.coverageId || '') === String(row.coverageCode || '')
                             || String(cession.cover || '').trim().toUpperCase() === String(row.cover || '').trim().toUpperCase();
+                        return sameLine && sameCoverage;
                     }) || {};
+                };
+                const finalContractPremium = rows.reduce(function(total, row){
+                    const sourceRow = sourceForRow(row);
                     const value = row.finalPremium !== undefined && row.finalPremium !== null
                         ? row.finalPremium : Number(sourceRow.premium || 0) + Number(row.premiumMovement || 0);
                     return total + Number(value || 0);
                 }, 0);
                 const finalContractSum = rows.reduce(function(total, row){
-                    const sourceRow = sourceRows.find(function(cession){
-                        return String(cession.coverageCode || cession.coverageId || '') === String(row.coverageCode || '')
-                            || String(cession.cover || '').trim().toUpperCase() === String(row.cover || '').trim().toUpperCase();
-                    }) || {};
+                    const sourceRow = sourceForRow(row);
                     const value = row.finalSum !== undefined && row.finalSum !== null
                         ? row.finalSum : Number(sourceRow.sumInsured || 0) + Number(row.sumInsuredMovement || 0);
                     return total + Number(value || 0);
@@ -892,10 +946,7 @@
                 const tax = quota ? Number(quota.tax || 0) : rows.reduce(function(total, row){ return total + Number(row.tax || 0); }, 0);
                 rows.forEach(function(row){
                     const hasManual = !!quota;
-                    const sourceRow = sourceRows.find(function(cession){
-                        return String(cession.coverageCode || cession.coverageId || '') === String(row.coverageCode || '')
-                            || String(cession.cover || '').trim().toUpperCase() === String(row.cover || '').trim().toUpperCase();
-                    }) || {};
+                    const sourceRow = sourceForRow(row);
                     const sourcePremium = Number(sourceRow.premium || 0);
                     const sourceSum = Number(sourceRow.sumInsured || 0);
                     const sourcePremiumRe = Number(sourceRow.premiumRe || 0);
@@ -907,19 +958,13 @@
                     const finalPremiumWeight = Math.abs(finalPremium);
                     const finalSumWeight = Math.abs(finalSum);
                     const totalFinalPremium = rows.reduce(function(total, item){
-                        const itemSource = sourceRows.find(function(cession){
-                            return String(cession.coverageCode || cession.coverageId || '') === String(item.coverageCode || '')
-                                || String(cession.cover || '').trim().toUpperCase() === String(item.cover || '').trim().toUpperCase();
-                        }) || {};
+                        const itemSource = sourceForRow(item);
                         const itemFinal = item.finalPremium !== undefined && item.finalPremium !== null
                             ? item.finalPremium : Number(itemSource.premium || 0) + Number(item.premiumMovement || 0);
                         return total + Math.abs(Number(itemFinal || 0));
                     }, 0);
                     const totalFinalSum = rows.reduce(function(total, item){
-                        const itemSource = sourceRows.find(function(cession){
-                            return String(cession.coverageCode || cession.coverageId || '') === String(item.coverageCode || '')
-                                || String(cession.cover || '').trim().toUpperCase() === String(item.cover || '').trim().toUpperCase();
-                        }) || {};
+                        const itemSource = sourceForRow(item);
                         const itemFinal = item.finalSum !== undefined && item.finalSum !== null
                             ? item.finalSum : Number(itemSource.sumInsured || 0) + Number(item.sumInsuredMovement || 0);
                         return total + Math.abs(Number(itemFinal || 0));
@@ -943,7 +988,7 @@
                     const premiumBase = Number(row.premiumMovement || 0);
                     const sumBase = Number(row.sumInsuredMovement || 0);
                     snapshot.distribution.push({
-                        contractId: group.contractId, lineId: group.lineId, coverageCode: row.coverageCode,
+                        contractId: group.contractId, lineId: row.lineId || group.lineId, coverageCode: row.coverageCode,
                         premiumMovement: round(premiumBase), sumInsuredMovement: round(sumBase),
                         finalPremium: round(finalPremium), finalSum: round(finalSum),
                         premiumCedant: finalPremiumCedant, sumInsuredCedant: finalSumCedant,
@@ -957,12 +1002,14 @@
                             : (premiumBase ? round(premiumRe / premiumBase) : Number(row.proportionRe || 0))
                     });
                     (group.participants || []).filter(function(participant){
-                        return String(participant.coverageCode || '') === String(row.coverageCode || '')
-                            || Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0);
+                        const sameLine = !participant.lineId || !row.lineId
+                            || String(participant.lineId).trim().toUpperCase() === String(row.lineId).trim().toUpperCase();
+                        return Number(participant.cessionId || 0) === Number(row.basedOnCessionId || 0)
+                            || (sameLine && String(participant.coverageCode || '') === String(row.coverageCode || ''));
                     }).forEach(function(participant){
                         const split = Number(participant.split || 0) / 100;
                         snapshot.participants.push({
-                            contractId: group.contractId, lineId: group.lineId, coverageCode: row.coverageCode,
+                            contractId: group.contractId, lineId: row.lineId || group.lineId, coverageCode: row.coverageCode,
                             cessionId: participant.cessionId, contactId: participant.contactId, brokerId: participant.brokerId,
                             split: Number(participant.split || 0),
                             sumInsured: round(finalSumRe * split), premium: round(finalPremiumRe * split),
@@ -1440,11 +1487,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             updateReinsuranceParticipant, addReinsuranceParticipant, removeReinsuranceParticipant,
             saveReinsuranceParticipants, isReinsuranceCoverage } = useAppContext();
         const policyContracts = (baseCessions || []).reduce(function(result, cession){
-            const key = String(cession.contractId || '') + '|' + String(cession.lineId || '');
-            if(!result[key]) result[key] = { sumInsured:0, premium:0, premiumCedant:0, premiumRe:0, commission:0, tax:0 };
+            const key = String(cession.contractId || '') + '|';
+            if(!result[key]) result[key] = { sumInsured:0, sumInsuredCedant:0, sumInsuredRe:0, premium:0, premiumCedant:0, premiumRe:0, commission:0, tax:0, _sumCoverageKeys:{} };
             const totals = result[key];
-            totals.sumInsured += Number(cession.sumInsured || 0);
-            totals.premium += Number(cession.premium || 0);
+            const coverageKey = String(cession.coverageCode || cession.coverageId || cession.cover || cession.id || '');
+            const firstCoverageRow = !totals._sumCoverageKeys[coverageKey];
+            if(firstCoverageRow){
+                totals.premium += Number(cession.premium || 0);
+                totals._sumCoverageKeys[coverageKey] = true;
+            }
+            if(isReinsuranceCoverage(cession)){
+                if(firstCoverageRow){
+                    totals.sumInsured += Number(cession.sumInsured || 0);
+                }
+                totals.sumInsuredCedant += Number(cession.sumInsuredCedant || 0);
+                totals.sumInsuredRe += Number(cession.sumInsuredRe || 0);
+            }
             totals.premiumCedant += Number(cession.premiumCedant || 0);
             totals.premiumRe += Number(cession.premiumRe || 0);
             totals.commission += Number(cession.commission || cession.comissionCedant || 0);
@@ -1454,21 +1512,26 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         const contracts = reinsuranceDraft && Array.isArray(reinsuranceDraft.contracts)
             ? reinsuranceDraft.contracts.map(function(group){
                 const rows = group.rows || [];
-                const key = String(group.contractId || '') + '|' + String(group.lineId || '');
-                const policyTotals = policyContracts[key] || { sumInsured:0, premium:0, premiumCedant:0, premiumRe:0, commission:0, tax:0 };
-                return { key:String(group.contractId || '') + '|' + String(group.lineId || ''), policyCode:group.policyCode || '', contractId:group.contractId, lineId:group.lineId,
-                    premium:policyTotals.premium + rows.reduce(function(total,row){ return total + Number(row.premiumMovement || 0); },0),
-                    sumInsured:policyTotals.sumInsured + rows.reduce(function(total,row){ return total + Number(row.sumInsuredMovement || 0); },0),
-                    premiumCedant:policyTotals.premiumCedant + rows.reduce(function(total,row){ return total + Number(row.premiumCedant || 0); },0),
-                    premiumRe:policyTotals.premiumRe + rows.reduce(function(total,row){ return total + Number(row.premiumRe || 0); },0),
-                    commission:policyTotals.commission + rows.reduce(function(total,row){ return total + Number(row.commission || 0); },0),
-                    tax:policyTotals.tax + rows.reduce(function(total,row){ return total + Number(row.tax || 0); },0) };
+                 const key = String(group.contractId || '') + '|';
+                const policyTotals = policyContracts[key] || { sumInsured:0, sumInsuredCedant:0, sumInsuredRe:0, premium:0, premiumCedant:0, premiumRe:0, commission:0, tax:0 };
+                const directCoinsurancePercentage = (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0);
+                const grossPremiumForContract = (baseCessions || []).filter(function(row){ return String(row.contractId || '') === String(group.contractId || ''); }).reduce(function(total, row){ return total + Math.abs(Number(row.premium || 0)); }, 0);
+                const coinsurancePremiumForContract = (baseCessions || []).filter(function(row){ return String(row.contractId || '') === String(group.contractId || ''); }).reduce(function(total, row){ return total + Math.abs(Number(row.coPremium || row.coCovPremium || 0)); }, 0);
+                const coinsurancePercentage = Math.max(0, Math.min(100, directCoinsurancePercentage || (grossPremiumForContract ? coinsurancePremiumForContract / grossPremiumForContract * 100 : 0)));
+                const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
+                return { key:String(group.contractId || '') + '|', policyCode:group.policyCode || '', contractId:group.contractId, lineId:'',
+                    premium:Number(((policyTotals.premium + rows.reduce(function(total,row){ return total + Number(row.premiumMovement || 0); },0)) * reinsuranceFactor).toFixed(2)),
+                    sumInsured:Number(((policyTotals.sumInsured + rows.reduce(function(total,row){ return total + Number(row.sumInsuredMovement || 0); },0)) * reinsuranceFactor).toFixed(2)),
+                    premiumCedant:Number((policyTotals.premiumCedant * reinsuranceFactor).toFixed(2)),
+                    premiumRe:Number((policyTotals.premiumRe * reinsuranceFactor).toFixed(2)),
+                    commission:Number((policyTotals.commission * reinsuranceFactor).toFixed(2)),
+                    tax:Number((policyTotals.tax * reinsuranceFactor).toFixed(2)) };
             }) : reinsuranceContracts();
         const selected = contracts.find(function(item){ return item.key === selectedReinsuranceKey; }) || contracts[0];
-        const selectedGroup = reinsuranceDraft && selected ? (reinsuranceDraft.contracts || []).find(function(group){ return String(group.contractId || '') + '|' + String(group.lineId || '') === selected.key; }) : null;
+        const selectedGroup = reinsuranceDraft && selected ? (reinsuranceDraft.contracts || []).find(function(group){ return String(group.contractId || '') + '|' === selected.key; }) : null;
         const reinsurerLineReady = reinsurersReady && selectedGroup && selectedReinsurerLine && selectedReinsurerLine.groupKey === selected.key;
         const selectedLines = selectedGroup ? (selectedGroup.rows || []) : (selected ? configuredReinsuranceCessions().filter(function(cession){
-            return String(cession.contractId || '') + '|' + String(cession.lineId || '') === selected.key;
+            return String(cession.contractId || '') + '|' === selected.key;
         }) : []);
         return <div className='lem-grid-panel' style={{ padding:8 }}>
             <Alert type='info' showIcon message='Distribución de reaseguro' style={{ marginBottom:8 }} />
@@ -1489,11 +1552,11 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 {selected ? <Tabs activeKey={reinsuranceDetailTab} onChange={setReinsuranceDetailTab} type='card' style={{ marginTop:8 }}>
                     <Tabs.TabPane tab='Distribución del movimiento' key='movement'>
                         <ReinsuranceMovementDistribution data={selectedLines} savedLines={selectedGroup && selectedGroup.manualDistribution}
-                            policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' + String(cession.lineId || '') === selected.key; })}
+                            policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' === selected.key; })}
                             participants={selectedGroup ? selectedGroup.participants || [] : []} reinsurerContacts={reinsuranceContacts} coinsuranceCessions={coinsuranceCessions} isReinsuranceCoverage={isReinsuranceCoverage} />
                     </Tabs.TabPane>
                     <Tabs.TabPane tab='Distribución' key='distribution'>
-                        <ReinsuranceDistributionEditor data={selectedLines} savedLines={selectedGroup && selectedGroup.manualDistribution} policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' + String(cession.lineId || '') === selected.key; })} coinsuranceCessions={coinsuranceCessions} groupKey={selected.key} onSave={saveReinsuranceDistribution} onOpenReinsurers={openReinsurers} />
+                        <ReinsuranceDistributionEditor data={selectedLines} savedLines={selectedGroup && selectedGroup.manualDistribution} policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' === selected.key; })} coinsuranceCessions={coinsuranceCessions} groupKey={selected.key} onSave={saveReinsuranceDistribution} onOpenReinsurers={openReinsurers} />
                     </Tabs.TabPane>
                     <Tabs.TabPane tab='Reaseguradores' key='reinsurers' disabled={!reinsurerLineReady}>
                         {reinsurerLineReady
@@ -1507,7 +1570,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                     </Tabs.TabPane>
                     <Tabs.TabPane tab='Cobertura' key='coverage'><ReinsuranceLines data={selectedLines}
                         coverages={coverages} participants={selectedGroup ? selectedGroup.participants || [] : []}
-                        policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' + String(cession.lineId || '') === selected.key; })}
+                        policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' === selected.key; })}
                         contract={selected} isReinsuranceCoverage={isReinsuranceCoverage} /></Tabs.TabPane>
                 </Tabs> : null}
             </>}
@@ -1579,17 +1642,36 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
     }
     function ReinsuranceMovementDistribution({ data, savedLines, policyRows, participants, reinsurerContacts, isReinsuranceCoverage, coinsuranceCessions }){
         const [selectedLine, setSelectedLine] = useState(null);
-        const base = (policyRows || []).reduce(function(total, row){
-            total.premium += Number(row.premium || 0);
-            total.retention += Number(row.premiumCedant || 0);
-            total.ceded += Number(row.premiumRe || 0);
-            total.commission += Number(row.commission || row.comissionCedant || 0);
-            total.tax += Number(row.tax || 0);
-            return total;
-        }, { premium:0, retention:0, ceded:0, commission:0, tax:0 });
-        const movement = (data || []).reduce(function(total, row){
-            total.sum += Number(row.sumInsuredMovement || 0);
-            total.premium += Number(row.premiumMovement || 0);
+        const lineKind = function(value){
+            const line = String(value || '').trim().toUpperCase();
+            if(line.indexOf('RETEN') >= 0 || line === 'RET') return 'retention';
+            if(line.indexOf('EXCEDENTE') >= 0 || line.indexOf('EXCESS') >= 0 || line === 'EX1') return 'excess';
+            if(line.indexOf('FAC') >= 0) return 'facultative';
+            if(line.indexOf('FRONT') >= 0 || line === 'FRO') return 'fronting';
+            return 'quota';
+        };
+        const movementLines = {
+            retention:{ sum:0, premium:0, commission:0, tax:0 },
+            quota:{ sum:0, premium:0, commission:0, tax:0 },
+            excess:{ sum:0, premium:0, commission:0, tax:0 },
+            facultative:{ sum:0, premium:0, commission:0, tax:0 },
+            fronting:{ sum:0, premium:0, commission:0, tax:0 }
+        };
+        (data || []).forEach(function(row){
+            const kind = lineKind(row.lineId || row.lineName || row.contractName);
+            const line = movementLines[kind] || movementLines.quota;
+            movementLines.retention.sum += Number(row.sumInsuredCedant || 0);
+            movementLines.retention.premium += Number(row.premiumCedant || 0);
+            if(kind !== 'retention'){
+                line.sum += Number(row.sumInsuredRe || 0);
+                line.premium += Number(row.premiumRe || 0);
+                line.commission += Number(row.commission || row.comissionCedant || 0);
+                line.tax += Number(row.tax || 0);
+            }
+        });
+        const movementBase = Object.keys(movementLines).reduce(function(total, key){
+            total.sum += movementLines[key].sum;
+            total.premium += movementLines[key].premium;
             return total;
         }, { sum:0, premium:0 });
         const coinsurancePercentage = Math.max(0, Math.min(100, (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0)));
@@ -1603,15 +1685,21 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             }, { premium:0, value:0 });
             return totals.premium ? totals.value / totals.premium : 0;
         };
-        const retentionPct = base.premium ? base.retention / base.premium * 100 : 0;
-        const cededPct = base.premium ? base.ceded / base.premium * 100 : 0;
+        const lineDefinition = function(key, label, canViewReinsurers){
+            const line = movementLines[key];
+            const percentage = movementBase.premium ? line.premium / movementBase.premium * 100 : 0;
+            return { key:key, contractLabel:label, percentage:percentage,
+                commissionPct:line.premium ? line.commission / line.premium * 100 : 0,
+                taxPct:line.premium ? line.tax / line.premium * 100 : 0,
+                canViewReinsurers:canViewReinsurers };
+        };
         const definitions = [
             { key:'nonTechnical', contractLabel:'No Técnica', percentage:0, canViewReinsurers:false },
-            { key:'retention', contractLabel:'Retención', percentage:retentionPct, canViewReinsurers:false },
-            { key:'quota', contractLabel:'Cuota Parte', percentage:cededPct, commissionPct:base.ceded ? base.commission / base.ceded * 100 : 0, taxPct:base.ceded ? base.tax / base.ceded * 100 : 0, canViewReinsurers:true },
-            { key:'excess', contractLabel:'Excedente 1', percentage:0, canViewReinsurers:true },
-            { key:'facultative', contractLabel:'Facultativo', percentage:0, canViewReinsurers:true },
-            { key:'fronting', contractLabel:'Fronting', percentage:0, canViewReinsurers:true },
+            lineDefinition('retention', 'Retención', false),
+            lineDefinition('quota', 'Cuota Parte', true),
+            lineDefinition('excess', 'Excedente 1', true),
+            lineDefinition('facultative', 'Facultativo', true),
+            lineDefinition('fronting', 'Fronting', true),
             { key:'coinsurance', contractLabel:'Coaseguro', percentage:0, isCoinsurance:true, canViewReinsurers:false,
                 commissionPct:coinsuranceRate('commission') * 100, taxPct:coinsuranceRate('tax') * 100 }
         ];
@@ -1621,11 +1709,11 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const row = Object.assign({}, definition, saved);
             const factor = row.isCoinsurance ? 1 : reinsuranceFactor;
             row.sum = row.isCoinsurance
-                ? Number((movement.sum * coinsurancePercentage / 100).toFixed(2))
-                : Number((movement.sum * Number(row.percentage || 0) / 100 * factor).toFixed(2));
+                ? Number((movementBase.sum * coinsurancePercentage / 100).toFixed(2))
+                : Number((movementBase.sum * Number(row.percentage || 0) / 100 * factor).toFixed(2));
             row.premium = row.isCoinsurance
-                ? Number((movement.premium * coinsurancePercentage / 100).toFixed(2))
-                : Number((movement.premium * Number(row.percentage || 0) / 100 * factor).toFixed(2));
+                ? Number((movementBase.premium * coinsurancePercentage / 100).toFixed(2))
+                : Number((movementBase.premium * Number(row.percentage || 0) / 100 * factor).toFixed(2));
             if(row.key === 'retention' || row.key === 'nonTechnical' || row.key === 'coinsurance'){
                 row.commission = row.isCoinsurance ? Number((row.premium * Number(row.commissionPct || 0) / 100).toFixed(2)) : 0;
                 row.tax = row.isCoinsurance ? Number((row.premium * Number(row.taxPct || 0) / 100).toFixed(2)) : 0;
@@ -1650,7 +1738,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             if(!selectedLine) return [];
             const grouped = {};
             (participants || []).filter(function(item){
-                return (item.distributionLineKey || 'quota') === selectedLine.key;
+                return lineKind(item.lineId || item.lineName) === selectedLine.key;
             }).forEach(function(item){
                 const key = String(item._participantKey || (String(item.contactId || '') + '|' + String(item.brokerId || '')));
                 const contact = (reinsurerContacts || []).find(function(option){ return String(option.id) === String(item.contactId); });
@@ -1747,20 +1835,66 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 total.tax += Number(row.tax || 0);
                 return total;
             }, { sum:0, premium:0, retentionSum:0, retentionPremium:0, cededSum:0, cededPremium:0, commission:0, tax:0 });
-            const cededPct = totals.premium ? Math.abs(totals.cededPremium / totals.premium * 100) : 0;
-            const retentionPct = totals.premium ? Math.abs(totals.retentionPremium / totals.premium * 100) : 0;
-            const grossBalance = finalPolicyBalance(source, policySource);
+            const lineKind = function(value){
+                const line = String(value || '').trim().toUpperCase();
+                if(line.indexOf('RETEN') >= 0 || line === 'RET') return 'retention';
+                if(line.indexOf('EXCEDENTE') >= 0 || line.indexOf('EXCESS') >= 0 || line === 'EX1') return 'excess';
+                if(line.indexOf('FAC') >= 0) return 'facultative';
+                if(line.indexOf('FRONT') >= 0 || line === 'FRO') return 'fronting';
+                return 'quota';
+            };
+            const lineTotals = {
+                retention:{ sum:0, premium:0, commission:0, tax:0 },
+                quota:{ sum:0, premium:0, commission:0, tax:0 },
+                excess:{ sum:0, premium:0, commission:0, tax:0 },
+                facultative:{ sum:0, premium:0, commission:0, tax:0 },
+                fronting:{ sum:0, premium:0, commission:0, tax:0 }
+            };
+            const addLineValue = function(target, row, isMovement){
+                const kind = lineKind(row.lineId || row.lineName || row.contractName);
+                const line = lineTotals[kind] || lineTotals.quota;
+                // Retention is stored inside each cession, usually on the
+                // Cuota Parte row, not necessarily as a separate lineId.
+                lineTotals.retention.sum += Number(row.sumInsuredCedant || 0);
+                lineTotals.retention.premium += Number(row.premiumCedant || 0);
+                if(kind !== 'retention'){
+                    line.sum += Number(row.sumInsuredRe || 0);
+                    line.premium += Number(row.premiumRe || 0);
+                    line.commission += Number(row.commission || row.comissionCedant || 0);
+                    line.tax += Number(row.tax || 0);
+                }
+            };
+            (policyRows || []).forEach(function(row){ addLineValue(lineTotals, row, false); });
+            (source || []).forEach(function(row){ addLineValue(lineTotals, row, true); });
+            const distributedPremium = Object.keys(lineTotals).reduce(function(total, key){ return total + lineTotals[key].premium; }, 0);
+            const distributedSum = Object.keys(lineTotals).reduce(function(total, key){ return total + lineTotals[key].sum; }, 0);
+            const hasLineDistribution = distributedPremium !== 0 || distributedSum !== 0;
+            const grossBalance = hasLineDistribution
+                ? { sum:distributedSum, premium:distributedPremium }
+                : finalPolicyBalance(source, policySource);
             const finalBalance = { sum:grossBalance.sum * reinsuranceFactor, premium:grossBalance.premium * reinsuranceFactor };
-            const retentionPremium = Number((finalBalance.premium * retentionPct / 100).toFixed(2));
-            const retentionSum = Number((finalBalance.sum * retentionPct / 100).toFixed(2));
             const lineName = source && source[0] && (source[0].contractName || source[0].lineName || source[0].lineId) || 'Cuota Parte';
+            const lineDefinition = function(key, label, canViewReinsurers){
+                const line = lineTotals[key];
+                const percentage = distributedPremium ? line.premium / distributedPremium * 100 : 0;
+                return {
+                    key:key, contractLabel:label, percentage:percentage,
+                    sum:Number((line.sum * reinsuranceFactor).toFixed(2)),
+                    premium:Number((line.premium * reinsuranceFactor).toFixed(2)),
+                    commissionPct:line.premium ? line.commission / line.premium * 100 : 0,
+                    commission:Number((line.commission * reinsuranceFactor).toFixed(2)),
+                    taxPct:line.premium ? line.tax / line.premium * 100 : 0,
+                    tax:Number((line.tax * reinsuranceFactor).toFixed(2)), balance:0,
+                    canViewReinsurers:canViewReinsurers
+                };
+            };
             const distribution = [
                 { key:'nonTechnical', contractLabel:'No Técnica', percentage:0, sum:0, premium:0, commissionPct:0, commission:0, taxPct:0, tax:0, balance:0, readOnly:true, canViewReinsurers:false },
-                { key:'retention', contractLabel:'Retención', percentage:retentionPct, sum:retentionSum, premium:retentionPremium, commissionPct:0, commission:0, taxPct:0, tax:0, balance:0, readOnly:true, canViewReinsurers:false },
-                { key:'quota', contractLabel:lineName, percentage:cededPct, sum:Number((finalBalance.sum * cededPct / 100).toFixed(2)), premium:Number((finalBalance.premium * cededPct / 100).toFixed(2)), commissionPct:totals.cededPremium ? totals.commission / totals.cededPremium * 100 : 0, commission:0, taxPct:totals.cededPremium ? totals.tax / totals.cededPremium * 100 : 0, tax:0, balance:0, canViewReinsurers:true },
-                { key:'excess', contractLabel:'Excedente 1', percentage:0, sum:0, premium:0, commissionPct:0, commission:0, taxPct:0, tax:0, balance:0, canViewReinsurers:true },
-                { key:'facultative', contractLabel:'Facultativo', percentage:0, sum:0, premium:0, commissionPct:0, commission:0, taxPct:0, tax:0, balance:0, canViewReinsurers:true },
-                { key:'fronting', contractLabel:'Fronting', percentage:0, sum:0, premium:0, commissionPct:0, commission:0, taxPct:0, tax:0, balance:0, canViewReinsurers:true },
+                Object.assign(lineDefinition('retention', 'Retención', false), { readOnly:true }),
+                Object.assign(lineDefinition('quota', lineName === 'Cuota Parte' ? lineName : 'Cuota Parte', true), {}),
+                lineDefinition('excess', 'Excedente 1', true),
+                lineDefinition('facultative', 'Facultativo', true),
+                lineDefinition('fronting', 'Fronting', true),
                 { key:'coinsurance', contractLabel:'Coaseguro', percentage:0, isCoinsurance:true,
                     sum:Number((grossBalance.sum * coinsurancePercentage / 100).toFixed(2)),
                     premium:Number((grossBalance.premium * coinsurancePercentage / 100).toFixed(2)),
@@ -1828,11 +1962,23 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             total.tax += Number(row.tax || 0);
             return total;
         }, { percentage:0, sumInsured:0, premium:0, commission:0, tax:0 });
+        const formatDistributionInput = function(value, name){
+            const number = Number(value);
+            if(!Number.isFinite(number)) return '';
+            const isPercentage = name === 'percentage' || name === 'commissionPct' || name === 'taxPct';
+            return number.toLocaleString('en-US', {
+                useGrouping:true,
+                minimumFractionDigits:isPercentage ? 0 : 2,
+                maximumFractionDigits:isPercentage ? 4 : 2
+            });
+        };
         const field = function(record, name){
             const isCededLine = !!record.canViewReinsurers;
             const isCommissionOrTax = name === 'commissionPct' || name === 'commission' || name === 'taxPct' || name === 'tax';
             const disabled = isCommissionOrTax ? !isCededLine : (record.key === 'nonTechnical' || record.key === 'coinsurance');
-            return <Input className='lem-rea-financial-input' disabled={disabled} value={record[name] == null ? '' : String(record[name])} onChange={function(event){ editLine(record.key, name, event.target.value); }} />;
+            return <Input className='lem-rea-financial-input' disabled={disabled} inputMode='decimal'
+                value={record[name] == null ? '' : formatDistributionInput(record[name], name)}
+                onChange={function(event){ editLine(record.key, name, event.target.value); }} />;
         };
         return <>
             <div className='lem-rea-actionbar'><Button type='primary' htmlType='button' onClick={function(){ onSave(groupKey, lines); }}>Guardar</Button><span>Distribución de reaseguro</span></div>
@@ -2514,13 +2660,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 .map(function(item){ return String(item || '').trim(); })
                 .find(function(item){ return item; })
             : '';
+        const responseData = error && error.outData && typeof error.outData === 'object'
+            ? error.outData
+            : error && error.response && error.response.data
+                ? error.response.data
+                : null;
         const msg = validationMessage || (error instanceof Error
             ? String(error.message || '').trim()
             : typeof error === 'string'
                 ? error.trim()
-                : '');
+                : error && typeof error === 'object'
+                    ? String(error.msg || error.message || error.description || error.error
+                        || (responseData && (responseData.msg || responseData.message || responseData.description)) || '').trim()
+                    : '');
 
         notification.error({
+            message: 'Error',
             description: msg || 'Ocurrió un error inesperado.',
             placement: 'top',
             duration: 2

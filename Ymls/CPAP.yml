@@ -1,0 +1,48 @@
+nonTechnicalPremium: 0
+Calculations:  
+  - name: product
+    formula: |
+      //block
+      //noreplace
+      const productcode = context.pol.productCode.replaceAll("_","");
+      return { code: productcode }
+  - name: dt
+    formula: |
+      //block
+      //noreplace
+      const result = doCmd({cmd: "ExeChain", data: { chain: "cmdGetLifeInsuredAge", context: '{ policyId: ' + context.pol.id + ' }' }});
+      const edad = Number(result.outData.edad);
+      let tasaEdad = 0;
+      if (edad >= 0 && edad <= 20) tasaEdad = 1.5;
+      else if (edad >= 21 && edad <= 30) tasaEdad = 2.58;
+      else if (edad >= 31 && edad <= 40) tasaEdad = 5.01;
+      else if (edad >= 41 && edad <= 50) tasaEdad = 9.62;
+      else if (edad >= 51 && edad <= 65) tasaEdad = 15.04;
+      return { edad, tasaEdad };
+  - name: tasaRea
+    formula: |
+      //block
+      //noreplace
+      return { tasa: 0.292 }
+Lines:
+  - condition: '_dt.edad > 65'
+    ced: _cov.limit;
+    re: 0;
+    cedantPremium: _cov.premium;
+    reinsurerPremium: 0;
+    commission: 0;
+    id: RET
+  - condition: '_dt.edad <= 65 && ["UNICACLA", "UNICAPLA"].includes(_product.code)'
+    ced: +(_cov.limit * 0.5).toFixed(2);
+    re: +(_cov.limit - _ced).toFixed(2);
+    cedantPremium: +(_cov.premium * _proportionCed - (_cov.premium * _proportionCed * _tasaRea.tasa)).toFixed(2);
+    reinsurerPremium: +(_cov.premium * _proportionRe - (_cov.premium * _proportionRe * _tasaRea.tasa)).toFixed(2);
+    commission: 0;
+    id: Cuota Parte
+  - condition: '_dt.edad <= 65 && !["UNICACLA", "UNICAPLA"].includes(_product.code)'
+    ced: +(_cov.limit * 0.5).toFixed(2);
+    re: +(_cov.limit - _ced).toFixed(2);
+    cedantPremium: +((_cov.premium > 0 && ((_cov.limit * _dt.tasaEdad / 1000.00) * _proportionCed)) || 0).toFixed(2);
+    reinsurerPremium: +((_cov.premium > 0 && ((_cov.limit * _dt.tasaEdad / 1000.00) * _proportionRe)) || 0).toFixed(2);
+    commission: 0;
+    id: Cuota Parte

@@ -164,14 +164,21 @@ for (let i = 0; i < base.length; i++) {
   const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
   const commissionRate = Number(c.premium) === 0 ? 0 : commissionBase / Number(c.premium);
   const counts = sums[code] === true;
+  // Vida Colectivo (ramo 20): los recargos/descuentos se aplican
+  // exclusivamente a la cesion de Cuota Parte, sin afectar retencion
+  // ni Excedente.
+  const movementAppliesToLine = !(txt(policy.lob) === '20' && lineUp !== 'CUOTA PARTE');
+  const lineDv = movementAppliesToLine ? dv : 0;
+  const linePv = movementAppliesToLine ? pv : 0;
+  const isCollectiveLife = txt(policy.lob) === '20';
   // La variacion final incluye el recargo/descuento aplicado a la cobertura.
-  const cedant = money(dv * pCed);
-  const re = money(dv * pRe);
-  const commission = money(dv * commissionRate);
-  const nonTechnical = money(dv - cedant - re);
+  const cedant = isCollectiveLife ? 0 : money(lineDv * pCed);
+  const re = isCollectiveLife ? lineDv : money(lineDv * pRe);
+  const commission = money(lineDv * commissionRate);
+  const nonTechnical = money(lineDv - cedant - re);
   grp.rows.push({
     coverageCode: code, cover: txt(c.cover), counts: counts,
-    premiumMovement: dv, proratedMovement: pv, sumInsuredMovement: sv,
+    premiumMovement: lineDv, proratedMovement: linePv, sumInsuredMovement: sv,
     // El estado final viene de la cotización de la póliza, no de sumar
     // cesiones, porque una misma cobertura puede estar en varias líneas.
     finalPremium: finalPremium[code], finalSum: finalSum[code],
@@ -181,8 +188,8 @@ for (let i = 0; i < base.length; i++) {
     commission: commission, currency: txt(c.currency) || txt(policy.currency),
     basedOnCessionId: Number(c.id)
   });
-  grp.totals.movement = money(grp.totals.movement + dv);
-  grp.totals.prorated = money(grp.totals.prorated + pv);
+  grp.totals.movement = money(grp.totals.movement + lineDv);
+  grp.totals.prorated = money(grp.totals.prorated + linePv);
   grp.totals.sumMovement = money(grp.totals.sumMovement + sv);
   grp.totals.cedant = money(grp.totals.cedant + cedant);
   grp.totals.re = money(grp.totals.re + re);
