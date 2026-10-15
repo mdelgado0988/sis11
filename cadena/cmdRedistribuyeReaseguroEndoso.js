@@ -103,10 +103,27 @@ if (!Array.isArray(distribucion))
   return distribucion;
 
 if(distribucion.length == 0) {
+  if (cancellationChange) {
+    const persistedCessions = getPolicyRea();
+    const hydratedIds = hydrateCancellationParticipants(persistedCessions);
+    const hydratedCancellations = persistedCessions.filter(cession => hydratedIds.includes(Number(cession?.id)));
+
+    if (hydratedCancellations.length > 0) {
+      distribuyeAceptantes(hydratedCancellations);
+      persistCancellationParticipants(hydratedCancellations);
+      return endStatment(true, `La cancelación utilizó la distribución de reaseguro existente`);
+    }
+
+    if (persistedCessions.some(cession => Array.isArray(cession?.Participants) && cession.Participants.length > 0)) {
+      return endStatment(true, `La cancelación utilizó la distribución de reaseguro existente`);
+    }
+  }
+
   return endStatment(true, `No existe distribución de reaseguro para la póliza`);
 }
 
 const policyRea = getPolicyRea();
+hydrateCancellationParticipants(policyRea);
 
 if(policyRea.length == 0)
   throw new Error("La póliza no tiene reaseguro que redistribuir");
@@ -345,7 +362,7 @@ function validateRedistribution(policyRea, distribucion) {
       }  
 
       //valido %
-      if(partPol.split != partOA.spli){
+      if(partPol.split != partOA.split){
         deboRedistribuir = { debo: true, causa: `El % del participante es diferente ${partOA.split}<>${partPol.split}` };
         break;
       } 
@@ -373,6 +390,26 @@ function getOARea() {
   const configRea = distReaConfig.find(x => x.name == "hiddenDistribucionReaseguro")?.userData?.[0];
   const distribucion = configRea ? JSON.parse(configRea) : [];
   return distribucion;
+}
+
+function persistCancellationParticipants(cessions) {
+  const statements = [];
+
+  (cessions || []).forEach(cession => {
+    (cession.Participants || []).forEach(participant => {
+      const entity = buildCessionPartEntity(participant, cession.id);
+      statements.push(buildInsertSql("CessionPart", entity));
+    });
+  });
+
+  if (statements.length === 0) {
+    return;
+  }
+
+  doCmd({ cmd: "DoQuery", data: { sql: statements.join("\n") } });
+  if (!DoQuery || DoQuery.ok === false) {
+    throw new Error(DoQuery?.msg || "No fue posible persistir los aceptantes de la cancelación");
+  }
 }
 
 //Obtiene reaseguro actual de la póliza, según el endoso
@@ -413,6 +450,51 @@ function getPolicyRea() {
     ...cession,
     Participants: participantsByCessionId[cession.id] ?? []
   }));
+}
+
+// Las cancelaciones pueden haberse creado sin CessionPart. En ese caso
+// reutilizo los aceptantes de la última cesión positiva anterior de la misma
+// póliza, contrato, cobertura y línea para que la sincronización los persista.
+function hydrateCancellationParticipants(cessions) {
+  const hydratedIds = [];
+
+  if (!Array.isArray(cessions)) {
+    return hydratedIds;
+  }
+
+  cessions.forEach(cancellation => {
+    if (String(cancellation?.premiumType || "").trim().toUpperCase() !== "CANCELLATION") {
+      return;
+    }
+
+    if (Array.isArray(cancellation.Participants) && cancellation.Participants.length > 0) {
+      return;
+    }
+
+    const cancellationId = Number(cancellation?.id || 0);
+    const source = cessions
+      .filter(candidate =>
+        String(candidate?.premiumType || "").trim().toUpperCase() !== "CANCELLATION" &&
+        Number(candidate?.overwritten || 0) === 0 &&
+        Number(candidate?.id || 0) < cancellationId &&
+        Number(candidate?.contractId || 0) === Number(cancellation?.contractId || 0) &&
+        cancellationCessionKey(candidate) === cancellationCessionKey(cancellation) &&
+        Array.isArray(candidate.Participants) &&
+        candidate.Participants.length > 0
+      )
+      .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))[0];
+
+    if (source) {
+      cancellation.Participants = source.Participants.map(participant => ({
+        ...participant,
+        id: 0,
+        cessionId: 0
+      }));
+      hydratedIds.push(Number(cancellation.id));
+    }
+  });
+
+  return hydratedIds;
 }
 
 //Obtengo el id de la póliza
@@ -466,7 +548,7 @@ function adjustCancellationReinsurance(policyId, changeId) {
     cmd: "LoadEntities",
     data: {
       entity: "Cession",
-      fields: "id,coverageId,lineId,changeId,premium,sumInsuredCedant,sumInsuredRe,proportionCed,proportionRe,premiumCedant,premiumRe,comissionCedant,tax",
+      fields: "id,contractId,coverageId,lineId,changeId,premium,sumInsuredCedant,sumInsuredRe,proportionCed,proportionRe,premiumCedant,premiumRe,comissionCedant,tax",
       // Include both unlinked rows from the first run and rows already linked
       // to this endorsement so retries can deterministically recalculate them.
       filter: `lifePolicyId = ${policyId} AND premiumType = 'CANCELLATION' AND (changeId IS NULL OR changeId = ${targetChangeId})`,
@@ -531,23 +613,24 @@ function buildFullCancellationStatements(policyId, changeId, cancellationCession
     cmd: "LoadEntities",
     data: {
       entity: "Cession",
-      fields: "id,coverageId,coverageCode,lineId,sumInsured,premium,sumInsuredCedant,premiumCedant,sumInsuredRe,premiumRe,comissionCedant,tax,nonTechnicalPremium,fee,proportionCed,proportionRe",
-      filter: `lifePolicyId = ${policyId} AND overwritten = 0 AND premiumType <> 'CANCELLATION' AND changeId IS NULL`,
+      fields: "id,contractId,coverageId,coverageCode,lineId,sumInsured,premium,sumInsuredCedant,premiumCedant,sumInsuredRe,premiumRe,comissionCedant,tax,nonTechnicalPremium,fee,proportionCed,proportionRe",
+      filter: `lifePolicyId = ${policyId} AND overwritten = 0 AND premiumType <> 'CANCELLATION'`,
       noTracking: true
     }
   });
 
-  const activeByCoverageLine = (Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [])
-    .reduce((result, cession) => {
-      const key = cancellationCessionKey(cession);
-      if (!key) return result;
-      const current = result[key];
-      if (!current || Number(cession.id || 0) > Number(current.id || 0)) result[key] = cession;
-      return result;
-    }, {});
+  const positiveCessions = Array.isArray(LoadEntities.outData)
+    ? LoadEntities.outData
+    : [];
 
   return cancellationCessions.map(cancellation => {
-    const source = activeByCoverageLine[cancellationCessionKey(cancellation)];
+    const source = positiveCessions
+      .filter(cession =>
+        Number(cession?.id || 0) < Number(cancellation?.id || 0) &&
+        Number(cession?.contractId || 0) === Number(cancellation?.contractId || 0) &&
+        cancellationCessionKey(cession) === cancellationCessionKey(cancellation)
+      )
+      .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))[0];
     if (!source) {
       throw new Error(`No existe cesión vigente para cancelar la cobertura ${cancellation.coverageId || cancellation.coverageCode} en la línea ${cancellation.lineId}`);
     }
