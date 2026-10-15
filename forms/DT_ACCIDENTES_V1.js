@@ -14,6 +14,8 @@ let policyId = window.location.href.split('/')[5] ?? 3357;
 let contact;
 let polizaConfirmada = false;
 let policyLoadPromise;
+let formDataReadyPromise;
+let formDefaultsReady = false;
 let saveReplayPending = false;
 const isEndorsment = window.location.href.includes('tab12');
 
@@ -125,6 +127,8 @@ const cobtarVida = [
     { lob: 20, cobtar: "cfgCobtarVidaColectivo"  },
     { lob: 71, cobtar: "cfgCobtarVidaIndividual"  }
 ]
+
+const ramosEdadActuarialRenovacion = ['20', '31', '71'];
 
 const ramoValores = ['20', '71'];
 
@@ -1835,8 +1839,16 @@ async function getContact(contactId) {
 }
 
 function setDefaultData(){
+    const fechaCalculoEdad = usaInicioVigenciaParaEdad()
+        ? policy.start
+        : new Date();
+    const edadActuarial = calcularEdad(contact.birth, fechaCalculoEdad);
+
     $("#txtEdadSuscripcion")
-        .val(calcularEdad(contact.birth))
+        .val(edadActuarial)
+        .attr('user-data', String(edadActuarial))
+        .trigger('input')
+        .trigger('change')
         .prop("readonly", true)
         .addClass("readonly-style");
     aplicarSumaPolizaSiCorresponde();
@@ -1923,7 +1935,7 @@ function protegerGuardadoMientrasCargaSuma() {
     }
 
     const handler = function (event) {
-        if (policy || !policyLoadPromise || !esAccionGuardar(event.target)) return;
+        if (formDefaultsReady || !formDataReadyPromise || !esAccionGuardar(event.target)) return;
 
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1936,7 +1948,7 @@ function protegerGuardadoMientrasCargaSuma() {
         const wasDisabled = button.disabled;
         button.disabled = true;
 
-        policyLoadPromise.then(function () {
+        formDataReadyPromise.then(function () {
             aplicarSumaPolizaSiCorresponde();
             button.disabled = wasDisabled;
             saveReplayPending = false;
@@ -2052,22 +2064,28 @@ async function initForm() {
 
     if ($hidden.length) {     
 
-        // La suma se aplica tan pronto llega la póliza; las demás cargas no la retrasan.
+        formDefaultsReady = false;
+
+        // El formulario no debe guardar hasta cargar la póliza, el contacto y la edad actuarial.
         policyLoadPromise = getPolicy();
         protegerGuardadoMientrasCargaSuma();
-        policy = await policyLoadPromise;
-        aplicarSumaPolizaSiCorresponde();
-        contact = await getContact(policy.MainInsured?.contactId ?? 0);     
-        await cargarUbicacionAsegurado();
+        formDataReadyPromise = (async function () {
+            policy = await policyLoadPromise;
+            aplicarSumaPolizaSiCorresponde();
+            contact = await getContact(policy.MainInsured?.contactId ?? 0);
+            await cargarUbicacionAsegurado();
 
-        //Renderización de tab y campos dinámicos
-        inyectarEstilosAntdCobtar();
-        prepareContainer();        
-        inicializarTabs("#contenedorCobtar");    
-        moverCamposATabGeneral();   
-        validaLogicaTabs();
-                
-        setDefaultData()
+            // Renderización de tabs y campos dinámicos antes de escribir valores calculados.
+            inyectarEstilosAntdCobtar();
+            prepareContainer();
+            inicializarTabs("#contenedorCobtar");
+            moverCamposATabGeneral();
+            validaLogicaTabs();
+            setDefaultData();
+            formDefaultsReady = true;
+        })();
+
+        await formDataReadyPromise;
 
         //Renderizado de opción para agregar coberturas
         await setProductCoverages();
@@ -2146,7 +2164,12 @@ function vEqual(value){
 }
 
 
-function calcularEdad(fechaNacimiento) {
+function usaInicioVigenciaParaEdad() {
+    return Number(policy?.policyVersion || 0) > 0
+        && ramosEdadActuarialRenovacion.includes(String(policy?.lob || '').trim());
+}
+
+function calcularEdad(fechaNacimiento, fechaCalculo) {
 
     // Acepta string o Date
     const nacimiento = new Date(fechaNacimiento);
@@ -2155,7 +2178,7 @@ function calcularEdad(fechaNacimiento) {
         throw new Error("Fecha de nacimiento inválida");
     }
 
-    const hoy = new Date();
+    const hoy = fechaCalculo ? new Date(fechaCalculo) : new Date();
 
     let edad = hoy.getFullYear() - nacimiento.getFullYear();
 

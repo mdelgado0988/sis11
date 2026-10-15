@@ -1621,6 +1621,20 @@
                             );
                             }
 
+                            setBatchGenerationText(`Actualizando edad actuarial de la oferta ${policy.poliza}`);
+
+                            return exe("ExeChain", {
+                                chain: "cmdUpdateRenewalActuarialAge",
+                                context: `{ offerPolicyId: ${newPolicyId} }`
+                            }).then(ageResponse => {
+                                if (!ageResponse || ageResponse.ok === false) {
+                                    throw new Error(
+                                        ageResponse && ageResponse.msg
+                                            ? ageResponse.msg
+                                            : `No fue posible actualizar la edad actuarial de la oferta ${policy.poliza}`
+                                    );
+                                }
+
                             setBatchGenerationText(`Actualizando valores GAP de la oferta ${policy.poliza}`);
 
                             return exe("ExeChain", {
@@ -1636,6 +1650,7 @@
                                 }
 
                                 return newPolicyId;
+                            });
                             });
                         });
                     });
