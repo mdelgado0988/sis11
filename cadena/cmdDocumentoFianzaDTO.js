@@ -79,6 +79,9 @@ resultado.NumeroContrato = oaUserData?.txtNumeroContrato ?? "0";
 resultado.TipoVigencia = obtenerTextoTipoVigencia(oaUserData?.tipo_vigencia);
 resultado.TipoVigencia = resultado.TipoVigencia ? ` ${resultado.TipoVigencia}` : "";
 resultado.TipoVigencia2 = resultado.TipoVigencia ? resultado.TipoVigencia.toUpperCase() : "";
+resultado.TipoVigencia3 = resultado.TipoVigencia
+  ? ` ${resultado.TipoVigencia.trim().charAt(0).toUpperCase()}${resultado.TipoVigencia.trim().slice(1).toLowerCase()}`
+  : "";
 
 //Fecha actual
 resultado.DiaFecha = dia;
@@ -133,6 +136,7 @@ resultado.TituloEncargado = "";
 const dirTenedor = Array.isArray(holder?.Addresses) && holder.Addresses.length > 0 ? holder.Addresses[0] : null;
 resultado.IdentificacionTenedor = (holder?.isPerson == true ? holder?.cnp : holder?.nif) ?? "";
 resultado.DireccionTenedor = axxDireccionCompleta(dirTenedor); //AXX-2418
+resultado.DireccionTenedor2 = axxDireccionSinSector(dirTenedor);
 resultado.TelefonoTenedor = findByType(holder?.Phones, telPhoneType)?.num ?? holder?.phone ?? "";
 resultado.CelularTenedor = findByType(holder?.Phones, celPhoneType)?.num ?? "";
 resultado.FaxTenedor = findByType(holder?.Phones, faxPhoneType)?.num ?? "";
@@ -142,8 +146,8 @@ resultado.ProvinciaTenedor = getCatalogValue("RepoStateCatalog", `countryCode = 
 resultado.CiudadTenedor = getCatalogValue("RepoCityCatalog", `stateCode = '${escapeSql(dirTenedor?.state ?? "")}' AND code = '${escapeSql(dirTenedor?.city ?? "")}'`, "name") ?? "";
 
 //Vigencia
-resultado.Desde = toFecha(policy?.start);
-resultado.Hasta = toFecha(policy?.end);
+resultado.Desde = toFechaDdMmYyyy(policy?.start);
+resultado.Hasta = toFechaDdMmYyyy(policy?.end);
 
 //Objeto asegurado: identificacion del contacto A Favor y numero de licitacion
 resultado.IdentificacionAFavor = getIdentificacionAFavor();
@@ -236,6 +240,14 @@ function toFecha(value) {
   const parts = partesFechaPanama(fechaComoUTC(value));
   if (!parts) return "";
   return `${parts.dia}/${parts.mes}/${parts.anio}`;
+}
+
+function toFechaDdMmYyyy(value) {
+  if (!value) return "";
+
+  const parts = partesFechaPanama(fechaComoUTC(value));
+  if (!parts) return "";
+  return `${String(parts.dia).padStart(2, "0")}/${String(parts.mes).padStart(2, "0")}/${parts.anio}`;
 }
 
 function fechaComoUTC(value) {
@@ -616,6 +628,19 @@ function axxDireccionCompleta(addr, extras) {
   });
   return salida.join(", ");
 }
+
+function axxDireccionSinSector(addr, extras) {
+  var a = addr || {};
+  var partes = [a.address1, a.address2].concat(extras || []);
+  var salida = [];
+  partes.forEach(function (p) {
+    var v = String(p == null ? "" : p).trim();
+    var repetido = salida.some(function (x) { return x.toUpperCase() == v.toUpperCase(); });
+    if (v && !repetido) salida.push(v);
+  });
+  return salida.join(", ");
+}
+
 function axxNombreCorregimiento(sector) {
   var id = Number(sector || 0);
   if (!(id > 0)) return "";

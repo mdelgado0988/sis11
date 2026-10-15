@@ -81,6 +81,10 @@ var tRecSum = "\n, ded AS (\n  SELECT d.lifePolicyId, SUM(d.dSiRe) AS deltaSumaC
 
 // primaFacultativa ya esta incluida en primaCedida; evitar duplicarla en el neto por pagar.
 tPage = tPage.replace(
+  "(r.primaRetenida + r.primaCedida + r.primaCat) AS primaSuscrita100,",
+  "r.primaSuscrita100 AS primaSuscrita100,"
+);
+tPage = tPage.replace(
   "r.primaCedida + r.primaFacultativa - r.comisionContractual - r.comisionFacultativa\n        - r.impuesto - r.impuestoFacultativo",
   "r.primaCedida - r.comisionContractual - r.impuesto"
 );
@@ -223,11 +227,12 @@ base = base.replace(
 );
 base = base.replace(
   'c.sumInsured, c.proportionRe,',
-  'c.sumInsured, c.proportionRe, CASE WHEN @@SUMACOB@@ THEN 1 ELSE 0 END AS sumaIncluida,'
+  'c.sumInsured, c.premium, c.proportionRe, CASE WHEN @@SUMACOB@@ THEN 1 ELSE 0 END AS sumaIncluida,'
 );
-base = base.replace('r.dstart, r.dend, r.isCanc, 0 AS isTerm,', 'r.dstart, r.dend, r.sumaIncluida, r.isCanc, 0 AS isTerm,');
-base = base.replace('MAX(rr.dstart), MAX(rr.dend), 0 AS isCanc, 1 AS isTerm,', 'MAX(rr.dstart), MAX(rr.dend), MAX(rr.sumaIncluida), 0 AS isCanc, 1 AS isTerm,');
-base = base.replace('o.anniversaryId, o.contactId, o.holderName,', 'o.anniversaryId, o.sumaIncluida, o.contactId, o.holderName,');
+base = base.replace('r.dstart, r.dend, r.isCanc, 0 AS isTerm,', 'r.dstart, r.dend, r.premium, r.sumaIncluida, r.premiumNo, r.isCanc, 0 AS isTerm,');
+base = base.replace('MAX(rr.dstart), MAX(rr.dend), 0 AS isCanc, 1 AS isTerm,', 'MAX(rr.dstart), MAX(rr.dend), 0, MAX(rr.sumaIncluida), 0, 0 AS isCanc, 1 AS isTerm,');
+base = base.replace('o.anniversaryId, o.contactId, o.holderName,', 'o.anniversaryId, o.sumaIncluida, o.premiumNo, o.premium, o.contactId, o.holderName,');
+base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    SUM(CASE WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0) ELSE 0 END) AS primaSuscrita100,');
 base = base.replace('SUM(d.dSiCed) AS sumaRetenida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiCed ELSE 0 END) AS sumaRetenida');
 base = base.replace('SUM(d.dSiRe)  AS sumaCedida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiRe ELSE 0 END) AS sumaCedida');
 base = base.replace("SUM(CASE WHEN d.bucket='CP'  THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='CP' THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte");
