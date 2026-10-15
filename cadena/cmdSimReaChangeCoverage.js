@@ -97,6 +97,25 @@ for (let i = 0; i < live.length; i++) {
 const base = [];
 for (const k in seen) { if (seen.hasOwnProperty(k)) base.push(seen[k]); }
 
+// CPEXCV maneja porcentajes independientes para suma y prima. La cesion
+// vigente conserva proportionCed/proportionRe como proporciones de suma, por
+// lo que el reparto de prima debe derivarse de sus importes monetarios.
+const contractCodeById = {};
+const contractIdsForCode = [];
+for (let i = 0; i < base.length; i++) {
+  const id = Number(base[i].contractId || 0);
+  if (id && contractIdsForCode.indexOf(id) < 0) contractIdsForCode.push(id);
+}
+if (contractIdsForCode.length) {
+  doCmd({ cmd: 'DoQuery', data: {
+    sql: 'SELECT id, code FROM Contract WHERE id IN (' + contractIdsForCode.join(',') + ')'
+  } });
+  const contractRows = DoQuery.outData || [];
+  for (let i = 0; i < contractRows.length; i++) {
+    contractCodeById[Number(contractRows[i].id)] = txt(contractRows[i].code);
+  }
+}
+
 // aceptantes de esas lineas
 const baseIds = [];
 for (let i = 0; i < base.length; i++) baseIds.push(Number(base[i].id));
@@ -161,14 +180,20 @@ for (let i = 0; i < base.length; i++) {
   const sv = sumDelta[code] === undefined ? 0 : money(sumDelta[code]);
   const pCed = Number(c.proportionCed || 0);
   const pRe = Number(c.proportionRe || 0);
+  const isCpexCcv = up(contractCodeById[Number(c.contractId)]) === 'CPEXCV';
+  const premiumBase = Number(c.premium || 0);
+  const premiumPCed = isCpexCcv && premiumBase !== 0
+    ? Number(c.premiumCedant || 0) / premiumBase : pCed;
+  const premiumPRe = isCpexCcv && premiumBase !== 0
+    ? Number(c.premiumRe || 0) / premiumBase : pRe;
   const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
   const commissionRate = Number(c.premium) === 0 ? 0 : commissionBase / Number(c.premium);
   const counts = sums[code] === true;
   const lineDv = dv;
   const linePv = pv;
   // La variacion final incluye el recargo/descuento aplicado a la cobertura.
-  const cedant = money(lineDv * pCed);
-  const re = money(lineDv * pRe);
+  const cedant = money(lineDv * premiumPCed);
+  const re = money(lineDv * premiumPRe);
   const commission = money(lineDv * commissionRate);
   const nonTechnical = money(lineDv - cedant - re);
   grp.rows.push({

@@ -1,12 +1,23 @@
 USE sis11
 GO
 
-SELECT id, contractId, changeId, cover, sumInsured, premium, premiumType
-		, lineId, sumInsuredCedant, premiumCedant, sumInsuredRe, premiumRe, proportionCed, proportionRe
-		, comissionCedant , tax , overwritten, coSumInsured, coPremium
-FROM Cession
-WHERE lifePolicyId = 4136
-ORDER BY overwritten desc, id
+SELECT c.id, c.contractId, c.changeId, c.cover, c.sumInsured, c.premium, c.premiumType
+		, c.lineId, c.sumInsuredCedant, c.premiumCedant, c.sumInsuredRe, c.premiumRe, c.proportionCed, c.proportionRe
+		, c.comissionCedant , c.tax , c.overwritten, c.coSumInsured, c.coPremium
+FROM Cession c
+INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
+WHERE c.lifePolicyId = 4103
+AND c.coverageCode = '112'
+ORDER BY c.overwritten desc, c.id
+
+SELECT c.id, c.contractId, c.changeId, c.cover, c.premium, c.premiumType
+		, c.lineId, c.premiumRe, c.proportionCed, c.proportionRe
+		, c.comissionCedant , c.tax , c.overwritten, c.coSumInsured, c.coPremium
+FROM Cession c
+INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
+WHERE c.lifePolicyId = 4105
+AND c.coverageCode = '112'
+ORDER BY c.overwritten desc, c.id
 
 select id, code, originalPolicyId, version, policyVersion, originalPolicyId, originalStart from LifePolicy where code = 'IN-GL-000722'
 
@@ -21,3 +32,4 @@ WHERE pol.originalPolicyId IS NOT NULL
 AND pol.originalPolicyId > 0 
 AND NOT EXISTS (       SELECT 1       FROM RenewalBatchPolicies rb       WHERE rb.policyId = pol.originalPolicyId   )
 ORDER BY pol.id DESC;
+
