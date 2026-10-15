@@ -204,6 +204,7 @@ async function saveChanges() {
   try{
   
     showLoading("Actualizando...");
+    sincronizarParticipacionesDesdeFormulario();
     //Validar totales distribuidos
     const valida = validaTotales();
     if(!valida) return;
@@ -547,6 +548,7 @@ async function addCessions(newCessions){
   let isOk = true;
 
   const newSaveCessions = [];
+  const pendingParticipants = [];
   
   const ordenadas = [...newCessions].sort((a, b) => {
 
@@ -562,9 +564,14 @@ async function addCessions(newCessions){
   
   for (let cession of ordenadas) {
 
+    const participants = Array.isArray(cession.Participants)
+      ? cession.Participants.map(participant => ({ ...participant }))
+      : [];
+    const cessionToSave = { ...cession, Participants: [] };
+
     const resultado = await me.exe("RepoCession", {
       operation: "ADD",
-      entity: cession
+      entity: cessionToSave
     });
       
     if (!resultado.ok) {
@@ -575,8 +582,71 @@ async function addCessions(newCessions){
       isOk = false;
       break; // corta completamente
     }
-    newSaveCessions.push(resultado.outData[0]);
-  } 
+
+    const savedCession = resultado.outData[0];
+    const savedCessionId = Number(savedCession && savedCession.id) || 0;
+    if (savedCessionId > 0 && participants.length > 0) {
+      const normalizedParticipants = participants.map(participant => ({
+        ...participant,
+        id: 0,
+        cessionId: savedCessionId,
+        split: redondear(participant.split, 6, true),
+        Broker: null
+      }));
+      pendingParticipants.push(...normalizedParticipants);
+      savedCession.Participants = normalizedParticipants;
+    }
+    newSaveCessions.push(savedCession);
+  }
+
+  if (isOk && pendingParticipants.length > 0) {
+    const sqlNumber = (value, decimals = 6) => {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "0";
+      return String(Number(number.toFixed(decimals)));
+    };
+    const sqlText = value => value === null || value === undefined || value === ""
+      ? "NULL"
+      : `N'${String(value).replace(/'/g, "''")}'`;
+    const sqlNullableNumber = value => value === null || value === undefined || value === ""
+      ? "NULL"
+      : sqlNumber(value);
+
+    const inserts = pendingParticipants.map(participant => `INSERT INTO [CessionPart]
+      ([cessionId], [contactId], [lineId], [split], [sumInsured], [premium], [name],
+       [liquidationId], [currency], [commission], [tax], [brokerId], [reserve], [fee])
+      VALUES (
+        ${Number(participant.cessionId) || 0},
+        ${Number(participant.contactId) || 0},
+        ${sqlText(participant.lineId)},
+        ${sqlNumber(participant.split)},
+        ${sqlNumber(participant.sumInsured)},
+        ${sqlNumber(participant.premium)},
+        ${sqlText(participant.name)},
+        ${sqlNullableNumber(participant.liquidationId)},
+        ${sqlText(participant.currency)},
+        ${sqlNumber(participant.commission)},
+        ${sqlNumber(participant.tax)},
+        ${sqlNullableNumber(participant.brokerId)},
+        ${sqlNumber(participant.reserve)},
+        ${sqlNumber(participant.fee)}
+      );`).join("\n");
+
+    const participantsResult = await me.exe("DoQuery", {
+      sql: `SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+${inserts}
+COMMIT TRANSACTION;`
+    });
+
+    if (!participantsResult || participantsResult.ok === false) {
+      mostrarNotificacion(
+        `No se pudo guardar los aceptantes: ${participantsResult && participantsResult.msg || "Error"}`,
+        "warning"
+      );
+      isOk = false;
+    }
+  }
   
   return { isOk: isOk, newSaveCessions: newSaveCessions};
 }  
@@ -1085,11 +1155,42 @@ async function loadCessions(){
     }
   }
 
+  // RepoCession puede devolver Participants con una conversión numérica que
+  // pierde precisión. CessionPart soporta 6 decimales, por lo que se carga
+  // explícitamente y se usa como fuente del porcentaje del aceptante.
+  await cargarParticipantesPrecisos();
+
   if(cessions.length <= 0)
     mostrarNotificacion(`No existe reaseguro en la póliza, por favor asegúrese de cotizar primero la póliza`, "warning");
 
   gridData = mapCessionsToGrid(cessions);
 
+}
+
+async function cargarParticipantesPrecisos() {
+  const cessionIds = cessions
+    .map(cession => Number(cession && cession.id) || 0)
+    .filter(id => id > 0);
+  if (cessionIds.length === 0) return;
+
+  const response = await me.exe("RepoCessionPart", {
+    operation: "GET",
+    filter: `cessionId in (${cessionIds.join(",")})`
+  });
+  if (!response || response.ok === false || !Array.isArray(response.outData)) return;
+
+  const participantsByCession = response.outData.reduce((groups, participant) => {
+    const cessionId = Number(participant && participant.cessionId) || 0;
+    if (cessionId <= 0) return groups;
+    if (!groups[cessionId]) groups[cessionId] = [];
+    groups[cessionId].push(participant);
+    return groups;
+  }, {});
+
+  cessions.forEach(cession => {
+    const participants = participantsByCession[Number(cession && cession.id) || 0];
+    if (participants) cession.Participants = participants;
+  });
 }
 
 function filterCurrentCessions(cessions, lifePolicyId) {
@@ -1221,11 +1322,13 @@ async function loadDataEntities(){
   await loadCoCessions();
   await listarCoaseguradores();
 
-  let RepoCoverages = await me.exe("LoadEntities", { entity: "LifeCoverage", fields: "id, code, limit, basePremium, premium", filter: `lifePolicyId = ${policyId}`, size: 500, page: 0 });
-  if (!RepoCoverages?.ok) {
-    // Compatibilidad con instalaciones donde premium no está disponible en la proyección.
-    RepoCoverages = await me.exe("LoadEntities", { entity: "LifeCoverage", fields: "id, code, limit, basePremium", filter: `lifePolicyId = ${policyId}`, size: 500, page: 0 });
-  }
+  const RepoCoverages = await me.exe("LoadEntities", {
+    entity: "LifeCoverage",
+    fields: "id, code, limit, basePremium",
+    filter: `lifePolicyId = ${policyId}`,
+    size: 500,
+    page: 0
+  });
   coverages = Array.isArray(RepoCoverages?.outData)
     ? RepoCoverages.outData
     : Array.isArray(RepoCoverages?.data)
@@ -1290,6 +1393,8 @@ function preserveDistribution(){
 ///////////////////////////////////////////////////////////
 
 async function guardarAceptantes(){
+  sincronizarParticipacionesDesdeFormulario();
+
   const lineasInvalidas = reaseguradoresData
     .map((r, index) => ({ r, index }))
     .filter(({ r }) => Number(r.split ?? 0) <= 0);
@@ -1342,52 +1447,99 @@ async function guardarAceptantes(){
 
 }
 
-async function addAceptantes(cessions, aceptantes) {
-  let isOk = true;
+function sincronizarParticipacionesDesdeFormulario() {
+  const $rows = $("#gridReaseguradores tbody tr");
+  if (!$rows.length) return;
 
-  for (let ces of cessions) {
-    const query = `DELETE p FROM CessionPart p WHERE cessionId in (${ces.id});`
-          
-    const resultado = await me.exe("DoQuery", { sql: query });  
-    if(!resultado.ok){
-      isOk = false;
-      break;
-    }      
-  }
-  
-  if(!isOk) return isOk;
+  $rows.each(function () {
+    const index = Number($(this).data("index"));
+    const participant = reaseguradoresData[index];
+    const input = $(this).find("input.percent").get(0);
+    if (!participant || !input) return;
 
-  //Si no hay nada que registrar continuamos
-  if(aceptantes.length == 0)
-    return true;
-
-  //Registramos el detalle
-  for (let part of aceptantes) {
-    // Solo se persiste brokerId. El objeto Broker embebido haria que el
-    // repositorio intentara insertar nuevamente el Contact asociado.
-    const entity = {
-      ...part,
-      id: 0,
-      Broker: null
-    };
-
-    const resultado = await me.exe("RepoCessionPart", {
-      operation: "ADD",
-      entity
-    });
-      
-    if (!resultado.ok) {
-      mostrarNotificacion(
-        `No se pudo guardar los aceptantes: ${resultado.msg}`,
-        "warning"
-      );
-      isOk = false;
-      break; // corta completamente
+    const rawValue = String(input.value ?? "").replace(/,/g, "").trim();
+    const parsedValue = Number(rawValue);
+    if (Number.isFinite(parsedValue)) {
+      participant.split = redondear(parsedValue, 6, true);
     }
-  } 
+  });
 
-  return isOk;
- 
+  // El guardado principal trabaja con cessions, no con reaseguradoresData.
+  // Propagamos el valor editado para que no vuelva a usar el porcentaje anterior.
+  if (tipoContratoSelected) {
+    cessions.forEach(cession => {
+      if (String(cession && cession.lineId || "").trim().toUpperCase()
+        !== String(tipoContratoSelected || "").trim().toUpperCase()) return;
+
+      (cession.Participants || []).forEach(participant => {
+        const currentParticipant = reaseguradoresData.find(item =>
+          Number(item && item.contactId) === Number(participant && participant.contactId)
+        );
+        if (currentParticipant) {
+          participant.split = redondear(currentParticipant.split, 6, true);
+        }
+      });
+    });
+  }
+}
+
+async function addAceptantes(cessions, aceptantes) {
+  const cessionIds = cessions
+    .map(cession => Number(cession && cession.id) || 0)
+    .filter(id => id > 0);
+  if (cessionIds.length === 0) return false;
+
+  const sqlNumber = (value, decimals = 6) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "0";
+    return String(Number(number.toFixed(decimals)));
+  };
+  const sqlText = value => value === null || value === undefined || value === ""
+    ? "NULL"
+    : `N'${String(value).replace(/'/g, "''")}'`;
+  const sqlNullableNumber = value => value === null || value === undefined || value === ""
+    ? "NULL"
+    : sqlNumber(value);
+
+  const inserts = aceptantes.map(part => {
+    const cessionId = Number(part && part.cessionId) || 0;
+    if (!cessionIds.includes(cessionId)) return null;
+
+    return `INSERT INTO [CessionPart]
+      ([cessionId], [contactId], [lineId], [split], [sumInsured], [premium], [name],
+       [liquidationId], [currency], [commission], [tax], [brokerId], [reserve], [fee])
+      VALUES (
+        ${cessionId},
+        ${Number(part.contactId) || 0},
+        ${sqlText(part.lineId)},
+        ${sqlNumber(part.split)},
+        ${sqlNumber(part.sumInsured)},
+        ${sqlNumber(part.premium)},
+        ${sqlText(part.name)},
+        ${sqlNullableNumber(part.liquidationId)},
+        ${sqlText(part.currency)},
+        ${sqlNumber(part.commission)},
+        ${sqlNumber(part.tax)},
+        ${sqlNullableNumber(part.brokerId)},
+        ${sqlNumber(part.reserve)},
+        ${sqlNumber(part.fee)}
+      );`;
+  }).filter(Boolean);
+
+  const sql = `SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+DELETE FROM [CessionPart] WHERE [cessionId] IN (${cessionIds.join(",")});
+${inserts.join("\n")}
+COMMIT TRANSACTION;`;
+  const resultado = await me.exe("DoQuery", { sql });
+  if (!resultado || resultado.ok === false) {
+    mostrarNotificacion(
+      `No se pudo guardar los aceptantes: ${resultado && resultado.msg || "Error"}`,
+      "warning"
+    );
+    return false;
+  }
+  return true;
 }
 
 function redistribuirAceptantesPorCobertura(cessionCobs) {
@@ -1415,7 +1567,7 @@ function redistribuirAceptantesPorCobertura(cessionCobs) {
         cessionId: ces.id,
         contactId: r.contactId,
         name: r.name,
-        split: r.split, // mismo split
+        split: redondear(r.split, 6, true), // mismo split, conservando hasta 6 decimales
         sumInsured: redondear(ces.sumInsuredRe * (r.split / 100)),
         premium: redondear(r.premium * factorPr),
         commission: redondear(r.commission * factorPr),
@@ -1515,11 +1667,15 @@ function distribuyeAceptantes(newCessions) {
     ces.Participants.forEach(p => {
       p.id = 0;
       p.cessionId = 0;
+      p.split = redondear(p.split, 6, true);
       p.sumInsured = redondear(p.split / 100 * ces.sumInsuredRe);
       p.premium = redondear(p.split / 100 * ces.premiumRe);
       p.commission = redondear(p.split / 100 * ces.comissionCedant);
       p.tax = redondear(p.split / 100 * ces.tax);
     });
+
+    // Reconcile per-line rounding so participant totals match the cession exactly.
+    ajustarDiferenciasParticipantes(ces);
     
     if(ces.lineId.trim().toUpperCase() == "FAC" && ces.Participants.length == 0){
       ces.err = true;
@@ -1554,6 +1710,29 @@ function distribuyeAceptantes(newCessions) {
     }
   });
   
+}
+
+function ajustarDiferenciasParticipantes(ces) {
+  if (!Array.isArray(ces.Participants) || ces.Participants.length === 0) return;
+
+  const target = ces.Participants.find(participant => Number(participant.split) > 0)
+    || ces.Participants[0];
+  if (!target) return;
+
+  const total = resumirParticipants(ces.Participants);
+  const campos = [
+    ["sumInsured", ces.sumInsuredRe],
+    ["premium", ces.premiumRe],
+    ["commission", ces.comissionCedant],
+    ["tax", ces.tax]
+  ];
+
+  campos.forEach(([field, expected]) => {
+    const difference = redondear(Number(expected || 0) - Number(total[field] || 0));
+    if (difference !== 0) {
+      target[field] = redondear(Number(target[field] || 0) + difference);
+    }
+  });
 }
 
 function resumirParticipants(participants) {
@@ -1794,7 +1973,7 @@ function renderReaseguradores() {
     let val = reaseguradoresData[index][key] || 0;
 
     if (key === "split") {
-      input.value = formatearRedondeado(val,8);
+      input.value = formatearRedondeado(val,6);
       return;
     }
 
@@ -1930,7 +2109,9 @@ function agruparParticipantsCuotaParte(cessions, contrato) {
   const resultados = Object.values(resultado);
 
   resultados.forEach(acc => {
-    acc.split = redondear(acc.split || 0, 8);
+    // La participación de cada aceptante admite hasta 8 decimales.
+    // redondear() conserva 2 decimales por defecto, por eso se fuerza aquí.
+    acc.split = redondear(acc.split || 0, 6, true);
     acc.sumInsured = redondear(acc.sumInsured || 0);
     acc.premium = redondear(acc.premium || 0);
     acc.commission = redondear(acc.commission || 0);
@@ -2070,7 +2251,9 @@ function addParticipantsEvent() {
 function renderGrid() {
 
   const $tbody = $("#gridReaseguradores tbody");
+  const $table = $("#gridReaseguradores");
   $tbody.empty();
+  $table.find("tfoot").remove();
 
   reaseguradoresData.forEach((r, index) => {
 
@@ -2135,6 +2318,40 @@ function renderGrid() {
 
     $tbody.append(row);
   });
+
+  const totals = reaseguradoresData.reduce((acc, participant) => {
+    acc.split += Number(participant.split) || 0;
+    acc.sumInsured += Number(participant.sumInsured) || 0;
+    acc.premium += Number(participant.premium) || 0;
+    acc.commission += Number(participant.commission) || 0;
+    acc.tax += Number(participant.tax) || 0;
+    acc.saldoRea += Number(participant.saldoRea) || 0;
+    return acc;
+  }, {
+    split: 0,
+    sumInsured: 0,
+    premium: 0,
+    commission: 0,
+    tax: 0,
+    saldoRea: 0
+  });
+
+  const totalRow = $(`
+    <tfoot>
+      <tr class="reaseguradores-totales">
+        <td colspan="4" style="text-align:left;font-weight:600;">Totales</td>
+        <td style="text-align:right;font-weight:600;">${formatInput(redondear(totals.split, 6, true), "percent")}</td>
+        <td style="text-align:right;font-weight:600;">${formatInput(redondear(totals.sumInsured), "number")}</td>
+        <td style="text-align:right;font-weight:600;">${formatInput(redondear(totals.premium), "number")}</td>
+        <td style="text-align:right;font-weight:600;">${formatInput(redondear(totals.commission), "number")}</td>
+        <td style="text-align:right;font-weight:600;">${formatInput(redondear(totals.tax), "number")}</td>
+        <td style="text-align:right;font-weight:600;">${formatInput(redondear(totals.saldoRea), "number")}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  `);
+
+  $table.append(totalRow);
 }
 
 ///////////////////////////////////////////////////////////
@@ -2234,7 +2451,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
       // ===== PORCENTAJE 8 DECIMALES =====
       if (c.tipo === "percent8") {
 
-        const val = redondear(valor, 8);
+        const val = redondear(valor, 8, true);
 
         html = `
           <div style="${baseStyle}">
@@ -3097,7 +3314,7 @@ function renderResumen() {
 function calcularPorcentaje(prima, monto) {
     if (prima === 0) return 0; // evita división entre cero
     const porcentaje = (monto / prima) * 100;
-    return redondear(porcentaje, 8);
+    return redondear(porcentaje, 8, true);
 }
 
 function redondear(valor, decimales = 2, forzar = false) {  
@@ -3125,9 +3342,9 @@ function redondear(valor, decimales = 2, forzar = false) {
 
 function formatInput(value, type) {
   try {
-    let dec = type === "number" ? 2 : 8;
+    let dec = type === "number" ? 2 : (type === "percent" ? 6 : 8);
     value = parseFloat(String(value ?? "").replace(/,/g, "")) || 0;
-    value = redondear(value, dec);
+    value = redondear(value, dec, type !== "number");
     return formatearNumero(value);
   } catch (error) {
     return value;
@@ -3159,7 +3376,7 @@ function formatearNumero(valor) {
 }
 
 function formatearRedondeado(valor, decimales = 2) {
-  return formatearNumero(redondear(valor, decimales));
+  return formatearNumero(redondear(valor, decimales, decimales > 2));
 }
 
 function mostrarNotificacion(msg, tipo) {

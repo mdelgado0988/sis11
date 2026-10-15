@@ -1293,16 +1293,41 @@
 
     accountMovementsLoadedPolicyRef.current = id;
     setAccountMovementsLoading(true);
-    exe('RepoTransfer', {
+    const transferRequest = exe('RepoTransfer', {
       operation: 'GET',
-      filter: `([Transfer].lifePolicyId = ${id} OR EXISTS (SELECT 1 FROM AllocationInstallment ai WHERE ai.allocationId = [Transfer].allocationId AND ai.lifePolicyId = ${id}) OR EXISTS (SELECT 1 FROM ClaimPayment cp WHERE cp.id = [Transfer].claimPaymentId AND cp.lifePolicyId = ${id})) AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1`,
+      filter: `([Transfer].lifePolicyId = ${id} OR EXISTS (SELECT 1 FROM AllocationInstallment ai WHERE ai.allocationId = [Transfer].allocationId AND ai.lifePolicyId = ${id}) OR EXISTS (SELECT 1 FROM ClaimPayment cp WHERE cp.id = [Transfer].claimPaymentId AND cp.lifePolicyId = ${id})) AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1 AND (ISNULL([Transfer].[isExternal], 0) = 1 OR (ISNULL([Transfer].[isExternal], 0) = 0 AND ([Transfer].[transactionCode] <> N'PREMIUMPAY' OR [Transfer].[transactionCode] IS NULL OR [Transfer].[allocationId] IS NULL OR NOT EXISTS (SELECT 1 FROM [Transfer] externalTransfer WHERE externalTransfer.[allocationId] = [Transfer].[allocationId] AND externalTransfer.[status] in (1,2) AND externalTransfer.[executed] = 1 AND externalTransfer.[isExternal] = 1))))`,
       include: ['Allocation', 'Allocation.InstallmentPremiums', 'TransferWorkspace', 'IncomeType'],
       noTracking: true
-    }).then(response => {
-      if (!response || response.ok === false) {
-        throw new Error(response && response.msg ? response.msg : t('Account movements could not be loaded.'));
+    });
+    const transitRequest = exe('ExeChain', {
+      chain: 'cmdGetTransitMovs',
+      context: JSON.stringify({
+        page: 1,
+        size: 100,
+        policyId: id,
+        onlyWithBalance: false,
+        cancellations: false
+      })
+    }).catch(error => ({ ok: false, msg: error && error.message ? error.message : '' }));
+    Promise.all([transferRequest, transitRequest]).then(([transferResponse, transitResponse]) => {
+      if (!transferResponse || transferResponse.ok === false) {
+        throw new Error(transferResponse && transferResponse.msg ? transferResponse.msg : t('Account movements could not be loaded.'));
       }
-      setAccountMovementRows(getRows(response));
+      let transitRows = [];
+      if (transitResponse && transitResponse.ok !== false) {
+        let transitPayload = transitResponse.outData;
+        if (typeof transitPayload === 'string') {
+          try { transitPayload = JSON.parse(transitPayload); } catch (error) { transitPayload = null; }
+        }
+        if (transitPayload && transitPayload.ok !== false && Array.isArray(transitPayload.data)) {
+          transitRows = transitPayload.data;
+        } else {
+          message.warning(t('Transit account movements could not be loaded.'));
+        }
+      } else {
+        message.warning(t('Transit account movements could not be loaded.'));
+      }
+      setAccountMovementRows(getRows(transferResponse).concat(transitRows));
     }).catch(error => {
       accountMovementsLoadedPolicyRef.current = null;
       setAccountMovementRows([]);
@@ -1481,6 +1506,43 @@
     (total, installment) => total + getInstallmentPaidAmount(installment),
     0
   );
+  const installmentDisplayRows = regularInstallmentRows.reduce((groups, installment) => {
+    const dueDate = text(installment && (installment.dueDate || installment.normalDueDate || installment.coveredUntil));
+    const dueDateKey = dueDate ? dueDate.slice(0, 10) : '';
+    const installmentNumber = installment && installment.numberInYear || '';
+    const contractYear = installment && installment.contractYear || '';
+    const concept = text(installment && installment.concept);
+    const groupKey = [dueDateKey, installmentNumber, contractYear, concept].join('|');
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        ...installment,
+        id: String(installment && installment.id || ''),
+        installmentIds: [installment && installment.id].filter(Boolean),
+        minimum: 0,
+        expected: 0,
+        payed: 0,
+        paid: 0,
+        isInstallmentGroup: false
+      };
+    }
+    const group = groups[groupKey];
+    group.minimum += firstNumber(installment, ['minimum', 'expected'], 0);
+    group.expected += firstNumber(installment, ['expected', 'minimum'], 0);
+    group.payed += firstNumber(installment, ['payed', 'paid'], 0);
+    group.paid += firstNumber(installment, ['paid', 'payed'], 0);
+    if (installment && installment.id && !group.installmentIds.includes(installment.id)) {
+      group.installmentIds.push(installment.id);
+    }
+    group.isInstallmentGroup = group.installmentIds.length > 1;
+    group.id = group.installmentIds.join(', ');
+    const paymentDate = installment && (installment.payedDate || installment.paymentDate);
+    if (paymentDate && (!group.payedDate || new Date(paymentDate) > new Date(group.payedDate))) {
+      group.payedDate = paymentDate;
+      group.paymentDate = paymentDate;
+    }
+    return groups;
+  }, {});
+  const groupedRegularInstallmentRows = Object.values(installmentDisplayRows);
   // The search query includes payments linked to cancellation installments. Reconcile only the
   // cancellation row so the grid totals remain the sum of the rows instead of an overridden total.
   const cancellationGroupPaidAmount = hasSearchPaid && cancellationInstallmentRows.length > 0
@@ -1499,8 +1561,8 @@
     cancellationAmount: cancellationGroupCancelledAmount
   } : null;
   const displayedInstallmentRows = (showCancelledInstallments
-    ? regularInstallmentRows
-    : regularInstallmentRows.filter(installment => !(installment && installment.cancellationDate)))
+    ? groupedRegularInstallmentRows
+    : groupedRegularInstallmentRows.filter(installment => !(installment && installment.cancellationDate)))
     .concat(showCancelledInstallments && cancellationGroupRow ? [cancellationGroupRow] : []);
   const hasCancelledInstallments = cancelledInstallmentRows.length > 0
     || (policyInfo && policyInfo.active === false);
@@ -2138,15 +2200,17 @@
       const allocation = movement.Allocation || movement.allocation
         || group && (group.Allocation || group.allocation);
       const movementId = Number(movement.id || group && group.id || 0);
-      if (result.some(row => Number(row.transferId) === movementId && movementId > 0)) return;
+      const transferId = Number(movement.transferId || 0) || movementId;
+      if (result.some(row => Number(row.transferId) === transferId && transferId > 0)) return;
+      const movementConcept = getPaymentReference(group, movement);
       result.push({
-        key: `account-${movementId || groupIndex}-${movementIndex}`,
+        key: `account-${transferId || movementId || groupIndex}-${movementIndex}`,
         date: workspace && (workspace.date || workspace.Date) || movement.date || group && group.date,
-        concept: getPaymentReference(group, movement),
+        concept: movementConcept !== '-' ? movementConcept : (text(movement.transaction || group && group.transaction) || '-'),
         transactionCode: text(movement.transactionCode || group && group.transactionCode) || '-',
         source: text(movement.sourceName || group && group.sourceName) || '-',
         destination: text(movement.destinationName || group && group.destinationName) || '-',
-        transferId: movementId || '-',
+        transferId: transferId || '-',
         allocationId: allocation && allocation.id || movement.allocationId || group && group.allocationId || '-',
         amount: number(movement.amount) || number(group && group.amount),
         currency: text(movement.currency || group && group.currency) || '-',

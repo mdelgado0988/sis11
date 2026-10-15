@@ -119,6 +119,7 @@ function normalizeInput(source) {
     size: Math.min(Math.max(toPositiveInteger(value.size) || 15, 1), 100),
     holderId: toPositiveInteger(value.holderId),
     transferId: toPositiveInteger(value.transferId),
+    policyId: toPositiveInteger(value.policyId),
     policy: normalizeText(value.policy),
     accountName: normalizeText(value.accountName),
     accountCode: normalizeText(value.accountCode),
@@ -135,6 +136,10 @@ function normalizeInput(source) {
 
 function buildFilter(input) {
   const conditions = ["a.[type] = 'TRANSIT'"];
+
+  if (input.policyId > 0) {
+    conditions.push(`a.[lifePolicyId] = ${input.policyId}`);
+  }
 
   if (input.onlyWithBalance) {
     conditions.push(`ROUND((

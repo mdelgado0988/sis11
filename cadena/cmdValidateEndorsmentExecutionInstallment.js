@@ -48,17 +48,25 @@ try {
     return { ok: false, msg: "No hay cuotas para validar" };
   }
 
+  const cuotaNegativaDelCambio = cuotasBase.find(q =>
+    Number(q.changeId || 0) === Number(change.id) &&
+    Number(q.minimum || 0) < -0.01
+  );
+
   const totalBill = n2(bill?.annualTotal ?? bill?.anualTotal ?? 0);
   const premiumBill = n2(bill?.anualPremium ?? 0);
   const taxBill = n2(bill?.tax ?? 0);
+  const discriminator = String(change.Discriminator || "").trim().toUpperCase();
+  const conceptoDiferencia = ["LOADINGCHANGE", "CHANGELOADING"].includes(discriminator)
+    ? "Descuento (Loadings)"
+    : "Prima";
 
-  const cuotasPagadas = cuotasBase.filter(q => Number(q.payed || 0) > 0);
   const cuotasPendientes = cuotasBase.filter(q =>
     Number(q.minimum || 0) > Number(q.payed || 0)
   );
 
   const totalPagado = n2(
-    cuotasPagadas.reduce((sum, x) => sum + (Number(x.payed) || 0), 0)
+    cuotasBase.reduce((sum, x) => sum + (Number(x.payed) || 0), 0)
   );
 
   const totalCuotasBase = n2(
@@ -71,12 +79,13 @@ try {
     cuotasDistribuye = distribuirMontoEnCuotas(cuotasDistribuye, premiumBill, taxBill);
   } else {
     const diferencia = n2(totalBill - totalPagado);
-    if (Math.abs(diferencia) > 0.01) {
+    if (Math.abs(diferencia) > 0.01 && !cuotaNegativaDelCambio) {
       cuotasDistribuye.push(crearCuotaDiferencia({
         template: cuotasCambio[0] || cuotasBase[0],
         diferencia,
         premiumBill,
-        taxBill
+        taxBill,
+        concepto: conceptoDiferencia
       }));
     }
   }
@@ -287,7 +296,10 @@ function normalizeDistributionTotals(cuotas, totalBill) {
 
     totalActual = n2(totalActual + q.minimum);
 
-    if (Number(q.payed || 0) <= 0.01 || Math.abs(n2(q.minimum) - n2(q.payed)) > 0.01) {
+    const saldoPendiente = n2(q.minimum - q.payed);
+    const esCuotaNegativa = n2(q.minimum) < 0;
+    if (!esCuotaNegativa &&
+        (Number(q.payed || 0) <= 0.01 || Math.abs(saldoPendiente) > 0.01)) {
       adjustableIndexes.push(index);
     }
   });
@@ -346,6 +358,12 @@ function normalizePayPlanDetails(payPlan, details) {
 
   if (!normalized.length) {
     return normalized;
+  }
+
+  const payed = n2(payPlan?.payed ?? 0);
+  const pendingAmount = n2((payPlan?.minimum ?? 0) - payed);
+  if (Math.abs(payed) > 0.01 && Math.abs(pendingAmount) <= 0.01) {
+    return [];
   }
 
   const targetTotal = n2((payPlan?.minimum ?? 0) - (payPlan?.payed ?? 0));
@@ -758,7 +776,7 @@ function cloneCuota(x) {
   };
 }
 
-function crearCuotaDiferencia({ template, diferencia, premiumBill, taxBill }) {
+function crearCuotaDiferencia({ template, diferencia, premiumBill, taxBill, concepto }) {
   const base = cloneCuota(template || {});
   const nuevoTotal = n2(premiumBill + taxBill);
   const proporcionPrima = nuevoTotal !== 0 ? premiumBill / nuevoTotal : 0;
@@ -777,6 +795,7 @@ function crearCuotaDiferencia({ template, diferencia, premiumBill, taxBill }) {
     expected: n2(diferencia),
     dueAmount: n2(diferencia),
     pendingAmount: n2(diferencia),
+    concept: concepto || base.concept || "Prima",
     PayPlanDetail: [
       {
         amount: prima,
