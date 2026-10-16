@@ -226,12 +226,12 @@ for (var coverageKey in coveragesThatSum) {
 var sumCoverageParts = [];
 base = base.replace(
   "CASE WHEN s.premiumType='NEW' THEN 1 ELSE 0 END ORDER BY s.ordId) AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.contractId, s.coverageId, s.lineId ORDER BY s.ordId) AS genNo,",
-  "CASE WHEN s.premiumType='NEW' THEN 1 ELSE 0 END ORDER BY s.ordId) AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.coverageId, s.changeId, s.anniversaryId, s.premiumType ORDER BY s.ordId) AS premiumNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.contractId, s.coverageId, s.lineId ORDER BY s.ordId) AS genNo,"
+  "CASE WHEN s.premiumType='NEW' THEN 1 ELSE 0 END ORDER BY s.ordId) AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, COALESCE(CONVERT(varchar(100), s.coverageId), UPPER(LTRIM(RTRIM(ISNULL(s.cover,''))))), s.changeId, s.anniversaryId, s.premiumType ORDER BY s.ordId) AS premiumNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.contractId, s.coverageId, s.lineId ORDER BY s.ordId) AS genNo,"
 );
 if (base.indexOf("AS premiumNo,") < 0) {
   base = base.replace(
     "AS newNo,",
-    "AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.coverageId, s.changeId, s.anniversaryId, s.premiumType ORDER BY s.ordId) AS premiumNo,"
+    "AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, COALESCE(CONVERT(varchar(100), s.coverageId), UPPER(LTRIM(RTRIM(ISNULL(s.cover,''))))), s.changeId, s.anniversaryId, s.premiumType ORDER BY s.ordId) AS premiumNo,"
   );
 }
 for (var groupKey in coverageGroups) {
@@ -251,6 +251,20 @@ base = base.replace(
   'c.sumInsured, c.proportionRe,',
   'c.sumInsured, c.premium, c.proportionRe, CASE WHEN @@SUMACOB@@ THEN 1 ELSE 0 END AS sumaIncluida,'
 );
+/* La prima suscrita se deduplica por cobertura. Si una fuente legacy no trae
+   coverageId, el nombre de cobertura mantiene la misma agrupacion. */
+base = base.replace(
+  'c.coverageId, c.lineId, c.LoB AS lob,',
+  'c.coverageId, c.cover, c.lineId, c.LoB AS lob,'
+);
+base = base.replace(
+  'r.id AS ordId, r.id, r.lifePolicyId, r.contractId, r.coverageId, r.lineId, r.lob,',
+  'r.id AS ordId, r.id, r.lifePolicyId, r.contractId, r.coverageId, r.cover, r.lineId, r.lob,'
+);
+base = base.replace(
+  "w.lineId, MAX(rr.lob), 'CHANGE',",
+  "MAX(rr.cover), w.lineId, MAX(rr.lob), 'CHANGE',"
+);
 base = base.replace('r.dstart, r.dend, r.isCanc, 0 AS isTerm,', 'r.dstart, r.dend, r.premium, r.sumaIncluida, r.isCanc, 0 AS isTerm,');
 base = base.replace('MAX(rr.dstart), MAX(rr.dend), 0 AS isCanc, 1 AS isTerm,', 'MAX(rr.dstart), MAX(rr.dend), 0, MAX(rr.sumaIncluida), 0 AS isCanc, 1 AS isTerm,');
 base = base.replace('o.anniversaryId, o.contactId, o.holderName,', 'o.anniversaryId, o.sumaIncluida, o.premiumNo, o.premium, o.contactId, o.holderName,');
@@ -262,7 +276,7 @@ base = base.replace(
   'o.anniversaryId, o.sumaIncluida, o.premium, o.contactId,',
   'o.anniversaryId, o.sumaIncluida, o.premiumNo, o.premium, o.contactId,'
 );
-base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    /* Prima suscrita: prima de Cession una sola vez por cobertura; en un retiro terminal\n       la fila sintetica no trae premium, por lo que se usa su variacion calculada. */\n    SUM(CASE WHEN d.isTerm = 1 THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0)\n             ELSE 0 END) AS primaSuscrita100,');
+base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    /* Emisiones y aniversarios toman una prima por cobertura. Todo endoso\n       muestra la variacion efectiva para no confundirla con la prima final. */\n    SUM(CASE WHEN d.isTerm = 1 THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.changeId IS NOT NULL THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0)\n             ELSE 0 END) AS primaSuscrita100,');
 base = base.replace('SUM(d.dSiCed) AS sumaRetenida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiCed ELSE 0 END) AS sumaRetenida');
 base = base.replace('SUM(d.dSiRe)  AS sumaCedida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiRe ELSE 0 END) AS sumaCedida');
 base = base.replace("SUM(CASE WHEN d.bucket='CP'  THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='CP' THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte");

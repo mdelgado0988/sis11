@@ -52,6 +52,15 @@ const cfgCoberturaReaseguro = [
   { lob: 84, name: "cfgCoberturaProductoReaFianza" }
 ]
 
+function numeroDe(valor) {
+  if (valor === null || valor === undefined || valor === "") return 0;
+  if (typeof valor === "number") return Number.isFinite(valor) ? valor : 0;
+
+  const texto = String(valor).trim().replace(/,/g, "");
+  const numero = Number(texto);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
 // ===== Datos de prueba =====
 let aceptantes = [
   { id: 1, nombre: "Reaseguradora A" }
@@ -542,6 +551,40 @@ async function cleanCessions() {
 
   return resultado;
   
+}
+
+async function cleanCessionsBeforeApplyContract() {
+  const id = Number(policyId);
+  if (!Number.isFinite(id) || id <= 0) {
+    return { ok: false, msg: "Póliza inválida" };
+  }
+
+  const resultado = await me.exe("DoQuery", {
+    sql: `SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+DELETE cp
+FROM CessionPart cp
+INNER JOIN Cession c ON c.id = cp.cessionId
+WHERE c.lifePolicyId = ${id};
+DELETE FROM Cession WHERE lifePolicyId = ${id};
+COMMIT TRANSACTION;`
+  });
+
+  return resultado;
+}
+
+function isPolicyIssuedForApplyContract() {
+  const active = policy?.active;
+  const activeDate = policy?.activeDate;
+  const hasIssueDate = activeDate !== null
+    && activeDate !== undefined
+    && String(activeDate).trim() !== "";
+
+  return hasIssueDate
+    || active === true
+    || active === 1
+    || String(active).toLowerCase() === "true"
+    || String(active) === "1";
 }
 
 async function addCessions(newCessions){
@@ -1307,7 +1350,7 @@ async function loadConfigCoverages(){
 
 async function loadDataEntities(){
 
-  const RepoPolicy = await me.exe("LoadEntity", { entity: "LifePolicy", fields: "lob, productCode, id, activeDate, coinsurance, currency", filter: `id = ${policyId}` });
+  const RepoPolicy = await me.exe("LoadEntity", { entity: "LifePolicy", fields: "lob, productCode, id, active, activeDate, coinsurance, currency", filter: `id = ${policyId}` });
   policy = RepoPolicy.outData;
 
   if(!RepoPolicy)
@@ -1701,6 +1744,18 @@ function distribuyeAceptantes(newCessions) {
   newCessions.forEach(ces => {
     ces.err = false;
     ces.msg = "";
+
+    // RET no tiene aceptantes. Al convertir una distribucion FAC a retencion
+    // pueden quedar participantes heredados en memoria; no deben validarse ni
+    // persistirse si la cesion no conserva participacion reasegurada.
+    const tieneCesionReaseguro = numeroDe(ces.proportionRe) > 0 ||
+      numeroDe(ces.sumInsuredRe) !== 0 ||
+      numeroDe(ces.premiumRe) !== 0;
+
+    if (!tieneCesionReaseguro) {
+      ces.Participants = [];
+      return;
+    }
   
     ces.Participants.forEach(p => {
       p.id = 0;
@@ -1726,6 +1781,14 @@ function validarAceptantesCession(cession, participants) {
   const toleranciaImportes = 0.005;
   const toleranciaSplit = 0.000001;
   const lineId = String(cession && cession.lineId || "").trim().toUpperCase();
+
+  const tieneCesionReaseguro = numeroDe(cession?.proportionRe) > 0 ||
+    numeroDe(cession?.sumInsuredRe) !== 0 ||
+    numeroDe(cession?.premiumRe) !== 0;
+
+  if (!tieneCesionReaseguro) {
+    return { err: false, msg: "" };
+  }
 
   if (lineId === "FAC" && rows.length === 0) {
     return { err: true, msg: "Debe registrar los aceptantes de la distribución FAC" };
@@ -3011,6 +3074,17 @@ function eventosGrid() {
   $(document).off("click", "#btnRecalcular")
     .on("click", "#btnRecalcular", async () => {
       try {
+        if (isPolicyIssuedForApplyContract()) {
+          mostrarNotificacion("No se puede aplicar el contrato porque la póliza ya está emitida.", "warning");
+          return;
+        }
+
+        const limpieza = await cleanCessionsBeforeApplyContract();
+        if (!limpieza?.ok) {
+          mostrarNotificacion(`No se pudieron limpiar las cesiones anteriores: ${limpieza?.msg || "Error"}`, "warning");
+          return;
+        }
+
         const requiereRecotizar = Array.isArray(coCessions) && coCessions.length > 0;
         if (requiereRecotizar) {
           mostrarNotificacion("Existe al menos un coasegurador; es necesario recotizar la póliza. Se ejecutará QuotePolicy.", "warning");
