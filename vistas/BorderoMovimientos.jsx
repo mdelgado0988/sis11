@@ -118,6 +118,10 @@
     const kb = k.toLowerCase();
     /* 'undefined' y 'null' COMO TEXTO son ausencia de dato, no un tipo de movimiento. */
     if (!k || kb === 'undefined' || kb === 'null') return SIN_DESCRIPCION;
+    const tipoNormalizado = kb.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (tipoNormalizado === 'cancelacion' || tipoNormalizado === 'cancellationchange' || tipoNormalizado === 'cancellation') {
+      return 'Cancelación';
+    }
     /* 1 - t(), aceptado solo si devolvio una traduccion real y no la clave. */
     let r1 = '';
     try {
@@ -135,6 +139,16 @@
 
   function etiquetaMovimiento(r){
     return traducirTipo(r ? r.tipo : '');
+  }
+
+  function normalizarFilaMovimiento(r){
+    if (!r) return r;
+    const raw = r.tipo === null || r.tipo === undefined ? '' : String(r.tipo).trim();
+    const normalizado = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (normalizado === 'cancelacion' || normalizado === 'cancellationchange' || normalizado === 'cancellation') {
+      return Object.assign({}, r, { tipo: 'CANCELACION' });
+    }
+    return r;
   }
   function claveMovimiento(r){
     return [r.poliza, r.id, r.movKey, fecha(r.fechaEmision), r.cserie].join('|');
@@ -194,6 +208,14 @@
      nada: la grilla se desbordaba igual. 5.200 -> 4.680 px = -10,00% exacto, sin eliminar
      ni reordenar ninguna de las 34 columnas. */
   const ANCHO_TOTAL = COLUMNAS.reduce(function(a, c){ return a + c.w; }, 0);
+  const COLUMNAS_GRUPADAS = COLUMNAS.slice(0, 12).concat([
+    { t: 'Suma', children: COLUMNAS.slice(12, 18) },
+    { t: 'Primas', children: COLUMNAS.slice(18, 25) },
+    { t: 'Comisión', children: COLUMNAS.slice(25, 29) },
+    { t: 'Impuesto', children: COLUMNAS.slice(29, 31) },
+    { t: 'Saldos', children: COLUMNAS.slice(31, 34) },
+    COLUMNAS[34]
+  ]);
   const COLUMNAS_REASEGURADORES = [
     { t:'id', c:'id', w:75, tipo:'txt', fixed:'left' }, { t:'Reasegurador', c:'reasegurador', w:220, tipo:'ellipsis' },
     { t:'Corredor', c:'corredor', w:190, tipo:'ellipsis' }, { t:'Ramo', c:'ramo', w:190, tipo:'ramo' },
@@ -215,8 +237,11 @@
        corto, y como la vista recorta lo que sobra, el paginador quedaba debajo del borde
        inferior. Medido: 922>900, 790>768, 622>600 — el mismo excedente en las tres, o sea
        que no depende del tamano de la ventana. 168 -> 190 = 168 + los 22 medidos. */
-    '.bm-view{display:flex;flex-direction:column;min-height:0;overflow:hidden;height:calc(100dvh - 190px);font-size:13px}',
+    '.bm-view{display:flex;flex-direction:column;min-height:0;overflow:hidden;height:calc(100dvh - 120px);font-size:13px}',
     '.bm-view{max-width:100%}',
+    '.bm-page-header{display:flex;align-items:center;gap:12px;min-height:44px;flex:0 0 auto;margin:0 4px 4px;padding:2px 4px 4px;border-bottom:2px solid #1e4b8f}',
+    '.bm-page-header-icon{width:6px;height:30px;flex:0 0 6px;border-radius:3px;background:#1e4b8f}',
+    '.bm-page-title{margin:0;color:#15356b;font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.3}',
     '.bm-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:transparent;border:1px solid ' + BARRA_B + ';',
     '  border-radius:6px;padding:10px 12px;margin:0 0 2px 4px}',
     '.bm-topbar .ant-btn{border-color:#8f9aa7}',
@@ -233,11 +258,18 @@
        ningun ancestro: la vista no puede desbordar el contenedor ni la ventana. */
     '.bm-grid,.bm-grid .ant-table-wrapper,.bm-grid .ant-table,.bm-grid .ant-table-container{max-width:100%;overflow-x:hidden}',
     '.bm-grid .ant-table-body{overflow-x:auto !important;overflow-y:auto !important}',
-    '.bm-grid .ant-table-header{overflow:hidden !important}',
+    '.bm-grid .ant-table-header{height:auto !important;flex:0 0 auto;overflow:hidden !important}',
+    '.bm-grid .ant-table-header .ant-table{height:auto !important;flex:0 0 auto}',
+    '.bm-grid .ant-table-header .ant-table-thead>tr{height:auto !important}',
     '.bm-grid .ant-table{border:1px solid ' + BORDE + ';border-radius:0}',
     '.bm-grid .ant-table-thead>tr>th{background:#bfbfbf;font-size:12px;line-height:18px;padding:5px 6px;',
     '  white-space:normal;word-break:normal;overflow-wrap:anywhere;',
     '  border-right:1px solid ' + BORDE + ';border-bottom:1px solid ' + BORDE + '}',
+    '.bm-grid .ant-table-thead>tr>th.bm-group-suma{background:#c8e6c9 !important;border:1px solid #81a982 !important}',
+    '.bm-grid .ant-table-thead>tr>th.bm-group-primas{background:#bbdefb !important;border:1px solid #78a9d6 !important}',
+    '.bm-grid .ant-table-thead>tr>th.bm-group-comision{background:#b2ebf2 !important;border:1px solid #70b8c0 !important}',
+    '.bm-grid .ant-table-thead>tr>th.bm-group-impuesto{background:#dcedc8 !important;border:1px solid #9fbd78 !important}',
+    '.bm-grid .ant-table-thead>tr>th.bm-group-saldos{background:#c5e1c5 !important;border:1px solid #82aa82 !important}',
     '.bm-grid .ant-table-tbody>tr>td{font-size:12px;line-height:18px;padding:5px 6px;',
     '  border-right:0;border-bottom:1px solid ' + BORDE + '}',
     '.bm-grid .ant-table-tbody>tr{cursor:pointer}',
@@ -344,8 +376,11 @@
         message.error(mensajeDeError(res));
         return false;
       }
-      if (esReaseguradores) { setDataReaseguradores(res.outData); setCriterioReaseguradores(crit); }
-      else { setData(res.outData); setCriterio(crit); }
+      const outData = res.outData || {};
+      const filasNormalizadas = Array.isArray(outData.filas) ? outData.filas.map(normalizarFilaMovimiento) : outData.filas;
+      const dataNormalizada = Object.assign({}, outData, { filas: filasNormalizadas });
+      if (esReaseguradores) { setDataReaseguradores(dataNormalizada); setCriterioReaseguradores(crit); }
+      else { setData(dataNormalizada); setCriterio(crit); }
       setPage(pg); setSize(sz);
       setSeleccion(null);
       return true;
@@ -465,7 +500,26 @@
     }, [cargandoCat]);
 
     const columnasPara = function(definiciones) { return definiciones.map(function(col){
+      if (col.children) {
+        const claseGrupo = {
+          Suma: 'bm-group-suma',
+          Primas: 'bm-group-primas',
+          Comisión: 'bm-group-comision',
+          Impuesto: 'bm-group-impuesto',
+          Saldos: 'bm-group-saldos'
+        }[col.t];
+        return {
+          title: col.t,
+          key: col.t,
+          className: claseGrupo,
+          onHeaderCell: function(){ return { className: claseGrupo }; },
+          children: columnasPara(col.children)
+        };
+      }
       const c = { title: col.t, dataIndex: col.c, key: col.s || col.c, width: col.w };
+      if (['id', 'changeId', 'fechaEmision', 'fDesde', 'fHasta', 'cserie'].indexOf(col.c) >= 0) {
+        c.align = 'center';
+      }
       if (col.s) {
         c.sorter = true;
         c.sortOrder = orden && orden.campo === col.s ? (orden.direccion === 'asc' ? 'ascend' : 'descend') : undefined;
@@ -496,10 +550,10 @@
       };
       return c;
     }); };
-    const columnas = columnasPara(COLUMNAS);
+    const columnas = columnasPara(COLUMNAS_GRUPADAS);
     const columnasReaseguradores = columnasPara(COLUMNAS_REASEGURADORES);
 
-    if (cargandoCat) return <DefaultPage title='Borderó (Nuevo)' icon='file-protect'><Skeleton active /></DefaultPage>;
+    if (cargandoCat) return <div className='bm-view'><Skeleton active /></div>;
 
     const datosActivos = tabActiva === 'reaseguradores' ? dataReaseguradores : data;
     const criterioActivo = tabActiva === 'reaseguradores' ? criterioReaseguradores : criterio;
@@ -507,8 +561,12 @@
     const columnasActivas = tabActiva === 'reaseguradores' ? columnasReaseguradores : columnas;
     const anchoActivo = tabActiva === 'reaseguradores' ? ANCHO_REASEGURADORES : ANCHO_TOTAL;
 
-    return <DefaultPage title='Borderó (Nuevo)' icon='file-protect'>
+    return <div>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
+      <header className='bm-page-header'>
+        <span className='bm-page-header-icon' aria-hidden='true' />
+        <h2 className='bm-page-title'>Borderó de reaseguro</h2>
+      </header>
       <div className='bm-view'>
 
         { /* Alcance 1 — UNA sola barra de botones, con Filtrar y Exportar. */ }
@@ -608,7 +666,7 @@
           </Form>
         </Drawer>
       </div>
-    </DefaultPage>;
+    </div>;
   };
 
   return <App />;

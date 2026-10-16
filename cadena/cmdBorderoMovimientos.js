@@ -79,6 +79,18 @@ var tCount  = "\n/* AXX-300 - el conteo se hace sobre la poblacion del periodo S
 var tRecon  = "\n, ded AS (\n  SELECT d.lifePolicyId,\n         SUM(d.dSiRe) AS deltaSumaCedida,\n         SUM(d.dPrRe) AS deltaPrimaCedida,\n         SUM(d.dCom)  AS deltaComision,\n         SUM(d.dTax)  AS deltaImpuesto,\n         MAX(d.restate) AS restate,\n         COUNT(DISTINCT d.movKey) AS movimientos\n  FROM dlt d GROUP BY d.lifePolicyId\n),\n/* Estado reconstruido: ultima generacion viva por particion (0 si fue retirada\n   o cancelada). No usa la resta de deltas. */\nlastgen AS (\n  SELECT o.lifePolicyId, o.contractId, o.coverageId, o.lineId,\n         MAX(o.genNo) AS ultimaGen\n  FROM ord o GROUP BY o.lifePolicyId, o.contractId, o.coverageId, o.lineId\n),\nestado AS (\n  SELECT o.lifePolicyId,\n         SUM(CASE WHEN o.isTerm=1 OR o.isCanc=1 THEN 0 ELSE o.vSiRe END) AS estSuma,\n         SUM(CASE WHEN o.isTerm=1 OR o.isCanc=1 THEN 0\n                  ELSE ISNULL(o.sumInsured,0) * ISNULL(o.proportionRe,0) END) AS estSumaPorProporcion,\n         SUM(CASE WHEN o.isTerm=1 OR o.isCanc=1 THEN 0 ELSE o.vTax END) AS estImpuesto\n  FROM dlt o INNER JOIN lastgen g\n    ON g.lifePolicyId=o.lifePolicyId AND g.contractId=o.contractId\n   AND g.coverageId=o.coverageId AND g.lineId=o.lineId AND g.ultimaGen=o.genNo\n  GROUP BY o.lifePolicyId\n),\n/* Conjunto vigente segun la plataforma. Solo aplicable donde la marca se usa. */\nvigente AS (\n  SELECT c.lifePolicyId,\n         SUM(CASE WHEN c.overwritten=0 THEN ISNULL(c.sumInsuredRe,0) ELSE 0 END) AS sumaVigente,\n         SUM(CASE WHEN c.overwritten=0 THEN ISNULL(c.premiumRe,0) ELSE 0 END) AS primaVigente,\n         SUM(CASE WHEN c.overwritten=1 THEN 1 ELSE 0 END) AS nOvw\n  FROM Cession c INNER JOIN scope sc ON sc.lifePolicyId=c.lifePolicyId\n  GROUP BY c.lifePolicyId\n)\nSELECT e.lifePolicyId, e.restate, e.movimientos,\n       e.deltaSumaCedida, es.estSuma AS estadoSumaCedida,\n       (e.deltaSumaCedida - es.estSuma) AS difTelescopica,\n       es.estSumaPorProporcion,\n       (es.estSuma - es.estSumaPorProporcion) AS difProporcion,\n       v.sumaVigente, v.nOvw,\n       (es.estSuma - v.sumaVigente) AS difVigente,\n       CASE WHEN es.estSuma < -0.005 THEN 1 ELSE 0 END AS estadoNegativo,\n       CASE WHEN ABS(es.estSuma - es.estSumaPorProporcion) > (0.05 + 0.0002 * ABS(es.estSuma)) THEN 1 ELSE 0 END AS fallaProporcion,\n       v.primaVigente, (e.deltaPrimaCedida - v.primaVigente) AS difPrimaVigente,\n       CASE WHEN v.nOvw > 0 AND ABS(es.estSuma - v.sumaVigente) > 0.05 THEN 1 ELSE 0 END AS fallaVigente,\n       CASE WHEN v.nOvw > 0 AND ABS(e.deltaPrimaCedida - v.primaVigente) > 0.05 THEN 1 ELSE 0 END AS fallaPrimaVigente,\n       CASE WHEN ABS(e.deltaSumaCedida - es.estSuma) > 0.05 THEN 1 ELSE 0 END AS fallaTelescopica,\n       CASE WHEN v.nOvw = 0 THEN 1 ELSE 0 END AS controlVigenteNoAplicable,\n       CASE WHEN es.estSuma < -0.005\n              OR ABS(es.estSuma - es.estSumaPorProporcion) > (0.05 + 0.0002 * ABS(es.estSuma))\n              OR (v.nOvw > 0 AND ABS(es.estSuma - v.sumaVigente) > 0.05)\n              OR (v.nOvw > 0 AND ABS(e.deltaPrimaCedida - v.primaVigente) > 0.05)\n              OR ABS(e.deltaSumaCedida - es.estSuma) > 0.05\n            THEN 0 ELSE 1 END AS concilia\nFROM ded e\nINNER JOIN estado es ON es.lifePolicyId = e.lifePolicyId\nINNER JOIN vigente v ON v.lifePolicyId = e.lifePolicyId\nORDER BY CASE WHEN es.estSuma < -0.005\n              OR ABS(es.estSuma - es.estSumaPorProporcion) > (0.05 + 0.0002 * ABS(es.estSuma))\n              OR (v.nOvw > 0 AND ABS(es.estSuma - v.sumaVigente) > 0.05)\n              OR (v.nOvw > 0 AND ABS(e.deltaPrimaCedida - v.primaVigente) > 0.05)\n              OR ABS(e.deltaSumaCedida - es.estSuma) > 0.05\n            THEN 0 ELSE 1 END, e.lifePolicyId";
 var tRecSum = "\n, ded AS (\n  SELECT d.lifePolicyId, SUM(d.dSiRe) AS deltaSumaCedida,\n         SUM(d.dPrRe) AS deltaPrimaCedida, MAX(d.restate) AS restate\n  FROM dlt d GROUP BY d.lifePolicyId\n),\nlastgen AS (\n  SELECT o.lifePolicyId, o.contractId, o.coverageId, o.lineId, MAX(o.genNo) AS ultimaGen\n  FROM ord o GROUP BY o.lifePolicyId, o.contractId, o.coverageId, o.lineId\n),\nestado AS (\n  SELECT o.lifePolicyId,\n         SUM(CASE WHEN o.isTerm=1 OR o.isCanc=1 THEN 0 ELSE o.vSiRe END) AS estSuma,\n         SUM(CASE WHEN o.isTerm=1 OR o.isCanc=1 THEN 0\n                  ELSE ISNULL(o.sumInsured,0) * ISNULL(o.proportionRe,0) END) AS estSumaPorProporcion\n  FROM dlt o INNER JOIN lastgen g\n    ON g.lifePolicyId=o.lifePolicyId AND g.contractId=o.contractId\n   AND g.coverageId=o.coverageId AND g.lineId=o.lineId AND g.ultimaGen=o.genNo\n  GROUP BY o.lifePolicyId\n),\nvigente AS (\n  SELECT c.lifePolicyId,\n         SUM(CASE WHEN c.overwritten=0 THEN ISNULL(c.sumInsuredRe,0) ELSE 0 END) AS sumaVigente,\n         SUM(CASE WHEN c.overwritten=0 THEN ISNULL(c.premiumRe,0) ELSE 0 END) AS primaVigente,\n         SUM(CASE WHEN c.overwritten=1 THEN 1 ELSE 0 END) AS nOvw\n  FROM Cession c INNER JOIN scope sc ON sc.lifePolicyId=c.lifePolicyId\n  GROUP BY c.lifePolicyId\n)\nSELECT COUNT(*) AS polizas,\n       SUM(CASE WHEN es.estSuma < -0.005 THEN 1 ELSE 0 END) AS estadoNegativo,\n       SUM(CASE WHEN ABS(es.estSuma - es.estSumaPorProporcion) > (0.05 + 0.0002 * ABS(es.estSuma)) THEN 1 ELSE 0 END) AS fallaProporcion,\n       SUM(CASE WHEN v.nOvw > 0 AND ABS(es.estSuma - v.sumaVigente) > 0.05 THEN 1 ELSE 0 END) AS fallaVigente,\n       SUM(CASE WHEN v.nOvw > 0 AND ABS(e.deltaPrimaCedida - v.primaVigente) > 0.05 THEN 1 ELSE 0 END) AS fallaPrimaVigente,\n       SUM(CASE WHEN ABS(e.deltaSumaCedida - es.estSuma) > 0.05 THEN 1 ELSE 0 END) AS fallaTelescopica,\n       SUM(CASE WHEN v.nOvw = 0 THEN 1 ELSE 0 END) AS sinControlVigente,\n       SUM(CASE WHEN es.estSuma < -0.005\n                  OR ABS(es.estSuma - es.estSumaPorProporcion) > (0.05 + 0.0002 * ABS(es.estSuma))\n                  OR (v.nOvw > 0 AND ABS(es.estSuma - v.sumaVigente) > 0.05)\n                  OR (v.nOvw > 0 AND ABS(e.deltaPrimaCedida - v.primaVigente) > 0.05)\n                  OR ABS(e.deltaSumaCedida - es.estSuma) > 0.05\n                THEN 1 ELSE 0 END) AS descuadres\nFROM ded e\nINNER JOIN estado es ON es.lifePolicyId = e.lifePolicyId\nINNER JOIN vigente v ON v.lifePolicyId = e.lifePolicyId";
 
+// Una cancelacion identificada por Change debe tener prioridad sobre el retiro tecnico.
+tPage = tPage.replace(
+  "CASE WHEN r.esRetiro=1 THEN 'RETIRO DE CESION'\\n            WHEN r.movKey LIKE 'EMI:%' THEN 'EMISION'\\n            WHEN r.movKey LIKE 'ANN:%' THEN 'ANIVERSARIO'\\n            WHEN r.esCancelacion=1 OR r.premiumType='CANCELLATION' THEN 'CANCELACION'",
+  "CASE WHEN r.chTipo='CancellationChange' OR EXISTS (SELECT 1 FROM Change chx WHERE chx.id=r.changeId AND chx.Discriminator='CancellationChange') OR r.esCancelacionVisual=1 OR r.premiumType='CANCELLATION' THEN 'CANCELACION'\\n            WHEN r.esRetiro=1 THEN 'RETIRO DE CESION'\\n            WHEN r.movKey LIKE 'EMI:%' THEN 'EMISION'\\n            WHEN r.movKey LIKE 'ANN:%' THEN 'ANIVERSARIO'"
+);
+
+// Reemplazo robusto del CASE: la cadena de tPage contiene saltos de linea reales.
+tPage = tPage.replace(
+  /CASE WHEN r\.esRetiro=1 THEN 'RETIRO DE CESION'[\s\S]*?END AS tipo,/,
+  "CASE WHEN r.esRetiro=1 AND EXISTS (SELECT 1 FROM Change chx WHERE chx.id=r.changeId AND chx.Discriminator='CancellationChange') THEN 'CANCELACION'\n            WHEN r.esRetiro=1 THEN 'RETIRO DE CESION'\n            WHEN r.movKey LIKE 'EMI:%' THEN 'EMISION'\n            WHEN r.movKey LIKE 'ANN:%' THEN 'ANIVERSARIO'\n            ELSE ISNULL(r.chTipo,'ENDOSO') END AS tipo,"
+);
+
 // primaFacultativa ya esta incluida en primaCedida; evitar duplicarla en el neto por pagar.
 tPage = tPage.replace(
   "(r.primaRetenida + r.primaCedida + r.primaCat) AS primaSuscrita100,",
@@ -212,6 +224,16 @@ for (var coverageKey in coveragesThatSum) {
   coverageGroups[groupKey].coverages.push(coverageParts[2]);
 }
 var sumCoverageParts = [];
+base = base.replace(
+  "CASE WHEN s.premiumType='NEW' THEN 1 ELSE 0 END ORDER BY s.ordId) AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.contractId, s.coverageId, s.lineId ORDER BY s.ordId) AS genNo,",
+  "CASE WHEN s.premiumType='NEW' THEN 1 ELSE 0 END ORDER BY s.ordId) AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.coverageId, s.changeId, s.anniversaryId, s.premiumType ORDER BY s.ordId) AS premiumNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.contractId, s.coverageId, s.lineId ORDER BY s.ordId) AS genNo,"
+);
+if (base.indexOf("AS premiumNo,") < 0) {
+  base = base.replace(
+    "AS newNo,",
+    "AS newNo,\n    ROW_NUMBER() OVER (PARTITION BY s.lifePolicyId, s.coverageId, s.changeId, s.anniversaryId, s.premiumType ORDER BY s.ordId) AS premiumNo,"
+  );
+}
 for (var groupKey in coverageGroups) {
   if (!Object.prototype.hasOwnProperty.call(coverageGroups, groupKey)) continue;
   var group = coverageGroups[groupKey];
@@ -229,10 +251,18 @@ base = base.replace(
   'c.sumInsured, c.proportionRe,',
   'c.sumInsured, c.premium, c.proportionRe, CASE WHEN @@SUMACOB@@ THEN 1 ELSE 0 END AS sumaIncluida,'
 );
-base = base.replace('r.dstart, r.dend, r.isCanc, 0 AS isTerm,', 'r.dstart, r.dend, r.premium, r.sumaIncluida, r.premiumNo, r.isCanc, 0 AS isTerm,');
-base = base.replace('MAX(rr.dstart), MAX(rr.dend), 0 AS isCanc, 1 AS isTerm,', 'MAX(rr.dstart), MAX(rr.dend), 0, MAX(rr.sumaIncluida), 0, 0 AS isCanc, 1 AS isTerm,');
+base = base.replace('r.dstart, r.dend, r.isCanc, 0 AS isTerm,', 'r.dstart, r.dend, r.premium, r.sumaIncluida, r.isCanc, 0 AS isTerm,');
+base = base.replace('MAX(rr.dstart), MAX(rr.dend), 0 AS isCanc, 1 AS isTerm,', 'MAX(rr.dstart), MAX(rr.dend), 0, MAX(rr.sumaIncluida), 0 AS isCanc, 1 AS isTerm,');
 base = base.replace('o.anniversaryId, o.contactId, o.holderName,', 'o.anniversaryId, o.sumaIncluida, o.premiumNo, o.premium, o.contactId, o.holderName,');
-base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    SUM(CASE WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0) ELSE 0 END) AS primaSuscrita100,');
+base = base.replace(
+  'o.anniversaryId, o.contactId,',
+  'o.anniversaryId, o.premiumNo, o.contactId,'
+);
+base = base.replace(
+  'o.anniversaryId, o.sumaIncluida, o.premium, o.contactId,',
+  'o.anniversaryId, o.sumaIncluida, o.premiumNo, o.premium, o.contactId,'
+);
+base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    /* Prima suscrita: prima de Cession una sola vez por cobertura; en un retiro terminal\n       la fila sintetica no trae premium, por lo que se usa su variacion calculada. */\n    SUM(CASE WHEN d.isTerm = 1 THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0)\n             ELSE 0 END) AS primaSuscrita100,');
 base = base.replace('SUM(d.dSiCed) AS sumaRetenida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiCed ELSE 0 END) AS sumaRetenida');
 base = base.replace('SUM(d.dSiRe)  AS sumaCedida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiRe ELSE 0 END) AS sumaCedida');
 base = base.replace("SUM(CASE WHEN d.bucket='CP'  THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='CP' THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte");
