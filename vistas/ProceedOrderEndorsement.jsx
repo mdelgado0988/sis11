@@ -2241,13 +2241,15 @@
       }
       pushStep(t('Update policy validity'), true, policyStart + ' -> ' + policyEnd);
 
-      // AXX-1978: generated after the validity update so the document shows the new validity.
+      // La generacion del documento del endoso la realiza el trigger.
+      /*
       try {
         await generateEndorsementDocument(cid);
       } catch (documentError) {
         pushStep(t('Generate the endorsement document'), false, String(documentError && documentError.message ? documentError.message : documentError));
         message.warning(t('The endorsement was applied, but its document could not be generated.') + ' ' + String(documentError && documentError.message ? documentError.message : documentError));
       }
+      */
 
       // --- synchronise the insured object (§3.3)
       const synced = await exe('ExeChain', {
