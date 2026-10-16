@@ -1501,6 +1501,16 @@ async function addAceptantes(cessions, aceptantes) {
     ? "NULL"
     : sqlNumber(value);
 
+  const estados = cessions.map(cession => {
+    const participants = aceptantes.filter(participant =>
+      Number(participant && participant.cessionId) === Number(cession && cession.id)
+    );
+    return {
+      id: Number(cession.id),
+      ...validarAceptantesCession(cession, participants)
+    };
+  });
+
   const inserts = aceptantes.map(part => {
     const cessionId = Number(part && part.cessionId) || 0;
     if (!cessionIds.includes(cessionId)) return null;
@@ -1530,6 +1540,10 @@ async function addAceptantes(cessions, aceptantes) {
 BEGIN TRANSACTION;
 DELETE FROM [CessionPart] WHERE [cessionId] IN (${cessionIds.join(",")});
 ${inserts.join("\n")}
+${estados.map(estado => `UPDATE [Cession]
+SET [err] = ${estado.err ? 1 : 0},
+    [msg] = ${sqlText(estado.msg)}
+WHERE [id] = ${estado.id};`).join("\n")}
 COMMIT TRANSACTION;`;
   const resultado = await me.exe("DoQuery", { sql });
   if (!resultado || resultado.ok === false) {
@@ -1543,21 +1557,9 @@ COMMIT TRANSACTION;`;
 }
 
 function redistribuirAceptantesPorCobertura(cessionCobs) {
-
-  const totalCob = cessionCobs.reduce((acc, c) => {
-    acc.sumInsuredRe += c.sumInsuredRe || 0;
-    acc.premiumRe += c.premiumRe || 0;    
-    acc.comissionCedant += c.comissionCedant || 0;
-    acc.tax += c.tax || 0;
-    return acc;
-  }, { sumInsuredRe: 0, premiumRe: 0, comissionCedant: 0, tax: 0 });
-
   const resultado = [];
 
   cessionCobs.forEach(ces => {
-
-    const factorPr = totalCob.premiumRe === 0 ? 0 : ces.premiumRe / totalCob.premiumRe;
-
     reaseguradoresData.forEach(r => {
       
       resultado.push({
@@ -1569,9 +1571,9 @@ function redistribuirAceptantesPorCobertura(cessionCobs) {
         name: r.name,
         split: redondear(r.split, 6, true), // mismo split, conservando hasta 6 decimales
         sumInsured: redondear(ces.sumInsuredRe * (r.split / 100)),
-        premium: redondear(r.premium * factorPr),
-        commission: redondear(r.commission * factorPr),
-        tax: redondear(r.tax * factorPr),
+        premium: redondear(ces.premiumRe * (r.split / 100)),
+        commission: redondear(ces.comissionCedant * (r.split / 100)),
+        tax: redondear(ces.tax * (r.split / 100)),
         currency: ces.currency,
         liquidationId: null,
         reserve: 0,
@@ -1585,9 +1587,41 @@ function redistribuirAceptantesPorCobertura(cessionCobs) {
 
   });
 
-  ajustarDiferenciasAceptantes(resultado, totalCob);
+  ajustarDiferenciasAceptantesPorCession(resultado, cessionCobs);
 
   return resultado;
+}
+
+function ajustarDiferenciasAceptantesPorCession(participants, cessions) {
+  cessions.forEach(cession => {
+    const rows = participants.filter(participant =>
+      Number(participant.cessionId) === Number(cession.id)
+    );
+    if (!rows.length) return;
+
+    const total = rows.reduce((acc, row) => {
+      acc.sumInsured += Number(row.sumInsured) || 0;
+      acc.premium += Number(row.premium) || 0;
+      acc.commission += Number(row.commission) || 0;
+      acc.tax += Number(row.tax) || 0;
+      return acc;
+    }, { sumInsured: 0, premium: 0, commission: 0, tax: 0 });
+
+    const target = rows.find(row => Number(row.split) > 0) || rows[0];
+    const fields = [
+      ["sumInsured", cession.sumInsuredRe],
+      ["premium", cession.premiumRe],
+      ["commission", cession.comissionCedant],
+      ["tax", cession.tax]
+    ];
+
+    fields.forEach(([field, expected]) => {
+      const difference = redondear(Number(expected || 0) - Number(total[field] || 0));
+      if (difference !== 0) {
+        target[field] = redondear(Number(target[field] || 0) + difference);
+      }
+    });
+  });
 }
 
 function ajustarDiferenciasAceptantes(resultado, totalesAse) {
@@ -1614,6 +1648,8 @@ function ajustarDiferenciasAceptantes(resultado, totalesAse) {
 }
 
 function validarTotalesReaseguradores(cessions) {
+  const toleranciaImportes = 0.005;
+  const toleranciaSplit = 0.000001;
 
   const totalCob = cessions.reduce((acc, c) => {
     acc.sumInsuredRe += montoSiEsCobertura(c.coverageCode, c.sumInsuredRe || 0);
@@ -1633,23 +1669,23 @@ function validarTotalesReaseguradores(cessions) {
     return acc;
   }, { split: 0, premium: 0, sumInsured: 0, commission: 0, tax: 0 });
 
-  if (Math.abs(total.split - totalCob.split) > 0.0001) {
+  if (Math.abs(total.split - totalCob.split) > toleranciaSplit) {
     return { ok:false, msg: "Total porcentual distribuido no es 100%" };
   }
 
-  if (Math.abs(total.premium - totalCob.premiumRe) > 0.0001) {
+  if (Math.abs(total.premium - totalCob.premiumRe) > toleranciaImportes) {
     return { ok:false, msg: "Total de prima distribuido no es 100%" };
   }
 
-  if (Math.abs(total.sumInsured - totalCob.sumInsuredRe) > 0.0001) {
+  if (Math.abs(total.sumInsured - totalCob.sumInsuredRe) > toleranciaImportes) {
     return { ok:false, msg: "Total de suma distribuido no es 100%" };
   }
 
-  if (Math.abs(total.commission - totalCob.comissionCedant) > 0.0001) {
+  if (Math.abs(total.commission - totalCob.comissionCedant) > toleranciaImportes) {
     return { ok:false, msg: "Total de comisión distribuido no es 100%" };
   }
 
-  if (Math.abs(total.tax - totalCob.tax) > 0.0001) {
+  if (Math.abs(total.tax - totalCob.tax) > toleranciaImportes) {
     return { ok:false, msg: "Total de impuesto distribuido no es 100%" };
   }
 
@@ -1663,6 +1699,8 @@ function distribuyeAceptantes(newCessions) {
   // =========================
 
   newCessions.forEach(ces => {
+    ces.err = false;
+    ces.msg = "";
   
     ces.Participants.forEach(p => {
       p.id = 0;
@@ -1677,39 +1715,37 @@ function distribuyeAceptantes(newCessions) {
     // Reconcile per-line rounding so participant totals match the cession exactly.
     ajustarDiferenciasParticipantes(ces);
     
-    if(ces.lineId.trim().toUpperCase() == "FAC" && ces.Participants.length == 0){
-      ces.err = true;
-      ces.msg = "Debe registrar los aceptantes de la distribución FAC";
-    }
-    else{
-      const resumenParticipantes = resumirParticipants(ces.Participants);
-      if(resumenParticipantes.split != 100){
-        ces.err = true;
-        ces.msg = "Porcentaje de distribución debe ser 100%";
-      }
-      
-      if(resumenParticipantes.sumInsured != ces.sumInsuredRe){
-        ces.err = true;
-        ces.msg = "Total suma distribuido incorrecto";
-      }
-  
-      if(resumenParticipantes.premium != ces.premiumRe){
-        ces.err = true;
-        ces.msg = "Total prima distribuido incorrecto";
-      }
-      
-      if(resumenParticipantes.commission != ces.comissionCedant){
-        ces.err = true;
-        ces.msg = "Total comisión distribuido incorrecto";
-      }
-  
-      if(resumenParticipantes.tax != ces.tax){
-        ces.err = true;
-        ces.msg = "Total impuesto distribuido incorrecto";
-      }
-    }
+    Object.assign(ces, validarAceptantesCession(ces, ces.Participants));
   });
   
+}
+
+function validarAceptantesCession(cession, participants) {
+  const rows = Array.isArray(participants) ? participants : [];
+  const resumen = resumirParticipants(rows);
+  const toleranciaImportes = 0.005;
+  const toleranciaSplit = 0.000001;
+  const lineId = String(cession && cession.lineId || "").trim().toUpperCase();
+
+  if (lineId === "FAC" && rows.length === 0) {
+    return { err: true, msg: "Debe registrar los aceptantes de la distribución FAC" };
+  }
+  if (Math.abs(resumen.split - 100) > toleranciaSplit) {
+    return { err: true, msg: "Porcentaje de distribución debe ser 100%" };
+  }
+  if (Math.abs(resumen.sumInsured - Number(cession.sumInsuredRe || 0)) > toleranciaImportes) {
+    return { err: true, msg: "Total suma distribuido incorrecto" };
+  }
+  if (Math.abs(resumen.premium - Number(cession.premiumRe || 0)) > toleranciaImportes) {
+    return { err: true, msg: "Total prima distribuido incorrecto" };
+  }
+  if (Math.abs(resumen.commission - Number(cession.comissionCedant || 0)) > toleranciaImportes) {
+    return { err: true, msg: "Total comisión distribuido incorrecto" };
+  }
+  if (Math.abs(resumen.tax - Number(cession.tax || 0)) > toleranciaImportes) {
+    return { err: true, msg: "Total impuesto distribuido incorrecto" };
+  }
+  return { err: false, msg: "" };
 }
 
 function ajustarDiferenciasParticipantes(ces) {

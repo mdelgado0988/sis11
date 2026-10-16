@@ -44,7 +44,9 @@ const dataFrecuenciaPago = [
   { code: 'm', name: 'Mensual' },
   { code: 'q', name: 'Trimestral' },
   { code: 's', name: 'Semestral' },
-  { code: 'y', name: 'Anual' }
+  { code: 'y', name: 'Anual' },
+  { code: 'm12', name: 'Pago Único' },
+  { code: 'm2', name: 'Bimensual' }
 ];
 
 const deducibles = [{ productCode: "MQ", text: '10% del valor de la perdida' }]
@@ -138,6 +140,7 @@ resultado.Hora = getHora(policy.end);
 resultado.Observaciones = policy.description ?? "";
 resultado.Frecuencia = dataFrecuenciaPago.find(x => x.code == policy.periodicity)?.name ?? "";
 resultado.Movimiento = policy.contractYear == 1 ? "Nuevo" : "Renovación"
+resultado.TituloMov = Number(policy.policyVersion ?? 0) > 0 ? "Renovación" : "Nueva";
 resultado.Prima = n(paramAnualPremium ? paramAnualPremium : (policy.annualPremium ?? 0));
 resultado.Impuesto = n(paramTax ? paramTax : (policy.tax ?? 0));
 resultado.Total = n(paramAnualTotal ? paramAnualTotal : (policy.annualTotal ?? 0));
@@ -149,7 +152,8 @@ const tarifaEntrada = JSON.parse(oaUserData.hiddenCobtar)
 doCmd({"cmd":"GetFullTable","data":{"table":"cfgCobtarRamoTecnico"}});
 const configCobtar = mapearTablaConfig(GetFullTable.outData ?? []);
 resultado.Coberturas = policy.Coverages
-  .sort((a, b) => Number(a.number ?? 0) - Number(b.number ?? 0))
+  .filter(({ name }) => !/^\s*(?:\d|NMA2919|HMACC)/i.test(String(name ?? "")))
+  .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es", { sensitivity: "base" }))
   .map(({ code, name, limit, premium, deductible }) => {
     const findCoverage = tarifaEntrada.find(x => x.coverageCode == code);
     const cov = {
@@ -213,6 +217,7 @@ resultado.TituloEncargado = "";
 return resultado;
 
 function agregarAdendosAlResultado() {
+  resultado.observacionesEndoso = "";
   const raw = oaUserData?.hiddenAdendos;
   if (!raw) return;
 
@@ -225,6 +230,11 @@ function agregarAdendosAlResultado() {
 
   if (!Array.isArray(adendos)) return;
 
+  resultado.observacionesEndoso = adendos
+    .map(adendo => String(adendo?.description ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+
   adendos.forEach(adendo => {
     const codigoAnexo = String(adendo?.idAnexo ?? adendo?.codigoAnexo ?? "").trim();
     const codigoCobertura = String(adendo?.coverageCode ?? adendo?.codigoCobertura ?? "").trim();
@@ -236,7 +246,7 @@ function agregarAdendosAlResultado() {
       .forEach(key => {
         const numeroParametro = key.replace(/\D/g, "");
         const nombreAtributo = `${codigoAnexo}_${codigoCobertura}_${numeroParametro}`;
-        resultado[nombreAtributo] = fechaDocumento(adendo[key]);
+        resultado[nombreAtributo] = formatearParametroAdendo(adendo[key]);
       });
   });
 }
@@ -407,6 +417,18 @@ function fechaDocumento(value) {
   if (/^\d{4}-\d{2}-\d{2}(?:T|\s|$)/.test(text)) return toFecha(text);
   const local = /^(\d{2})[/-](\d{2})[/-](\d{4})(?:\s|T|$)/.exec(text);
   return local ? local[1] + "/" + local[2] + "/" + local[3] : value;
+}
+
+function formatearParametroAdendo(value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}(?:T|\s|$)/.test(text)
+    || /^(\d{2})[/-](\d{2})[/-](\d{4})(?:\s|T|$)/.test(text)) {
+    return fechaDocumento(value);
+  }
+
+  return /^-?\d+(?:[.,]\d+)?$/.test(text) ? n(text) : value;
 }
 
 function getHora(fecha) {
