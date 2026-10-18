@@ -3,9 +3,12 @@
 
 /**
  * @name cmdFiniquitoAU
- * @purpose Builds the vehicle data required by the automobile settlement document.
- * @context { claimId: number, tipo: 0|1 }
- * @tipo 0: insured vehicle, 1: affected vehicle.
+ * @purpose Builds the vehicle and person data required by the automobile settlement document.
+ * @context { claimId: number, tipo: 0|1|2|3 }
+ * @tipo 0: vehículo asegurado; formulario frmOAAutomovilAsegurado.
+ * @tipo 1: vehículo afectado; formulario frmOAAutomovil.
+ * @tipo 2: persona afectada; formulario frmOAPersonaAfectada, devuelve Beneficiario y Afectado.
+ * @tipo 3: persona asegurada; formulario frmOAPersonaAseguradaAU, devuelve Asegurado.
  */
 
 const input = context || {};
@@ -13,9 +16,17 @@ const claimId = positiveInteger(input.claimId || input.siniestroId || input.id);
 const tipo = Number(input.tipo !== undefined ? input.tipo : input.type);
 
 if (claimId <= 0) throw new Error('claimId es obligatorio y debe ser válido.');
-if (tipo !== 0 && tipo !== 1) throw new Error('tipo debe ser 0 para asegurado o 1 para afectado.');
+const formNameByType = {
+  0: 'frmOAAutomovilAsegurado',
+  1: 'frmOAAutomovil',
+  2: 'frmOAPersonaAfectada',
+  3: 'frmOAPersonaAseguradaAU'
+};
+if (!Object.prototype.hasOwnProperty.call(formNameByType, tipo)) {
+  throw new Error('tipo debe ser 0, 1, 2 o 3.');
+}
 
-const formName = tipo === 0 ? 'frmOAAutomovilAsegurado' : 'frmOAAutomovil';
+const formName = formNameByType[tipo];
 const result = {
   claimId: claimId,
   tipo: tipo,
@@ -31,7 +42,14 @@ const result = {
   Anio: '',
   Placa: '',
   Propietario: '',
-  PayoutId: ''
+  Conductor: '',
+  IdentificacionAfectado: '',
+  Beneficiario: {},
+  Afectado: {},
+  Asegurado: {},
+  PayoutId: '',
+  Monto: '0.00',
+  MontoLetras: ''
 };
 
 doCmd({
@@ -88,20 +106,36 @@ const payoutMatch = payouts
   .map(payout => ({ payout: payout, object: findAffectedObject(payout && payout.jAffectedObjects, formName) }))
   .find(item => item.object);
 
-const vehicleObject = payoutMatch && payoutMatch.object;
+const payoutObject = payoutMatch && payoutMatch.object;
 const policyVehicleObject = tipo === 0 ? findPolicyObject(policy, formName) : null;
 
-if (vehicleObject || policyVehicleObject) {
-  const vehicle = getVehicleValues(vehicleObject);
+if (tipo === 0 || tipo === 1) {
+  const vehicle = getVehicleValues(payoutObject);
   const policyVehicle = getVehicleValues(policyVehicleObject);
   result.Marca = vehicle.Marca || policyVehicle.Marca;
   result.Modelo = vehicle.Modelo || policyVehicle.Modelo;
   result.Anio = vehicle.Anio || policyVehicle.Anio;
   result.Placa = vehicle.Placa || policyVehicle.Placa;
   result.Propietario = vehicle.Propietario || policyVehicle.Propietario;
+  result.Conductor = vehicle.Conductor || policyVehicle.Conductor;
+  if (tipo === 1) result.IdentificacionAfectado = vehicle.IdentificacionAfectado;
 }
 
-if (payoutMatch && payoutMatch.payout) result.PayoutId = payoutMatch.payout.id || '';
+if (tipo === 2 && payoutObject) {
+  const people = getAffectedPersonValues(payoutObject);
+  result.Beneficiario = people.Beneficiario;
+  result.Afectado = people.Afectado;
+}
+
+if (tipo === 3 && payoutObject) result.Asegurado = getInsuredPersonValues(payoutObject);
+
+if (payoutMatch && payoutMatch.payout) {
+  const payout = payoutMatch.payout;
+  result.PayoutId = payout.id || '';
+  const payoutAmount = getPayoutAmount(payout);
+  result.Monto = formatAmount(payoutAmount);
+  result.MontoLetras = amountToWords(payoutAmount);
+}
 return result;
 
 function findAffectedObject(raw, expectedFormName) {
@@ -163,7 +197,45 @@ function getVehicleValues(object) {
     Modelo: getModeloTexto(marcaCode, modeloCode),
     Anio: getCollectedValue(values, ['ano', 'anio', 'year', 'año', 'txtanioauto']),
     Placa: getCollectedValue(values, ['placa', 'tbplaca', 'plate', 'licenseplate']),
-    Propietario: getCollectedValue(values, ['propietario', 'oapropietario', 'owner', 'nombrepropietario', 'txtpropietario'])
+    Propietario: getCollectedValue(values, ['propietario', 'oapropietario', 'owner', 'nombrepropietario', 'txtpropietario']),
+    Conductor: getCollectedValue(values, ['oaconductor', 'conductor', 'driver', 'nombreconductor']),
+    IdentificacionAfectado: getCollectedValue(values, ['oacod'])
+  };
+}
+
+function getAffectedPersonValues(object) {
+  const values = {};
+  collectValues(object, values);
+  return {
+    Beneficiario: {
+      Nombre: getCollectedValue(values, ['bennombre']),
+      Identificacion: getCollectedValue(values, ['bencedula']),
+      Edad: getCollectedValue(values, ['benedad']),
+      Nacionalidad: getCountryText(getCollectedValue(values, ['bennacionalidad'])),
+      Relacion: getRelationshipText(getCollectedValue(values, ['benrelacion']))
+    },
+    Afectado: {
+      Nombre: getCollectedValue(values, ['incnombre']),
+      Identificacion: getCollectedValue(values, ['inccedula']),
+      Edad: getCollectedValue(values, ['incedad']),
+      NumeroTarjeta: getCollectedValue(values, ['incnotarjeta']),
+      Sexo: getGenderText(getCollectedValue(values, ['incsexo'])),
+      Nacionalidad: getCountryText(getCollectedValue(values, ['incnacionalidad'])),
+      Motivo: getCollectedValue(values, ['incmotivo']),
+      FechaEvento: getCollectedValue(values, ['incfechaevento'])
+    }
+  };
+}
+
+function getInsuredPersonValues(object) {
+  const values = {};
+  collectValues(object, values);
+  return {
+    Nombre: getCollectedValue(values, ['asegnombre']),
+    Identificacion: getCollectedValue(values, ['asegcedula']),
+    Sexo: getGenderText(getCollectedValue(values, ['asegsexo'])),
+    EstadoCivil: getMaritalStatusText(getCollectedValue(values, ['asegestadocivil'])),
+    Motivo: getCollectedValue(values, ['asegmotivo'])
   };
 }
 
@@ -195,7 +267,11 @@ function collectValues(value, target) {
 function isVehicleField(key) {
   return ['marca', 'brand', 'modelo', 'model', 'ano', 'anio', 'year', 'placa',
     'plate', 'licenseplate', 'propietario', 'owner', 'nombrepropietario', 'cmbmarca',
-    'cmbmodelo', 'txtanioauto', 'tbplaca', 'txtpropietario', 'oapropietario'].includes(key);
+    'cmbmodelo', 'txtanioauto', 'tbplaca', 'txtpropietario', 'oapropietario', 'oaconductor',
+    'conductor', 'driver', 'nombreconductor', 'oacod', 'bennombre', 'bencedula', 'benedad',
+    'bennacionalidad', 'benrelacion', 'incnombre', 'inccedula', 'incedad', 'incnotarjeta',
+    'incsexo', 'incnacionalidad', 'incmotivo', 'incfechaevento', 'asegnombre', 'asegcedula',
+    'asegsexo', 'asegestadocivil', 'asegmotivo'].includes(key);
 }
 
 function getCollectedValue(values, aliases) {
@@ -229,12 +305,131 @@ function getModeloTexto(marca, value) {
   const catalog = GetFullTable && GetFullTable.ok && Array.isArray(GetFullTable.outData)
     ? GetFullTable.outData
     : [];
-  const row = catalog.slice(1).find(item => {
-    if (Array.isArray(item)) return stringValue(item[1]) === marcaCode && stringValue(item[2]) === modeloCode;
-    return stringValue(item.cmarca || item.marca || item.brandCode) === marcaCode
-      && stringValue(item.cmodelo || item.code || item.id) === modeloCode;
+  const rows = catalog.slice(1);
+  const matchesModel = item => Array.isArray(item)
+    ? stringValue(item[2]) === modeloCode || stringValue(item[3]) === modeloCode
+    : stringValue(item.cmodelo || item.code || item.id) === modeloCode
+      || stringValue(item.xmodelo || item.nombre || item.name) === modeloCode;
+  const belongsToBrand = (item, brand) => Array.isArray(item)
+    ? stringValue(item[1]) === brand
+    : stringValue(item.cmarca || item.marca || item.brandCode) === brand;
+  const modelRows = rows.filter(matchesModel);
+  let row = modelRows.find(item => belongsToBrand(item, marcaCode));
+
+  // Some affected-object forms store the selected brand label instead of its code.
+  if (!row && marcaCode) {
+    doCmd({ cmd: 'GetFullTable', data: { table: 'tbMarcas' } });
+    const brands = GetFullTable && GetFullTable.ok && Array.isArray(GetFullTable.outData)
+      ? GetFullTable.outData.slice(1)
+      : [];
+    const normalizedBrand = marcaCode.toUpperCase();
+    const brand = brands.find(item => (Array.isArray(item)
+      ? stringValue(item[2])
+      : stringValue(item.xmarca || item.nombre || item.name)).toUpperCase() === normalizedBrand);
+    const resolvedBrandCode = brand && stringValue(Array.isArray(brand) ? brand[1] : brand.cmarca || brand.code || brand.id);
+    if (resolvedBrandCode) row = modelRows.find(item => belongsToBrand(item, resolvedBrandCode));
+  }
+
+  // Model codes are normally unique; use the single match when the stored brand is unavailable.
+  if (!row && modelRows.length === 1) row = modelRows[0];
+  return stringValue(Array.isArray(row) ? row[3] : row && (row.xmodelo || row.nombre || row.name)) || modeloCode;
+}
+
+function getCountryText(value) {
+  return getCatalogText('RepoCountryCatalog', value, 'code', 'name');
+}
+
+function getRelationshipText(value) {
+  return getCatalogText('RepoRelationshipCatalog', value, 'id', 'name', "principalType='BENEFICIARY'");
+}
+
+function getMaritalStatusText(value) {
+  return getCatalogText('RepoMaritalStatusCatalog', value, 'id', 'name');
+}
+
+function getCatalogText(command, value, codeField, descriptionField, filter) {
+  const code = stringValue(value);
+  if (!code) return '';
+
+  doCmd({
+    cmd: command,
+    data: {
+      operation: 'GET',
+      filter: filter,
+      size: 0,
+      page: 0
+    }
   });
-  return stringValue(Array.isArray(row) ? row[3] : row && (row.name || row.nombre)) || modeloCode;
+
+  const response = command === 'RepoCountryCatalog'
+    ? RepoCountryCatalog
+    : command === 'RepoRelationshipCatalog'
+      ? RepoRelationshipCatalog
+      : RepoMaritalStatusCatalog;
+  const match = rows(response && response.outData)
+    .find(item => stringValue(item && item[codeField]) === code);
+  return stringValue(match && match[descriptionField]) || code;
+}
+
+function getGenderText(value) {
+  const code = stringValue(value).toUpperCase();
+  if (code === 'M') return 'Masculino';
+  if (code === 'F') return 'Femenino';
+  return stringValue(value);
+}
+
+function getPayoutAmount(payout) {
+  const value = payout && payout.payed !== undefined && payout.payed !== null
+    ? payout.payed
+    : payout && payout.originalAmount;
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function formatAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '0.00';
+  return amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function amountToWords(value) {
+  const amount = Math.abs(Number(value) || 0);
+  const totalCents = Math.round(amount * 100);
+  const integer = Math.floor(totalCents / 100);
+  const cents = String(totalCents % 100).padStart(2, '0');
+  const prefix = Number(value) < 0 ? 'Menos ' : '';
+  return `${prefix}${numberToSpanish(integer)} con ${cents}/100`;
+}
+
+function numberToSpanish(value) {
+  const number = Math.floor(Math.abs(Number(value) || 0));
+  if (number === 0) return 'Cero';
+
+  const units = ['', 'Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco', 'Seis', 'Siete', 'Ocho', 'Nueve'];
+  const teens = ['Diez', 'Once', 'Doce', 'Trece', 'Catorce', 'Quince', 'Dieciséis', 'Diecisiete', 'Dieciocho', 'Diecinueve'];
+  const tens = ['', '', 'Veinte', 'Treinta', 'Cuarenta', 'Cincuenta', 'Sesenta', 'Setenta', 'Ochenta', 'Noventa'];
+  const hundreds = ['', 'Ciento', 'Doscientos', 'Trescientos', 'Cuatrocientos', 'Quinientos', 'Seiscientos', 'Setecientos', 'Ochocientos', 'Novecientos'];
+
+  function underThousand(n) {
+    if (n === 0) return '';
+    if (n === 100) return 'Cien';
+    const hundred = hundreds[Math.floor(n / 100)];
+    const rest = n % 100;
+    let text = hundred;
+    if (rest >= 10 && rest < 20) text += `${text ? ' ' : ''}${teens[rest - 10]}`;
+    else if (rest >= 20) text += `${text ? ' ' : ''}${tens[Math.floor(rest / 10)]}${rest % 10 ? ` y ${units[rest % 10]}` : ''}`;
+    else if (rest > 0) text += `${text ? ' ' : ''}${units[rest]}`;
+    return text;
+  }
+
+  const millions = Math.floor(number / 1000000);
+  const thousands = Math.floor((number % 1000000) / 1000);
+  const remainder = number % 1000;
+  const parts = [];
+  if (millions) parts.push(millions === 1 ? 'Un Millón' : `${underThousand(millions)} Millones`);
+  if (thousands) parts.push(thousands === 1 ? 'Mil' : `${underThousand(thousands)} Mil`);
+  if (remainder) parts.push(underThousand(remainder));
+  return parts.join(' ');
 }
 
 function extractValue(value) {

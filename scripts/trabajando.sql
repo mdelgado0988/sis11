@@ -65,8 +65,8 @@ order by cpregunta
 
 return;
 
-declare @ramo int = 31
-SELECT * 
+declare @ramo int = 6
+SELECT t.* , pol.fanopol
 FROM (
 select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
 		CONCAT(cramo,'-' , REPLACE(REPLACE(rtrim(cplan),CONCAT(cramo,'_'),''),'$','')) Contador
@@ -80,9 +80,9 @@ select ROW_NUMBER() OVER(ORDER BY cramo, cplan) ID, cramo,
 		, (SELECT MAX (cproces) cproces FROM adpoliza t where t.cramo = pl.cramo and t.cplan = pl.cplan) EjemploOferta
 from maplanes pl
 where cramo = @ramo 
---AND pl.istatplan = 'V'
 )  t
---WHERE t.id >= 49
+LEFT JOIN adpoliza pol ON pol.cproces = t.EjemploOferta
+WHERE t.TienePolizas = 'Si' AND pol.fanopol >= 2025
 order by 2
 
 select xabreviatura, xdescripcion_l, cramo 
@@ -186,7 +186,7 @@ order by 1,2
 select distinct rtrim(xnombrep) xnombrep, cramo, cplan, xdpto
 from marepteccia
 where cramo in (6)
-and (xnombrep NOT like '%endoso%')
+--and (xnombrep NOT like '%endoso%')
 --AND xdpto <> 'SINIESTROS'
 AND xdpto = 'SINIESTROS'
 AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')

@@ -23,6 +23,10 @@ const reportCoverageName = getReportCoverageName(claimId);
 const product = getProduct(policy);
 const docs = getSettlementDocs(product, policy);
 const docsToGenerate = docs.filter(doc => doc?.template);
+const isAutoPolicy = String(policy.lob || '').trim() === '6';
+const autoPayoutForms = isAutoPolicy
+    ? getAutoPayoutForms(claimId)
+    : new Set();
 let sentDocs = 0;
 
 if (!docs.length) {
@@ -41,6 +45,12 @@ if (!docsToGenerate.length) {
 
 // Start generating documents
 for (const doc of docsToGenerate) {
+    const autoSettlement = isAutoPolicy ? getAutoSettlementDefinition(doc) : null;
+
+    // Auto settlements require a paid, active payout with the exact affected-object form.
+    if (autoSettlement && !autoPayoutForms.has(autoSettlement.formName)) {
+        continue;
+    }
 
     doCmd({cmd: 'PutMessage', 
         data: { 
@@ -51,7 +61,10 @@ for (const doc of docsToGenerate) {
                 data: {
                     claimId,
                     template: doc.template,
-                    reportName: getReportName(doc, reportCoverageName)
+                    reportName: getReportName(doc, reportCoverageName),
+                    context: autoSettlement
+                        ? { claimId, tipo: autoSettlement.tipo }
+                        : undefined
                 }})
             }
     });
@@ -96,7 +109,7 @@ function getPolicy(claim) {
         cmd: "LoadEntity",
         data: {
             entity: "LifePolicy",
-            fields: "id, code, productCode, cessionBeneficiary",
+            fields: "id, code, lob, productCode, cessionBeneficiary",
             filter: `id = ${claim.lifePolicyId}`
         }
     });
@@ -213,6 +226,67 @@ function getReportName(doc, reportCoverageName) {
         !upperName.includes(reportCoverageName.toUpperCase());
 
     return needsCoverageSuffix ? `${name} - ${reportCoverageName}` : name;
+}
+
+function getAutoPayoutForms(claimId) {
+    doCmd({
+        cmd: 'RepoLifeCoveragePayout',
+        data: {
+            operation: 'GET',
+            filter: `claimId = ${claimId} AND payed <> 0 AND status <> 2`,
+            size: 0,
+            page: 0
+        }
+    });
+
+    const forms = new Set();
+    const payouts = Array.isArray(RepoLifeCoveragePayout?.outData)
+        ? RepoLifeCoveragePayout.outData
+        : [];
+    payouts.forEach(payout => collectAffectedForms(safeJson(payout?.jAffectedObjects, null), forms));
+    return forms;
+}
+
+function collectAffectedForms(value, forms) {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+        value.forEach(item => collectAffectedForms(item, forms));
+        return;
+    }
+
+    const formName = String(value.formName || '').trim();
+    if (formName) forms.add(formName);
+    Object.keys(value).forEach(key => collectAffectedForms(value[key], forms));
+}
+
+function getAutoSettlementDefinition(doc) {
+    const customContext = String(doc?.customContext || '');
+    if (!/cmdFiniquitoAU/i.test(customContext)) return null;
+
+    const configuredType = customContext.match(/\b(?:tipo|type)\s*[:=]\s*['"]?([0-3])\b/i);
+    const source = `${doc?.name || ''} ${doc?.template || ''}`.toUpperCase();
+    const tipo = configuredType ? Number(configuredType[1]) : getAutoSettlementTypeFromName(source);
+    const formByType = {
+        0: 'frmOAAutomovilAsegurado',
+        1: 'frmOAAutomovil',
+        2: 'frmOAPersonaAfectada',
+        3: 'frmOAPersonaAseguradaAU'
+    };
+
+    if (!Object.prototype.hasOwnProperty.call(formByType, tipo)) {
+        throw new Error(`No se pudo determinar el tipo de cmdFiniquitoAU para la plantilla ${doc?.template || doc?.name || '(sin nombre)'}.`);
+    }
+
+    return { tipo, formName: formByType[tipo] };
+}
+
+function getAutoSettlementTypeFromName(source) {
+    const normalized = String(source || '').replace(/[^A-Z0-9]/g, '');
+    if (normalized.includes('PAGOAFECTADO')) return 2;
+    if (normalized.includes('PAGOASEGURADO')) return 3;
+    if (normalized.includes('AUTOAFECTADO')) return 1;
+    if (normalized.includes('AUTOASEGURADO')) return 0;
+    return NaN;
 }
 
 function safeJson(raw, fallback) {

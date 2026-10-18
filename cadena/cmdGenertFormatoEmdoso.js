@@ -2,6 +2,7 @@
 //noreplace
 /*
  * @authorJampier Solera
+ * @author Cesar Aguilar implementation feature for type ChangeActLicitation; Edited:16/10/2026
  * @created 2026/02/11
  * @name cmdGenertFormatoEmdoso
  * @version 1.1
@@ -39,6 +40,7 @@ const reportesEndoso = {
     conPrima: 'FormatoEndososFianza.docx',
     sinPrima: 'FormatoEndososSinCoberturaFianza.docx',
     ordenProceder: 'EndosoOrdenProcederFianza.docx',
+    actoPublico: 'EndosoActoPublicoLicitacion.docx',
     cambioSuma: 'EndosoCambioSumaFianza.docx',
     cambioVigencia: 'EndosoCambioVigenciaFianza.docx'
   },
@@ -585,6 +587,9 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   if (isSuretyPolicy(policy) && endorsementType === 'PROCEEDORDER') {
     return reportes.fianza.ordenProceder;
   }
+  if (isSuretyPolicy(policy) && endorsementType === 'CHANGEACTLICITATION') {
+    return reportes.fianza.actoPublico;
+  }
   if (isSuretyPolicy(policy) && endorsementType === 'CHANGE_INSURED_SUM_SURETY') {
     return reportes.fianza.cambioSuma;
   }
@@ -964,6 +969,7 @@ function getEndorsementTitleForChange(change) {
   const titlesByType = {
     CHANGE_COVERAGE_SURETY: 'Cambio de Vigencia de Cobertura',
     CHANGE_INSURED_SUM_SURETY: 'Cambio de Suma de Cobertura',
+    CHANGEACTLICITATION: 'Fecha de Acto Público / Licitación',
     PROCEEDORDER: 'Orden de proceder'
   };
 
@@ -1199,6 +1205,12 @@ function buildSuretyDocumentData({ policy, change, insuredData, holder, contacts
     TipoMovimiento: Number(policy.contractYear || 0) === 1 ? 'Nuevo' : 'Renovación', Corredor: fullName(seller) || 'No Tiene', Oferta: policy.id,
     Coberturas: coverages.map(coverage => ({ Codigo: coverage.code, Cobertura: coverage.name || '', Limite: n(coverage.limit), Prima: n(coverage.premium), Moneda: 'B/.' }))
   };
+  if (tipoCambioCobertura(change).endorsementType === 'CHANGEACTLICITATION') {
+    const publicTenderDate = dateParts(change.effectiveDate);
+    result.FechaActoPublicoTexto = publicTenderDate.year
+      ? publicTenderDate.day + ' DE ' + months[publicTenderDate.month - 1].toUpperCase() + ' DE ' + publicTenderDate.year
+      : '';
+  }
   return result;
 }
 
