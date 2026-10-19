@@ -30,6 +30,7 @@
   // ------------------------------------------------------------- configuracion por ramo
   // Misma tabla de tarifas de entrada que usa el formulario del objeto asegurado de cada ramo.
   const COBTAR_POR_RAMO = [
+    { lob: 6, table: 'cfgCobtarAuto', object: 'DTAUT' },
     { lob: 31, table: 'cfgCobtarVida', object: 'DT_ACCIDENTES_V1' },
     { lob: 20, table: 'cfgCobtarVidaColectivo', object: 'DT_ACCIDENTES_V1' },
     { lob: 71, table: 'cfgCobtarVidaIndividual', object: 'DT_ACCIDENTES_V1' },
@@ -569,6 +570,60 @@
     return current.concat(added);
   };
 
+  // Distribuye el total anual de facturación (prima e impuesto) entre las
+  // cuotas vigentes. Es el mismo criterio usado en cambio de suma para que
+  // el plan de pagos y el Bill del endoso siempre cuadren.
+  const buildNativePayPlan = function (currentPlan, difference, effectiveDate) {
+    const rows = Array.isArray(currentPlan) ? currentPlan.map(function (item) { return Object.assign({}, item); }) : [];
+    let remainingCents = Math.round(money(difference) * 100);
+    if (!remainingCents) return rows;
+
+    let candidates = rows.map(function (row, index) {
+      const amount = Math.round(Number(row.minimum !== undefined ? row.minimum : row.expected || 0) * 100);
+      const paid = Math.round(Number(row.payed !== undefined ? row.payed : row.paid || 0) * 100);
+      return { row: row, index: index, amount: amount, paid: paid, weight: Math.max(amount, 1) };
+    }).filter(function (item) {
+      return !item.row.cancellationDate && item.amount > item.paid;
+    });
+
+    while (candidates.length && remainingCents) {
+      const initialRemaining = remainingCents;
+      const totalWeight = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
+      let applied = 0;
+      const nextCandidates = [];
+      candidates.forEach(function (item, index) {
+        const portion = index === candidates.length - 1
+          ? initialRemaining - applied
+          : Math.round(initialRemaining * item.weight / totalWeight);
+        const nextAmount = item.amount + portion;
+        const limitedAmount = initialRemaining < 0 ? Math.max(item.paid, nextAmount) : nextAmount;
+        const actualPortion = limitedAmount - item.amount;
+        item.amount = limitedAmount;
+        item.row.minimum = money(limitedAmount / 100);
+        item.row.expected = money(limitedAmount / 100);
+        applied += actualPortion;
+        if (initialRemaining >= 0 || item.amount > item.paid) nextCandidates.push(item);
+      });
+      remainingCents -= applied;
+      if (!applied) break;
+      candidates = nextCandidates;
+    }
+
+    if (!remainingCents) return rows;
+    const last = rows[rows.length - 1] || {};
+    const lastNumber = rows.reduce(function (max, item) { return Math.max(max, Number(item && item.numberInYear || 0)); }, 0);
+    const contractYear = rows.reduce(function (max, item) { return Math.max(max, Number(item && item.contractYear || 0)); }, 0) || 1;
+    rows.push(Object.assign({}, last, {
+      id: 0, lifePolicyId: Number(policyId), concept: 'Prima',
+      expected: money(remainingCents / 100), minimum: money(remainingCents / 100),
+      payed: 0, payedDate: null, transferId: null, dueDate: effectiveDate, coveredUntil: effectiveDate,
+      allocationDate: null, contractYear: contractYear, final: false, finalDate: null,
+      numberInYear: lastNumber + 1, allocationId: null, cancellationDate: null,
+      compensationDate: null, created: null, normalDueDate: effectiveDate, changeId: null, PayPlanDetail: null
+    }));
+    return rows;
+  };
+
   // ------------------------------------------------------------- cotizacion
   const buildBasePayload = function () {
     const before = policy && policy.Coverages ? policy.Coverages : [];
@@ -615,9 +670,18 @@
         tax: num(bill.tax) - num(diff.tax),
         total: num(bill.anualTotal) - num(diff.annualTotal)
       };
+      const currentPlanTotal = payPlan.reduce(function (sum, installment) {
+        return sum + num(installment.minimum !== undefined ? installment.minimum : installment.expected);
+      }, 0);
+      const finalBillTotal = num(bill.anualTotal !== undefined ? bill.anualTotal : bill.annualTotal);
+      const calculatedPayPlan = buildNativePayPlan(
+        payPlan,
+        money(finalBillTotal - currentPlanTotal),
+        effectiveDate.format('YYYY-MM-DD') + 'T12:00:00'
+      );
       setQuote({
         raw: o, payload: payload, cobtar: cobtar, prorate: prorate, detail: detail, rows: addedRows, zero: zero,
-        jNewPayPlan: parseJson(o.jNewPayPlan, []) || [],
+        jNewPayPlan: calculatedPayPlan,
         billing: {
           premium: { before: before.premium, after: num(bill.anualPremium), movement: num(diff.annualPremium), prorated: num(detail.coveragesCost) },
           tax: { before: before.tax, after: num(bill.tax), movement: num(diff.tax), prorated: money(num(detail.changeCost) - num(detail.coveragesCost)) },
@@ -895,7 +959,9 @@
     try {
       // 1. registro del endoso (el comando vuelve a cotizar con las mismas tarifas de entrada)
       const created = await exe('ChangeAddCoverage', Object.assign({}, quote.payload, {
-        jAdditional: JSON.stringify(jAdditional), operation: 'ADD', code: null, note: txt(note)
+        jAdditional: JSON.stringify(jAdditional),
+        jNewPayPlan: JSON.stringify(quote.jNewPayPlan || []),
+        operation: 'ADD', code: null, note: txt(note)
       }));
       const change = first(created);
       if (!created || !created.ok || !change || !change.id) throw new Error(t('El endoso no pudo ser creado') + ': ' + cleanMessage(created));
@@ -931,12 +997,39 @@
       if (!exeResponse || !exeResponse.ok) throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(exeResponse));
       executed = true;
 
-      // 5. cuotas del endoso (la ejecucion inmediata no las genera)
+      // 5. Cuotas del endoso. MakePayPlan reconstruye usando solo prima y
+      // perdería el impuesto; las cuotas existentes se actualizan con el
+      // total cotizado y solo los remanentes se crean con MakePayPlan.
       try {
-        const ch = first(await exe('LoadEntity', { entity: 'Change', fields: 'id,lifePolicyId,effectiveDate,jNewPayPlan,Discriminator', filter: 'id=' + changeId, noTracking: true }));
-        if (ch && txt(ch.jNewPayPlan) && txt(ch.jNewPayPlan) !== '[]') {
+        const plannedRows = quote.jNewPayPlan || [];
+        const oldRowsById = {};
+        payPlan.forEach(function (item) { oldRowsById[String(item.id)] = item; });
+        for (let i = 0; i < plannedRows.length; i++) {
+          const planned = plannedRows[i];
+          const current = oldRowsById[String(planned && planned.id)];
+          if (!current || !Number(current.id) || current.cancellationDate) continue;
+          const before = money(current.minimum !== undefined ? current.minimum : current.expected);
+          const after = money(planned.minimum !== undefined ? planned.minimum : planned.expected);
+          const paid = money(current.payed !== undefined ? current.payed : current.paid);
+          if (after < paid) throw new Error(t('La distribución intentó reducir una cuota por debajo de lo ya pagado'));
+          if (before === after) continue;
+          const update = await exe('SetField', {
+            entity: 'PayPlan', entityId: Number(current.id),
+            fieldValue: 'expected=' + after.toFixed(2) + ',minimum=' + after.toFixed(2), raw: true
+          });
+          if (!update || !update.ok) throw new Error((update && update.msg) || t('No se pudo actualizar una cuota distribuida'));
+        }
+        const endorsementInstallments = plannedRows.filter(function (item) { return !Number(item && item.id || 0); });
+        if (endorsementInstallments.length) {
           const pp = await exe('MakePayPlan', {
-            policyId: policyId, initial: ch.effectiveDate, Change: ch,
+            policyId: policyId,
+            initial: effectiveDate.format('YYYY-MM-DD') + 'T12:00:00',
+            Change: {
+              id: changeId,
+              lifePolicyId: policyId,
+              effectiveDate: effectiveDate.format('YYYY-MM-DD') + 'T12:00:00',
+              jNewPayPlan: JSON.stringify(endorsementInstallments)
+            },
             policy: { id: policyId, payerId: policy.payerId, holderId: policy.holderId, contractYear: policy.contractYear, currency: policy.currency }
           });
           if (!pp || !pp.ok) failures.push(t('cuotas del endoso') + ': ' + cleanMessage(pp));
@@ -1005,12 +1098,12 @@
         }
       } catch (ioError) { failures.push(t('tarifas de entrada en el objeto asegurado') + ': ' + String(ioError && ioError.message ? ioError.message : ioError)); }
 
-      // 8. documento del endoso
-      try {
-        const doc = await exe('ExeChain', { chain: 'cmdGenertFormatoEmdoso', context: JSON.stringify({ changeId: changeId }) });
-        const data = doc && doc.outData;
-        if (!doc || !doc.ok || (data && data.ok === false)) failures.push(t('documento del endoso') + ': ' + ((data && data.msg) || cleanMessage(doc)));
-      } catch (docError) { failures.push(t('documento del endoso') + ': ' + String(docError && docError.message ? docError.message : docError)); }
+      // 8. documento del endoso: generación temporalmente deshabilitada.
+      // try {
+      //   const doc = await exe('ExeChain', { chain: 'cmdGenertFormatoEmdoso', context: JSON.stringify({ changeId: changeId }) });
+      //   const data = doc && doc.outData;
+      //   if (!doc || !doc.ok || (data && data.ok === false)) failures.push(t('documento del endoso') + ': ' + ((data && data.msg) || cleanMessage(doc)));
+      // } catch (docError) { failures.push(t('documento del endoso') + ': ' + String(docError && docError.message ? docError.message : docError)); }
 
       // 9. lo escrito
       let written = [];
@@ -1751,12 +1844,25 @@
 .axx299-modal .ant-modal-close { top:6px; right:8px; }
 .axx299-modal .ant-modal-body { padding:8px; }
 .axx299-modal .ant-modal-footer { padding:6px 8px; border-top:1px solid #d9e2ec; }
-.axx299-modal .ant-table-wrapper { border:1px solid #d9e2ec; }
+.axx299-modal .ant-table-wrapper { border:1px solid #cbd1d8; }
 .axx299-modal .ant-table { font-size:12px; }
-.axx299-modal .ant-table-thead > tr > th { padding:4px 6px !important; line-height:16px; }
-.axx299-modal .ant-table-tbody > tr > td { padding:3px 6px !important; line-height:16px; }
+.axx299-modal .ant-table-thead > tr > th { background:#bfbfbf !important; color:#262626;
+          border-right:1px solid #cbd1d8 !important; border-bottom:1px solid #cbd1d8 !important;
+          padding:4px 6px !important; line-height:16px; }
+.axx299-modal .ant-table-thead > tr > th:last-child { border-right:none !important; }
+.axx299-modal .ant-table-thead > tr > th::before { display:none !important; }
+.axx299-modal .ant-table-tbody > tr > td { border-right:none !important; border-bottom:1px solid #cbd1d8 !important;
+          padding:3px 6px !important; line-height:16px; }
+.axx299-modal .ant-table-tbody > tr:hover > td { background:#b7d7ff !important; }
+.axx299-modal .ant-table-tbody > tr.ant-table-row-selected > td { background:#86b4ff !important; }
+.axx299-modal .axx-selectable-coverage-row > td { cursor:pointer; }
 .axx299-modal .ant-table-tbody > tr > td .ant-tag { margin:0; font-size:11px; line-height:18px; padding:0 5px; }
 .axx299-modal .ant-table-selection-column { width:34px; padding-left:6px !important; padding-right:4px !important; }
+.axx299-modal .ant-checkbox-inner { width:16px; height:16px; border:1px solid #8f9aa7 !important; border-radius:3px; background:#fff; }
+.axx299-modal .ant-checkbox:hover .ant-checkbox-inner, .axx299-modal .ant-checkbox-wrapper:hover .ant-checkbox-inner { border-color:#8da9c2 !important; }
+.axx299-modal .ant-checkbox-checked .ant-checkbox-inner, .axx299-modal .ant-checkbox-indeterminate .ant-checkbox-inner { border-color:#1677ff !important; background:#1677ff; }
+.axx299-modal .ant-checkbox-input:focus + .ant-checkbox-inner { border-color:#1677ff !important; box-shadow:0 0 0 2px rgba(22,119,255,.2); }
+.axx299-modal .ant-checkbox-disabled .ant-checkbox-inner { border-color:#b8c4d1 !important; background:#f5f5f5; }
 .axx299 .ant-input:not([type="hidden"]), .axx299 .ant-input-number, .axx299 .ant-select-selector, .axx299 .ant-picker, .axx299-modal .ant-input:not([type="hidden"]), .axx299-modal .ant-input-number, .axx299-modal .ant-select-selector, .axx299-modal .ant-picker {
           border:1px solid #b8c4d1 !important; border-radius:6px !important; transition:border-color .2s, box-shadow .2s; }
 .axx299 .ant-input:hover, .axx299 .ant-input-number:hover, .axx299 .ant-select:hover .ant-select-selector, .axx299 .ant-picker:hover, .axx299-modal .ant-input:hover, .axx299-modal .ant-input-number:hover, .axx299-modal .ant-select:hover .ant-select-selector, .axx299-modal .ant-picker:hover {
@@ -1985,6 +2091,23 @@
           }}
           okText={t('Agregar')} cancelText={t('Cancelar')}>
           <Table size="small" rowKey="code" pagination={false} scroll={{ y: 420 }} dataSource={eligible} columns={colsEligible}
+            rowClassName={function () { return 'axx-selectable-coverage-row'; }}
+            onRow={function (record) {
+              return {
+                onClick: function (event) {
+                  // El checkbox ya gestiona su propio clic; evita alternar dos veces.
+                  const target = event && event.target;
+                  if (target && target.closest && target.closest('.ant-checkbox, .ant-checkbox-wrapper, input, button, a')) return;
+                  if (running || (result && result.ok)) return;
+                  const code = String(record.code);
+                  setCoverageDraft(function (current) {
+                    return current.indexOf(code) >= 0
+                      ? current.filter(function (item) { return item !== code; })
+                      : current.concat(code);
+                  });
+                }
+              };
+            }}
             locale={{ emptyText: t('El producto no tiene coberturas opcionales pendientes de incluir en esta póliza.') }}
             rowSelection={{ selectedRowKeys: coverageDraft, getCheckboxProps: function () { return { disabled: running || (result && result.ok) }; },
               onChange: function (keys) { setCoverageDraft(keys.map(String)); } }} />

@@ -209,6 +209,14 @@ function getQuotationObject(coverageCode) {
     if(key != 'COVERAGECODE') obj.params.push(key);
   });
 
+  // Las fórmulas de Auto usan LIMITE en mayúsculas. La configuración puede
+  // exponer ese campo con otra capitalización, por lo que se publica un alias
+  // estable para la evaluación de la tarifa.
+  const limitKey = Object.keys(obj).find(function (key) {
+    return String(key).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase() === 'LIMITE';
+  });
+  obj.LIMITE = limitKey ? obj[limitKey] : 0;
+
   //Convertimos a números valores sencibles:
   obj.msumaaseg = n(obj.txtSA);
   obj.txtSumaAsegurada = n(obj.txtSA);
@@ -475,6 +483,19 @@ function getInsuredObject() {
     throw new Error("El detalle de coberturas del objeto asegurado no es válido.");
   }
 
+  // En inclusión de coberturas, los parámetros nuevos viven en jAdditional
+  // hasta ejecutar el endoso. Se combinan solo para esta cotización, sin
+  // modificar el objeto asegurado persistido.
+  getAdditionalCobtar().forEach(function (addition) {
+    const code = getCobtarCoverageCode(addition);
+    if (code === null || code === undefined || String(code).trim() === '') return;
+    const index = oaUserData.cobtar.findIndex(function (item) {
+      return String(getCobtarCoverageCode(item)) === String(code);
+    });
+    if (index >= 0) oaUserData.cobtar[index] = Object.assign({}, oaUserData.cobtar[index], addition);
+    else oaUserData.cobtar.push(Object.assign({}, addition));
+  });
+
   Object.keys(autoCobtarOverrides || {}).forEach(function (coverageCode) {
     const override = autoCobtarOverrides[coverageCode] || {};
     const row = oaUserData.cobtar.find(function (item) { return String(getCobtarCoverageCode(item)) === String(coverageCode); });
@@ -488,6 +509,35 @@ function getInsuredObject() {
 
 function getCobtarCoverageCode(row) {
   return row && (row.COVERAGECODE !== undefined ? row.COVERAGECODE : row.coverageCode);
+}
+
+function getAdditionalCobtar() {
+  const parseObject = function (value) {
+    if (value && typeof value === 'object') return value;
+    if (typeof value !== 'string' || !value.trim()) return {};
+    try { return JSON.parse(value); } catch (error) { return {}; }
+  };
+  const extraData = parseObject(extra);
+  const nestedExtra = parseObject(extraData.data);
+  const dto = parseObject(poliza && poliza.jChangeDto);
+  const nestedDto = parseObject(dto.data);
+  const candidates = [
+    nestedExtra.jAdditional,
+    extraData.jAdditional,
+    nestedDto.jAdditional,
+    dto.jAdditional,
+    poliza && poliza.jAdditional
+  ];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const additional = parseObject(candidates[i]);
+    if (Array.isArray(additional.cobtar)) return additional.cobtar;
+    if (typeof additional.cobtar === 'string') {
+      const cobtar = parseObject(additional.cobtar);
+      if (Array.isArray(cobtar)) return cobtar;
+    }
+  }
+  return [];
 }
 
 function getResultCoverages() {
