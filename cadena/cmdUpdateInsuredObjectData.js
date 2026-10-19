@@ -3,8 +3,8 @@
 /*
  * @name cmdUpdateInsuredObjectData
  * @version 1.0
- * @Purpose Sync the insured-object hidden coverage grid (OA_FIANZASV3 for surety
- *          and DT_RAMO_TECNICO for technical lines, field hiddenCobtar) with the
+ * @Purpose Sync the insured-object hidden coverage grid (OA_FIANZASV3 for surety,
+ *          DT_RAMO_TECNICO for technical lines and DTAUT for Auto, field hiddenCobtar) with the
  *          coverage dates actually applied to the policy.
  *          AXX-214 / GLOB-1221, ProceedOrderEndorsement v1.0 section 3.3.
  * @Input  { policyId, syncDays?, syncSums? }  syncDays actualiza 'Duración Días' con la
@@ -24,6 +24,8 @@ const keyEnd = 'F. Final';
 const keyDays = 'Duración Días';
 const syncDays = !!(context && context.syncDays);
 const syncSums = !!(context && context.syncSums);
+const autoCobtarOverrides = context && context.autoCobtarOverrides && typeof context.autoCobtarOverrides === 'object'
+  ? context.autoCobtarOverrides : {};
 
 const policyId = context && context.policyId ? Number(context.policyId) : 0;
 if (!policyId) {
@@ -61,7 +63,10 @@ if (!policy) return { ok: false, msg: 'cmdUpdateInsuredObjectData: poliza ' + po
 
 const isTechnicalPolicy = ['96', '52'].indexOf(String(policy.lob == null ? '' : policy.lob).trim()) >= 0;
 const isSuretyPolicy = ['81', '82', '83', '84'].indexOf(String(policy.lob == null ? '' : policy.lob).trim()) >= 0;
-const objectDefinitionCode = isTechnicalPolicy ? 'DT_RAMO_TECNICO' : 'OBJFIANZA';
+const isAutoPolicy = String(policy.lob == null ? '' : policy.lob).trim() === '6';
+const objectDefinitionCode = isTechnicalPolicy
+  ? 'DT_RAMO_TECNICO'
+  : (isAutoPolicy ? 'DTAUT' : 'OBJFIANZA');
 
 const byCode = {};
 (policy.Coverages || []).forEach(function (c) { byCode[String(c.code).trim()] = c; });
@@ -166,7 +171,7 @@ for (let i = 0; i < coverageUpdates.length; i++) {
 // Read it WITHOUT the repository GET on purpose: that GET makes EF track the entity, and the
 // UPDATE below then fails with 'another instance with the same key value is already being
 // tracked'. A read-only projection keeps the change tracker clean for the write.
-const objectDefinitionFilter = isTechnicalPolicy
+const objectDefinitionFilter = (isTechnicalPolicy || isAutoPolicy)
   ? "od.code = '" + objectDefinitionCode + "'"
   : 'od.formId = ' + formIdFianza;
 doCmd({ cmd: 'DoQuery', data: { sql: 'SELECT TOP 1 io.id, io.objectDefinitionId, io.lifePolicyId, io.jValues, io.jMap, io.jFileUpload, io.alias, io.jDetailList FROM InsuredObject io JOIN ObjectDefinition od ON od.id = io.objectDefinitionId WHERE io.lifePolicyId = ' + policyId + ' AND ' + objectDefinitionFilter, timeout: 60 } });
@@ -206,7 +211,9 @@ if (!Array.isArray(grid) || !grid.length) {
 const hasDates = grid.filter(function (row) {
   return row && Object.prototype.hasOwnProperty.call(row, keyStart) && Object.prototype.hasOwnProperty.call(row, keyEnd);
 }).length;
-if (!hasDates && !(syncSums && isSuretyPolicy && insuredBondSum !== null)) {
+const hasCoverageSumsToSync = syncSums && Object.keys(coverageSums).length > 0;
+const hasAutoOverridesToSync = isAutoPolicy && Object.keys(autoCobtarOverrides).length > 0;
+if (!hasDates && !hasCoverageSumsToSync && !hasAutoOverridesToSync && !(syncSums && isSuretyPolicy && insuredBondSum !== null)) {
   return { ok: false, msg: 'cmdUpdateInsuredObjectData: hiddenCobtar del objeto ' + target.id + ' no tiene las columnas "' + keyStart + '" / "' + keyEnd + '", asi que no hay fechas que actualizar sin inventar un formato nuevo' };
 }
 
@@ -256,6 +263,18 @@ grid.forEach(function (row) {
       sumFields.forEach(function (fieldName) { row[fieldName] = coverageSums[code]; });
       detailRow.sum = coverageSums[code];
       updatedSumRows++;
+      rowUpdated = true;
+    }
+  }
+
+  if (isAutoPolicy && Object.prototype.hasOwnProperty.call(autoCobtarOverrides, code)) {
+    const override = autoCobtarOverrides[code] || {};
+    const fieldName = Object.keys(row).find(function (key) {
+      return String(key).toLowerCase() === String(override.field || '').toLowerCase();
+    });
+    if (fieldName && override.field) {
+      row[fieldName] = override.value;
+      detailRow.option = fieldName;
       rowUpdated = true;
     }
   }

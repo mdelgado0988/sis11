@@ -8,6 +8,7 @@ CreateDate: 05-07-2026
 */
 const me = this;    
 const policyId = window.location.href.split('/')[5] || 3374;
+const isEndorsment = window.location.href.includes('tab12');
 let policy = {};
 let configCobtar = [];
 let configCoverages = [];
@@ -139,6 +140,7 @@ function syncVINSelectState() {
 
     const value = normalizeVINValue($tbVIN.val());
     const hasValue = value !== '';
+    const allowVINEditOnEndorsement = isEndorsment && polizaConfirmada;
     const $vinWrapper = $tbVIN.closest('.ant-form-item').first();
 
     if (hasValue) {
@@ -155,11 +157,11 @@ function syncVINSelectState() {
       }
       $select.prop('disabled', false);
       const noTieneVIN = String($select.val() || '').trim().toLowerCase() === 'si';
-      $tbVIN.prop('disabled', noTieneVIN);
-      $tbVIN.prop('required', !noTieneVIN);
-      $tbVIN.attr('aria-required', noTieneVIN ? 'false' : 'true');
-      $tbVIN.toggleClass('vin-optional', noTieneVIN);
-      $vinWrapper.toggleClass('vin-no-required', noTieneVIN);
+      $tbVIN.prop('disabled', allowVINEditOnEndorsement ? false : noTieneVIN);
+      $tbVIN.prop('required', allowVINEditOnEndorsement || !noTieneVIN);
+      $tbVIN.attr('aria-required', allowVINEditOnEndorsement || !noTieneVIN ? 'true' : 'false');
+      $tbVIN.toggleClass('vin-optional', !allowVINEditOnEndorsement && noTieneVIN);
+      $vinWrapper.toggleClass('vin-no-required', !allowVINEditOnEndorsement && noTieneVIN);
     }
 
     $tbVIN[0].setCustomValidity('');
@@ -262,28 +264,58 @@ function moveFieldsToTabHome() {
   }
 }
 
+function setEstadoCargaInicial(cargando) {
+  $('#autoFormLoadStatus').remove();
+  if (!cargando || !$('#tabHome').length) return;
+  $('<div>', {
+    id: 'autoFormLoadStatus',
+    class: 'alert alert-info',
+    text: 'Cargando datos del vehículo...'
+  }).prependTo('#tabHome');
+}
 
 const onDocumentReady = async() => {
   
     prepareTabContainer();
     moveFieldsToTabHome();
+    setEstadoCargaInicial(true);
 
-    await loadPolicy();
-    await cargarUbicacionAsegurado();
+    try {
+      await loadPolicy();
+      polizaConfirmada = esPolizaEmitidaCoberturas();
 
-    $("#cmbMarca").on("change", changeMarca);
-    // Keep the certificate field read-only at all times.
-    $("#txtCertificado").prop("readonly", true);
-    await loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2});
-    await changeMarca();
-    await loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob});
-    await loadDataTable({reference:'#cmbUsoAuto',tableName:'tblUsoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob});
-    await cargarCobtarDinamico();
-    validaInputs();
-    injectVINStyle();
-    ensureVINSelect();
-    syncVINSelectState();
-    syncVINSelectWhenReady();
+      // Keep the certificate field read-only at all times.
+      $("#txtCertificado").prop("readonly", true);
+
+      // These requests only require the policy and can run concurrently. Model
+      // loading remains below because it must use the selected brand.
+      const initialLoads = await Promise.allSettled([
+          cargarUbicacionAsegurado(),
+          loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2}),
+          loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob}),
+          loadDataTable({reference:'#cmbUsoAuto',tableName:'tblUsoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob})
+      ]);
+      const failedLoads = initialLoads.filter(function (item) { return item.status === 'rejected'; });
+      if (failedLoads.length) {
+          const message = 'No se pudo cargar ' + failedLoads.length + ' catálogo(s) del objeto asegurado.';
+          console.error(message, failedLoads);
+          if (me.message && me.message.warning) me.message.warning(message);
+      }
+      await changeMarca();
+      $("#cmbMarca").on("change", changeMarca);
+      await cargarCobtarDinamico();
+      bloquearCamposPolizaEmitida();
+      validaInputs();
+      injectVINStyle();
+      ensureVINSelect();
+      syncVINSelectState();
+      syncVINSelectWhenReady();
+    } catch (error) {
+      console.error('No se pudo inicializar el formulario de automóvil.', error);
+      if (me.message && me.message.error) me.message.error('No se pudo cargar completamente el formulario de automóvil.');
+    } finally {
+      setEstadoCargaInicial(false);
+    }
 
 }
 
@@ -356,7 +388,7 @@ async function loadDataTableModelo ({
 
 $(document)
     .promise()
-    .then(setTimeout(onDocumentReady, 1000));
+    .then(function () { setTimeout(onDocumentReady, 1000); });
 
 //Validando inputs
 function validaInputs() {
@@ -450,6 +482,13 @@ function inyectarEstilosAntdCobtar() {
                 border: 1px solid #d9d9d9 !important;
                 pointer-events: none;
                 opacity: 1 !important;
+            }
+            .auto-issued-readonly {
+                background-color: #f5f5f5 !important;
+                color: #666 !important;
+                border-color: #d9d9d9 !important;
+                cursor: not-allowed !important;
+                pointer-events: none !important;
             }
             #tabTarifas #toolbarCoberturas {
                 display: flex !important;
@@ -549,8 +588,59 @@ async function setConfigCoverages() {
     });
 }
 
+function esPolizaEmitidaCoberturas() {
+    const active = policy?.active;
+    const activeDate = policy?.activeDate;
+    const tieneFechaEmision = activeDate !== null
+        && activeDate !== undefined
+        && String(activeDate).trim() !== '';
+
+    return tieneFechaEmision
+        || active === true
+        || active === 1
+        || String(active).toLowerCase() === 'true'
+        || String(active) === '1';
+}
+
+function bloquearCamposPolizaEmitida() {
+    if (!polizaConfirmada) return;
+
+    // Some generated fields are not marked with .ptab and remain outside the
+    // custom tabs, so lock the owning form as well as the tariff container.
+    const $form = $('#txtCertificado').closest('form');
+    const $scope = $form.add('#tabTarifas');
+    $scope.find('input:not([type="hidden"]), textarea')
+        .prop('readonly', true)
+        .attr('aria-readonly', 'true')
+        .addClass('auto-issued-readonly');
+    $scope.find('select, input[type="checkbox"], input[type="radio"]')
+        .addClass('auto-issued-readonly')
+        .attr('aria-disabled', 'true')
+        .off('.autoIssuedReadonly')
+        .on('mousedown.autoIssuedReadonly keydown.autoIssuedReadonly change.autoIssuedReadonly', function (event) {
+            event.preventDefault();
+            return false;
+        });
+    $('#btnGestionarCoberturas').prop('disabled', true);
+
+    if (isEndorsment) {
+        const $editable = $('#tbextras, #txtColorAuto, #tbplaca, #cmbCombustibleAuto, #tbVIN');
+        $editable
+            .prop('readonly', false)
+            .prop('disabled', false)
+            .removeClass('auto-issued-readonly')
+            .removeAttr('aria-readonly aria-disabled')
+            .off('.autoIssuedReadonly');
+    }
+}
+
 async function setProductCoverages() {
-    const productJson = await getProduct(policy.lob, policy.productCode);
+    polizaConfirmada = esPolizaEmitidaCoberturas();
+    const results = await Promise.all([
+        getProduct(policy.lob, policy.productCode),
+        setConfigCoverages()
+    ]);
+    const productJson = results[0];
     let product = {};
 
     try {
@@ -558,8 +648,6 @@ async function setProductCoverages() {
     } catch (error) {
         product = {};
     }
-
-    await setConfigCoverages();
 
     if (!product || !product.Coverages || !product.Coverages.length) {
         productCoverages = [];
@@ -627,8 +715,7 @@ async function setProductCoverages() {
 async function cargarCobtarDinamico() {
     try {
         inyectarEstilosAntdCobtar();
-        await setProductCoverages();
-        await listarCobtar();
+        await Promise.all([setProductCoverages(), listarCobtar()]);
         renderTablaAgrupada(configCobtar);
         cargarCobtarDesdeHidden('#hiddenCobtar', '#tabTarifas');
         bindEventosCobtar();
@@ -870,7 +957,7 @@ function bindEventosCobtar() {
 }
 
 function setDefaultCobtar() {
-    if ($('#hiddenCobtar').val() === '') {
+    if (!polizaConfirmada && $('#hiddenCobtar').val() === '') {
         const data = construirCobtar('#tabTarifas');
         $('#hiddenCobtar').val(JSON.stringify(data));
     }

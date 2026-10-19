@@ -11,7 +11,7 @@
   *@Output: [{ code, limit, premium, dedutible, description }]
 */
 
-const { poliza, action, extra } = context;
+const { poliza, action, extra, autoCobtarOverrides, coverageSumOverrides } = context;
 const objectDefinitionCode = "DTAUT";
 let tarifas;
 let tbTarConfig = [];
@@ -49,6 +49,9 @@ try {
   for (let cov of poliza.Coverages) {
 
     const resultCoverage = resultCoverages.find(x => x.code == cov.code);
+    const manualSum = Number((coverageSumOverrides || {})[String(cov.code)]);
+    const hasManualSum = Number.isFinite(manualSum) && manualSum > 0;
+    let tariffApplied = false;
     const obj = getQuotationObject(cov.code);
     const pprima = getPPrima(tbTarConfig, cov.code, obj);
     const porcentaje = getPorcentaje(vwGetConfigTar, cov.code);
@@ -74,6 +77,7 @@ try {
 
       //Si encuentro condición en verdadero recupero los valores y no continuo;
       if(condicion){
+        tariffApplied = true;
 
         // log(`Evaluando suma: ${tarifa.sumaasegurada}`);
         resultCoverage.limit = evalConfig(obj, tarifa.sumaasegurada);    
@@ -101,13 +105,19 @@ try {
         });     
 
         //Calculamos la fecha inicial
-        const cobtar = oaUserData.cobtar.find(x => x.COVERAGECODE == tarifa.ccobertura);
+        const cobtar = oaUserData.cobtar.find(x => getCobtarCoverageCode(x) == tarifa.ccobertura);
         resultCoverage.fini = parseFechaUTCMedioDia(cobtar?.["FINICIAL"]);
         resultCoverage.ffin = parseFechaUTCMedioDia(cobtar?.["FFINAL"]);
         
         break;
       }
       
+    }
+
+    // Las coberturas sin una tarifa de entrada conservan la suma digitada en
+    // el endoso. Su prima se prorratea posteriormente en la vista.
+    if (!tariffApplied && hasManualSum) {
+      resultCoverage.limit = n(manualSum);
     }
     
   }
@@ -178,7 +188,7 @@ function getQuotationObject(coverageCode) {
   };
   
   // buscar en cobtar y asignar valores
-  let item = (oaUserData.cobtar || []).find(x => x.COVERAGECODE == coverageCode);
+  let item = (oaUserData.cobtar || []).find(x => getCobtarCoverageCode(x) == coverageCode);
 
   //Cuando sea null validamos por cualquier eventualidad
   if (!item){
@@ -465,7 +475,19 @@ function getInsuredObject() {
     throw new Error("El detalle de coberturas del objeto asegurado no es válido.");
   }
 
+  Object.keys(autoCobtarOverrides || {}).forEach(function (coverageCode) {
+    const override = autoCobtarOverrides[coverageCode] || {};
+    const row = oaUserData.cobtar.find(function (item) { return String(getCobtarCoverageCode(item)) === String(coverageCode); });
+    if (!row || !override.field) return;
+    const existingField = Object.keys(row).find(function (key) { return String(key).toLowerCase() === String(override.field).toLowerCase(); }) || override.field;
+    row[existingField] = override.value;
+  });
+
   return oaUserData;
+}
+
+function getCobtarCoverageCode(row) {
+  return row && (row.COVERAGECODE !== undefined ? row.COVERAGECODE : row.coverageCode);
 }
 
 function getResultCoverages() {

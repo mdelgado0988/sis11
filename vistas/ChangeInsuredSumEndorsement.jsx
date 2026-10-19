@@ -1,7 +1,7 @@
 /**
  * @name  ChangeInsuredSumEndorsement
  * @issue AXX-1978 / GLOBUAT-261
- * @purpose Endoso de cambio de suma asegurada POR COBERTURA para Fianzas. El usuario puede editar
+ * @purpose Endoso de cambio de suma asegurada POR COBERTURA. El usuario puede editar
  *          varias coberturas con suma y capturar su nueva suma (por diferencia o suma final). La prima se
  *          calcula con la configuracion de la cotizacion: prima vigente x (suma nueva / suma
  *          original), y a esa diferencia se le aplica la prorrata desde la fecha efectiva del
@@ -62,6 +62,7 @@
   const [eligible, setEligible] = useState([]);
   const [covCode, setCovCode] = useState(null);
   const [coverageInputs, setCoverageInputs] = useState({});
+  const [autoSumSelectors, setAutoSumSelectors] = useState({});
   const [effectiveDate, setEffectiveDate] = useState(null);
   const [payPlanPreview, setPayPlanPreview] = useState([]);
   const [surcharge, setSurcharge] = useState(0);
@@ -106,6 +107,48 @@
   const fmt = function (v) {
     const n = Number(v || 0);
     return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const cleanMessage = function (response) {
+    return String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim();
+  };
+  const isAutoPolicy = function () { return txt(policy && policy.lob) === '6'; };
+  const ramoLabel = function () {
+    const name = txt(policy && (policy.lobName || (policy.Lob && policy.Lob.name)));
+    if (name) return name.replace(/^\s*[^-]+\s+-\s*/, '').trim() || name;
+    if (isAutoPolicy()) return 'Auto';
+    return txt(policy && policy.lob) ? 'ramo ' + txt(policy.lob) : 'ramo de la póliza';
+  };
+  const coverageTariffChain = function () {
+    return isAutoPolicy() ? 'cmdCalculatePremiumAuto' : 'cmdCalculatePremiumSuretyBond';
+  };
+  const normalizeConfigKey = function (value) {
+    return txt(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  };
+  const tableObjects = function (table) {
+    if (!Array.isArray(table) || !Array.isArray(table[0])) return [];
+    const headers = table[0].map(function (header) { return txt(header); });
+    return table.slice(1).map(function (values) {
+      const row = {};
+      headers.forEach(function (header, index) { row[header] = values[index]; });
+      return row;
+    });
+  };
+  const catalogOptions = function (raw) {
+    try {
+      const clean = String(raw || '[]').replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":').replace(/'/g, '"');
+      const values = JSON.parse(clean);
+      return Array.isArray(values) ? values.map(function (item) {
+        return { value: txt(item.code !== undefined ? item.code : item.value), label: txt(item.name || item.label || item.description || item.code || item.value) };
+      }) : [];
+    } catch (e) { return []; }
+  };
+  const fieldValue = function (row, names) {
+    const keys = Object.keys(row || {});
+    for (let i = 0; i < names.length; i++) {
+      const key = keys.find(function (item) { return normalizeConfigKey(item) === names[i]; });
+      if (key !== undefined) return row[key];
+    }
+    return undefined;
   };
 
   function coinsuranceNumber(value) {
@@ -887,7 +930,13 @@
             entity: 'Contact',
             fields: 'id, name, middlename, surname1, surname2, isPerson',
             filter: "exists (select 1 from contactRole r where r.contactId = contact.id and r.role = 'COI')"
-          }).catch(function () { return { outData: [] }; })
+          }).catch(function () { return { outData: [] }; }),
+          txt(p.lob) === '6'
+            ? exe('GetFullTable', { table: 'cfgCobtarAuto' }).catch(function () { return { outData: [] }; })
+            : Promise.resolve({ outData: [] }),
+          txt(p.lob) === '6'
+            ? exe('RepoInsuredObject', { operation: 'GET', filter: 'lifePolicyId=' + id, include: ['ObjectDefinition'], size: 0 }).catch(function () { return { outData: [] }; })
+            : Promise.resolve({ outData: [] })
         ]).then(function (responses) {
           const tr = responses[0];
           const currencyResponse = responses[1];
@@ -916,6 +965,45 @@
             return { id: Number(item.id), name: name };
           }).filter(function (item) { return item.id > 0 && item.name; }));
           setPolicy(Object.assign({}, p, { Currency: currency || p.Currency }));
+          const selectorMap = {};
+          if (txt(p.lob) === '6') {
+            const insuredObject = ((responses[8] && responses[8].outData) || []).find(function (item) {
+              return txt(item && item.ObjectDefinition && item.ObjectDefinition.code).toUpperCase() === 'DTAUT';
+            }) || ((responses[8] && responses[8].outData) || []).find(function (item) { return txt(item && item.jValues).indexOf('hiddenCobtar') >= 0; });
+            let fields = [];
+            let storedRows = [];
+            try { fields = JSON.parse((insuredObject && insuredObject.jValues) || '[]'); } catch (e) { fields = []; }
+            const hidden = fields.find(function (field) { return field && field.name === 'hiddenCobtar'; });
+            try { storedRows = JSON.parse(hidden && Array.isArray(hidden.userData) ? hidden.userData[0] : (hidden && hidden.userData) || '[]'); } catch (e) { storedRows = []; }
+            const configRows = tableObjects((responses[7] && responses[7].outData) || []);
+            (p.Coverages || []).forEach(function (coverage) {
+              const code = txt(coverage.code);
+              const stored = storedRows.find(function (row) { return txt(row && (row.coverageCode || row.COVERAGECODE)) === code; }) || {};
+              const candidates = configRows.filter(function (row) {
+                return txt(fieldValue(row, ['coveragecode', 'ccobertura'])) === code
+                  && txt(fieldValue(row, ['productcode', 'cproducto', 'plan'])) === txt(p.productCode)
+                  && normalizeConfigKey(fieldValue(row, ['type', 'tipo'])) === 'select';
+              }).map(function (row) {
+                const field = txt(fieldValue(row, ['name', 'campo', 'field']));
+                return { field: field, label: txt(fieldValue(row, ['description', 'descripcion'])) || field, options: catalogOptions(fieldValue(row, ['catalog', 'catalogo'])) };
+              }).filter(function (item) { return item.field && Object.prototype.hasOwnProperty.call(stored, item.field); });
+              candidates.sort(function (a, b) {
+                const score = function (item) {
+                  const name = normalizeConfigKey(item.field + ' ' + item.label);
+                  if (/limite|suma/.test(name)) return 0;
+                  if (/opcion|opci.n/.test(name)) return 1;
+                  return 2;
+                };
+                return score(a) - score(b);
+              });
+              if (candidates.length) {
+                const selector = candidates[0];
+                selector.current = txt(stored[selector.field]);
+                selectorMap[code] = selector;
+              }
+            });
+          }
+          setAutoSumSelectors(selectorMap);
           loadReaHist(p.id);
           setLoading(false);
           let rows = (tr && tr.outData) || [];
@@ -1113,6 +1201,17 @@
       next[key] = field === 'difference'
         ? { difference: amount, final: money(Number(currentSum || 0) + amount) }
         : { difference: money(amount - Number(currentSum || 0)), final: amount };
+      return next;
+    });
+    invalidate();
+  }
+
+  function updateAutoSumOption(code, value) {
+    const selector = autoSumSelectors[txt(code)];
+    if (!selector) return;
+    setCoverageInputs(function (current) {
+      const next = Object.assign({}, current);
+      next[txt(code)] = { autoOption: true, optionField: selector.field, optionValue: value, difference: null, final: null };
       return next;
     });
     invalidate();
@@ -1756,6 +1855,13 @@
     for (let i = 0; i < sumEditableRows.length; i++) {
       const item = sumEditableRows[i];
       const input = coverageInputs[txt(item.code)] || {};
+      const autoSelector = isAutoPolicy() ? autoSumSelectors[txt(item.code)] : null;
+      if (autoSelector) {
+        if (!input.autoOption || txt(input.optionValue) === '' || txt(input.optionValue) === txt(autoSelector.current)) continue;
+        changes.push({ code: txt(item.code), item: item, coverage: oldCoverages.find(function (coverage) { return txt(coverage.code) === txt(item.code); }) || item,
+          oldSum: money(item.limit), newSum: money(item.limit), autoOptionField: autoSelector.field, autoOptionValue: input.optionValue });
+        continue;
+      }
       const amount = Number(input.final);
       if (input.final === null || input.final === undefined || input.final === '') continue;
       if (!Number.isFinite(amount)) {
@@ -1779,7 +1885,7 @@
     const policyStart = day10(policy && policy.start);
     if (policyStart && effective < policyStart) { setError(t('La fecha efectiva no puede ser anterior al inicio de la póliza') + ' (' + policyStart + ')'); return; }
     const policyEnd = day10(policy && policy.end);
-    if (policyEnd && effective > policyEnd) { setError(t('La fecha efectiva no puede ser posterior al fin de la fianza') + ' (' + policyEnd + ')'); return; }
+    if (policyEnd && effective > policyEnd) { setError(t('La fecha efectiva no puede ser posterior al fin de la póliza') + ' (' + policyEnd + ')'); return; }
 
     const calculationVersion = ++requestVersion.calculation;
     // Invalida tambien cualquier simulacion iniciada con el calculo anterior.
@@ -1795,14 +1901,15 @@
       const newCoverages = JSON.parse(JSON.stringify(oldCoverages));
       const adjustment = money(Number(surcharge || 0) - Number(discount || 0));
 
-      // This endorsement uses surety tariffs only to resolve the final insured
-      // sums. Premiums remain calculated below from the issued premium and
-      // each coverage's own proration.
+      // La cadena tarifaria se selecciona por ramo. Las primas del endoso se
+      // calculan abajo con la prima emitida y la prorrata de cada cobertura.
       const directChangesByCode = {};
       const coverageSumOverrides = {};
+      const autoCobtarOverrides = {};
       changes.forEach(function (change) {
         directChangesByCode[change.code] = change;
         coverageSumOverrides[change.code] = change.newSum;
+        if (change.autoOptionField) autoCobtarOverrides[change.code] = { field: change.autoOptionField, value: change.autoOptionValue };
       });
       const tariffPolicy = JSON.parse(JSON.stringify(policy));
       tariffPolicy.action = 'ChangeCoverage';
@@ -1814,16 +1921,17 @@
         }
       });
       const tariffResponse = await exe('ExeChain', {
-        chain: 'cmdCalculatePremiumSuretyBond',
+        chain: coverageTariffChain(),
         context: JSON.stringify({
           poliza: tariffPolicy,
           action: 'ChangeCoverage',
           extra: { jAdditional: JSON.stringify({ endorsementType: 'CHANGE_INSURED_SUM_SURETY' }) },
-          coverageSumOverrides: coverageSumOverrides
+          coverageSumOverrides: coverageSumOverrides,
+          autoCobtarOverrides: autoCobtarOverrides
         })
       });
       if (!tariffResponse || tariffResponse.ok === false) {
-        throw new Error(t('No se pudo cotizar las sumas de las coberturas de fianza') + ': ' + cleanMessage(tariffResponse));
+        throw new Error(t('No se pudo cotizar las sumas de las coberturas de ') + ramoLabel() + ': ' + cleanMessage(tariffResponse));
       }
       let tariffRows = tariffResponse.outData;
       if (typeof tariffRows === 'string') {
@@ -1832,10 +1940,12 @@
       if (!Array.isArray(tariffRows) && tariffRows && Array.isArray(tariffRows.data)) tariffRows = tariffRows.data;
       if (Array.isArray(tariffRows) && tariffRows.length === 1 && Array.isArray(tariffRows[0])) tariffRows = tariffRows[0];
       if (!Array.isArray(tariffRows)) {
-        throw new Error(t('La cotización de fianza no devolvió las coberturas calculadas'));
+        throw new Error(t('La cotización de ') + ramoLabel() + t(' no devolvió las coberturas calculadas'));
       }
       tariffRows.forEach(function (tariffRow) {
-        if (!tariffRow || tariffRow.tariffApplied !== true) return;
+        // Fianzas marca explícitamente la tarifa aplicada. Auto devuelve la
+        // cobertura ya calculada sin esa marca, por lo que no debe descartarse.
+        if (!tariffRow || (!isAutoPolicy() && tariffRow.tariffApplied !== true)) return;
         const code = txt(tariffRow.code);
         const coverage = oldCoverages.find(function (item) { return txt(item.code) === code; });
         const newSum = money(tariffRow.limit);
@@ -1848,7 +1958,12 @@
           ? Object.assign({}, coverage, { start: tariffRow.fini, end: tariffRow.ffin })
           : coverage;
         if (directChangesByCode[code]) {
-          directChangesByCode[code].newSum = newSum;
+          // En Auto, una suma digitada sin selector no depende de tarifa:
+          // conservar el valor manual evita que una respuesta sin tarifa
+          // aplicable lo reemplace por el límite vigente.
+          if (!isAutoPolicy() || directChangesByCode[code].autoOptionField) {
+            directChangesByCode[code].newSum = newSum;
+          }
           directChangesByCode[code].coverage = coverageDates;
         } else if (newSum !== oldSum) {
           changes.push({ code: code, item: coverage, coverage: coverageDates, oldSum: oldSum, newSum: newSum, derivedByTariff: true });
@@ -2004,6 +2119,7 @@
         currency: policy.currency,
         coverageCode: changes.map(function (item) { return item.code; }).join(', '),
         coverageCodes: changes.map(function (item) { return item.code; }),
+        autoCobtarOverrides: autoCobtarOverrides,
         adjustmentCoverageCode: changes[0].code,
         sumMode: 'FINAL_OR_DIFFERENCE',
         direction: changes.reduce(function (sum, item) { return sum + item.newSum - item.oldSum; }, 0) >= 0 ? 'INCREASE' : 'DECREASE',
@@ -2200,9 +2316,6 @@
     setRunning(true); setError(null); setModal(false);
     const failures = [];
     let keepExecutionLocked = false;
-    const cleanMessage = function (response) {
-      return String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim();
-    };
     const dateAtNoon = function (value) {
       const date = day10(value);
       return date ? date + 'T12:00:00' : '';
@@ -2492,16 +2605,26 @@
 
       // El cambio de suma no modifica la vigencia de la poliza.
 
-      // AXX-2420 (4, 7): la grilla de tarifas del objeto asegurado (SA de la cobertura), la suma afianzada y la suma
-      // asegurada de la poliza (cobertura principal) quedan iguales al limite que el endoso dejo en la cobertura.
-      try {
-        const synced = await exe('ExeChain', { chain: 'cmdUpdateInsuredObjectData', context: JSON.stringify({ policyId: policyId, syncSums: true }) });
-        const syncData = synced && synced.outData;
-        if (!synced || !synced.ok || !syncData || syncData.ok === false) {
-          failures.push(t('sincronizacion del objeto asegurado') + ': ' + String((syncData && syncData.msg) || (synced && synced.msg) || ''));
+      // AXX-2420 (4, 7): la grilla de tarifas del objeto asegurado y la suma afianzada de Fianzas quedan
+      // iguales al limite final que el endoso dejo en cada cobertura. Auto no sincroniza hiddenCobtar.
+      if (!isAutoPolicy() || Object.keys((calc && calc.autoCobtarOverrides) || {}).length) {
+        try {
+          const synced = await exe('ExeChain', {
+            chain: 'cmdUpdateInsuredObjectData',
+            context: JSON.stringify({
+              policyId: policyId,
+              syncSums: !isAutoPolicy(),
+              jNewCoverages: calc && calc.quote && calc.quote.jNewCoverages,
+              autoCobtarOverrides: calc && calc.autoCobtarOverrides
+            })
+          });
+          const syncData = synced && synced.outData;
+          if (!synced || !synced.ok || !syncData || syncData.ok === false) {
+            failures.push(t('sincronizacion del objeto asegurado') + ': ' + String((syncData && syncData.msg) || (synced && synced.msg) || ''));
+          }
+        } catch (syncError) {
+          failures.push(t('sincronizacion del objeto asegurado') + ': ' + String(syncError && syncError.message ? syncError.message : syncError));
         }
-      } catch (syncError) {
-        failures.push(t('sincronizacion del objeto asegurado') + ': ' + String(syncError && syncError.message ? syncError.message : syncError));
       }
 
       try {
@@ -3430,6 +3553,8 @@
                       <Button id="btnCalcular" type="primary" loading={loading}
                         disabled={!effectiveDate || !sumEditableRows.some(function (row) {
                           const value = coverageInputs[txt(row.code)];
+                          const selector = isAutoPolicy() && autoSumSelectors[txt(row.code)];
+                          if (selector) return value && value.autoOption && txt(value.optionValue) !== '' && txt(value.optionValue) !== txt(selector.current);
                           return value && value.final !== null && value.final !== undefined && value.final !== '' && Number.isFinite(Number(value.final));
                         })} onClick={calcular}>{t('Calcular endoso')}</Button>
                     </div>
@@ -3441,6 +3566,8 @@
                         { title: t('Suma actual'), dataIndex: 'limit', key: 'limit', align: 'right', width: 120, render: function (value) { return fmt(value); } },
                         { title: t('Diferencia (+/-)'), key: 'difference', width: 160,
                           render: function (value, row) {
+                            const selector = isAutoPolicy() && autoSumSelectors[txt(row.code)];
+                            if (selector) return <span>-</span>;
                             const input = coverageInputs[txt(row.code)] || {};
                             return <InputNumber id={'numDiferencia-' + row.code} step={1000} style={{ width: 140 }} value={input.difference}
                               formatter={function (v) { return v === undefined || v === null || v === '' ? '' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
@@ -3449,15 +3576,32 @@
                           } },
                         { title: t('Nueva suma final'), key: 'final', width: 160,
                           render: function (value, row) {
+                            const selector = isAutoPolicy() && autoSumSelectors[txt(row.code)];
+                            if (selector) return <span>{t('Calculada según opción')}</span>;
                             const input = coverageInputs[txt(row.code)] || {};
                             return <InputNumber id={'numSumaFinal-' + row.code} step={1000} style={{ width: 140 }} value={input.final}
                               formatter={function (v) { return v === undefined || v === null || v === '' ? '' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
                               parser={function (v) { return String(v || '').replace(/,/g, ''); }}
                               onChange={function (v) { updateCoverageInput(row.code, 'final', v, row.limit); }} />;
                           } },
+                        { title: t('Opción de suma'), key: 'autoOption', width: 220,
+                          render: function (value, row) {
+                            const selector = isAutoPolicy() && autoSumSelectors[txt(row.code)];
+                            if (!selector) return '-';
+                            const input = coverageInputs[txt(row.code)] || {};
+                            return <div>
+                              <div className="axx-antes" style={{ marginBottom: 4 }}>{t('Actual') + ': ' + (selector.options.find(function (item) { return txt(item.value) === txt(selector.current); }) || { label: selector.current }).label}</div>
+                              <Select size="small" style={{ width: 170 }} value={input.autoOption ? input.optionValue : undefined}
+                                placeholder={t('Seleccione')}
+                                onChange={function (value) { updateAutoSumOption(row.code, value); }}>
+                                {(selector.options || []).map(function (item) { return <Select.Option key={item.value} value={item.value}>{item.label}</Select.Option>; })}
+                              </Select>
+                            </div>;
+                          } },
                         { title: t('Suma resultante'), key: 'newSum', align: 'right', width: 130,
                           render: function (value, row) {
                             const input = coverageInputs[txt(row.code)] || {};
+                            if (isAutoPolicy() && autoSumSelectors[txt(row.code)]) return input.autoOption ? t('Al calcular') : '';
                             if (input.final === null || input.final === undefined || input.final === '' || !Number.isFinite(Number(input.final))) return '';
                             return fmt(input.final);
                           } }
