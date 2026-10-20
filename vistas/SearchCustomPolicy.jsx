@@ -12,7 +12,7 @@
  *
  * Comandos (todos nativos, los mismos que usa la pantalla nativa; sin cadenas ni triggers propios):
  *  - cmdCustomSearchPolicy {filter, size, page}  -> la busqueda liviana de la grilla
- *  - RepoLob, RepoProduct, RepoCurrency, RepoOrganization, RepoSelection GET -> catalogos
+ *  - RepoLob, Product, RepoCurrency, RepoOrganization, RepoSelection GET -> catalogos
  *  - cmdCustomSearchPolicy / GetContacts / GetHoldings -> buscadores de grupo, contacto
  *  - RepoSelection ADD / DELETE -> guardar y borrar selecciones
  *
@@ -364,19 +364,13 @@
 
   const loadCatalogs = () => {
     exe('RepoLob', { operation: 'GET' }).then((r) => { if (r && r.ok) setLobs(r.outData || []); });
-    exe('RepoProduct', { operation: 'GET' }).then((r) => {
+    exe('LoadEntities', {
+      entity: 'Product',
+      fields: 'code,name,lobCode',
+      noTracking: true
+    }).then((r) => {
       if (!(r && r.ok)) return;
-      const list = (r.outData || []).map((p) => {
-        let cfg = {};
-        try { cfg = typeof p.configJson === 'string' ? JSON.parse(p.configJson) : p.configJson || {}; } catch (e) { cfg = {}; }
-        const main = (cfg && cfg.Main) || {};
-        let disabled = false;
-        let hidden = false;
-        if (main.active !== undefined && main.active !== null) {
-          try { disabled = !eval(main.active); hidden = !!main.hideIfInactive && disabled; } catch (e) { disabled = true; hidden = !!main.hideIfInactive; }
-        }
-        return { code: p.code, name: p.name, lobCode: p.lobCode, additionalLobs: main.additionalLobs || [], disabled: disabled, hidden: hidden };
-      });
+      const list = (r.outData || []).map((p) => ({ code: p.code, name: p.name, lobCode: p.lobCode }));
       setProducts(list);
     });
     exe('RepoCurrency', { operation: 'GET' }).then((r) => { if (r && r.ok) setCurrencies(r.outData || []); });
@@ -725,7 +719,7 @@
       ) : undefined}
     />
   );
-  const productsForLob = products.filter((p) => !p.hidden && (!f.lob || p.lobCode == f.lob || (p.additionalLobs || []).indexOf(f.lob) !== -1));
+  const productsForLob = products.filter((p) => !f.lob || p.lobCode == f.lob);
   const restrictedUsersCols = [
     { title: t('Authorized Users'), dataIndex: 'user' },
     { title: t('Actions'), key: 'del', render: (v, r) => <Button type="link" icon={<IcoDelete />} onClick={() => setRestr(Object.assign({}, restr, { users: restr.users.filter((u) => u.user !== r.user) }))} /> }
@@ -788,12 +782,12 @@
               {fila(
                 campo(t('LoB'),
                   <Select showSearch allowClear showArrow style={{ width: '100%' }} placeholder={t('Please select LoB')} value={f.lob}
-                    onChange={(v) => setF((prev) => { const n = Object.assign({}, prev, { lob: v }); const pc = val(prev.product); if (pc && !products.filter((p) => p.code === pc && (!v || p.lobCode == v || (p.additionalLobs || []).indexOf(v) !== -1)).length) n.product = undefined; return n; })}>
+                    onChange={(v) => setF((prev) => { const n = Object.assign({}, prev, { lob: v }); const pc = val(prev.product); if (pc && !products.filter((p) => p.code === pc && (!v || p.lobCode == v)).length) n.product = undefined; return n; })}>
                     {lobs.map((d) => <Option key={d.code} value={d.code}>{t(d.name)}</Option>)}
                   </Select>),
                 campo(t('Product'),
                   <Select labelInValue allowClear showSearch style={{ width: '100%' }} placeholder={t('Please select product')} value={f.product} onChange={(v) => setField('product', v)}>
-                    {productsForLob.map((p) => <Option key={p.code} value={p.code} disabled={p.disabled}>{p.name}</Option>)}
+                    {productsForLob.map((p) => <Option key={p.code} value={p.code}>{p.name}</Option>)}
                   </Select>)
               )}
               {fila(

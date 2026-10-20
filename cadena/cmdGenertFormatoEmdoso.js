@@ -56,6 +56,10 @@ const reportesEndoso = {
     conPrima: 'FormatoEndososRT.docx',
     sinPrima: 'FormatoEndososSinCoberturaRT.docx'
   },
+  ramoDiverso: {
+    conPrima: 'FormatoEndososRD.docx',
+    sinPrima: 'FormatoEndososSinCoberturaRD.docx'
+  },
   vidaTarjetaProtegida: 'FormatoEndososVidaTarjetaProtegida.docx'
   
 };
@@ -434,13 +438,16 @@ function isSuretyPolicy(policy) {
 }
 
 function isSuretyV2Policy(policy) {
-  const productCode = String(policy?.productCode ?? '').trim().toUpperCase();
-  return String(policy?.lob ?? '').trim() === '81'
-    && ['81ANTICIPO', '81PROPUESTA'].includes(productCode);
+  // Los formatos V2 son el estandar para cualquier producto de fianzas.
+  return isSuretyPolicy(policy);
 }
 
 function isTechnicalPolicy(policy) {
   return ['96', '52'].includes(String(policy?.lob ?? '').trim());
+}
+
+function isDiversosPolicy(policy) {
+  return String(policy?.lob ?? '').trim() === '52';
 }
 
 function isAutoPolicy(policy) {
@@ -580,11 +587,30 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   // Los cambios de coberturas deben usar siempre el formato con la seccion
   // de coberturas, aunque el movimiento no genere prima.
   const esCambioCoberturaActual = esCambioCobertura(change);
+  const isLoadingChange = String(change?.Discriminator || '').trim().toUpperCase() === 'LOADINGCHANGE';
+
+  // Los recargos y descuentos nunca deben mostrar el detalle de coberturas,
+  // incluso cuando el motor produzca una variacion de prima.
+  if (isLoadingChange) {
+    if (isLifePolicyLob(policy?.lob)) return reportes.vida.sinPrima;
+    if (isDiversosPolicy(policy)) return reportes.ramoDiverso.sinPrima;
+    if (isTechnicalPolicy(policy)) return reportes.ramoTecnico.sinPrima;
+    if (isSuretyPolicy(policy)) {
+      return (isSuretyV2Policy(policy) ? reportes.fianza.anticipo : reportes.fianza).sinPrima;
+    }
+    return reportes.incendio.sinPrima;
+  }
 
   if (isLifePolicyLob(policy?.lob)) {
     return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
       ? reportes.vida.conPrima
       : reportes.vida.sinPrima;
+  }
+
+  if (isDiversosPolicy(policy)) {
+    return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
+      ? reportes.ramoDiverso.conPrima
+      : reportes.ramoDiverso.sinPrima;
   }
 
   if (isTechnicalPolicy(policy)) {
@@ -616,11 +642,6 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   const fianzaTemplates = isSuretyV2Policy(policy)
     ? reportes.fianza.anticipo
     : reportes.fianza;
-  const isLoadingChange = String(change?.Discriminator || '').trim().toUpperCase() === 'LOADINGCHANGE';
-
-  // ChangeLoading siempre usa el formato sin cobertura, incluso cuando el
-  // movimiento de recargo/descuento produzca una variación de prima.
-  if (isLoadingChange) return fianzaTemplates.sinPrima;
 
   return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
     ? fianzaTemplates.conPrima

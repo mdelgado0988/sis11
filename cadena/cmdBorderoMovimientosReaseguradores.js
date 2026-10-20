@@ -47,7 +47,8 @@ function fechaPanamaSql(campo) {
 var movementPeriodSql = "((c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch0 WHERE ch0.id=c.changeId AND ch0.status=1 AND " + fechaPanamaSql('ch0.executionDate') + " BETWEEN " + fromTo + "))\n"
   + "     OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an0 WHERE an0.id=c.anniversaryId AND " + fechaPanamaSql('an0.executionDate') + " BETWEEN " + fromTo + "))\n"
   + "     OR (c.premiumType='ANNIVERSARY' AND c.anniversaryId IS NULL AND " + fechaPanamaSql('lp.activeDate') + " BETWEEN " + fromTo + ")\n"
-  + "     OR (c.premiumType='NEW' AND " + fechaPanamaSql('ISNULL(lp.activeDate, lp.created)') + " BETWEEN " + fromTo + "))";
+  + "     OR (c.premiumType='NEW' AND " + fechaPanamaSql('ISNULL(lp.activeDate, lp.created)') + " BETWEEN " + fromTo + ")\n"
+  + "     OR (c.changeId IS NULL AND c.premiumType='CANCELLATION' AND EXISTS (SELECT 1 FROM Change chCancel WHERE chCancel.lifePolicyId=c.lifePolicyId AND chCancel.status=1 AND chCancel.Discriminator='CancellationChange' AND " + fechaPanamaSql('chCancel.executionDate') + " BETWEEN " + fromTo + ")) )";
 
 /* El orden se conserva por la generación de cesión. Al particionar por aceptante
    se obtiene la diferencia real de cada reasegurador, no un saldo repetido. */
@@ -59,7 +60,7 @@ var sql = "\nWITH scope AS (\n"
   + "   AND " + movementPeriodSql + "\n"
   + "), src AS (\n"
   + " SELECT c.id AS cessionId, c.lifePolicyId, c.contractId, c.coverageId, c.lineId, c.LoB,\n"
-  + "        c.changeId, c.anniversaryId, c.premiumType, c.[start] AS cessionStart, c.[end] AS cessionEnd,\n"
+  + "        COALESCE(c.changeId,orphanCancellation.changeId) AS changeId, c.anniversaryId, c.premiumType, c.[start] AS cessionStart, c.[end] AS cessionEnd,\n"
   + "        c.contactId AS insuredId, c.holderName, c.coSumInsured, c.coPremium,\n"
   + "        p.id AS partId, p.contactId AS reinsurerId, p.brokerId, p.name AS participantName, p.split,\n"
   + "        ISNULL(p.sumInsured, 0) AS sumInsured, ISNULL(p.premium, 0) AS premium,\n"
@@ -68,6 +69,22 @@ var sql = "\nWITH scope AS (\n"
   + " FROM Cession c\n"
   + " INNER JOIN CessionPart p ON p.cessionId = c.id\n"
   + " INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId\n"
+  + " OUTER APPLY (\n"
+  + "   /* Las cancelaciones legacy se enlazan al primer endoso de cancelacion\n"
+  + "      ejecutado despues de la ultima cesion vinculada de la poliza. */\n"
+  + "   SELECT TOP 1 chCancel.id AS changeId\n"
+  + "   FROM Change chCancel\n"
+  + "   WHERE c.changeId IS NULL AND c.premiumType='CANCELLATION'\n"
+  + "     AND chCancel.lifePolicyId=c.lifePolicyId\n"
+  + "     AND chCancel.status=1 AND chCancel.Discriminator='CancellationChange'\n"
+  + "     AND chCancel.executionDate >= ISNULL((\n"
+  + "       SELECT MAX(chPrev.executionDate)\n"
+  + "       FROM Cession cPrev INNER JOIN Change chPrev ON chPrev.id=cPrev.changeId\n"
+  + "       WHERE cPrev.lifePolicyId=c.lifePolicyId AND cPrev.id<c.id\n"
+  + "         AND cPrev.changeId IS NOT NULL AND chPrev.status=1\n"
+  + "     ),CONVERT(datetime2,'19000101'))\n"
+  + "   ORDER BY chCancel.executionDate,chCancel.id\n"
+  + " ) orphanCancellation\n"
   + " INNER JOIN scope sc ON sc.lifePolicyId=c.lifePolicyId\n"
   + " WHERE lp.activeDate IS NOT NULL" + lobFilter + policyFilter + "\n"
   + "), ord AS (\n"
@@ -131,13 +148,24 @@ var sql = "\nWITH scope AS (\n"
   + " LEFT JOIN Contract ct ON ct.id=g.contractId\n"
   + " LEFT JOIN Contact rr ON rr.id=g.reinsurerId LEFT JOIN Contact br ON br.id=g.brokerId LEFT JOIN Contact ins ON ins.id=g.insuredId\n"
   + ")\n";
-var countSql = sql + 'SELECT COUNT(*) AS total,COUNT(DISTINCT poliza) AS polizas FROM result';
-doCmd({ cmd:'DoQuery', data:{ sql:countSql, timeout:300 } });
-if (!DoQuery || !DoQuery.ok) throw 'No fue posible contar el borderó por reasegurador: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'sin detalle');
-var summary = DoQuery.outData && DoQuery.outData[0] || {};
-var total = Number(summary.total || 0);
-if (exportar) size = Math.min(Math.max(total, 1), 50000);
-var skip = (page - 1) * size;
-doCmd({ cmd:'DoQuery', data:{ sql:sql + 'SELECT * FROM result ORDER BY ' + orderSql + ' OFFSET ' + skip + ' ROWS FETCH NEXT ' + size + ' ROWS ONLY', timeout:300 } });
+/* Materializamos una sola vez el resultado: conteo y pagina usan exactamente
+   la misma poblacion, sin volver a evaluar ventanas y asociaciones. */
+var toma = exportar ? 50000 : size;
+if (exportar) page = 1;
+var skip = (page - 1) * toma;
+var loteSql = sql
+  + 'SELECT * INTO #result FROM result;\n'
+  + 'CREATE CLUSTERED INDEX IX_result_id ON #result(id);\n'
+  + 'DECLARE @total int, @polizas int, @filasJson nvarchar(max);\n'
+  + 'SELECT @total=COUNT(*), @polizas=COUNT(DISTINCT poliza) FROM #result;\n'
+  + 'SELECT @filasJson=(SELECT * FROM #result ORDER BY ' + orderSql
+  + ' OFFSET ' + skip + ' ROWS FETCH NEXT ' + toma + ' ROWS ONLY FOR JSON PATH);\n'
+  + 'SELECT @total AS total,@polizas AS polizas,@filasJson AS filasJson;';
+doCmd({ cmd:'DoQuery', data:{ sql:loteSql, timeout:300 } });
 if (!DoQuery || !DoQuery.ok) throw 'No fue posible obtener el borderó por reasegurador: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'sin detalle');
-return { filas:DoQuery.outData || [],total:total,polizas:Number(summary.polizas || 0),page:page,size:size,paginas:size ? Math.ceil(total/size) : 0,exportacion:exportar };
+var lote = DoQuery.outData && DoQuery.outData[0] || {};
+var total = Number(lote.total || 0);
+if (exportar) size = Math.min(Math.max(total, 1), 50000);
+var filas;
+try { filas = lote.filasJson ? JSON.parse(lote.filasJson) : []; } catch (error) { filas = []; }
+return { filas:filas,total:total,polizas:Number(lote.polizas || 0),page:page,size:size,paginas:size ? Math.ceil(total/size) : 0,exportacion:exportar };

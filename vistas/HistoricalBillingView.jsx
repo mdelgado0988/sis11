@@ -846,7 +846,7 @@
   function loadCatalogs() {
     Promise.all([
       exe('RepoLob', { operation: 'GET' }),
-      exe('RepoProduct', { operation: 'GET' }),
+      exe('LoadEntities', { entity: 'Product', fields: 'code,name,lobCode', noTracking: true }),
       exe('RepoPaymentMethodCatalog', { operation: 'GET' }),
       exe('RepoRelationshipCatalog', { operation: 'GET', filter: "principalType = 'PERSON'" })
     ]).then(responses => {
@@ -858,7 +858,7 @@
       setProductCatalog(getRows(responses[1]).map(item => ({
         value: text(item && item.code),
         label: text(item && (item.name || item.code)),
-        line: text(item && (item.lobCode || item.lob))
+        line: text(item && item.lobCode)
       })).filter(item => item.value));
       setCollectionPaymentMethodOptions(getRows(responses[2]).map(item => ({
         value: text(item && item.code),

@@ -245,7 +245,19 @@ for (var groupKey in coverageGroups) {
 var sumCoveragePredicate = sumCoverageParts.length ? '(' + sumCoverageParts.join(' OR ') + ')' : '1=0';
 base = base.replace(
   'FROM Cession c\n  INNER JOIN scope sc ON sc.lifePolicyId = c.lifePolicyId\n),\n/* Cambios EJECUTADOS',
-  'FROM Cession c\n  INNER JOIN scope sc ON sc.lifePolicyId = c.lifePolicyId\n  INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId\n),\n/* Cambios EJECUTADOS'
+  'FROM Cession c\n  INNER JOIN scope sc ON sc.lifePolicyId = c.lifePolicyId\n  INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId\n  OUTER APPLY (\n    /* Las cancelaciones legacy no traen changeId. Se enlazan al primer endoso\n       de cancelacion ejecutado despues de la ultima cesion vinculada previa. */\n    SELECT TOP 1 chCancel.id AS changeId\n    FROM Change chCancel\n    WHERE c.changeId IS NULL\n      AND c.premiumType = \'CANCELLATION\'\n      AND chCancel.lifePolicyId = c.lifePolicyId\n      AND chCancel.status = 1\n      AND chCancel.Discriminator = \'CancellationChange\'\n      AND chCancel.executionDate >= ISNULL((\n        SELECT MAX(chPrev.executionDate)\n        FROM Cession cPrev\n        INNER JOIN Change chPrev ON chPrev.id = cPrev.changeId\n        WHERE cPrev.lifePolicyId = c.lifePolicyId\n          AND cPrev.id < c.id\n          AND cPrev.changeId IS NOT NULL\n          AND chPrev.status = 1\n      ), CONVERT(datetime2, \'19000101\'))\n    ORDER BY chCancel.executionDate, chCancel.id\n  ) orphanCancellation\n),\n/* Cambios EJECUTADOS'
+);
+base = base.replace(
+  'c.premiumType, c.changeId, c.anniversaryId, c.contactId, c.holderName,',
+  'c.premiumType, COALESCE(c.changeId, orphanCancellation.changeId) AS changeId, c.anniversaryId, c.contactId, c.holderName,'
+);
+base = base.replace(
+  "CASE WHEN c.changeId IS NULL AND c.premiumType IN ('CHANGE','CANCELLATION','REVERT')",
+  "CASE WHEN COALESCE(c.changeId, orphanCancellation.changeId) IS NULL AND c.premiumType IN ('CHANGE','CANCELLATION','REVERT')"
+);
+base = base.replace(
+  "CASE WHEN c.changeId IS NOT NULL\n                    AND (c.premiumType = 'CANCELLATION' OR ISNULL(c.sumInsuredRe,0) < 0)",
+  "CASE WHEN COALESCE(c.changeId, orphanCancellation.changeId) IS NOT NULL\n                    AND (c.premiumType = 'CANCELLATION' OR ISNULL(c.sumInsuredRe,0) < 0)"
 );
 base = base.replace(
   'c.sumInsured, c.proportionRe,',
@@ -298,6 +310,7 @@ if (!poliza) {
     + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND " + fechaPanamaSql('an.executionDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') )"
     + " OR (c.premiumType = 'ANNIVERSARY' AND c.anniversaryId IS NULL AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND " + fechaPanamaSql('lp.activeDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') )"
     + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((" + fechaPanamaSql('lp.activeDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') OR (lp.activeDate IS NULL AND " + fechaPanamaSql('lp.created') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "'))))"
+    + " OR (c.changeId IS NULL AND c.premiumType = 'CANCELLATION' AND EXISTS (SELECT 1 FROM Change chCancel WHERE chCancel.lifePolicyId = c.lifePolicyId AND chCancel.status = 1 AND chCancel.Discriminator = 'CancellationChange' AND " + fechaPanamaSql('chCancel.executionDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "'))"
     + ")";
 }
 
