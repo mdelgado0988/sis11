@@ -2083,11 +2083,12 @@
           + String(syncError && syncError.message ? syncError.message : syncError));
       }
 
-      try {
-        await generateEndorsementDocument(changeId);
-      } catch (documentError) {
-        failures.push(t('documento del endoso') + ': ' + String(documentError && documentError.message ? documentError.message : documentError));
-      }
+      // La generación automática del documento del endoso está temporalmente deshabilitada.
+      // try {
+      //   await generateEndorsementDocument(changeId);
+      // } catch (documentError) {
+      //   failures.push(t('documento del endoso') + ': ' + String(documentError && documentError.message ? documentError.message : documentError));
+      // }
 
       const message = failures.length
         ? t('El endoso se ejecutó correctamente, pero hubo problemas en: ') + failures.join(' | ')

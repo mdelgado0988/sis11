@@ -15,7 +15,7 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 6
+where t.cramo = 83
 --and t.cplan = '6_22' 
 and t.cendoso = 36
 --and t.ccober = 25
@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 6
+declare @ramoXY int = 81
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -35,7 +35,7 @@ select c.cramo, rtrim(c.cplan) cplan, rtrim(pl.xplan) xplan, rtrim(mc.ccobertura
 		, c.CGRUPO
 		, c.CGRUPO1, c.CGRUPO2
 		, c.ccontrea, c.cramorea, qordenimp, c.SA SADefault
-		, pl.qedadmax
+		, pl.qedadmax, c.ccoberdepe
 INTO #Coberturas
 from macoberturas mc
 inner join maplancob c  on c.ccobertura = mc.ccobertura and c.cramo = mc.cramo
@@ -173,14 +173,15 @@ inner join macoberturas mc on mc.cramo = c.cramo and mc.ccobertura = c.ccobertur
 WHERE c.cramo IN (81,82,83,84)
 
 --reportes endosos de fianzas
-select cramo lob, CASE WHEN cramo = 81 THEN CONCAT(cramo, cplan) ELSE cplan END [Producto], rtrim(xnombrep) xnombrep,
-	(rtrim(xdescripcion)) xdescripcion, xformula1 CoverageCode, xdpto, iestado
-from marepteccia
-where cramo in (6)
-and (xnombrep not like '%endoso%')
+select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.cplan END [Producto], rtrim(r.xnombrep) xnombrep,
+	(rtrim(r.xdescripcion)) xdescripcion, r.xformula1 CoverageCode, r.xdpto, r.iestado, mc.xdescripcion_l cob
+from marepteccia r
+LEFT JOIN macoberturas mc on mc.cramo = r.cramo and mc.ccobertura = r.xformula1
+where r.cramo in (81)
+and (r.xnombrep not like '%endoso%')
 --AND xdpto <> 'SINIESTROS'
-AND xdpto = 'EMISION'
-AND xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
+AND r.xdpto = 'EMISION'
+AND r.xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 order by 1,2
 
 select distinct rtrim(xnombrep) xnombrep, cramo, cplan, xdpto
@@ -207,7 +208,7 @@ select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.
 	inner join adpolcob c on c.crecibo = rec.crecibo and c.isuma = 'S' ) AS oferta2
 
 from marepteccia r
-where r.cramo in (6)
+where r.cramo in (81)
 and r.xnombrep not like '%endoso%'
 --AND xformula1 <> '0'
 AND (r.xformula1 is not null and r.xformula1 <> '0' and isnumeric(r.xformula1) = 1)
