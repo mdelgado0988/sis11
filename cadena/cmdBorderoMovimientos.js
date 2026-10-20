@@ -276,26 +276,35 @@ base = base.replace(
   'o.anniversaryId, o.sumaIncluida, o.premium, o.contactId,',
   'o.anniversaryId, o.sumaIncluida, o.premiumNo, o.premium, o.contactId,'
 );
-base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    /* Emisiones y aniversarios toman una prima por cobertura. Todo endoso\n       muestra la variacion efectiva para no confundirla con la prima final. */\n    SUM(CASE WHEN d.isTerm = 1 THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.changeId IS NOT NULL THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0)\n             ELSE 0 END) AS primaSuscrita100,');
+base = base.replace('SUM(d.dNtp)   AS primaCat,', 'SUM(d.dNtp)   AS primaCat,\n    /* Emisiones, aniversarios y endosos toman una prima por cobertura. Los\n       retiros tecnicos conservan su variacion porque no son una cotizacion. */\n    SUM(CASE WHEN d.isTerm = 1 THEN ISNULL(d.dPrCed, 0) + ISNULL(d.dPrRe, 0) + ISNULL(d.dNtp, 0)\n             WHEN d.premiumNo = 1 THEN ISNULL(d.premium, 0)\n             ELSE 0 END) AS primaSuscrita100,');
 base = base.replace('SUM(d.dSiCed) AS sumaRetenida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiCed ELSE 0 END) AS sumaRetenida');
 base = base.replace('SUM(d.dSiRe)  AS sumaCedida', 'SUM(CASE WHEN d.sumaIncluida=1 THEN d.dSiRe ELSE 0 END) AS sumaCedida');
 base = base.replace("SUM(CASE WHEN d.bucket='CP'  THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='CP' THEN d.dSiRe ELSE 0 END) AS sumaCuotaParte");
 base = base.replace("SUM(CASE WHEN d.bucket='EX'  THEN d.dSiRe ELSE 0 END) AS sumaExcedente", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='EX' THEN d.dSiRe ELSE 0 END) AS sumaExcedente");
 base = base.replace("SUM(CASE WHEN d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS sumaFacultativa", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS sumaFacultativa");
 
+function fechaPanamaSql(campo) {
+  return "CAST(CAST(" + campo + " AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date)";
+}
+
+var periodoFechaEmision = fechaPanamaSql('r.fechaEmision') + " BETWEEN '@@FROM@@' AND '@@TO@@'";
+tPage = tPage.replace("CAST(r.fechaEmision AS date) BETWEEN '@@FROM@@' AND '@@TO@@'", periodoFechaEmision);
+tCount = tCount.replace("CAST(r.fechaEmision AS date) BETWEEN '@@FROM@@' AND '@@TO@@'", periodoFechaEmision);
+
 var scope = lobPred + " AND " + polizaPred;
 if (!poliza) {
   scope += " AND ("
-    + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND ch.executionDate >= '" + fdesde + "' AND ch.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
-    + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND an.executionDate >= '" + fdesde + "' AND an.executionDate < DATEADD(day, 1, '" + fhasta + "')) )"
-    + " OR (c.premiumType = 'ANNIVERSARY' AND c.anniversaryId IS NULL AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) )"
-    + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((lp.activeDate >= '" + fdesde + "' AND lp.activeDate < DATEADD(day, 1, '" + fhasta + "')) OR (lp.activeDate IS NULL AND lp.created >= '" + fdesde + "' AND lp.created < DATEADD(day, 1, '" + fhasta + "'))))"
-    + "))";
+    + "(c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch WHERE ch.id = c.changeId AND " + fechaPanamaSql('ch.executionDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') )"
+    + " OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an WHERE an.id = c.anniversaryId AND " + fechaPanamaSql('an.executionDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') )"
+    + " OR (c.premiumType = 'ANNIVERSARY' AND c.anniversaryId IS NULL AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND " + fechaPanamaSql('lp.activeDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') )"
+    + " OR (c.premiumType = 'NEW' AND EXISTS (SELECT 1 FROM LifePolicy lp WHERE lp.id = c.lifePolicyId AND ((" + fechaPanamaSql('lp.activeDate') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "') OR (lp.activeDate IS NULL AND " + fechaPanamaSql('lp.created') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "'))))"
+    + ")";
 }
 
 function omitePeriodoPorPoliza(s) {
   if (!poliza) { return s; }
-  return s.replace(/WHERE CAST\(r\.fechaEmision AS date\) BETWEEN '[^']+' AND '[^']+'/g, 'WHERE 1=1');
+  var periodoResuelto = fechaPanamaSql('r.fechaEmision') + " BETWEEN '" + fdesde + "' AND '" + fhasta + "'";
+  return s.split('WHERE ' + periodoResuelto).join('WHERE 1=1');
 }
 
 function arma(tpl, scopePred, skip, take) {

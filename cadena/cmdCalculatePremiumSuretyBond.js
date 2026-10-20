@@ -110,6 +110,12 @@ try {
   for (let cov of coveragesForQuotation) {
 
     const resultCoverage = resultCoverages.find(x => x.code == cov.code);
+    // La vigencia pertenece a la configuración de la cobertura, no a una
+    // condición de tarifa. Así se conserva aunque ninguna tarifa aplique.
+    const cobtar = (oaUserData.cobtar || []).find(x => String(x.COVERAGECODE) === String(cov.code));
+    const tariffDates = getTariffCoverageDates(cobtar);
+    resultCoverage.fini = tariffDates.start;
+    resultCoverage.ffin = tariffDates.end;
     const overrideKey = Object.keys(resolvedCoverageSumOverrides)
       .find(code => String(code) === String(cov.code));
     const insuredSumOverride = overrideKey === undefined
@@ -162,12 +168,6 @@ try {
           oaUserData[`${p}_${cov.code}`] = obj[p];
         });     
 
-        //Calculamos la fecha inicial
-        const cobtar = oaUserData.cobtar.find(x => x.COVERAGECODE == tarifa.ccobertura);
-        const tariffDates = getTariffCoverageDates(cobtar);
-        resultCoverage.fini = tariffDates.start;
-        resultCoverage.ffin = tariffDates.end;
-        
         break;
       }
       

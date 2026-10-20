@@ -54,7 +54,30 @@
     const s = r.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return (n < 0 ? '-' : '') + s;
   }
-  function fecha(v){ return v ? String(v).substring(0,10) : ''; }
+  function fecha(v, conservarTexto){
+    if (!v) return '';
+    const raw = String(v).trim();
+    // policyEnd is a text date and must not change when formatted locally.
+    if (conservarTexto || /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return match ? match[3] + '/' + match[2] + '/' + match[1] : raw.substring(0, 10);
+    }
+
+    const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+    const parsed = new Date(hasZone ? raw : raw + 'Z');
+    if (Number.isNaN(parsed.getTime())) return raw.substring(0, 10);
+
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Panama',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(parsed).reduce(function(result, part){
+      if (part.type !== 'literal') result[part.type] = part.value;
+      return result;
+    }, {});
+    return parts.day + '/' + parts.month + '/' + parts.year;
+  }
   function num(v){ return (v === null || v === undefined || isNaN(Number(v))) ? 0 : Number(v); }
   /* CA-05 — el tipo solo no identifica el movimiento: una poliza puede traer dos
      reemisiones el mismo dia con los mismos importes (824 EMI:2/EMI:3, 829 EMI:3/EMI:6
@@ -533,7 +556,9 @@
           return <span style={ color ? { color: color } : undefined }>{ money(v) }</span>;
         };
       }
-      else if (col.tipo === 'fecha') c.render = fecha;
+      else if (col.tipo === 'fecha') c.render = function(v, r){
+        return fecha(v, col.c === 'fDesde' && r && r.tipo === 'ChangeCoverageSurety');
+      };
       else if (col.tipo === 'ramo') c.render = function(v){ return nombreRamo(v); };
       else if (col.tipo === 'mov') c.render = function(v, r){ return etiquetaMovimiento(r); };
       else if (col.tipo === 'endorsementId') c.render = function(v){ return v === null || v === undefined || v === '' ? '-' : v; };

@@ -41,10 +41,13 @@ var lobIn = ramos.map(function (value) { return "'" + quote(value) + "'"; }).joi
 var lobFilter = ramos.length ? ' AND c.LoB IN (' + lobIn + ')' : '';
 var policyFilter = poliza ? " AND lp.code LIKE '%" + quote(poliza) + "%'" : '';
 var fromTo = "'" + quote(fdesde) + "' AND '" + quote(fhasta) + "'";
-var movementPeriodSql = "((c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch0 WHERE ch0.id=c.changeId AND ch0.status=1 AND CAST(ch0.executionDate AS date) BETWEEN " + fromTo + "))\n"
-  + "     OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an0 WHERE an0.id=c.anniversaryId AND CAST(an0.executionDate AS date) BETWEEN " + fromTo + "))\n"
-  + "     OR (c.premiumType='ANNIVERSARY' AND c.anniversaryId IS NULL AND CAST(lp.activeDate AS date) BETWEEN " + fromTo + ")\n"
-  + "     OR (c.premiumType='NEW' AND CAST(ISNULL(lp.activeDate, lp.created) AS date) BETWEEN " + fromTo + "))";
+function fechaPanamaSql(campo) {
+  return "CAST(CAST(" + campo + " AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date)";
+}
+var movementPeriodSql = "((c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Change ch0 WHERE ch0.id=c.changeId AND ch0.status=1 AND " + fechaPanamaSql('ch0.executionDate') + " BETWEEN " + fromTo + "))\n"
+  + "     OR (c.anniversaryId IS NOT NULL AND EXISTS (SELECT 1 FROM Anniversary an0 WHERE an0.id=c.anniversaryId AND " + fechaPanamaSql('an0.executionDate') + " BETWEEN " + fromTo + "))\n"
+  + "     OR (c.premiumType='ANNIVERSARY' AND c.anniversaryId IS NULL AND " + fechaPanamaSql('lp.activeDate') + " BETWEEN " + fromTo + ")\n"
+  + "     OR (c.premiumType='NEW' AND " + fechaPanamaSql('ISNULL(lp.activeDate, lp.created)') + " BETWEEN " + fromTo + "))";
 
 /* El orden se conserva por la generación de cesión. Al particionar por aceptante
    se obtiene la diferencia real de cada reasegurador, no un saldo repetido. */

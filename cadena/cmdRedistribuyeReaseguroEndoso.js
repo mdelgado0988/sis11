@@ -77,6 +77,7 @@ const CESSION_PART_COLUMNS = [
   "reserve",
   "fee"
 ];
+const contractCodeCache = {};
 
 //////////////////////////////////////////////////////////////////
 // Cuerpo principal del comando
@@ -155,6 +156,7 @@ function distribuyeContrato(policyRea, distribucion) {
     for (let contract of contractIds) {
 
       const distribucionContract = distribucion.filter(x => x.contractId == contract);
+      const isCPAP = getContractCode(contract) === "CPAP";
       
       const tieneRET = distribucionContract.find(x => x.lineId.toUpperCase() == "RET") ? true : false;
       const tieneCP = distribucionContract.find(x => x.lineId.toUpperCase() == "CUOTA PARTE") ? true : false;
@@ -196,18 +198,26 @@ function distribuyeContrato(policyRea, distribucion) {
         //policyCession.sumInsured
         //policyCession.premium
 
-        //No tecnica
-        const proporcionNoTecnica = redondear(ces.premium == 0 ? 0 : ces.nonTechnicalPremium / ces.premium,8);
-        polCes.nonTechnicalPremium = redondear(proporcionNoTecnica * polCes.premium);
+        // CPAP distribuye únicamente su prima de riesgo efectiva. Esa base no
+        // se modela como prima no técnica: se conserva desde la proporción
+        // retenida + cedida que ya tiene la distribución del contrato.
+        let premiumDistributionBase;
+        if (isCPAP) {
+          premiumDistributionBase = getCPAPRiskPremium(polCes, ces);
+        } else {
+          const proporcionNoTecnica = redondear(ces.premium == 0 ? 0 : ces.nonTechnicalPremium / ces.premium, 8);
+          polCes.nonTechnicalPremium = redondear(proporcionNoTecnica * polCes.premium);
+          premiumDistributionBase = redondear(polCes.premium - polCes.nonTechnicalPremium);
+        }
 
         //ret
         polCes.sumInsuredCedant = redondear(polCes.sumInsured * ces.proportionCed);
-        polCes.premiumCedant = redondear((polCes.premium - polCes.nonTechnicalPremium) * ces.proportionCed);
+        polCes.premiumCedant = redondear(premiumDistributionBase * ces.proportionCed);
         polCes.proportionCed = ces.proportionCed;
 
         //CED        
         polCes.sumInsuredRe = redondear(polCes.sumInsured * ces.proportionRe);
-        polCes.premiumRe = redondear((polCes.premium - polCes.nonTechnicalPremium) * ces.proportionRe);
+        polCes.premiumRe = redondear(premiumDistributionBase * ces.proportionRe);
         polCes.proportionRe = ces.proportionRe;
         
         const proporcionComision = ces.premiumRe == 0 ? 0 : (ces.comissionCedant / ces.premiumRe);
@@ -223,7 +233,7 @@ function distribuyeContrato(policyRea, distribucion) {
           polCes.sumInsuredCedant += diffSuma;
   
         //Ajustamos prima
-        const diffPrima = redondear((polCes.premium - polCes.nonTechnicalPremium) - redondear(polCes.premiumRe + polCes.premiumCedant));
+        const diffPrima = redondear(premiumDistributionBase - redondear(polCes.premiumRe + polCes.premiumCedant));
         if(diffPrima != 0)
           polCes.premiumCedant += diffPrima;
 
@@ -452,6 +462,39 @@ function getPolicyRea() {
   }));
 }
 
+function getContractCode(contractId) {
+  const key = String(contractId ?? "").trim();
+  if (!key) return "";
+  if (Object.prototype.hasOwnProperty.call(contractCodeCache, key)) {
+    return contractCodeCache[key];
+  }
+
+  doCmd({
+    cmd: "GetContracts",
+    data: { filter: `[id]=${Number(contractId)}`, size: 1 }
+  });
+
+  const contract = GetContracts?.outData?.[0] || {};
+  const code = String(contract.code || "").trim().toUpperCase();
+  contractCodeCache[key] = code;
+  return code;
+}
+
+function getCPAPRiskPremium(policyCession, distributionCession) {
+  // La distribución capturada es la fuente preferida; si no trae prima,
+  // preservamos la proporción de la cesión vigente de la póliza.
+  const source = Math.abs(toNumber(distributionCession?.premium)) > 0
+    ? distributionCession
+    : policyCession;
+  const totalPremium = Math.abs(toNumber(source?.premium));
+  if (totalPremium === 0) return 0;
+
+  const riskPremium = Math.abs(toNumber(source?.premiumCedant))
+    + Math.abs(toNumber(source?.premiumRe));
+  const riskFactor = Math.max(0, Math.min(1, riskPremium / totalPremium));
+  return redondear(toNumber(policyCession?.premium) * riskFactor, 8);
+}
+
 // Las cancelaciones pueden haberse creado sin CessionPart. En ese caso
 // reutilizo los aceptantes de la última cesión positiva anterior de la misma
 // póliza, contrato, cobertura y línea para que la sincronización los persista.
@@ -548,7 +591,7 @@ function adjustCancellationReinsurance(policyId, changeId) {
     cmd: "LoadEntities",
     data: {
       entity: "Cession",
-      fields: "id,contractId,coverageId,lineId,changeId,premium,sumInsuredCedant,sumInsuredRe,proportionCed,proportionRe,premiumCedant,premiumRe,comissionCedant,tax",
+      fields: "id,contractId,coverageId,coverageCode,lineId,changeId,premium,sumInsuredCedant,sumInsuredRe,proportionCed,proportionRe,premiumCedant,premiumRe,comissionCedant,tax",
       // Include both unlinked rows from the first run and rows already linked
       // to this endorsement so retries can deterministically recalculate them.
       filter: `lifePolicyId = ${policyId} AND premiumType = 'CANCELLATION' AND (changeId IS NULL OR changeId = ${targetChangeId})`,
@@ -587,9 +630,21 @@ function adjustCancellationReinsurance(policyId, changeId) {
   }
 
   const fullCancellation = Math.abs(toNumber(detail.prorate) - 1) < 0.000001;
+  const cpapCancellationCessions = cessions.filter(cession =>
+    getContractCode(cession.contractId) === "CPAP"
+  );
+  const previousCPAPCessions = cpapCancellationCessions.length > 0
+    ? getPreviousPositiveCessions(policyId)
+    : [];
   const statements = fullCancellation
     ? buildFullCancellationStatements(policyId, targetChangeId, cessions)
-    : buildProratedCancellationStatements(policyId, targetChangeId, cessions, targetPremium);
+    : buildProratedCancellationStatements(
+      policyId,
+      targetChangeId,
+      cessions,
+      targetPremium,
+      previousCPAPCessions
+    );
 
   statements.push(`UPDATE p
 SET sumInsured = ROUND(ISNULL(c.sumInsuredRe, 0) * ISNULL(p.split, 0) / 100.0, 2),
@@ -613,8 +668,8 @@ function buildFullCancellationStatements(policyId, changeId, cancellationCession
     cmd: "LoadEntities",
     data: {
       entity: "Cession",
-      fields: "id,contractId,coverageId,coverageCode,lineId,sumInsured,premium,sumInsuredCedant,premiumCedant,sumInsuredRe,premiumRe,comissionCedant,tax,nonTechnicalPremium,fee,proportionCed,proportionRe",
-      filter: `lifePolicyId = ${policyId} AND overwritten = 0 AND premiumType <> 'CANCELLATION'`,
+      fields: "id,contractId,coverageId,coverageCode,lineId,sumInsured,premium,sumInsuredCedant,premiumCedant,sumInsuredRe,premiumRe,comissionCedant,tax,nonTechnicalPremium,fee,proportionCed,proportionRe,overwritten",
+      filter: `lifePolicyId = ${policyId} AND (premiumType IS NULL OR premiumType <> 'CANCELLATION') AND premium > 0`,
       noTracking: true
     }
   });
@@ -624,11 +679,15 @@ function buildFullCancellationStatements(policyId, changeId, cancellationCession
     : [];
 
   return cancellationCessions.map(cancellation => {
+    const isCPAP = getContractCode(cancellation?.contractId) === "CPAP";
     const source = positiveCessions
       .filter(cession =>
         Number(cession?.id || 0) < Number(cancellation?.id || 0) &&
         Number(cession?.contractId || 0) === Number(cancellation?.contractId || 0) &&
-        cancellationCessionKey(cession) === cancellationCessionKey(cancellation)
+        (isCPAP || Number(cession?.overwritten || 0) === 0) &&
+        (isCPAP
+          ? matchesCPAPCancellationSource(cession, cancellation)
+          : cancellationCessionKey(cession) === cancellationCessionKey(cancellation))
       )
       .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))[0];
     if (!source) {
@@ -657,8 +716,50 @@ WHERE id = ${Number(cancellation.id)}
   });
 }
 
-function buildProratedCancellationStatements(policyId, changeId, cessions, targetPremium) {
-  const basePremium = cessions.reduce((total, cession) => total + Math.abs(toNumber(cession.premium)), 0);
+function getPreviousPositiveCessions(policyId) {
+  // LoadEntities can exclude overwritten historical rows. CPAP needs the
+  // positive movement before the cancellation, including historical rows.
+  doCmd({
+    cmd: "DoQuery",
+    data: {
+      sql: `SELECT id, contractId, coverageId, coverageCode, lineId, premium, premiumCedant, premiumRe
+FROM Cession
+WHERE lifePolicyId = ${Number(policyId)}
+  AND ISNULL(premium, 0) > 0
+  AND ISNULL(premiumType, '') <> 'CANCELLATION';`
+    }
+  });
+
+  if (!DoQuery || DoQuery.ok === false) {
+    throw new Error(DoQuery?.msg || "No fue posible consultar las cesiones positivas previas de CPAP");
+  }
+  return Array.isArray(DoQuery.outData) ? DoQuery.outData : [];
+}
+
+function buildProratedCancellationStatements(policyId, changeId, cessions, targetPremium, previousCPAPCessions = []) {
+  const previousPositiveByCancellationId = cessions.reduce((result, cession) => {
+    if (getContractCode(cession.contractId) !== "CPAP") {
+      return result;
+    }
+
+    // A zero-premium coverage does not have a risk premium to redistribute.
+    // It may legitimately lack a positive predecessor (for example, coverage 169).
+    if (Math.abs(toNumber(cession.premium)) === 0) {
+      return result;
+    }
+
+    const source = getPreviousPositiveCession(cession, previousCPAPCessions);
+    if (!source) {
+      throw new Error(`No existe cesión positiva previa para recalcular la cancelación CPAP de la cobertura ${cession.coverageId || cession.coverageCode} en la línea ${cession.lineId}`);
+    }
+
+    result[cession.id] = source;
+    return result;
+  }, {});
+  const basePremium = cessions.reduce((total, cession) => {
+    const source = previousPositiveByCancellationId[cession.id];
+    return total + Math.abs(toNumber(source?.premium ?? cession.premium));
+  }, 0);
   if (basePremium <= 0 && targetPremium !== 0) {
     throw new Error("Las Cessions de cancelación no tienen prima base para distribuir coveragesDif");
   }
@@ -667,12 +768,15 @@ function buildProratedCancellationStatements(policyId, changeId, cessions, targe
   let allocatedPremium = 0;
   return cessions.map((cession, index) => {
     const id = Number(cession.id);
-    const currentPremium = toNumber(cession.premium);
+    const previousPositive = previousPositiveByCancellationId[cession.id] || null;
+    const currentPremium = toNumber(previousPositive?.premium ?? cession.premium);
     const weight = basePremium > 0 ? Math.abs(currentPremium) / basePremium : 0;
     const premium = index === cessions.length - 1
       ? Math.sign(targetPremium) * (targetAbsPremium - allocatedPremium)
       : Math.sign(targetPremium) * Math.round(targetAbsPremium * weight * 100) / 100;
     allocatedPremium += Math.abs(premium);
+
+    const isCPAP = getContractCode(cession.contractId) === "CPAP";
 
     const cedantInsured = Math.abs(toNumber(cession.sumInsuredCedant));
     const reInsured = Math.abs(toNumber(cession.sumInsuredRe));
@@ -703,8 +807,15 @@ function buildProratedCancellationStatements(policyId, changeId, cessions, targe
     const taxRatio = toNumber(cession.premiumRe) !== 0
       ? toNumber(cession.tax) / toNumber(cession.premiumRe)
       : 0;
-    const premiumCedant = Math.round(premium * cedantRatio * 100) / 100;
-    const premiumRe = Math.round(premium * reRatio * 100) / 100;
+    const sourceTotalPremium = Math.abs(toNumber(previousPositive?.premium));
+    const sourceRiskPremium = Math.abs(toNumber(previousPositive?.premiumCedant))
+      + Math.abs(toNumber(previousPositive?.premiumRe));
+    const riskFactor = isCPAP && sourceTotalPremium > 0
+      ? Math.min(1, sourceRiskPremium / sourceTotalPremium)
+      : 1;
+    const riskPremium = premium * riskFactor;
+    const premiumCedant = Math.round(riskPremium * cedantRatio * 100) / 100;
+    const premiumRe = Math.round(riskPremium * reRatio * 100) / 100;
     const commission = Math.round(premiumRe * commissionRatio * 100) / 100;
     const tax = Math.round(premiumRe * taxRatio * 100) / 100;
 
@@ -720,6 +831,43 @@ WHERE id = ${id}
   AND premiumType = 'CANCELLATION'
   AND (changeId IS NULL OR changeId = ${changeId});`;
   });
+}
+
+function getPreviousPositiveCession(cancellation, positiveCessions) {
+  return positiveCessions
+    .filter(source =>
+      Number(source?.id || 0) < Number(cancellation?.id || 0) &&
+      Number(source?.contractId || 0) === Number(cancellation?.contractId || 0) &&
+      matchesCPAPCancellationSource(source, cancellation)
+    )
+    .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))[0];
+}
+
+function matchesCPAPCancellationSource(source, cancellation) {
+  const sourceCoverageId = String(source?.coverageId ?? "").trim();
+  const cancellationCoverageId = String(cancellation?.coverageId ?? "").trim();
+  const sourceCoverageCode = String(source?.coverageCode ?? "").trim();
+  const cancellationCoverageCode = String(cancellation?.coverageCode ?? "").trim();
+  const sameCoverage = sourceCoverageId && cancellationCoverageId
+    ? sourceCoverageId === cancellationCoverageId ||
+      (sourceCoverageCode && cancellationCoverageCode && sourceCoverageCode === cancellationCoverageCode)
+    : sourceCoverageCode && cancellationCoverageCode && sourceCoverageCode === cancellationCoverageCode;
+
+  return sameCoverage && normalizeReinsuranceLine(source?.lineId) === normalizeReinsuranceLine(cancellation?.lineId);
+}
+
+function normalizeReinsuranceLine(lineId) {
+  const normalized = String(lineId ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+  if (normalized === "CP" || normalized.includes("CUOTA PARTE")) return "CP";
+  if (normalized === "EX" || normalized.includes("EXCEDENTE")) return "EX";
+  if (normalized.startsWith("FAC")) return "FAC";
+  if (normalized.startsWith("FRO")) return "FRO";
+  if (normalized.startsWith("RET")) return "RET";
+  return normalized;
 }
 
 function cancellationCessionKey(cession) {
