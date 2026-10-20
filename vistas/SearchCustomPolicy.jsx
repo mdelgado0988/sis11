@@ -142,8 +142,13 @@
     const tz = getTimeZone();
     return tz ? MT.utc(d).tz(tz) : MT.utc(d).local();
   };
-  const formatDate = (d) => branchMoment(d).format('MMMM Do YYYY, h:mm:ss a');
-  const formatDateShort = (d) => (d ? branchMoment(d).format('YYYY-MM-DD') : '');
+  // La busqueda recibe instantes UTC; la grilla los presenta siempre en Panama.
+  const panamaMoment = (d) => {
+    if (typeof d === 'string' && /[+-]\d{2}:\d{2}$/.test(d)) return MT.parseZone(d).tz('America/Panama');
+    return MT.utc(d).tz('America/Panama');
+  };
+  const formatDate = (d) => panamaMoment(d).format('MMMM Do YYYY, h:mm:ss a');
+  const formatDateShort = (d) => (d ? panamaMoment(d).format('YYYY-MM-DD') : '');
 
   // Mismo color de estado que la nativa.
   const getColor = (s) => {
@@ -621,7 +626,7 @@
       const name = getProductName(r);
       return <Tooltip title={name}><span className="msn19-catalogo">{name}</span></Tooltip>;
     } },
-    { title: 'Año-Mes', key: 'yearMonth', render: (v, r) => (r.start ? branchMoment(r.start).format('YYYY-MM') : '-') },
+    { title: 'Año-Mes', key: 'yearMonth', render: (v, r) => (r.start ? panamaMoment(r.start).format('YYYY-MM') : '-') },
     { title: 'Estado', dataIndex: 'policyStatus', align: 'center', render: (v) => <Tag color={v === 'OFFERED' ? 'blue' : (v === 'CURRENT' ? 'green' : (v === 'CANCELLED' ? 'red' : 'orange'))}>{getStateText(v)}</Tag> },
     { title: 'Inicia', dataIndex: 'start', render: nowrap },
     { title: 'Vence', dataIndex: 'end', render: nowrap },

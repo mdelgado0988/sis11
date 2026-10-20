@@ -153,6 +153,7 @@ resultado.Hasta = toFechaDdMmYyyy(policy?.end);
 resultado.IdentificacionAFavor = getIdentificacionAFavor();
 resultado.Licitacion = oaUserData?.n_licitacion ?? "";
 resultado.TextoLicitacion = `${resultado.TipoLicitacion} No: ${resultado.Licitacion}`.trim();
+resultado.TextoLicitacion2 = `${resultado.Licitacion}`.trim();
 
 //Datos economicos de la poliza
 resultado.Prima = n(policy?.annualPremium ?? 0);
