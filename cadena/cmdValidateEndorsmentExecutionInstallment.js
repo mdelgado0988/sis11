@@ -77,6 +77,22 @@ try {
 
   if (cuotasPendientes.length > 0) {
     cuotasDistribuye = distribuirMontoEnCuotas(cuotasDistribuye, premiumBill, taxBill);
+
+    // Un pago parcial no puede reducirse por debajo de lo ya cobrado. Si el
+    // descuento deja un excedente, se conserva como una cuota negativa del
+    // endoso, igual que cuando todas las cuotas ya estaban pagadas.
+    const excedenteNegativo = n2(
+      totalBill - cuotasDistribuye.reduce((sum, x) => sum + (Number(x.minimum) || 0), 0)
+    );
+    if (excedenteNegativo < -0.01 && !cuotaNegativaDelCambio) {
+      cuotasDistribuye.push(crearCuotaDiferencia({
+        template: cuotasCambio[0] || cuotasBase[0],
+        diferencia: excedenteNegativo,
+        premiumBill,
+        taxBill,
+        concepto: conceptoDiferencia
+      }));
+    }
   } else {
     const diferencia = n2(totalBill - totalPagado);
     if (Math.abs(diferencia) > 0.01 && !cuotaNegativaDelCambio) {
