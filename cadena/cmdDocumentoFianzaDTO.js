@@ -75,7 +75,7 @@ resultado.SumaLetras = numeroALetras(policy.insuredSum ?? 0)
   .toUpperCase()
   .replace(/\s+CON\s+(\d{2}\/100)$/, " BALBOAS CON $1");
 resultado.DiasVigencia = diasVigenciaDocumento;
-resultado.NumeroContrato = oaUserData?.txtNumeroContrato ?? "0";
+resultado.NumeroContrato = oaUserData?.txtNumeroContratoFianza ?? oaUserData?.txtNumeroContrato ?? "0";
 resultado.TipoVigencia = obtenerTextoTipoVigencia(oaUserData?.tipo_vigencia);
 resultado.TipoVigencia = resultado.TipoVigencia ? ` ${resultado.TipoVigencia}` : "";
 resultado.TipoVigencia2 = resultado.TipoVigencia ? resultado.TipoVigencia.toUpperCase() : "";
