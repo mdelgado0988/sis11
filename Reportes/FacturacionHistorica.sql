@@ -2,11 +2,11 @@ USE SIS11
 
 GO
 
-DECLARE  @fstart DATE = '20261013'
-        ,@fend DATE =  '20261013'
+DECLARE  @fstart DATE = '20261001'
+        ,@fend DATE =  '20261020'
 		,@ramo varchar(50) = 20
-		,@producto varchar(50) = 'vid-desemp'
-		,@poliza VARCHAR(50) = null
+		,@producto varchar(50) = null--'vid-desemp'
+		,@poliza VARCHAR(50) = 'FC-001197'
 
 /* INFORMACIÓN DE PÓLIZAS (NUEVO) */
 SELECT 
@@ -27,7 +27,7 @@ SELECT
     ISNULL(refe.ReferidoName, '') AS [Referido por],
     ISNULL(prcp.usuario, '') AS Usuario,
     CONVERT(VARCHAR, CAST(an.[start] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Desde,
-    CONVERT(VARCHAR, CAST(snap.policyEnd AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta,
+    CONVERT(VARCHAR, TRY_CONVERT(date, snap.policyEnd), 103) AS Hasta,
     CASE WHEN ISNULL(lp.policyVersion,0) = 0 THEN 'Nueva' ELSE 'Renovación' END AS Tipo,
 
     ISNULL(pym.name, '') AS recursopago,
@@ -446,11 +446,12 @@ SELECT
             THEN CONVERT(VARCHAR, CAST(ed.effectiveDate AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
         ELSE CONVERT(VARCHAR, ISNULL(ed.newStart, lp.[start]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
     END AS Desde,
-    CONVERT(VARCHAR, COALESCE(
-        TRY_CONVERT(datetime2, CASE WHEN ISJSON(ed.jDetail) = 1 THEN JSON_VALUE(ed.jDetail, '$.policyEnd') END),
-        ed.newEnd,
-        lp.[end]
-    ) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS Hasta
+    CASE
+        WHEN ISJSON(ed.jDetail) = 1
+             AND NULLIF(LTRIM(RTRIM(JSON_VALUE(ed.jDetail, '$.policyEnd'))), '') IS NOT NULL
+            THEN CONVERT(VARCHAR, TRY_CONVERT(date, JSON_VALUE(ed.jDetail, '$.policyEnd')), 103)
+        ELSE CONVERT(VARCHAR, COALESCE(ed.newEnd, lp.[end]) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103)
+    END AS Hasta
     ,CASE 
 		WHEN ed.Discriminator = 'AddCoverageChange' THEN 'Adición de Cobertura'
 		WHEN ed.Discriminator = 'BeneficiaryChange' THEN 'Cambio de Beneficiario'
