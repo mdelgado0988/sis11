@@ -39,6 +39,10 @@ const reportesEndoso = {
   fianza: {
     conPrima: 'FormatoEndososFianza.docx',
     sinPrima: 'FormatoEndososSinCoberturaFianza.docx',
+    anticipo: {
+      conPrima: 'FormatoEndososFianzaV2.docx',
+      sinPrima: 'FormatoEndososSinCoberturaFianzaV2.docx'
+    },
     ordenProceder: 'EndosoOrdenProcederFianza.docx',
     actoPublico: 'EndosoActoPublicoLicitacion.docx',
     cambioSuma: 'EndosoCambioSumaFianza.docx',
@@ -429,6 +433,12 @@ function isSuretyPolicy(policy) {
   return ['81', '82', '83', '84'].includes(String(policy?.lob ?? '').trim());
 }
 
+function isSuretyV2Policy(policy) {
+  const productCode = String(policy?.productCode ?? '').trim().toUpperCase();
+  return String(policy?.lob ?? '').trim() === '81'
+    && ['81ANTICIPO', '81PROPUESTA'].includes(productCode);
+}
+
 function isTechnicalPolicy(policy) {
   return ['96', '52'].includes(String(policy?.lob ?? '').trim());
 }
@@ -603,9 +613,18 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
       : reportes.incendio.conPrima;
   }
 
+  const fianzaTemplates = isSuretyV2Policy(policy)
+    ? reportes.fianza.anticipo
+    : reportes.fianza;
+  const isLoadingChange = String(change?.Discriminator || '').trim().toUpperCase() === 'LOADINGCHANGE';
+
+  // ChangeLoading siempre usa el formato sin cobertura, incluso cuando el
+  // movimiento de recargo/descuento produzca una variación de prima.
+  if (isLoadingChange) return fianzaTemplates.sinPrima;
+
   return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
-    ? reportes.fianza.conPrima
-    : reportes.fianza.sinPrima;
+    ? fianzaTemplates.conPrima
+    : fianzaTemplates.sinPrima;
 }
 
 function esEndosoTarjetaProtegida(change) {
@@ -751,7 +770,7 @@ function buildTechnicalRisk(userData, catalogs, countries, provinces) {
     NumeroProyecto: value('txtCodigoProyecto'),
     PeriodoPrueba: value('txtPeriodoPrueba'),
     SumaAsegurada: value('txtSA'),
-    SumaAfianzada: value('txtSA'),
+    SumaAfianzada: n(numericValue(value('txtSA'))),
     UsoBien: catalogText(lookup.usoBien, value('cmbUsoBien'), 0, 1),
     CodigoUsoBien: value('cmbUsoBien'),
     PeriodoMantenimiento: value('txtPeriodoMantenimiento'),
@@ -816,7 +835,7 @@ function buildSuretyRisk(userData, catalogs) {
     TipoVigencia: catalogText(lookup.tipoVigencia, suretyValue(data, ['tipo_vigencia']), 0, 1),
     TipoCalendario: catalogText(lookup.tipoVigencia, suretyValue(data, ['tipo_calendario']), 0, 1),
     DiasVigencia: suretyValue(data, ['txtDiasVigencia']),
-    SumaAfianzada: suretyValue(data, ['suma_afianzada']),
+    SumaAfianzada: n(numericValue(suretyValue(data, ['suma_afianzada']))),
     ValorGarantia: suretyValue(data, ['valor_garantia']),
     DescripcionObjetoAfianzado: suretyValue(data, ['desc_objeto_afianzado']),
     Observaciones: suretyValue(data, ['observaciones']),
@@ -1388,7 +1407,10 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
 
     //Carga de datos Contacto
   doCmd({cmd:"LoadEntities",data:{entity:"Contact",operatiion:"GET",filter:"id in ("+xContactsFilterArray.join(',')+")",fields:vfieldsContacto}});
-  const dataContacto = LoadEntities.outData;
+  const dataContacto = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
+  const holderContact = dataContacto.find(contact => Number(contact.id) === Number(policy.holderId)) || holder;
+  const insuredContactId = Number(dataCotizacionAsegurados?.contactId || policy.holderId || 0);
+  const insuredContact = dataContacto.find(contact => Number(contact.id) === insuredContactId) || holderContact;
 
   // Catalogos (si estas funciones se llaman muchas veces, esto conviene cachearlo fuera)
   doCmd({ cmd: "RepoCountryCatalog", data: { operation: "GET" } });
@@ -1429,7 +1451,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     ? (countries.find(itm => itm.code === addr.country)?.name || String(addr.country))
     : "No Tiene";
 
-  const linea2 = addr.address1 ? String(addr.address1) : "";
+  const linea2 = addr.address1 ? String(addr.address1) : (addr.address2 ? String(addr.address2) : "");
 
   // Phones seguro (sin reventar si viene vacío)
   const celPhone = holder?.Phones?.find(p => p.type === "PHONETYPE2")?.num ?? "No Tiene";
@@ -1499,17 +1521,20 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     NombreProducto: row.NombreProducto || "",
 
     Tomador: {
+      ContactId: Number(policy.holderId || 0),
       NombreCompleto: holderFullName,
-      Identificacion: holder.cnp || holder.nit || "No Tiene"
+      Identificacion: getIdentificacion(holderContact) || "No Tiene"
     },
 
     Asegurado: {
+      ContactId: insuredContactId,
       NombreCompleto: holderFullName,
-      Identificacion: holder.cnp || holder.nit || "No Tiene",
+      Identificacion: getIdentificacion(insuredContact) || "No Tiene",
       TelefonoContacto: holder.phone ||"No Tiene",
       TelefonoFax: "No Tiene",
       TelefonoCelular: celPhone,
-      Email: email
+      Email: email,
+      Direccion: linea2
     },
 
     Address: {
@@ -1743,7 +1768,8 @@ function getNombreCompleto(row){
 }
 
 function getIdentificacion(row){
-  return row.isPerson ? (row.cnp || "") : (row.nif || "");
+  const isPerson = row && (row.isPerson === true || Number(row.isPerson) === 1 || String(row.isPerson).toLowerCase() === "true");
+  return isPerson ? (row?.cnp || "") : (row?.nif || "");
 }
 
 function actualizarEntidad(row, entidad, opciones = {}) {
@@ -1754,7 +1780,7 @@ function actualizarEntidad(row, entidad, opciones = {}) {
   entidad.NombreCompleto = getNombreCompleto(row);
 
   if (opciones.identificacion)
-    entidad.Identificacion = getIdentificacion(row);
+    entidad.Identificacion = getIdentificacion(row) || "No Tiene";
 
   if (opciones.telefono)
     entidad.TelefonoContacto = row.phone || "";
