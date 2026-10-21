@@ -4016,7 +4016,7 @@
     const contact = getTransitAccountContact(account);
     const isGlobalContact = getTrimmedString(contact && contact.name)
       .toUpperCase()
-      .indexOf('GLOBAL') >= 0;
+      .indexOf('ASEGURADORA GLOBAL') >= 0;
 
     // Las cuentas propias no determinan el cliente del ingreso. Para las de
     // terceros, el cliente se toma de la cuenta y no puede modificarse.
