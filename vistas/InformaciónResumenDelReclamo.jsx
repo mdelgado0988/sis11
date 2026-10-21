@@ -951,6 +951,7 @@
   const [claimantHasMore, setClaimantHasMore] = React.useState(false);
   const [claimantSearchError, setClaimantSearchError] = React.useState('');
   const eventCatalogRef = React.useRef(null);
+  const eventCatalogCacheRef = React.useRef(new Map());
   const reasonOptionsRef = React.useRef([]);
   const eventOptionsRef = React.useRef([]);
   const [reasonOptions, setReasonOptions] = React.useState([]);
@@ -997,6 +998,7 @@
   const [checkRequestModalOpen, setCheckRequestModalOpen] = React.useState(false);
   const [paymentRequestDetail, setPaymentRequestDetail] = React.useState(null);
   const [paymentRequestCatalogs, setPaymentRequestCatalogs] = React.useState({ methods: [], types: [] });
+  const paymentStaticCatalogRef = React.useRef({ value: null, pending: null });
   const [paymentCoverageId, setPaymentCoverageId] = React.useState(null);
   const [paymentAmount, setPaymentAmount] = React.useState('');
   const [paymentConcept, setPaymentConcept] = React.useState('');
@@ -1410,20 +1412,21 @@
       return Promise.resolve();
     }
     setNewClaimProductLoading(true);
-    return exe('RepoProduct', {
-      operation: 'GET',
-      filter: "lobCode = '" + normalizedLob.replace(/'/g, "''") + "'"
+    return exe('LoadEntities', {
+      entity: 'Product',
+      fields: 'code,name',
+      filter: "lobCode = '" + normalizedLob.replace(/'/g, "''") + "'",
+      noTracking: true
     }).then((result) => {
       if (!mountedRef.current || requestId !== newClaimProductRequest.current) return;
       if (!result || result.ok === false) throw new Error(result && result.msg
         ? result.msg : 'No se pudieron cargar los productos.');
       const seen = {};
       setNewClaimProductOptions(responseRows(result, 'los productos').map((product) => {
-        const value = String(firstValue(product && product.code, product && product.id, '')).trim();
+        const value = String(firstValue(product && product.code, '')).trim();
         if (!value || seen[value]) return null;
         seen[value] = true;
-        return { value: value, label: String(firstValue(product && product.name,
-          product && product.description, product && product.code, product && product.id, value)) };
+        return { value: value, label: String(firstValue(product && product.name, product && product.code, value)) };
       }).filter(Boolean));
     }).catch((caughtError) => {
       if (mountedRef.current && requestId === newClaimProductRequest.current) {
@@ -1454,11 +1457,13 @@
     setNewClaimModalOpen(true);
     if (preservedLob) loadNewClaimProducts(preservedLob);
     if (!newClaimLobOptions.length) {
-      exe('RepoLob', { operation: 'GET' }).then((result) => {
+      exe('LoadEntities', {
+        entity: 'Lob', fields: 'code,name', noTracking: true
+      }).then((result) => {
         if (!mountedRef.current || !result || result.ok === false) return;
         setNewClaimLobOptions(responseRows(result, 'los ramos').map((row) => ({
-          value: String(firstValue(row.code, row.id, '')),
-          label: String(firstValue(row.name, row.description, row.code, row.id, ''))
+          value: String(firstValue(row.code, '')),
+          label: String(firstValue(row.name, row.code, ''))
         })).filter((row) => row.value));
       }).catch(() => {});
     }
@@ -1587,6 +1592,9 @@
     draftRef.current.claimantId = String(contactId);
     draftRef.current.claimantLabel = '';
     draftRef.current.claimantType = '';
+    draftRef.current.occurrenceHour = '08';
+    draftRef.current.occurrenceMinute = '00';
+    draftRef.current.occurrencePeriod = 'am';
     setDraft(draftRef.current);
     setClaimStageSelection('1');
     setEditable(true);
@@ -1682,6 +1690,17 @@
   const normalizeCoverageRows = (claim) => {
     const policy = claim && claim.Policy ? claim.Policy : {};
     const coverages = Array.isArray(policy.Coverages) ? policy.Coverages : [];
+    const affectedObjectCountByCoverage = {};
+    try {
+      readAffectedFormInstances(claim && claim.jCustomForms).forEach((entry) => {
+        const coverageId = Number(entry.coverageId);
+        if (Number.isSafeInteger(coverageId) && coverageId > 0) {
+          affectedObjectCountByCoverage[coverageId] = (affectedObjectCountByCoverage[coverageId] || 0) + 1;
+        }
+      });
+    } catch (error) {
+      // Invalid legacy data must not prevent the reserve summary from loading.
+    }
     return coverages.map((coverage) => {
       const id = coverage && Number(coverage.id);
       if (!Number.isSafeInteger(id) || id <= 0) return null;
@@ -1706,6 +1725,7 @@
         id: id,
         code: String(firstValue(coverage.code, coverage.coverageCode, coverage.number, id)),
         name: String(firstValue(coverage.name, coverage.description, coverage.code, 'Cobertura ' + id)),
+        affectedObjects: affectedObjectCountByCoverage[id] || 0,
         start: formatDate(firstValue(coverage.start, policy.start)),
         end: formatDate(firstValue(coverage.end, policy.end)),
         limit: limit,
@@ -1763,16 +1783,19 @@
 
   const reserveResultPayload = (result) => result && result.outData
     && !Array.isArray(result.outData) ? result.outData : result;
-  const runReserveOperation = (commandName, payload, successMessage) => {
-    if (documents.saving) return Promise.resolve(false);
-    if (reserveSavingRef.current) {
-      setReserveError('Ya hay una operación de reserva en curso.');
+  const runReserveOperation = (commandName, payload, successMessage, onFailure) => {
+    const fail = (message) => {
+      setReserveError(message);
+      if (typeof onFailure === 'function') onFailure(message);
       return Promise.resolve(false);
+    };
+    if (documents.saving) return fail('Espere a que termine la operación de documentos antes de registrar la reserva.');
+    if (reserveSavingRef.current) {
+      return fail('Ya hay una operación de reserva en curso.');
     }
     const operationClaimId = currentClaimRef.current ? Number(currentClaimRef.current.id) : null;
     if (!operationClaimId || routeClaimId() !== operationClaimId) {
-      setReserveError('El siniestro cambió. Recargue la información antes de continuar.');
-      return Promise.resolve(false);
+      return fail('El siniestro cambió. Recargue la información antes de continuar.');
     }
     const operationId = reserveOperationRef.current + 1;
     reserveOperationRef.current = operationId;
@@ -1804,8 +1827,10 @@
     }).catch((caughtError) => {
       if (mountedRef.current && reserveOperationRef.current === operationId
         && routeClaimId() === operationClaimId) {
-        setReserveError(caughtError && caughtError.message
-          ? caughtError.message : 'No fue posible ejecutar la operación de reserva.');
+        const message = caughtError && caughtError.message
+          ? caughtError.message : 'No fue posible ejecutar la operación de reserva.';
+        setReserveError(message);
+        if (typeof onFailure === 'function') onFailure(message);
       }
       return false;
     }).then((outcome) => {
@@ -2553,6 +2578,57 @@
     if (affected.write) return;
     affected.modal = null; notifyAffected();
   };
+  const affectedAutomaticReserveAmount = (formName, fields) => {
+    const formFields = {
+      frmOATarjetaFraude: 'colMonto',
+      frmOAAseguradoColectivo: 'colSaldo'
+    };
+    const fieldName = formFields[String(formName || '').trim()];
+    if (!fieldName) return null;
+    const matches = (fields || []).filter((field) => field && field.name === fieldName);
+    if (matches.length !== 1 || !Array.isArray(matches[0].userData) || matches[0].userData.length !== 1) return null;
+    const amount = numericValue(String(matches[0].userData[0] == null ? '' : matches[0].userData[0]).replace(/,/g, ''));
+    return amount !== null && amount > 0 ? amount : null;
+  };
+  const confirmAffectedObjectReserve = (claim, object, amount) => new Promise((resolve) => {
+    if (!Modal || typeof Modal.confirm !== 'function') { resolve('unavailable'); return; }
+    let handled = false;
+    Modal.confirm({
+      title: 'Objeto afectado registrado',
+      content: <span>Se registró el objeto afectado. ¿Desea crear automáticamente una reserva de indemnización por <strong>{formatAmount(amount)}</strong>?</span>,
+      okText: 'Sí, crear reserva',
+      cancelText: 'No',
+      onCancel: () => { if (!handled) { handled = true; resolve('declined'); } },
+      onOk: () => {
+        if (handled) return Promise.resolve(false);
+        handled = true;
+        let entity;
+        try {
+          entity = buildReserveEntity(claim, object.coverageId, 'INCREASE', 'IN', amount,
+            'Reserva automática por objeto afectado: ' + object.description);
+          entity.jAffectedObjects = JSON.stringify(object);
+        } catch (error) {
+          affected.saveMessage = 'Objeto afectado registrado, pero no se creó la reserva: ' + (error.message || 'monto no válido.');
+          notifyAffected();
+          resolve('failed');
+          return Promise.resolve(false);
+        }
+        const reportFailure = (message) => {
+          affected.saveMessage = 'Objeto afectado registrado, pero no se creó la reserva automática: ' + message;
+          notifyAffected();
+        };
+        return runReserveOperation('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity }, 'Reserva automática registrada.', reportFailure)
+          .then((created) => {
+            if (!created) {
+              resolve('failed');
+              return false;
+            }
+            resolve('created');
+            return true;
+          });
+      }
+    });
+  });
   const saveAffectedFormModal = () => {
     const claim = currentClaimRef.current, modal = affected.modal;
     if (!modal || modal.renderFailed || affected.write || !affectedCurrent(claim) || !canEdit(claim)) return Promise.resolve(false);
@@ -2617,6 +2693,8 @@
     }
     const write = { claim, modal }; affected.write = write; modal.error = ''; notifyAffected();
     let savedAffectedForms = '';
+    let automaticReserve = null;
+    let savedInstance = null;
     const current = () => affectedCurrent(claim) && affected.write === write;
     return repositoryRequest('RepoClaim', claimReadPayload(Number(claim.id)), undefined, current).then((result) => {
       if (!current()) return false;
@@ -2637,6 +2715,8 @@
       const instance = { key: modal.key || 'AffectedObject_' + modal.coverageId + '_' + modal.formId + '_' + nextNumber,
         coverageId: modal.coverageId, formId: modal.formId, description: modal.description,
         formName: modal.formName, fields: fields };
+      savedInstance = instance;
+      automaticReserve = index < 0 ? affectedAutomaticReserveAmount(modal.formName, fields) : null;
       if (index >= 0) instances[index] = instance; else instances.push(instance);
       const entity = serializeEntity(fresh);
       entity.jCustomForms = writeAffectedFormInstances(fresh.jCustomForms, instances);
@@ -2648,8 +2728,16 @@
       // Only jCustomForms changed, so keep the loaded claim and refresh this grid in memory.
       claim.jCustomForms = savedAffectedForms;
       affected.saved = readAffectedFormInstances(savedAffectedForms);
+      const nextCoverageRows = normalizeCoverageRows(claim);
+      coverageRowsRef.current = nextCoverageRows;
+      setCoverageRows(nextCoverageRows);
       affected.modal = null; affected.saveMessage = 'Objeto afectado guardado.'; notifyAffected();
-      return true;
+      return automaticReserve === null ? true : confirmAffectedObjectReserve(claim, savedInstance, automaticReserve)
+        .then((outcome) => {
+          if (outcome === 'created') affected.saveMessage = 'Objeto afectado y reserva automática registrados.';
+          notifyAffected();
+          return true;
+        });
     }).catch((error) => {
       if (current()) { modal.error = error.message || 'No fue posible guardar el objeto afectado.'; notifyAffected(); }
       return false;
@@ -3911,6 +3999,30 @@ END CATCH;`;
     const code = Number(value);
     return Number.isSafeInteger(code) && code >= 0 ? code : null;
   };
+  const loadPaymentStaticCatalogs = () => {
+    const cache = paymentStaticCatalogRef.current;
+    if (cache.value) return Promise.resolve(cache.value);
+    if (cache.pending) return cache.pending;
+    const request = Promise.all([
+      repositoryRequest('RepoPaymentMethodCatalog', { operation: 'GET' }),
+      repositoryRequest('RepoPaymentTypeCatalog', { operation: 'GET' })
+    ]).then(([methodsResult, typesResult]) => {
+      const methods = methodsResult && methodsResult.ok === true && Array.isArray(methodsResult.outData)
+        ? methodsResult.outData : null;
+      const types = typesResult && typesResult.ok === true && Array.isArray(typesResult.outData)
+        ? typesResult.outData : null;
+      if (!methods || !types) throw new Error('No fue posible cargar los catálogos de pago.');
+      cache.value = { methods: methods, types: types };
+      return cache.value;
+    });
+    cache.pending = request;
+    request.then(() => {
+      if (cache.pending === request) cache.pending = null;
+    }, () => {
+      if (cache.pending === request) cache.pending = null;
+    });
+    return request;
+  };
   const loadPaymentBeneficiaries = (type, query) => {
     const session = paymentCatalogRef.current;
     if (!session || !paymentCatalogCurrent(session) || paymentSavingRef.current) return;
@@ -3977,18 +4089,14 @@ END CATCH;`;
       if (session.config.Claim && session.config.Claim.defaultPaymentValues) throw new Error('La configuración Claim.defaultPaymentValues requiere adaptación antes de ejecutar la solicitud.');
       const type = paymentTypeOptions()[0];
       if (!type) throw new Error('No hay tipos de beneficiario habilitados.');
-      return Promise.all([loadPaymentBeneficiaries(type.value), session.purchaseOrdersEnabled ? loadPaymentPurchaseOrders(session) : Promise.resolve(), repositoryRequest('RepoPaymentMethodCatalog', { operation: 'GET' }).then((result) => {
+      return Promise.all([loadPaymentBeneficiaries(type.value), session.purchaseOrdersEnabled ? loadPaymentPurchaseOrders(session) : Promise.resolve(), loadPaymentStaticCatalogs().then((catalogs) => {
         if (!paymentCatalogCurrent(session)) return;
-        if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar los métodos de pago.');
-        session.methods = result.outData.filter((row) => row && (!row.module || row.module === 'PAYMENT')
+        session.methods = catalogs.methods.filter((row) => row && (!row.module || row.module === 'PAYMENT')
           && ['cheque', 'transferencia cuenta a cuenta'].indexOf(String(row.name || '').trim().toLowerCase()) !== -1);
         if (session.methods.some((row) => !row.code || !row.name)) throw new Error('Catálogo de métodos de pago incompatible.');
         if (session.method && !session.methods.some((row) => row.code === session.method)) throw new Error('El método de pago del siniestro no está disponible.');
-      }), repositoryRequest('RepoPaymentTypeCatalog', { operation: 'GET' }).then((result) => {
-        if (!paymentCatalogCurrent(session)) return;
-        if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar los tipos de pago.');
         const seen = {};
-        session.paymentTypes = result.outData.map((row) => {
+        session.paymentTypes = catalogs.types.map((row) => {
           const code = canonicalPaymentType(row && row.code);
           if (!row || code === null || typeof row.name !== 'string' || row.name.trim() === '' || seen[code]) {
             throw new Error('Catálogo de tipos de pago incompatible.');
@@ -4696,16 +4804,12 @@ END CATCH;`;
     return byCode;
   };
 
-  const claimTypeCode = (claim) => claim && typeof claim.claimType === 'string'
-    ? claim.claimType.trim() : '';
-
-  const insuredEventForUpdate = (event, claimType) => {
-    const expectedMode = typeof claimType === 'string' ? claimType.trim() : '';
+  const insuredEventForUpdate = (event) => {
     const eventMode = event && typeof event.mode === 'string' ? event.mode.trim() : '';
     if (!event || typeof event !== 'object' || Array.isArray(event)
       || typeof event.code !== 'string' || !event.code.trim()
       || typeof event.name !== 'string' || !event.name.trim()
-      || !expectedMode || eventMode !== expectedMode || event.disabled !== false
+      || !eventMode || event.disabled !== false
       || typeof event.hasHealthProcedures !== 'boolean') {
       throw new Error('El evento asegurado seleccionado no es válido.');
     }
@@ -5432,12 +5536,13 @@ END CATCH;`;
       entity.eventReason = reasonCode;
     }
     if (insuredEventTouched) {
-      const selectedEvent = insuredEventForUpdate(draftValue.insuredEvent, claim.claimType);
+      const selectedEvent = insuredEventForUpdate(draftValue.insuredEvent);
       if (selectedEvent.code !== draftValue.insuredEventCode) {
         throw new Error('El evento asegurado seleccionado no es consistente.');
       }
       entity.InsuredEvent = selectedEvent;
       entity.insuredEvent = selectedEvent.code;
+      entity.claimType = selectedEvent.mode;
     }
     let customFormsPayload = entity.jCustomForms;
     if (touchedFields && touchedFields.customForms) {
@@ -5738,12 +5843,10 @@ END CATCH;`;
     return options.concat([{ value: value, label: label || value, disabled: true }]);
   };
 
-  const eventOptionsForReason = (catalog, reasonCode, selectedCode, selectedEvent, claimType) => {
-    const expectedMode = typeof claimType === 'string' ? claimType.trim() : '';
+  const eventOptionsForReason = (catalog, reasonCode, selectedCode, selectedEvent) => {
     const codes = catalog && catalog.mappings[reasonCode] || [];
     const options = codes.map((code) => catalog.eventByCode[code]).filter((event) =>
-      event && event.disabled === false
-        && (newClaimModeRef.current || !expectedMode || event.mode === expectedMode))
+      event && event.disabled === false)
       .map((event) => ({ value: event.code, label: event.name }));
     const selectedName = selectedEvent && typeof selectedEvent.name === 'string'
       ? selectedEvent.name.trim() : selectedCode;
@@ -5765,7 +5868,47 @@ END CATCH;`;
     setReasonOptions(visibleReasons);
     setEventOptionList(eventOptionsForReason(catalog, selectedReason,
       draftValue && draftValue.insuredEventCode || '',
-      draftValue && draftValue.insuredEvent, claimTypeCode(claim)));
+      draftValue && draftValue.insuredEvent));
+  };
+
+  const loadEventCatalogForProduct = (productCode) => {
+    const cache = eventCatalogCacheRef.current;
+    const cached = cache.get(productCode);
+    if (cached) return cached;
+    const request = Promise.all([
+      repositoryRequest('GetFullTable', { table: 'SysInsuredEventsPerCoverage', filter: '1=1' }),
+      repositoryRequest('RepoEventReasonCatalog', catalogGetPayload()),
+      repositoryRequest('RepoInsuredEventCatalog', catalogGetPayload())
+    ]).then((results) => {
+      const mappings = parseEventMatrix(strictOutData(results[0], 'tabla de eventos'), productCode);
+      if (Object.keys(mappings).length === 0) {
+        throw new Error('No hay eventos configurados para el producto del siniestro.');
+      }
+      const reasonByCode = parseReasonCatalog(strictOutData(results[1], 'catálogo de razones'));
+      const eventByCode = parseInsuredEventCatalog(strictOutData(results[2], 'catálogo de eventos'));
+      const options = Object.keys(mappings).map((code) => {
+        const reason = reasonByCode[code];
+        if (!reason) throw new Error('La tabla contiene una razón de evento desconocida.');
+        mappings[code].forEach((eventCode) => {
+          const event = eventByCode[eventCode];
+          if (!event) {
+            throw new Error('La tabla contiene un evento asegurado incompatible: '
+              + eventCode + ' para el producto ' + productCode + '.');
+          }
+        });
+        return reason.disabled ? null : { value: reason.code, label: reason.name };
+      }).filter(Boolean);
+      if (options.length === 0) throw new Error('No hay razones de evento activas para este producto.');
+      return {
+        productCode: productCode, mappings: mappings, reasonByCode: reasonByCode,
+        eventByCode: eventByCode, reasonOptions: options
+      };
+    });
+    cache.set(productCode, request);
+    request.catch(() => {
+      if (cache.get(productCode) === request) cache.delete(productCode);
+    });
+    return request;
   };
 
   const loadClaimCatalogs = (requestedClaimId) => {
@@ -5793,36 +5936,8 @@ END CATCH;`;
       && requestRef.current === requestId
       && (isNewClaim ? newClaimModeRef.current && currentClaimRef.current === claim
         : routeClaimId() === claimIdValue);
-    return Promise.all([
-      repositoryRequest('GetFullTable', { table: 'SysInsuredEventsPerCoverage', filter: '1=1' }),
-      repositoryRequest('RepoEventReasonCatalog', catalogGetPayload()),
-      repositoryRequest('RepoInsuredEventCatalog', catalogGetPayload())
-    ]).then((results) => {
+    return loadEventCatalogForProduct(productCode).then((catalog) => {
       if (!isCurrent()) return;
-      const mappings = parseEventMatrix(strictOutData(results[0], 'tabla de eventos'), productCode);
-      if (Object.keys(mappings).length === 0) {
-        clearEventCatalog();
-        throw new Error('No hay eventos configurados para el producto del siniestro.');
-      }
-      const reasonByCode = parseReasonCatalog(strictOutData(results[1], 'catálogo de razones'));
-      const eventByCode = parseInsuredEventCatalog(strictOutData(results[2], 'catálogo de eventos'));
-      const options = Object.keys(mappings).map((code) => {
-        const reason = reasonByCode[code];
-        if (!reason) throw new Error('La tabla contiene una razón de evento desconocida.');
-        mappings[code].forEach((eventCode) => {
-          const event = eventByCode[eventCode];
-          if (!event) {
-            throw new Error('La tabla contiene un evento asegurado incompatible: '
-              + eventCode + ' para el producto ' + productCode + '.');
-          }
-        });
-        return reason.disabled ? null : { value: reason.code, label: reason.name };
-      }).filter(Boolean);
-      if (options.length === 0) throw new Error('No hay razones de evento activas para este producto.');
-      const catalog = {
-        productCode: productCode, mappings: mappings, reasonByCode: reasonByCode,
-        eventByCode: eventByCode, reasonOptions: options
-      };
       eventCatalogRef.current = catalog;
       applyEventCatalogToDraft(catalog, draftRef.current, claim);
     }).catch((caughtError) => {
@@ -5851,7 +5966,7 @@ END CATCH;`;
     }
     const next = Object.assign({}, draftRef.current, { eventReasonCode: code });
     const options = eventOptionsForReason(catalog, code,
-      next.insuredEventCode, next.insuredEvent, claimTypeCode(currentClaimRef.current));
+      next.insuredEventCode, next.insuredEvent);
     const currentIsValid = options.some((option) => option.value === next.insuredEventCode
       && !option.disabled);
     if (!currentIsValid) {
@@ -5866,7 +5981,7 @@ END CATCH;`;
     clearNewClaimValidation('eventReasonCode');
     if (next.insuredEventCode) clearNewClaimValidation('insuredEventCode');
     setEventOptionList(eventOptionsForReason(catalog, code,
-      next.insuredEventCode, next.insuredEvent, claimTypeCode(currentClaimRef.current)));
+      next.insuredEventCode, next.insuredEvent));
     setError('');
   };
 
@@ -5877,7 +5992,6 @@ END CATCH;`;
       && option.value === code && !option.disabled);
     const event = catalog && catalog.eventByCode[code];
     if (selected.length !== 1 || !event || event.disabled
-      || !newClaimModeRef.current && event.mode !== claimTypeCode(currentClaimRef.current)
       || !draftRef.current || !currentClaimRef.current
       || savingRef.current || stageSavingRef.current || adjusterLoadingRef.current
       || !newClaimModeRef.current && routeClaimId() !== Number(currentClaimRef.current.id)) {
@@ -6883,16 +6997,12 @@ END CATCH;`;
       target="_blank" rel="noopener noreferrer"
       onClick={(event) => event.stopPropagation()}>{text}</a>;
   };
-  const loadPaymentRequestCatalogs = () => Promise.all([
-    repositoryRequest('RepoPaymentMethodCatalog', { operation: 'GET' }),
-    repositoryRequest('RepoPaymentTypeCatalog', { operation: 'GET' })
-  ]).then(([methodsResult, typesResult]) => {
+  const loadPaymentRequestCatalogs = () => loadPaymentStaticCatalogs().then((catalogs) => {
     if (!mountedRef.current) return;
-    const methods = Array.isArray(methodsResult && methodsResult.outData) ? methodsResult.outData : [];
-    const types = Array.isArray(typesResult && typesResult.outData) ? typesResult.outData : [];
-    setPaymentRequestCatalogs({ methods: methods, types: types });
+    setPaymentRequestCatalogs({ methods: catalogs.methods, types: catalogs.types });
   }).catch(() => {
     // El detalle sigue disponible aunque un catálogo no pueda cargarse temporalmente.
+    if (mountedRef.current) setPaymentRequestCatalogs({ methods: [], types: [] });
   });
 
   const openPaymentRequestDetail = (row, kind) => {
@@ -7959,6 +8069,10 @@ END CATCH;`;
       .resumen-shell .resumen-data-table tbody tr.resumen-row-selected:hover{background:#86b4ff;color:#123b66}
       .resumen-shell .resumen-data-table tbody tr.resumen-row-selected td:first-child{box-shadow:inset 4px 0 0 #0050b3}
       .resumen-shell .resumen-data-table .resumen-cell-number{text-align:right}
+      .resumen-shell .resumen-data-table .resumen-affected-count{text-align:center}
+      .resumen-shell .resumen-affected-check{display:inline-flex;vertical-align:-2px}
+      .resumen-shell .resumen-affected-count-positive{color:#237804;font-weight:600}
+      .resumen-shell .resumen-affected-count-zero{color:#cf1322;font-weight:600}
       .resumen-shell .resumen-data-table .resumen-grid-amount-positive{color:#237804}
       .resumen-shell .resumen-data-table .resumen-grid-amount-negative{color:#cf1322}
       .resumen-shell .resumen-data-table .resumen-grid-amount-zero{color:#262626;font-weight:400}
@@ -8513,6 +8627,7 @@ END CATCH;`;
                   <th className="resumen-cell-number">Total reserva</th>
                   <th className="resumen-cell-number">Pagos</th>
                   <th className="resumen-cell-number">Gastos</th>
+                  <th className="resumen-affected-count">OA</th>
                 </tr></thead>
                 <tbody>{coverageRows.length ? coverageRows.map((row) => (
                   <tr key={row.id} tabIndex="0"
@@ -8529,8 +8644,15 @@ END CATCH;`;
                     <td className="resumen-cell-number">{formatGridAmount(row.totalReserve)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.payments)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.expenses)}</td>
+                    <td className={'resumen-affected-count ' + (row.affectedObjects > 0
+                      ? 'resumen-affected-count-positive' : 'resumen-affected-count-zero')}>
+                      {row.affectedObjects > 0 ? <React.Fragment><span className="resumen-affected-check" aria-label="Con objetos afectados">
+                        <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          strokeLinecap="round" strokeLinejoin="round" focusable="false"><path d="M4 12l5 5L20 6" /></svg>
+                      </span> {row.affectedObjects}</React.Fragment> : '0'}
+                    </td>
                   </tr>
-                )) : <tr><td className="resumen-empty-row" colSpan="11">No hay coberturas disponibles para este siniestro.</td></tr>}</tbody>
+                )) : <tr><td className="resumen-empty-row" colSpan="12">No hay coberturas disponibles para este siniestro.</td></tr>}</tbody>
               </table>
             </div>
 

@@ -10,7 +10,7 @@
  *           formulario que CustomClaimAffectedObjectConfig asigna (frmOATarjetaFraude) para la PRIMERA cobertura
  *           válida marcada (cob_N = N), guardado en la sección «ObjetosAfectados» como lo guarda la vista.
  *           Los catálogos aceptan código o texto. Una fila con errores se rechaza con TODOS sus motivos.
- *           Sin preprocesador, sin triggers, sin reservas ni pagos.
+ *           También crea una reserva de indemnización por cada cobertura marcada, usando Monto.
  * @context  { row:{ajustador, reclamante, causa, fSiniestro, provincia, ciudad, lugar, fNotificacionS,
  *           descripSiniestro, obserAdicional, idPoliza, poliza, casegurado, cedula, tipoTrajeta, cantSiniestro,
  *           monto, nombreComercio, tarjetaHabitante, tipoTransaccion, lugarSiniestro,
@@ -62,11 +62,11 @@ try {
   if (occurrence && policy && policy.start && occurrence.date < String(policy.start).slice(0, 10)) {
     errors.push(`FSiniestro ${occurrence.date} es anterior al inicio de vigencia de la póliza ${policy.code} (${String(policy.start).slice(0, 10)}).`);
   }
-  // 3. Catálogos del reclamo (código o texto)
+  // 3. Evento asegurado de la carga y razón derivada para el reclamo.
   const stage = { code: "1", name: "NOTIFICADO" };
   const adjuster = findAdjuster(r.ajustador);
   const claimer = required(r.reclamante, "Reclamante") ? findContact(r.reclamante, "Reclamante", false) : null;
-  const event = policy && required(r.causa, "Causa") ? resolveEvent(r.causa, policy.productCode) : null;
+  const event = policy && required(r.causa, "Evento asegurado") ? resolveEvent(r.causa, policy.productCode) : null;
   const geo = resolveGeo(r.provincia, r.ciudad);
   required(r.lugar, "Lugar");
 
@@ -76,9 +76,10 @@ try {
   // 5. Datos de la tarjeta (formulario del objeto afectado)
   const cardValues = cardFields(r);
 
-  // 6. Coberturas: formato estricto; se usa la PRIMERA marcada que exista en la póliza y tenga objeto afectado.
+  // 6. Coberturas: la primera válida se usa para el objeto afectado; todas las marcadas generan reserva.
   const marked = markedCoverages(r);
   const chosen = policy && marked.length ? firstValidCoverage(policy, marked) : null;
+  const reserveCoverages = policy && marked.length ? policyCoverages(policy, marked) : [];
 
   // 6b. Numeración: si el contador de Main.claimCode no existe, el sistema guarda el reclamo SIN número y falla.
   if (policy) checkClaimCounters(policy.productCode);
@@ -118,7 +119,7 @@ try {
     eventReason: event.reason.code,
     InsuredEvent: event.insured,
     elegibleCoverages: String(chosen.coverage.id),
-    claimType: String(policy.policyType || "I").trim() || "I",
+    claimType: String(event.insured.mode).trim(),
     stageCode: String(stage.code),
     occurrence: occurrence.iso,
     notification: notification,
@@ -143,8 +144,13 @@ try {
   const created = firstRow(RepoClaim.outData) || {};
   const claimId = created.id;
   const claimCode = created.code || claimId;
+  if (!Number.isSafeInteger(Number(claimId)) || Number(claimId) <= 0) {
+    fail("El reclamo fue creado, pero no se recibió un identificador válido para registrar las reservas.");
+  }
+  const reserveCount = createInitialReserves(claimId, policy, reserveCoverages, cardValues.colMonto,
+    "Reserva inicial por carga masiva de fraude");
   const skipped = chosen.skipped.length ? ` Coberturas marcadas no usadas: ${chosen.skipped.join("; ")}.` : "";
-  return { ok: true, msg: `Reclamo ${claimCode} creado (id ${claimId}) en la póliza ${policy.code}, cobertura ${coverageCode}, con su objeto afectado.${skipped}`, claimId: claimId, code: claimCode };
+  return { ok: true, msg: `Reclamo ${claimCode} creado (id ${claimId}) en la póliza ${policy.code}, cobertura ${coverageCode}, con su objeto afectado y ${reserveCount} reserva(s) inicial(es).${skipped}`, claimId: claimId, code: claimCode };
 
 } catch (error) {
   const reason = error && error.message ? error.message : String(error);
@@ -173,6 +179,30 @@ function firstRow(data) {
   if (!data) return null;
   if (typeof data.length === "number") return data.length ? JSON.parse(JSON.stringify(data[0])) : null;
   return JSON.parse(JSON.stringify(data));
+}
+
+function createInitialReserves(claimId, policy, coverages, amount, concept) {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) fail("El monto de la reserva debe ser mayor que cero.");
+  if (!Array.isArray(coverages) || !coverages.length) fail("No hay coberturas válidas para crear la reserva.");
+  const saved = [];
+  for (let index = 0; index < coverages.length; index++) {
+    const coverage = coverages[index] || {};
+    const coverageId = Number(coverage.id);
+    if (!Number.isSafeInteger(coverageId) || coverageId <= 0) fail("La cobertura de la reserva no es válida.");
+    const entity = {
+      amount: numericAmount, operation: "RESERVE", reserveType: "IN", concept: concept,
+      lifePolicyId: Number(policy.id), claimId: Number(claimId), lifeCoverageId: coverageId,
+      reserved: numericAmount, payed: 0
+    };
+    doCmd({ cmd: "RepoLifeCoveragePayout", data: { operation: "ADD", entity: entity } });
+    if (!RepoLifeCoveragePayout.ok) {
+      const savedCodes = saved.map(row => row.code).join(", ");
+      fail(`El reclamo ${claimId} fue creado, pero no se pudo crear la reserva de la cobertura ${coverage.code}: ${translate(RepoLifeCoveragePayout.msg)}.${savedCodes ? ` Ya se crearon reservas para: ${savedCodes}.` : ""}`);
+    }
+    saved.push({ code: String(coverage.code || coverageId) });
+  }
+  return saved.length;
 }
 
 function norm(value) {
@@ -232,16 +262,19 @@ function parseDate(value, label) {
 
 function pad(n) { const t = String(n); return t.length < 2 ? "0" + t : t; }
 
-// FSiniestro: fecha con hora opcional (DD/MM/AAAA HH:mm, h:mm am/pm o fracción de Excel); sin hora, 00:00.
+// FSiniestro se persiste en UTC; sin hora se usa 14:00Z para mostrar 08:00 AM en la aplicación.
 function parseOccurrence(dateText) {
   if (!required(dateText, "FSiniestro")) return null;
   const date = parseDate(dateText, "FSiniestro");
   if (!date) return null;
-  let hour = 0, minute = 0;
+  let hour = 14, minute = 0;
   const text = String(dateText).trim();
   const serial = text.match(/^\d{1,5}(\.\d+)$/);
   const inline = text.match(/[ T](\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?\s*m?\.?$/i);
-  if (serial) { const mins = Math.round(Number("0" + serial[1]) * 1440); hour = Math.floor(mins / 60) % 24; minute = mins % 60; }
+  if (serial) {
+    const mins = Math.round(Number("0" + serial[1]) * 1440);
+    if (mins > 0) { hour = Math.floor(mins / 60) % 24; minute = mins % 60; }
+  }
   else if (inline) {
     hour = Number(inline[1]); minute = Number(inline[2]);
     const half = inline[3] ? inline[3].toLowerCase() : "";
@@ -326,7 +359,7 @@ function findAdjuster(value) {
   return null;
 }
 
-// Causa + evento asegurado, con la misma tabla que usa la vista del reclamo (SysInsuredEventsPerCoverage por producto).
+// La carga recibe el evento asegurado; la razón se deduce de la configuración del producto.
 function resolveEvent(value, productCode) {
   const reasons = query("SELECT code, name, ISNULL(disabled,0) disabled FROM EventReasonCatalog");
   const events = query("SELECT code, name, mode, ISNULL(disabled,0) disabled, hasHealthProcedures FROM InsuredEventCatalog");
@@ -342,43 +375,32 @@ function resolveEvent(value, productCode) {
     if (!reason) return;
     mapping[reason] = (mapping[reason] || []).concat(String(row[iEvents] || "").split(",").map(s => s.trim()).filter(Boolean));
   });
-  const productHasTable = Object.keys(mapping).length > 0;
   const key = norm(value);
   const activeReasons = reasons.filter(x => !(x.disabled === true || x.disabled === 1));
   const activeEvents = events.filter(x => !(x.disabled === true || x.disabled === 1));
-  const scopeReasons = productHasTable ? activeReasons.filter(x => mapping[x.code]) : activeReasons;
+  const scopeReasons = activeReasons.filter(x => mapping[x.code]);
+  const scopeEvents = activeEvents.filter(e => Object.keys(mapping).some(k => mapping[k].indexOf(e.code) !== -1));
+  let matches = scopeEvents.filter(x => norm(x.code) === key);
+  if (!matches.length) matches = scopeEvents.filter(x => norm(x.name) === key);
+  if (matches.length !== 1) {
+    errors.push(matches.length > 1
+      ? `Evento asegurado '${value}' es ambiguo (${matches.map(x => x.code).join(", ")}); use el código.`
+      : `Evento asegurado '${value}' no está configurado para el producto ${productCode}.`);
+    return null;
+  }
 
-  let reason = null, insured = null;
-  let hits = scopeReasons.filter(x => norm(x.code) === key);
-  if (!hits.length) hits = scopeReasons.filter(x => norm(x.name) === key);
-  if (hits.length > 1) { errors.push(`Causa '${value}' es ambigua (${hits.map(x => x.code).join(", ")}); use el código.`); return null; }
-  if (hits.length === 1) reason = hits[0];
-  else {
-    // También se acepta el evento asegurado (código o nombre): la causa se deduce de la tabla del producto.
-    const scopeEvents = productHasTable ? activeEvents.filter(e => Object.keys(mapping).some(k => mapping[k].indexOf(e.code) !== -1)) : activeEvents;
-    let ev = scopeEvents.filter(x => norm(x.code) === key);
-    if (!ev.length) ev = scopeEvents.filter(x => norm(x.name) === key);
-    if (ev.length === 1) {
-      insured = ev[0];
-      const owners = productHasTable ? scopeReasons.filter(x => (mapping[x.code] || []).indexOf(insured.code) !== -1) : [];
-      if (owners.length === 1) reason = owners[0];
-      else if (owners.length > 1) { errors.push(`Causa '${value}' es un evento asegurado de varias causas (${owners.map(x => x.code).join(", ")}); indique la causa.`); return null; }
-      else { errors.push(`Causa '${value}' es un evento asegurado sin causa configurada para el producto ${productCode}; indique la causa.`); return null; }
-    } else {
-      errors.push(productHasTable
-        ? `Causa '${value}' no es una causa configurada para el producto ${productCode} (válidas: ${scopeReasons.map(x => x.code + " " + x.name).join(", ")}).`
-        : `Causa '${value}' no existe como causa de reclamo (ni por código ni por nombre).`);
-      return null;
-    }
+  const insured = matches[0];
+  const owners = scopeReasons.filter(x => (mapping[x.code] || []).indexOf(insured.code) !== -1);
+  if (owners.length !== 1) {
+    errors.push(owners.length > 1
+      ? `Evento asegurado '${value}' tiene varias razones configuradas (${owners.map(x => x.code).join(", ")}); corrija SysInsuredEventsPerCoverage.`
+      : `Evento asegurado '${value}' no tiene una razón configurada para el producto ${productCode}.`);
+    return null;
   }
-  if (!insured && productHasTable) {
-    const allowed = (mapping[reason.code] || []).map(code => activeEvents.find(e => e.code === code)).filter(Boolean);
-    if (!allowed.length) { errors.push(`La causa ${reason.code} no tiene eventos asegurados activos para el producto ${productCode}.`); return null; }
-    insured = allowed.find(e => norm(e.name).indexOf("SIN ASIGNAR") === 0) || allowed[0];
-  }
+
   return {
-    reason: reason,
-    insured: insured ? { code: insured.code, name: String(insured.name).trim(), mode: insured.mode, disabled: false, hasHealthProcedures: insured.hasHealthProcedures === true || insured.hasHealthProcedures === 1 } : null
+    reason: owners[0],
+    insured: { code: insured.code, name: String(insured.name).trim(), mode: insured.mode, disabled: false, hasHealthProcedures: insured.hasHealthProcedures === true || insured.hasHealthProcedures === 1 }
   };
 }
 
@@ -483,6 +505,17 @@ function firstValidCoverage(policy, codes) {
   }
   errors.push(`Ninguna cobertura marcada es válida: ${skipped.join("; ")}.`);
   return null;
+}
+
+function policyCoverages(policy, codes) {
+  const rows = query(`SELECT id, code, name FROM LifeCoverage WHERE lifePolicyId=${policy.id}`);
+  const selected = [];
+  codes.forEach(code => {
+    const matches = rows.filter(row => String(row.code).trim() === code);
+    if (!matches.length) errors.push(`cob_${code}: la póliza ${policy.code} no tiene la cobertura ${code}.`);
+    else selected.push(matches[0]);
+  });
+  return selected;
 }
 
 function ageAt(birth, date) {

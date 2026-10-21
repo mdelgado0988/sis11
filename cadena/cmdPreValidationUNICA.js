@@ -161,9 +161,9 @@ function validateRow(cells, catalogs, productCodes) {
   const start = parseDate(cells[5]);
   const end = parseDate(cells[6]);
   if (!cells[5]) errors.push("Fdesde es obligatoria.");
-  else if (!start) errors.push(`Fdesde «${cells[5]}» no es una fecha válida (use DD/MM/AAAA o AAAA-MM-DD).`);
+  else if (!start) errors.push(`Fdesde «${cells[5]}» no es una fecha válida (use DD/MM/AAAA, AAAA-MM-DD o un serial de Excel).`);
   if (!cells[6]) errors.push("Fhasta es obligatoria.");
-  else if (!end) errors.push(`Fhasta «${cells[6]}» no es una fecha válida (use DD/MM/AAAA o AAAA-MM-DD).`);
+  else if (!end) errors.push(`Fhasta «${cells[6]}» no es una fecha válida (use DD/MM/AAAA, AAAA-MM-DD o un serial de Excel).`);
   if (start && end) {
     if (end.time <= start.time) errors.push(`Fhasta (${end.iso}) debe ser posterior a Fdesde (${start.iso}).`);
     else {
@@ -392,8 +392,14 @@ function parseDate(value) {
   if (match) { y = +match[1]; m = +match[2]; d = +match[3]; }
   else {
     match = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-    if (!match) return null;
-    d = +match[1]; m = +match[2]; y = +match[3];
+    if (match) { d = +match[1]; m = +match[2]; y = +match[3]; }
+    else {
+      // Excel serial dates use the 1900 date system, including its historical leap-year offset.
+      const serial = /^\d{1,7}(?:\.\d+)?$/.test(s) ? Math.floor(Number(s)) : null;
+      if (!Number.isSafeInteger(serial) || serial < 1 || serial > 2958465) return null;
+      const date = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+      y = date.getUTCFullYear(); m = date.getUTCMonth() + 1; d = date.getUTCDate();
+    }
   }
   const date = new Date(Date.UTC(y, m - 1, d));
   if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;

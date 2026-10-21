@@ -4004,14 +4004,23 @@
   }
 
   function updateNewIncomeTransitContact(account, incomeTypeCode) {
-    if (!collectionChargeVisible
+    const canSyncContact = collectionChargeVisible
+      || (!movementEditVisible && activeTab === 'new-income');
+    if (!canSyncContact
       || !isTransitIncomeType(incomeTypeCode || newIncomeTypeCode)
       || isFixedFundsTransitAccount(account)) {
       setNewIncomeTransitContact(null);
       return;
     }
 
-    setNewIncomeTransitContact(getTransitAccountContact(account));
+    const contact = getTransitAccountContact(account);
+    const isGlobalContact = getTrimmedString(contact && contact.name)
+      .toUpperCase()
+      .indexOf('GLOBAL') >= 0;
+
+    // Las cuentas propias no determinan el cliente del ingreso. Para las de
+    // terceros, el cliente se toma de la cuenta y no puede modificarse.
+    setNewIncomeTransitContact(contact && !isGlobalContact ? contact : null);
   }
 
   function applyNewIncomeTransitContact(container) {
@@ -5742,7 +5751,10 @@
     }
 
     setCloseCashDeskLoading(true);
-    exe('CloseTransferWorkspace', { workspaceId: workspaceId })
+    exe('ExeChain', {
+      chain: 'cmdCloseTransferWorkspaceCustom',
+      context: JSON.stringify({ workspaceId: workspaceId })
+    })
       .then(response => {
         if (!response || response.ok === false) {
           throw new Error(response && response.msg
