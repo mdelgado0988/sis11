@@ -176,7 +176,7 @@ function buildFilter(input) {
   }
 
   if (input.policy) {
-    conditions.push(`pol.[code] = N'${escapeSql(input.policy)}'`);
+    conditions.push(`pol.[code] LIKE N'%${escapeSql(input.policy)}%'`);
   }
 
   if (input.accountName) {

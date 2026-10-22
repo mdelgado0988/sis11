@@ -3437,7 +3437,9 @@ function calcularPorcentajeRedondo(prima, monto) {
     for (const decimales of [0, 2, 4, 6, 8]) {
       const candidato = redondear(porcentajeExacto, decimales, true);
       const comisionCalculada = redondear((base * candidato) / 100, 2);
-      if (comisionCalculada === objetivo) return candidato;
+      // A one-cent difference is only a currency-rounding artifact. Prefer the
+      // simpler displayed percentage instead of exposing decimals such as 40.9998.
+      if (Math.round(Math.abs(comisionCalculada - objetivo) * 100) <= 1) return candidato;
     }
 
     return redondear(porcentajeExacto, 8, true);
