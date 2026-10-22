@@ -116,6 +116,16 @@ if (contractIdsForCode.length) {
   }
 }
 
+const cpapRiskPremiumFactor = function (cession) {
+  // CPAP no reparte toda la prima: la cesión vigente conserva la proporción
+  // real de prima de riesgo (retenida + cedida) frente a la prima original.
+  const originalPremium = Math.abs(Number(cession.premium || 0));
+  if (!originalPremium) return 1;
+  const distributedPremium = Math.abs(Number(cession.premiumCedant || 0))
+    + Math.abs(Number(cession.premiumRe || 0));
+  return Math.max(0, Math.min(1, distributedPremium / originalPremium));
+};
+
 // aceptantes de esas lineas
 const baseIds = [];
 for (let i = 0; i < base.length; i++) baseIds.push(Number(base[i].id));
@@ -191,9 +201,12 @@ for (let i = 0; i < base.length; i++) {
   const counts = sums[code] === true;
   const lineDv = dv;
   const linePv = pv;
+  const isCPAP = up(contractCodeById[Number(c.contractId)]) === 'CPAP';
+  const riskPremiumFactor = isCPAP ? cpapRiskPremiumFactor(c) : 1;
+  const distributedPremium = money(lineDv * riskPremiumFactor);
   // La variacion final incluye el recargo/descuento aplicado a la cobertura.
-  const cedant = money(lineDv * premiumPCed);
-  const re = money(lineDv * premiumPRe);
+  const cedant = money(distributedPremium * premiumPCed);
+  const re = money(distributedPremium * premiumPRe);
   const commission = money(lineDv * commissionRate);
   const nonTechnical = money(lineDv - cedant - re);
   grp.rows.push({
@@ -203,6 +216,7 @@ for (let i = 0; i < base.length; i++) {
     // cesiones, porque una misma cobertura puede estar en varias líneas.
     finalPremium: finalPremium[code], finalSum: finalSum[code],
     proportionCed: pCed, proportionRe: pRe,
+    riskPremiumFactor: riskPremiumFactor,
     premiumCedant: cedant, premiumRe: re, nonTechnicalPremium: nonTechnical,
     sumInsured: Number(c.sumInsured || 0), sumInsuredCounted: counts ? Number(c.sumInsured || 0) : 0,
     commission: commission, currency: txt(c.currency) || txt(policy.currency),
