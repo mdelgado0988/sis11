@@ -1023,8 +1023,8 @@ function onRowSelected(row) {
   mpcp = redondear(mpcp,2);
   mccp = redondear(mccp,2);  
   micp = redondear(micp,2);
-  pccp = calcularPorcentaje(mpcp, mccp);
-  picp = calcularPorcentaje(mpcp, micp);
+  pccp = calcularPorcentajeRedondo(mpcp, mccp);
+  picp = calcularPorcentajeRedondo(mpcp, micp);
   srcp = redondear(mpcp - mccp - micp,2);
 
   //ex1
@@ -1034,8 +1034,8 @@ function onRowSelected(row) {
   mpex1 = redondear(mpex1,2);
   mcex1 = redondear(mcex1,2);  
   miex1 = redondear(miex1,2);
-  pcex1 = calcularPorcentaje(mpex1, mcex1);
-  piex1 = calcularPorcentaje(mpex1, miex1);
+  pcex1 = calcularPorcentajeRedondo(mpex1, mcex1);
+  piex1 = calcularPorcentajeRedondo(mpex1, miex1);
   srex1 = redondear(mpex1 - mcex1 - miex1,2);
 
   //fac
@@ -1045,8 +1045,8 @@ function onRowSelected(row) {
   mpfp = redondear(mpfp,2);
   mcfp = redondear(mcfp,2);  
   mifp = redondear(mifp,2);
-  pcfp = calcularPorcentaje(mpfp, mcfp);  
-  pifp = calcularPorcentaje(mpfp, mifp);  
+  pcfp = calcularPorcentajeRedondo(mpfp, mcfp);
+  pifp = calcularPorcentajeRedondo(mpfp, mifp);
   srfp = redondear(mpfp - mcfp - mifp,2);
 
   //fro
@@ -1056,8 +1056,8 @@ function onRowSelected(row) {
   mpfo = redondear(mpfo,2);
   mcfo = redondear(mcfo,2);  
   mifo = redondear(mifo,2);
-  pcfo = calcularPorcentaje(mpfo, mcfo);
-  pifo = calcularPorcentaje(mpfo, mifo);
+  pcfo = calcularPorcentajeRedondo(mpfo, mcfo);
+  pifo = calcularPorcentajeRedondo(mpfo, mifo);
   srfo = redondear(mpfo - mcfo - mifo,2);
 
   // If the coverage-based non-technical premium differs by up to one cent due to rounding,
@@ -3425,6 +3425,22 @@ function calcularPorcentaje(prima, monto) {
     if (prima === 0) return 0; // evita división entre cero
     const porcentaje = (monto / prima) * 100;
     return redondear(porcentaje, 8, true);
+}
+
+function calcularPorcentajeRedondo(prima, monto) {
+    const base = redondear(prima, 8, true);
+    const objetivo = redondear(monto, 2);
+    if (base === 0) return 0;
+
+    const porcentajeExacto = (objetivo / base) * 100;
+    // Prefer the simplest rate that still recreates the stored commission.
+    for (const decimales of [0, 2, 4, 6, 8]) {
+      const candidato = redondear(porcentajeExacto, decimales, true);
+      const comisionCalculada = redondear((base * candidato) / 100, 2);
+      if (comisionCalculada === objetivo) return candidato;
+    }
+
+    return redondear(porcentajeExacto, 8, true);
 }
 
 function redondear(valor, decimales = 2, forzar = false) {  

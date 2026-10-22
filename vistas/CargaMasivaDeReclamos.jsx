@@ -32,9 +32,9 @@
   const ActionIcon = (props) => React.createElement('span', { className: 'anticon bulk-claims-action-icon', 'aria-hidden': true },
     React.createElement('svg', { viewBox: '64 64 896 896', width: '1em', height: '1em', fill: 'currentColor', focusable: false },
       React.createElement('path', { d: actionPaths[props.name] })));
-  const importNames = { DESGRAVAMEN: 'CargaMasivaReclamosDesgravamen', FRAUDE: 'CargaMasivaReclamoFraude' };
+  const CLAIMS_IMPORT_CATEGORY = 'ReclamosMasivos';
   const [state, setState] = React.useState({
-    product: 'DESGRAVAMEN', file: null, rows: [], detail: null, detailOpen: false, error: '',
+    product: null, configs: [], configsLoading: false, file: null, rows: [], detail: null, detailOpen: false, error: '',
     loading: false, loaded: false, current: 1, total: null, hasNext: false, templateLoading: false,
     uploading: false, uploadUncertain: false, notice: '', detailLoading: false, detailError: '', exporting: false,
     selectedBatchId: null, resultsOpen: false,
@@ -42,7 +42,9 @@
   });
   const mountedRef = React.useRef(true);
   const requestRef = React.useRef(0);
-  const productRef = React.useRef('DESGRAVAMEN');
+  const configsRef = React.useRef([]);
+  const configRequestRef = React.useRef(0);
+  const productRef = React.useRef(null);
   const templateRequestRef = React.useRef(0);
   const templateBusyRef = React.useRef(false);
   const uploadBusyRef = React.useRef(false);
@@ -66,9 +68,56 @@
     if (!Array.isArray(rows)) throw new Error('La respuesta del sistema no tiene el formato esperado.');
     return rows;
   };
+  const configFilter = (product) => {
+    const id = Number(product);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Seleccione un tipo de carga válido.');
+    return "category = '" + CLAIMS_IMPORT_CATEGORY + "' and id = " + id;
+  };
+  const configRows = (result, product) => {
+    const configs = responseRows(result);
+    if (configs.length !== 1 || Number(configs[0].id || configs[0].Id) !== Number(product)
+      || configs[0].category !== CLAIMS_IMPORT_CATEGORY) {
+      throw new Error('El tipo de carga ya no pertenece a ' + CLAIMS_IMPORT_CATEGORY + ' o no está disponible.');
+    }
+    return configs;
+  };
+  const loadConfigs = () => {
+    if (uploadBusyRef.current) return Promise.resolve();
+    const token = ++configRequestRef.current;
+    const active = () => mountedRef.current && token === configRequestRef.current;
+    update({ configsLoading: true, error: '' });
+    return Promise.resolve().then(() => exe('RepoImportConfig', { operation: 'GET', filter: "category = '" + CLAIMS_IMPORT_CATEGORY + "'" })).then((result) => {
+      if (!active()) return;
+      const configs = responseRows(result);
+      const seen = new Set();
+      if (!configs.length) throw new Error('No hay importaciones configuradas en la categoría ' + CLAIMS_IMPORT_CATEGORY + '.');
+      configs.forEach((config) => {
+        const id = Number(config.id || config.Id);
+        if (!Number.isSafeInteger(id) || id <= 0 || typeof config.name !== 'string' || !config.name.trim()
+          || config.category !== CLAIMS_IMPORT_CATEGORY || seen.has(id)) {
+          throw new Error('La lista de tipos de carga no es válida.');
+        }
+        seen.add(id);
+      });
+      configsRef.current = configs;
+      update({ configs: configs });
+      return selectProduct(seen.has(Number(productRef.current)) ? productRef.current : String(configs[0].id || configs[0].Id));
+    }).catch((error) => {
+      if (active()) {
+        configsRef.current = [];
+        productRef.current = null;
+        requestRef.current++;
+        listedBatchesRef.current = [];
+        selectedBatchRef.current = null;
+        closeDetail();
+        update({ configs: [], product: null, rows: [], selectedBatchId: null, loading: false, error: error.message });
+      }
+    }).then(() => { if (active()) update({ configsLoading: false }); });
+  };
   const loadBatches = (page) => {
     if (!mountedRef.current) return Promise.resolve();
     const product = productRef.current;
+    if (!product) return Promise.resolve();
     const current = Number.isSafeInteger(page) && page > 0 ? page : 1;
     if (current !== pageRef.current) closeDetail();
     listedBatchesRef.current = [];
@@ -81,11 +130,10 @@
       selectedBatchId: selectedBatchRef.current ? String(selectedBatchRef.current.id) : null });
     return Promise.resolve().then(() => {
       if (!active()) return null;
-      return exe('RepoImportConfig', { operation: 'GET', filter: "category = 'ReclamosMasivos' and name = '" + importNames[product] + "'" });
+      return exe('RepoImportConfig', { operation: 'GET', filter: configFilter(product) });
     }).then((result) => {
       if (!active()) return null;
-      const configs = responseRows(result);
-      if (configs.length !== 1) throw new Error('No se encontró una configuración única para ' + product + '.');
+      const configs = configRows(result, product);
       configId = Number(configs[0].id || configs[0].Id);
       if (!Number.isSafeInteger(configId) || configId <= 0) throw new Error('La configuración de carga no tiene un identificador válido.');
       return exe('RepoBatch', { operation: 'GET', filter: 'importConfigId = ' + configId, page: current - 1, size: 10 });
@@ -120,15 +168,17 @@
     }).then(() => { if (active()) update({ loading: false }); });
   };
   const selectProduct = (product) => {
-    if (uploadBusyRef.current || ['DESGRAVAMEN', 'FRAUDE'].indexOf(product) < 0) return;
+    const configId = Number(product);
+    if (uploadBusyRef.current || !Number.isSafeInteger(configId) || configId <= 0
+      || !configsRef.current.some((config) => Number(config.id || config.Id) === configId)) return;
     closeDetail();
     selectedBatchRef.current = null;
     templateRequestRef.current++;
     templateBusyRef.current = false;
     fileRef.current = null;
     uploadUncertainRef.current = false;
-    update({ product: product, file: null, detail: null, detailOpen: false, error: '', templateLoading: false, uploadUncertain: false, notice: '' });
-    productRef.current = product;
+    productRef.current = String(configId);
+    update({ product: productRef.current, file: null, detail: null, detailOpen: false, error: '', templateLoading: false, uploadUncertain: false, notice: '' });
     return loadBatches(1);
   };
   const selectFile = (file) => {
@@ -223,11 +273,10 @@
     return Promise.resolve().then(() => {
       if (!active()) return null;
       if (!Number.isSafeInteger(id) || id <= 0) throw new Error('El lote seleccionado no tiene un identificador válido.');
-      return exe('RepoImportConfig', { operation: 'GET', filter: "category = 'ReclamosMasivos' and name = '" + importNames[product] + "'" });
+      return exe('RepoImportConfig', { operation: 'GET', filter: configFilter(product) });
     }).then((result) => {
       if (!active()) return null;
-      const configs = responseRows(result);
-      if (configs.length !== 1) throw new Error('No se encontró una configuración única para ' + product + '.');
+      const configs = configRows(result, product);
       config = configs[0];
       const configId = Number(config.id || config.Id);
       if (!Number.isSafeInteger(configId) || configId <= 0 || Number(selected.importConfigId) !== configId) {
@@ -251,7 +300,7 @@
         || (entities[0].importConfigId != null && Number(entities[0].importConfigId) !== Number(batch.importConfigId))) {
         throw new Error('La respuesta no corresponde al lote seleccionado.');
       }
-      const detail = normalizeDetail(batch, entities[0].jData, config.jMappings, product);
+      const detail = normalizeDetail(batch, entities[0].jData, config.jMappings, config.name);
       detailRef.current = detail;
       update({ detail: detail });
     }).catch((error) => {
@@ -290,7 +339,8 @@
     const detail = detailRef.current;
     if (!mountedRef.current || !detail || exportBusyRef.current) return Promise.resolve();
     const token = detailRequestRef.current;
-    const active = () => mountedRef.current && token === detailRequestRef.current && detail.product === productRef.current;
+    const active = () => mountedRef.current && token === detailRequestRef.current
+      && Number(detail.importConfigId) === Number(productRef.current);
     exportBusyRef.current = true;
     update({ exporting: true, detailError: '' });
     return ensureXlsx().then((library) => {
@@ -510,11 +560,10 @@
     update({ uploading: true, loading: false, error: '', notice: '' });
     return Promise.resolve().then(() => {
       if (!mountedRef.current) return null;
-      return exe('RepoImportConfig', { operation: 'GET', filter: "category = 'ReclamosMasivos' and name = '" + importNames[product] + "'" });
+      return exe('RepoImportConfig', { operation: 'GET', filter: configFilter(product) });
     }).then((result) => {
       if (!mountedRef.current) return null;
-      const configs = responseRows(result);
-      if (configs.length !== 1) throw new Error('No se encontró una configuración única para ' + product + '.');
+      const configs = configRows(result, product);
       const config = configs[0];
       const id = Number(config.id || config.Id);
       if (!Number.isSafeInteger(id) || id <= 0) throw new Error('La configuración de carga no tiene un identificador válido.');
@@ -561,11 +610,10 @@
     update({ templateLoading: true, error: '' });
     return Promise.resolve().then(() => {
       if (!active()) return null;
-      return exe('RepoImportConfig', { operation: 'GET', filter: "category = 'ReclamosMasivos' and name = '" + importNames[product] + "'" });
+      return exe('RepoImportConfig', { operation: 'GET', filter: configFilter(product) });
     }).then((result) => {
       if (!active()) return;
-      const configs = responseRows(result);
-      if (configs.length !== 1) throw new Error('No se encontró una configuración única para la plantilla de ' + product + '.');
+      const configs = configRows(result, product);
       const headers = templateHeaders(configs[0].jMappings);
       return ensureXlsx().then((library) => {
         if (!active()) return;
@@ -611,11 +659,11 @@
     let configId;
     return Promise.resolve().then(() => {
       if (!active()) return null;
-      return exe('RepoImportConfig', { operation: 'GET', filter: "category = 'ReclamosMasivos' and name = '" + importNames[product] + "'" });
+      return exe('RepoImportConfig', { operation: 'GET', filter: configFilter(product) });
     }).then((result) => {
       if (!active()) return null;
-      const configs = responseRows(result);
-      configId = configs.length === 1 ? Number(configs[0].id || configs[0].Id) : 0;
+      const configs = configRows(result, product);
+      configId = Number(configs[0].id || configs[0].Id);
       if (!Number.isSafeInteger(configId) || configId <= 0 || configId !== Number(selected.importConfigId)) throw new Error('El lote no corresponde al tipo de carga seleccionado.');
       return exe('RepoBatch', { operation: 'GET', filter: 'id = ' + Number(selected.id) + ' and importConfigId = ' + configId, page: 0, size: 1 });
     }).then((result) => {
@@ -707,7 +755,7 @@
     && Number(batch.success) + Number(batch.error) > Number(batch.records);
   React.useEffect(() => {
     mountedRef.current = true;
-    loadBatches(1);
+    loadConfigs();
     const schedule = () => {
       if (!mountedRef.current) return;
       pollTimerRef.current = window.setTimeout(() => { pollBatches().then(schedule); }, 4000);
@@ -749,6 +797,8 @@
       render: (value) => <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{display(value)}</div> }].concat(
     state.detail ? state.detail.headers.map((title, index) => ({ title: title, key: 'column-' + index, width: 180,
       render: (_, row) => display(row.values[index]) })) : []);
+  const selectedConfig = state.configs.find((config) => String(config.id || config.Id) === String(state.product));
+  const selectedConfigName = selectedConfig ? selectedConfig.name : '—';
   return (
     <div className="bulk-claims-shell">
       <style>{`
@@ -790,6 +840,7 @@
         .bulk-claims-shell .ant-table-tbody > tr > td, .bulk-claims-detail .ant-table-tbody > tr > td { padding:6px 8px; border-bottom:1px solid #e2e8f0; }
         .bulk-claims-shell .ant-table-tbody > tr:hover > td, .bulk-claims-detail .ant-table-tbody > tr:hover > td { background:#f5f9ff; }
         .bulk-claims-shell .ant-table-tbody > tr.bulk-claims-selected > td, .bulk-claims-shell .ant-table-tbody > tr.bulk-claims-selected:hover > td { background:#b7d5ff; }
+        .bulk-claims-selectable-grid .ant-table-tbody > tr:not(.ant-table-placeholder) > td { cursor:pointer; }
         .bulk-claims-grid { flex:1 1 auto; min-width:0; border:1px solid #aebdcd; border-radius:8px; overflow:hidden; background:#fff; }
         .bulk-claims-file { display:inline-block; max-width:100%; overflow-wrap:anywhere; color:#64748b; font-size:12px; }
         .bulk-claims-hint { margin:4px 0; color:#64748b; font-size:12px; }
@@ -830,9 +881,8 @@
             <div className="bulk-claims-upload-fields">
               <div className="bulk-claims-upload-type">
                 <Form.Item label="Tipo de Carga">
-                  <Select className="bulk-claims-load-type" style={{ width: 320, maxWidth: '100%' }} size="small" aria-label="Tipo de Carga" value={state.product} disabled={state.uploading} onChange={selectProduct}>
-                    <Select.Option value="DESGRAVAMEN">DESGRAVAMEN</Select.Option>
-                    <Select.Option value="FRAUDE">FRAUDE</Select.Option>
+                  <Select className="bulk-claims-load-type" style={{ width: 320, maxWidth: '100%' }} size="small" aria-label="Tipo de Carga" value={state.product} loading={state.configsLoading} disabled={state.uploading || state.configsLoading || !state.configs.length} onChange={selectProduct}>
+                    {state.configs.map((config) => <Select.Option key={config.id || config.Id} value={String(config.id || config.Id)}>{config.name}</Select.Option>)}
                   </Select>
                 </Form.Item>
               </div>
@@ -857,7 +907,7 @@
           <p className="bulk-claims-hint">Use la plantilla del producto seleccionado. Cargar el archivo crea el lote; la ejecución se realiza por separado.</p>
         </fieldset>
         <div className="bulk-claims-section">
-          <h3>Cargas activas · {state.product}</h3>
+          <h3>Cargas activas · {selectedConfigName}</h3>
           <Space>
             <Button type="primary" className="bulk-claims-action" disabled={!state.selectedBatchId || state.loading || state.uploading} onClick={showSelectedDetail}><ActionIcon name="view" />Ver detalles</Button>
             <Button type="primary" className="bulk-claims-action bulk-claims-execute" disabled={state.loading || state.uploading || !canExecute(selectedBatchRef.current)} onClick={() => requestExecution(selectedBatchRef.current)}><ActionIcon name="play" />Ejecutar</Button>
@@ -865,7 +915,7 @@
           </Space>
         </div>
         <div className="bulk-claims-grid">
-        <Table size="small" bordered rowKey={(row) => String(row.id)} columns={columns} dataSource={state.rows} loading={state.loading}
+        <Table className="bulk-claims-selectable-grid" size="small" bordered rowKey={(row) => String(row.id)} columns={columns} dataSource={state.rows} loading={state.loading}
           rowSelection={{ type: 'radio', selectedRowKeys: state.selectedBatchId ? [state.selectedBatchId] : [],
             onChange: (_, rows) => selectBatch(rows[0]), getCheckboxProps: () => ({ disabled: state.loading || state.uploading }) }}
           rowClassName={(row) => String(row.id) === state.selectedBatchId ? 'bulk-claims-selected' : ''}

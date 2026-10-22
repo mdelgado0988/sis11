@@ -369,6 +369,44 @@ function getChangeInsuredObjectValues(change, propertyName) {
   return object.userData || {};
 }
 
+function snapshotObjectIds(object) {
+  const names = ['id', 'insuredObjectId', 'objectId', 'lifePolicyInsuredObjectId', 'sourceId', 'originalId'];
+  return names.map(name => String(object?.[name] ?? '').trim()).filter(Boolean);
+}
+
+function sharesSnapshotObjectId(left, right) {
+  const rightIds = new Set(snapshotObjectIds(right));
+  return snapshotObjectIds(left).some(id => rightIds.has(id));
+}
+
+function changeSnapshotInsuredObjects(change) {
+  const snapshot = safeJson(change?.jSnapshot, {});
+  const objects = Array.isArray(snapshot?.InsuredObjects) ? snapshot.InsuredObjects : [];
+  return parseChangeInsuredObjects(objects);
+}
+
+function previousAffectedInsuredObjectValue(change, currentObject, fieldName) {
+  const previous = parseChangeInsuredObjects(change?.jOldInsuredObjects);
+  if (!previous.length) previous.push(...changeSnapshotInsuredObjects(change));
+  if (!previous.length) return '';
+
+  const current = parseChangeInsuredObjects(change?.jNewInsuredObjects);
+  const candidates = [
+    ...current.filter(item => Object.prototype.hasOwnProperty.call(item?.userData || {}, fieldName)),
+    currentObject
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const matched = previous.find(item => sharesSnapshotObjectId(item, candidate));
+    if (matched) return suretyValue(matched.userData, [fieldName]);
+  }
+
+  // A single snapshot containing the field is unambiguous even when legacy
+  // snapshots did not preserve the insured-object identifier.
+  const withField = previous.filter(item => Object.prototype.hasOwnProperty.call(item?.userData || {}, fieldName));
+  return withField.length === 1 ? suretyValue(withField[0].userData, [fieldName]) : '';
+}
+
 function getBeneficiaryDocumentPlan(change) {
   if (changeName !== 'InsuredObjectChange') {
     return { hasBeneficiary: false, hasOtherObjects: false };
@@ -1170,7 +1208,7 @@ function datosCambioBeneficiarioVida(beneficiaryData, custom) {
   return incluirEndosoEnDatosBeneficiarios(beneficiaryData, custom).custom;
 }
 
-function buildSuretyDocumentData({ policy, change, insuredData, holder, contacts, countries, provinces, cities, sectors }) {
+function buildSuretyDocumentData({ policy, change, insuredData, insuredObject, holder, contacts, countries, provinces, cities, sectors }) {
   const data = insuredData || {};
   const allContacts = Array.isArray(contacts) ? contacts : [];
   const contactById = id => allContacts.find(contact => Number(contact.id) === Number(id));
@@ -1247,8 +1285,13 @@ function buildSuretyDocumentData({ policy, change, insuredData, holder, contacts
   };
   if (tipoCambioCobertura(change).endorsementType === 'CHANGEACTLICITATION') {
     const publicTenderDate = dateParts(change.effectiveDate);
+    const previousPublicTenderValue = previousAffectedInsuredObjectValue(change, insuredObject, 'f_acto_publico') || policy.start;
+    const previousPublicTenderDate = dateParts(previousPublicTenderValue);
     result.FechaActoPublicoTexto = publicTenderDate.year
       ? publicTenderDate.day + ' DE ' + months[publicTenderDate.month - 1].toUpperCase() + ' DE ' + publicTenderDate.year
+      : '';
+    result.FechaActoPublicoTextoAnterior = previousPublicTenderDate.year
+      ? previousPublicTenderDate.day + ' DE ' + months[previousPublicTenderDate.month - 1].toUpperCase() + ' DE ' + previousPublicTenderDate.year
       : '';
   }
   return result;
@@ -1622,7 +1665,7 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   // It is intentionally absent from non-surety endorsement payloads.
   if (isSuretyPolicy(policy)) {
     custom.DocumentoFianza = buildSuretyDocumentData({
-      policy, change, insuredData, holder, contacts: dataContacto,
+      policy, change, insuredData, insuredObject: InsuredObject, holder, contacts: dataContacto,
       countries, provinces: procincias, cities: Municipios, sectors
     });
   }
