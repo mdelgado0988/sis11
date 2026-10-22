@@ -4,25 +4,28 @@ GO
 SELECT c.id, c.contractId, c.changeId, c.cover, c.sumInsured, c.premium, c.premiumType
 		, c.lineId, c.sumInsuredCedant, c.premiumCedant, c.sumInsuredRe, c.premiumRe, c.proportionCed, c.proportionRe
 		, c.comissionCedant , c.tax , c.overwritten, c.coSumInsured, c.coPremium,c.err, c.msg
+		, cob.code
 FROM Cession c
 INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
-WHERE c.lifePolicyId = 4152
+WHERE c.lifePolicyId = 4398
+/*and cob.code = ''*/
 ORDER BY c.overwritten desc, c.id
 
-SELECT c.id, c.contractId, c.changeId, c.cover, c.premium, c.premiumType
-		, c.lineId, c.premiumRe, c.proportionCed, c.proportionRe
-		, c.comissionCedant , c.tax , c.overwritten, c.coSumInsured, c.coPremium
-		,c.err, c.msg
+SELECT c.id, c.contractId, c.changeId, c.cover, c.sumInsured, c.premium, c.premiumType
+		, c.lineId, c.sumInsuredCedant, c.premiumCedant, c.sumInsuredRe, c.premiumRe, c.proportionCed, c.proportionRe
+		, c.comissionCedant , c.tax , c.overwritten, c.coSumInsured, c.coPremium,c.err, c.msg
+		, cob.code
 FROM Cession c
-WHERE c.lifePolicyId = 4152
+INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
+WHERE c.changeId = 4398
 ORDER BY c.overwritten desc, c.id
 
 select id, code, originalPolicyId, version, policyVersion, originalPolicyId, originalStart from LifePolicy where code = 'IN-GL-000722'
 
-SELECT p.*
+SELECT c.changeId, c.lineId, c.premiumType, p.contactId, p.lineId, p.sumInsured, p.premium, p.split, p.commission, p.tax
 FROM Cession c
 INNER JOIN CessionPart p on p.cessionId = c.id
-WHERE c.lifePolicyId = 4152
+WHERE c.lifePolicyId = 4398
 ORDER BY c.overwritten desc, c.id
 
 

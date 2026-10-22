@@ -592,8 +592,8 @@ function adjustCancellationReinsurance(policyId, changeId) {
     data: {
       entity: "Cession",
       fields: "id,contractId,coverageId,coverageCode,lineId,changeId,premium,sumInsuredCedant,sumInsuredRe,proportionCed,proportionRe,premiumCedant,premiumRe,comissionCedant,tax",
-      // Include both unlinked rows from the first run and rows already linked
-      // to this endorsement so retries can deterministically recalculate them.
+      // A cancellation can be marked as overwritten by a subsequent
+      // reinsurance synchronization. Keep it eligible for a deterministic retry.
       filter: `lifePolicyId = ${policyId} AND premiumType = 'CANCELLATION' AND (changeId IS NULL OR changeId = ${targetChangeId})`,
       noTracking: true
     }
@@ -603,6 +603,7 @@ function adjustCancellationReinsurance(policyId, changeId) {
     ? LoadEntities.outData
     : [];
   if (cancellationCessions.length === 0) {
+    synchronizeCancellationParticipants(policyId, targetChangeId);
     return;
   }
 
@@ -621,14 +622,6 @@ function adjustCancellationReinsurance(policyId, changeId) {
   }, {});
 
   const cessions = Object.values(latestByCoverageLine);
-  const cessionIds = cessions
-    .map(item => Number(item && item.id))
-    .filter(id => Number.isInteger(id) && id > 0);
-
-  if (cessionIds.length === 0) {
-    return;
-  }
-
   const fullCancellation = Math.abs(toNumber(detail.prorate) - 1) < 0.000001;
   const cpapCancellationCessions = cessions.filter(cession =>
     getContractCode(cession.contractId) === "CPAP"
@@ -646,20 +639,35 @@ function adjustCancellationReinsurance(policyId, changeId) {
       previousCPAPCessions
     );
 
-  statements.push(`UPDATE p
+  doCmd({ cmd: "DoQuery", data: { sql: statements.join("\n") } });
+  if (!DoQuery || DoQuery.ok === false) {
+    throw new Error(DoQuery && DoQuery.msg
+      ? DoQuery.msg
+      : "No fue posible ajustar el reaseguro de la cancelaciÃ³n");
+  }
+
+  synchronizeCancellationParticipants(policyId, targetChangeId);
+}
+
+function synchronizeCancellationParticipants(policyId, changeId) {
+  doCmd({
+    cmd: "DoQuery",
+    data: {
+      sql: `UPDATE p
 SET sumInsured = ROUND(ISNULL(c.sumInsuredRe, 0) * ISNULL(p.split, 0) / 100.0, 2),
     premium = ROUND(ISNULL(c.premiumRe, 0) * ISNULL(p.split, 0) / 100.0, 2),
     commission = ROUND(ISNULL(c.comissionCedant, 0) * ISNULL(p.split, 0) / 100.0, 2),
     tax = ROUND(ISNULL(c.tax, 0) * ISNULL(p.split, 0) / 100.0, 2)
 FROM CessionPart p
 INNER JOIN Cession c ON c.id = p.cessionId
-WHERE p.cessionId IN (${cessionIds.join(",")});`);
+WHERE c.lifePolicyId = ${Number(policyId)}
+  AND c.premiumType = 'CANCELLATION'
+  AND (c.changeId IS NULL OR c.changeId = ${Number(changeId)});`
+    }
+  });
 
-  doCmd({ cmd: "DoQuery", data: { sql: statements.join("\n") } });
   if (!DoQuery || DoQuery.ok === false) {
-    throw new Error(DoQuery && DoQuery.msg
-      ? DoQuery.msg
-      : "No fue posible ajustar el reaseguro de la cancelaciÃ³n");
+    throw new Error(DoQuery?.msg || "No fue posible sincronizar los aceptantes de la cancelación");
   }
 }
 
@@ -684,7 +692,6 @@ function buildFullCancellationStatements(policyId, changeId, cancellationCession
       .filter(cession =>
         Number(cession?.id || 0) < Number(cancellation?.id || 0) &&
         Number(cession?.contractId || 0) === Number(cancellation?.contractId || 0) &&
-        (isCPAP || Number(cession?.overwritten || 0) === 0) &&
         (isCPAP
           ? matchesCPAPCancellationSource(cession, cancellation)
           : cancellationCessionKey(cession) === cancellationCessionKey(cancellation))
