@@ -1,13 +1,13 @@
 SELECT
     cl.id AS [Id],
     cl.code AS [CODIGO],
-    lb.code AS [cramo], -- Campo informativo
-    lb.name AS [Ramo],
+    lp.lob AS [cramo], -- Campo informativo
+    ISNULL(lb.name, lp.lob) AS [Ramo],
     lp.code AS [POLIZA],
-    NULL AS [COBIS], -- Campo informativo
-    con.name + ' ' + ISNULL(con.surname1, '') AS [CLIENTE],
+    ISNULL(con.nationalId, '') AS [COBIS],
+    LTRIM(RTRIM(CONCAT(ISNULL(con.name, ''), ' ' + NULLIF(con.surname1, ''), ' ' + NULLIF(con.surname2, '')))) AS [CLIENTE],
     -- SE AGREGA EL CESSION BENEFICIARY COMO ACREEDOR --
-    acon.name + ' ' + ISNULL(acon.surname1, '') AS [ACREEDOR],
+    ISNULL(NULLIF(LTRIM(RTRIM(CONCAT(ISNULL(acon.name, ''), ' ' + NULLIF(acon.surname1, ''), ' ' + NULLIF(acon.surname2, '')))), ''), 'NO TIENE') AS [ACREEDOR],
     CONVERT(VARCHAR(10), CAST(lp.start AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS [FDESDE Poliza],
     CONVERT(VARCHAR(10), CAST(lp.[end] AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS [FHASTA Poliza],
     cl.id AS [NSINIESTRO],
@@ -29,10 +29,10 @@ SELECT
         ELSE ISNULL(cp.entityState, '')
     END END AS [ESTADO DE LA],
     ISNULL(cp.parentId, 0) AS [NOFUSION],
-    bcon.name + ' ' + ISNULL(bcon.surname1, '') AS [BENEFICIARIO],
+    ISNULL(NULLIF(LTRIM(RTRIM(CONCAT(ISNULL(bcon.name, ''), ' ' + NULLIF(bcon.surname1, ''), ' ' + NULLIF(bcon.surname2, '')))), ''), '') AS [BENEFICIARIO],
     CAST(ISNULL(cp.grossAmount, ISNULL(cp.total, 0)) - ISNULL(cp.total, 0) AS decimal(18,2)) AS [DEDUCCION],
     CAST(ISNULL(cp.total, 0) AS decimal(18,2)) AS [MONTO_NETO],
-    cp.concept AS [CONCEPTO],
+    COALESCE(NULLIF(cp.concept, ''), CASE WHEN ISJSON(cp.jDetail) = 1 THEN JSON_VALUE(cp.jDetail, '$[0].description') END, po.concept, '') AS [CONCEPTO],
     CONVERT(VARCHAR(10), CAST(cp.date AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS [Fecha de pago],
     -- COBERTURA Y REASEGURO --
     ISNULL(cv.code, '') AS [NOCOBERTURA],
@@ -47,11 +47,11 @@ SELECT
 FROM ClaimPayment cp
 INNER JOIN Claim cl ON cp.claimId = cl.id
 INNER JOIN LifePolicy lp ON cl.lifePolicyId = lp.id
-INNER JOIN Contact con ON cl.contactId = con.id -- Cliente/Asegurado
-INNER JOIN Contact bcon ON cp.contactId = bcon.id -- Beneficiario del pago
+LEFT JOIN Contact con ON cl.contactId = con.id -- Cliente/Asegurado
+LEFT JOIN Contact bcon ON cp.contactId = bcon.id -- Beneficiario del pago
 -- JOIN PARA OBTENER EL NOMBRE DEL ACREEDOR (CESSION BENEFICIARY) --
 LEFT JOIN Contact acon ON lp.cessionBeneficiary = acon.id
-INNER JOIN Lob lb ON lp.lob = lb.code
+LEFT JOIN Lob lb ON lp.lob = lb.code
 LEFT JOIN ClaimStage cst ON cst.code = cl.stageCode
 LEFT JOIN LifeCoveragePayout po ON po.id = cp.payoutId
 LEFT JOIN LifeCoverage cv ON cv.id = ISNULL(cp.coverageId, po.lifeCoverageId)
@@ -87,6 +87,14 @@ OUTER APPLY (SELECT
 ) ri
 WHERE CAST((cp.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' AS date) >= CAST(@FechaDesde AS date)
   AND CAST((cp.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' AS date) <= CAST(@FechaHasta AS date)
-AND (ISNULL(@estado, '') = '' OR @estado = CASE WHEN cst.code IS NULL THEN 'SIN ESTADO' ELSE UPPER(cst.name) END)
-and (@cliente = '' or con.name + ' ' + ISNULL(con.surname1, '') like '%' + @cliente + '%')
+  AND ISNULL(cp.entityState, '') NOT IN ('REJECTED', 'REVERTED')
+  AND (ISNULL(@estado, '') = '' OR @estado = CASE WHEN cst.code IS NULL THEN 'SIN ESTADO' ELSE UPPER(cst.name) END)
+  AND (
+      NULLIF(LTRIM(RTRIM(ISNULL(@cliente, ''))), '') IS NULL
+      OR LTRIM(RTRIM(CONCAT(ISNULL(con.name, ''), ' ' + NULLIF(con.surname1, ''), ' ' + NULLIF(con.surname2, '')))) LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
+      OR ISNULL(con.nationalId, '') LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
+      OR ISNULL(con.cnp, '') LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
+      OR ISNULL(con.nif, '') LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
+      OR ISNULL(con.passport, '') LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
+  )
 ORDER BY cp.date DESC;

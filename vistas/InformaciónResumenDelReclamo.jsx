@@ -1331,14 +1331,28 @@
     const text = typeof value === 'string' ? value : value.format && value.format('YYYY-MM-DD');
     return text || null;
   };
+  const policyClientName = (contact) => {
+    const isPerson = Number(contact && contact.isPerson);
+    if (isPerson === 1) return [contact.name, contact.surname1].filter(Boolean).join(' ');
+    if (isPerson === 0) return String(contact.surname2 || '').trim();
+    return personName(contact);
+  };
   const policyContactNames = (policy) => {
     const contacts = [];
-    if (policy && policy.Holder) contacts.push(policy.Holder);
-    if (policy && policy.holder) contacts.push(policy.holder);
     (Array.isArray(policy && policy.Insureds) ? policy.Insureds : []).forEach((insured) => {
       contacts.push(insured && (insured.Contact || insured.contact || insured));
     });
-    return contacts.map(personName).filter(Boolean).join(' ');
+    const seenContacts = new Set();
+    return contacts.reduce((names, contact) => {
+      const name = policyClientName(contact);
+      const contactId = Number(contact && contact.id);
+      const key = Number.isSafeInteger(contactId) && contactId > 0
+        ? 'id:' + contactId : 'name:' + String(name || '').toUpperCase();
+      if (!name || seenContacts.has(key)) return names;
+      seenContacts.add(key);
+      names.push(name);
+      return names;
+    }, []).join(' ');
   };
   const policyContactSearchText = (policy) => {
     const contacts = [];

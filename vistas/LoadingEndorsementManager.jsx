@@ -645,7 +645,7 @@
             setReinsurersReady(false);
             setSelectedReinsurerLine(null);
             try {
-                const response = await exe('ExeChain', { chain:'cmdSimReaChangeCoverage', context:JSON.stringify({ policyId:Number(policyId), rows:rows, participants:[] }) });
+                const response = await exe('ExeChain', { chain:'cmdSimReaChangeCoverage', context:JSON.stringify({ policyId:Number(policyId), rows:rows, participants:[], movementType:'LOADING' }) });
                 if(!response || response.ok === false) throw errorText(response, 'No fue posible calcular el reaseguro.');
                 let simulation = response.outData;
                 if(typeof simulation === 'string') simulation = JSON.parse(simulation);
@@ -1925,6 +1925,13 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             total.premium += movementLines[key].premium;
             return total;
         }, { sum:0, premium:0 });
+        // El simulador marca los recargos/descuentos de EG para CPAP que se
+        // retienen al 100%. En ese caso, la grilla debe mostrar la
+        // distribución efectiva del movimiento y no reutilizar el porcentaje
+        // histórico de la póliza.
+        const usesEffectiveMovementDistribution = (data || []).some(function(row){
+            return row.retentionOnlyLoadingPremium === true;
+        });
         // El movimiento debe conservar la distribucion vigente de la poliza.
         // Los importes siguen siendo los del endoso; los porcentajes se obtienen
         // de las cesiones persistidas, no de la composicion del movimiento.
@@ -1963,12 +1970,16 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         };
         const lineDefinition = function(key, label, canViewReinsurers){
             const line = movementLines[key];
-            const premiumPercentage = policyBasePremium
-                ? policyLinePremium[key] / policyBasePremium * 100
-                : (movementBase.premium ? line.premium / movementBase.premium * 100 : 0);
-            const sumPercentage = isCpexCcv
+            const premiumPercentage = usesEffectiveMovementDistribution
+                ? (movementBase.premium ? line.premium / movementBase.premium * 100 : 0)
+                : (policyBasePremium
+                    ? policyLinePremium[key] / policyBasePremium * 100
+                    : (movementBase.premium ? line.premium / movementBase.premium * 100 : 0));
+            const sumPercentage = usesEffectiveMovementDistribution
+                ? (movementBase.sum ? line.sum / movementBase.sum * 100 : premiumPercentage)
+                : (isCpexCcv
                 ? (policyBaseSum ? policyLineSum[key] / policyBaseSum * 100 : (movementBase.sum ? line.sum / movementBase.sum * 100 : 0))
-                : premiumPercentage;
+                : premiumPercentage);
             return { key:key, contractLabel:label,
                 // The movement grid displays premium participation for CPEXCV;
                 // the sum participation remains separate for its amount calculation.

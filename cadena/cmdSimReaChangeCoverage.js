@@ -15,7 +15,7 @@
  * (incluye recargos y descuentos). El importe prorateado se conserva como dato
  * informativo, pero no puede ser la base porque omite esos ajustes manuales.
  *
- * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement, finalPremium, finalSum}], participants:[{cessionId, contactId, split}]}
+ * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement, finalPremium, finalSum}], participants:[{cessionId, contactId, split}], movementType?: 'LOADING'}
  */
 const money = function (v) { return Number(Number(v).toFixed(2)); };
 const txt = function (v) { return String(v == null ? '' : v).trim(); };
@@ -28,6 +28,7 @@ if (!rows.length) throw 'No hay resultado de calculo que distribuir: ejecute pri
 // Cambio de suma entrega el estado final completo. Los demás movimientos
 // conservan sus cesiones vigentes, incluso sin movimiento de cobertura.
 const finalStateOnly = context.finalStateOnly === true;
+const isLoadingMovement = up(context.movementType) === 'LOADING';
 
 const delta = {};
 const prorated = {};
@@ -126,6 +127,10 @@ const cpapRiskPremiumFactor = function (cession) {
   return Math.max(0, Math.min(1, distributedPremium / originalPremium));
 };
 
+const severeIllnessProductCodes = { EG1: true, EG2: true, EG3: true, EG4: true, EG5: true };
+const normalizedProductCode = up(policy.productCode).replace(/[^A-Z0-9]/g, '');
+const isSevereIllnessProduct = severeIllnessProductCodes[normalizedProductCode] === true;
+
 // aceptantes de esas lineas
 const baseIds = [];
 for (let i = 0; i < base.length; i++) baseIds.push(Number(base[i].id));
@@ -202,21 +207,27 @@ for (let i = 0; i < base.length; i++) {
   const lineDv = dv;
   const linePv = pv;
   const isCPAP = up(contractCodeById[Number(c.contractId)]) === 'CPAP';
+  // Los recargos/descuentos de EG para CPAP se retienen por completo. Esta
+  // excepcion solo afecta la diferencia del endoso, nunca la cesion vigente.
+  const retentionOnlyLoadingPremium = isLoadingMovement && isCPAP && isSevereIllnessProduct;
   const riskPremiumFactor = isCPAP ? cpapRiskPremiumFactor(c) : 1;
-  const distributedPremium = money(lineDv * riskPremiumFactor);
+  const distributedPremium = retentionOnlyLoadingPremium ? lineDv : money(lineDv * riskPremiumFactor);
   // La variacion final incluye el recargo/descuento aplicado a la cobertura.
-  const cedant = money(distributedPremium * premiumPCed);
-  const re = money(distributedPremium * premiumPRe);
-  const commission = money(lineDv * commissionRate);
-  const nonTechnical = money(lineDv - cedant - re);
+  const cedant = retentionOnlyLoadingPremium ? lineDv : money(distributedPremium * premiumPCed);
+  const re = retentionOnlyLoadingPremium ? 0 : money(distributedPremium * premiumPRe);
+  // Sin prima cedida en el movimiento tampoco se mueve comision de aceptantes.
+  const commission = retentionOnlyLoadingPremium ? 0 : money(lineDv * commissionRate);
+  const nonTechnical = retentionOnlyLoadingPremium ? 0 : money(lineDv - cedant - re);
   grp.rows.push({
     coverageCode: code, cover: txt(c.cover), counts: counts,
     premiumMovement: lineDv, proratedMovement: linePv, sumInsuredMovement: sv,
     // El estado final viene de la cotización de la póliza, no de sumar
     // cesiones, porque una misma cobertura puede estar en varias líneas.
     finalPremium: finalPremium[code], finalSum: finalSum[code],
-    proportionCed: pCed, proportionRe: pRe,
-    riskPremiumFactor: riskPremiumFactor,
+    proportionCed: retentionOnlyLoadingPremium ? 1 : pCed,
+    proportionRe: retentionOnlyLoadingPremium ? 0 : pRe,
+    riskPremiumFactor: retentionOnlyLoadingPremium ? 1 : riskPremiumFactor,
+    retentionOnlyLoadingPremium: retentionOnlyLoadingPremium,
     premiumCedant: cedant, premiumRe: re, nonTechnicalPremium: nonTechnical,
     sumInsured: Number(c.sumInsured || 0), sumInsuredCounted: counts ? Number(c.sumInsured || 0) : 0,
     commission: commission, currency: txt(c.currency) || txt(policy.currency),
