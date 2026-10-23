@@ -1,5 +1,6 @@
 /*
  * @name BusquedaDeReclamos
+ * @author: Cesar Aguilar
  * @description Vista para consultar, filtrar, ordenar y exportar reclamos.
  * @purpose Facilitar la búsqueda de reclamos y el acceso a su resumen y entidades relacionadas.
  * @version 1.0.1
@@ -12,6 +13,7 @@
   const Input = A.Input;
   const Select = A.Select;
   const DatePicker = A.DatePicker;
+  const Tabs = A.Tabs;
   const Button = A.Button;
   const Space = A.Space;
   const Row = A.Row;
@@ -22,7 +24,7 @@
   const RangePicker = DatePicker.RangePicker;
 
   const SearchOutlinedIcon = () => (
-    <span role="img" aria-label="search" className="anticon anticon-search">
+    <span role="img" aria-label={t('Search')} className="anticon anticon-search">
       <svg viewBox="0 0 1024 1024" focusable="false" aria-hidden="true">
         <path d="M909.6 854.5 649.9 594.8a278.5 278.5 0 0 0 64.5-177.2c0-152.3-123.5-275.8-275.8-275.8S162.8 265.3 162.8 417.6s123.5 275.8 275.8 275.8c67.5 0 129.3-24.2 177.2-64.5l259.7 259.7a8 8 0 0 0 11.3 0l22.8-22.8a8 8 0 0 0 0-11.3zM438.6 637.4c-121.4 0-219.8-98.4-219.8-219.8s98.4-219.8 219.8-219.8 219.8 98.4 219.8 219.8-98.4 219.8-219.8 219.8z" />
       </svg>
@@ -30,7 +32,7 @@
   );
 
   const ReloadOutlinedIcon = () => (
-    <span role="img" aria-label="reload" className="anticon anticon-reload">
+    <span role="img" aria-label={t('Reload')} className="anticon anticon-reload">
       <svg viewBox="0 0 1024 1024" focusable="false" aria-hidden="true">
         <path d="M909.1 209.3 862.6 364a8 8 0 0 1-10.7 5.1l-147.4-60.8a8 8 0 0 1-1.6-13.8l50.5-32.3A318.8 318.8 0 0 0 512 148c-176.7 0-320 143.3-320 320s143.3 320 320 320c149.4 0 274.8-102.4 310-240.9a8 8 0 0 1 7.8-6.1h49.8a8 8 0 0 1 7.8 9.8C849.5 717.9 696 844 512 844c-207.7 0-376-168.3-376-376S304.3 92 512 92c116.6 0 220.8 53.1 289.8 136.4l35.9-23a8 8 0 0 1 11.2 3.9z" />
       </svg>
@@ -41,13 +43,6 @@
   const EXPORT_PAGE_SIZE = 50;
   const EMPTY_VALUE = '';
   const MAX_FILTER_LENGTH = 200;
-  const CLAIM_INCLUDES = ['Contact', 'Process', 'Claimer', 'Policy', 'Stage'];
-  const AUDIT_STATUS_OPTIONS = [
-    { value: 0, label: 'Ninguno' },
-    { value: 1, label: 'Listo para auditoría' },
-    { value: 2, label: 'Auditado' }
-  ];
-
   const [form] = Form.useForm();
   const [rows, setRows] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
@@ -97,7 +92,7 @@
     if (!normalized) return null;
     const number = Number(normalized);
     if (!/^\d+$/.test(normalized) || !Number.isSafeInteger(number) || number <= 0) {
-      throw new Error(label + ' debe ser un número entero válido mayor que cero.');
+      throw new Error(label + ' ' + t('must be a valid positive integer.'));
     }
     return number;
   };
@@ -106,7 +101,7 @@
     if (!value) return '';
     if (typeof value.format === 'function') return value.format('YYYY-MM-DD');
     const date = new Date(value);
-    if (isNaN(date.getTime())) throw new Error('Se recibió una fecha inválida.');
+    if (isNaN(date.getTime())) throw new Error(t('An invalid date was received.'));
     const pad = (part) => String(part).padStart(2, '0');
     return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate());
   };
@@ -141,80 +136,62 @@
     if (!range || !range.length) return null;
     const from = formatFilterDate(range[0]);
     const to = formatFilterDate(range[1]);
-    if (!from || !to) throw new Error('Complete el rango de ' + label + '.');
-    if (from > to) throw new Error('La fecha inicial de ' + label + ' no puede ser posterior a la fecha final.');
+    if (!from || !to) throw new Error(t('Complete the date range for ') + label + '.');
+    if (from > to) throw new Error(t('The start date for ') + label + t(' cannot be after the end date.'));
     return { from: dayBoundsUtc(from).from, to: dayBoundsUtc(to).to };
-  };
-
-  const auditStatusValue = (value) => {
-    const selected = firstValue(value);
-    if (selected === null || selected === undefined || String(selected).trim() === '') return null;
-    const status = Number(selected);
-    if (!AUDIT_STATUS_OPTIONS.some((option) => option.value === status)) {
-      throw new Error('Seleccione un estado de auditoría válido.');
-    }
-    return status;
   };
 
   const escapeLikeString = (value) => escapeFilterString(value).replace(/[[%_]/g, '[$&]');
 
+  const affectedObjectFilters = (values) => ({
+    identification: cleanString(values && values.affectedIdentification),
+    licensePlate: cleanString(values && values.affectedLicensePlate),
+    vin: cleanString(values && values.affectedVin),
+    notificationDate: formatFilterDate(values && values.affectedNotificationDate),
+    sisNumber: cleanString(values && values.affectedSisNumber),
+    cobisNumber: cleanString(values && values.affectedCobisNumber)
+  });
+
   /*
-   * Único punto de adaptación del contrato de filtros de RepoClaim.
-   * Los nombres corresponden a los campos observados en la vista actual de SISos.
+   * Construye la condición WHERE que consume cmdClaimCustomSearch.
+   * Los nombres corresponden a campos de Claim y sus relaciones directas.
    */
-  const buildRepoClaimFilter = (formValues) => {
+  const buildClaimCustomSearchFilter = (formValues) => {
     const values = formValues || {};
     const conditions = [];
     const id = positiveInteger(values.id, 'ID');
-    const masterClaimId = positiveInteger(values.masterClaimId, 'ID de reclamo maestro');
-    const occurrence = validateRange(values.occurrence, 'ocurrencia');
-    const notification = validateRange(values.notification, 'notificación');
+    const occurrence = validateRange(values.occurrence, t('Occurrence'));
+    const notification = validateRange(values.notification, t('Notification'));
     const createdDay = formatFilterDate(values.date);
     const created = createdDay ? dayBoundsUtc(createdDay) : null;
-    const auditStatus = auditStatusValue(values.auditStatus);
+    affectedObjectFilters(values);
 
     const addText = (field, value) => {
       const normalized = escapeFilterString(value);
       if (normalized) conditions.push(field + " = '" + normalized + "'");
     };
 
-    /* Campos de la póliza o del proceso: el filtro de RepoClaim es SQL sobre el reclamo, se llega por subconsulta. */
+    /* Campos de póliza: el filtro se resuelve desde Claim mediante subconsulta. */
     const addPolicyText = (field, value) => {
       const normalized = escapeFilterString(value);
       if (normalized) conditions.push("lifePolicyId in (select id from lifePolicy where " + field + " = N'" + normalized + "')");
     };
 
     if (id !== null) conditions.push('id = ' + id);
-    if (masterClaimId !== null) conditions.push('masterClaimId = ' + masterClaimId);
-    const quickFilter = cleanString(values.quickFilter);
-    if (quickFilter) {
-      if (/^\d+$/.test(quickFilter) && Number.isSafeInteger(Number(quickFilter))) {
-        conditions.push('id = ' + Number(quickFilter));
-      } else {
-        addText('code', quickFilter);
-      }
-    }
     addText('code', values.code);
     addText('stageCode', values.stageCode);
     if (created) {
       conditions.push("created >= '" + created.from + "'");
       conditions.push("created <= '" + created.to + "'");
     }
-    const claimerId = positiveInteger(values.claimantId, 'Reclamante');
-    const contactId = positiveInteger(values.insuredId, 'Asegurado');
-    const lifePolicyId = positiveInteger(values.lifePolicyId, 'Póliza');
+    const claimerId = positiveInteger(values.claimantId, t('Claimant'));
+    const contactId = positiveInteger(values.insuredId, t('Insured'));
+    const lifePolicyId = positiveInteger(values.lifePolicyId, t('Policy'));
     if (claimerId !== null) conditions.push('claimerId = ' + claimerId);
     if (contactId !== null) conditions.push('contactId = ' + contactId);
     if (lifePolicyId !== null) conditions.push('lifePolicyId = ' + lifePolicyId);
-    const status = escapeFilterString(values.status);
-    if (status) {
-      conditions.push("processId in (select id from Proceso where entityState = N'" + status
-        + "' or estado = N'" + status + "')");
-    }
     addPolicyText('lob', values.lob);
     addPolicyText('productCode', values.product);
-    addText('claimType', values.claimType);
-    if (auditStatus !== null) conditions.push('id in (select claimId from Audit where status = ' + auditStatus + ')');
     const migrationCode = escapeLikeString(values.migrationCode);
     if (migrationCode) conditions.push("externalId like N'%" + migrationCode + "%'");
     addText('externalId', values.externalId);
@@ -264,17 +241,19 @@
     };
   };
 
-  const repoClaimRequest = (page, size, activeFilters, activeOrdering) => {
+  const claimCustomSearchRequest = (page, size, activeFilters, activeOrdering) => {
     const requestOrdering = activeOrdering || ordering;
-    return exe('RepoClaim', {
-      operation: 'GET',
-      include: CLAIM_INCLUDES,
-      filter: buildRepoClaimFilter(activeFilters),
-      orderBy: requestOrdering.orderBy,
-      orderDir: requestOrdering.orderDir,
-      page: Math.max(0, Number(page || 0)),
-      size: Number(size || PAGE_SIZE)
-    });
+    return exe('ExeChain', {
+      chain: 'cmdClaimCustomSearch',
+      context: JSON.stringify({
+        filter: buildClaimCustomSearchFilter(activeFilters),
+        affectedObjectFilters: affectedObjectFilters(activeFilters),
+        orderBy: requestOrdering.orderBy,
+        orderDir: requestOrdering.orderDir,
+        page: Math.max(0, Number(page || 0)),
+        size: Number(size || PAGE_SIZE)
+      })
+    }).then((result) => result && result.ok ? result.outData : result);
   };
 
   const responseRows = (result) => {
@@ -295,7 +274,7 @@
     ].filter(Boolean).join(' ')));
     const identifier = cleanString(contact && (contact.cnp || contact.nif || contact.passport || contact.nationalId));
     const id = Number(contact && (contact.id || contact.Id));
-    return (fullName || 'Contacto') + (identifier ? ' | ' + identifier : '') + (id > 0 ? ' | #' + id : '');
+    return (fullName || t('Contact')) + (identifier ? ' | ' + identifier : '') + (id > 0 ? ' | #' + id : '');
   };
 
   const mapContactOptions = (result) => responseRows(result).map((contact) => {
@@ -328,7 +307,7 @@
       exe('GetContacts', { operation: 'GET', filter: filter, page: 0, size: 15 })
         .then((result) => {
           if (!mountedRef.current || requestId !== contactRequestRef.current[kind]) return;
-          if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : 'No se pudieron buscar los contactos.');
+          if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : t('Contacts could not be searched.'));
           const options = mapContactOptions(result);
           if (kind === 'claimant') setClaimantOptions(options);
           else setInsuredOptions(options);
@@ -337,7 +316,7 @@
           if (!mountedRef.current || requestId !== contactRequestRef.current[kind]) return;
           if (kind === 'claimant') setClaimantOptions([]);
           else setInsuredOptions([]);
-          message.error(searchError && searchError.message ? searchError.message : 'No se pudieron buscar los contactos.');
+          message.error(searchError && searchError.message ? searchError.message : t('Contacts could not be searched.'));
         })
         .then(() => {
           if (mountedRef.current && requestId === contactRequestRef.current[kind]) {
@@ -365,7 +344,7 @@
       exe('RepoLifePolicy', { operation: 'GET', filter: '(' + filter + ')', page: 0, size: 15 })
         .then((result) => {
           if (!mountedRef.current || requestId !== policyRequestRef.current) return;
-          if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : 'No se pudieron buscar las pólizas.');
+          if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : t('Policies could not be searched.'));
           setPolicyOptions(responseRows(result).map((policy) => {
             const id = Number(policy && (policy.id || policy.Id));
             return { value: id, label: cleanString(policy && (policy.code || policy.Code)) || ('#' + id) };
@@ -374,7 +353,7 @@
         .catch((searchError) => {
           if (!mountedRef.current || requestId !== policyRequestRef.current) return;
           setPolicyOptions([]);
-          message.error(searchError && searchError.message ? searchError.message : 'No se pudieron buscar las pólizas.');
+          message.error(searchError && searchError.message ? searchError.message : t('Policies could not be searched.'));
         })
         .then(() => {
           if (mountedRef.current && requestId === policyRequestRef.current) setPolicySearchLoading(false);
@@ -393,19 +372,21 @@
       return Promise.resolve();
     }
     setProductsLoading(true);
-    return exe('RepoProduct', {
-      operation: 'GET',
-      filter: "lobCode = '" + escapeFilterString(normalizedLob) + "'"
+    return exe('LoadEntities', {
+      entity: 'Product',
+      fields: 'code,name',
+      filter: "lobCode = '" + escapeFilterString(normalizedLob) + "'",
+      noTracking: true
     }).then((result) => {
       if (!mountedRef.current || requestId !== productRequestRef.current) return;
-      if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : 'No se pudieron cargar los productos.');
+      if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : t('Products could not be loaded.'));
       setProductCatalog(responseRows(result).map((product) => ({
         value: cleanString(product && product.code),
         label: cleanString(product && (product.name || product.code))
       })).filter((option) => option.value));
     }).catch((catalogError) => {
       if (mountedRef.current && requestId === productRequestRef.current) {
-        message.error(catalogError && catalogError.message ? catalogError.message : 'No se pudieron cargar los productos.');
+        message.error(catalogError && catalogError.message ? catalogError.message : t('Products could not be loaded.'));
       }
     }).then(() => {
       if (mountedRef.current && requestId === productRequestRef.current) setProductsLoading(false);
@@ -417,12 +398,12 @@
     catalogRequestRef.current = requestId;
     setCatalogsLoading(true);
     return Promise.all([
-      exe('RepoLob', { operation: 'GET' }),
+      exe('LoadEntities', { entity: 'Lob', fields: 'code,name', noTracking: true }),
       exe('RepoClaimStage', { operation: 'GET' })
     ]).then((results) => {
       if (!mountedRef.current || requestId !== catalogRequestRef.current) return;
       results.forEach((result) => {
-        if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : 'No se pudieron cargar los catálogos.');
+        if (!result || result.ok === false) throw new Error(result && result.msg ? result.msg : t('Catalogs could not be loaded.'));
       });
       setLobOptions(responseRows(results[0]).map((lob) => ({
         value: cleanString(lob && lob.code),
@@ -434,7 +415,7 @@
       })).filter((option) => option.value));
     }).catch((catalogError) => {
       if (mountedRef.current && requestId === catalogRequestRef.current) {
-        message.error(catalogError && catalogError.message ? catalogError.message : 'No se pudieron cargar los catálogos.');
+        message.error(catalogError && catalogError.message ? catalogError.message : t('Catalogs could not be loaded.'));
       }
     }).then(() => {
       if (mountedRef.current && requestId === catalogRequestRef.current) setCatalogsLoading(false);
@@ -470,13 +451,12 @@
 
   const claimPaths = {
     notified: ['notification', 'notificationDate', 'notified', 'notifiedAt', 'created'],
+    occurrence: ['occurrence', 'occurrenceDate', 'occurredAt'],
     policy: ['Policy.code', 'Policy.policyCode', 'Policy.number', 'Policy.policyNumber', 'policyCode', 'policy'],
     type: ['claimType', 'ClaimType.code', 'type.code', 'typeCode', 'type'],
-    cie: ['cie', 'cieCode', 'CIE', 'diagnosisCode', 'principalDiagnosis.code'],
     insuredAmount: ['Policy.insuredSum', 'insuredAmount', 'sumInsured', 'amountInsured', 'Policy.insuredAmount', 'Policy.sumInsured', 'Policy.amountInsured'],
     branch: ['Policy.lob', 'Policy.lobCode', 'Policy.branchCode', 'Policy.Branch.code', 'Policy.branch.code', 'branch.code', 'Branch.code', 'lob', 'branchCode', 'branch'],
-    product: ['Policy.productCode', 'Policy.Product.code', 'Policy.product.code', 'product.code', 'Product.code', 'productCode', 'product'],
-    status: ['Process.entityState', 'Process.statusName', 'Process.status.name', 'Process.stateName', 'Process.state.name', 'status.name', 'Status.name', 'statusName', 'status'],
+    product: ['Policy.Product.name', 'Policy.productName', 'Policy.productCode', 'Policy.Product.code', 'Policy.product.code', 'product.code', 'Product.code', 'productCode', 'product'],
     stage: ['Stage.name', 'Stage.description', 'Stage.code', 'stageCode', 'stage.name', 'stageName', 'stage']
   };
 
@@ -520,6 +500,13 @@
     );
   };
 
+  const lineOfBusinessName = (value) => {
+    const code = cleanString(value);
+    if (!code) return null;
+    const lineOfBusiness = lobOptions.find((option) => option.value === code);
+    return lineOfBusiness ? lineOfBusiness.label : code;
+  };
+
   const formatDateTime = (value) => {
     if (!value) return EMPTY_VALUE;
     const normalized = typeof value === 'string'
@@ -546,6 +533,22 @@
     return months[Number(parts.month) - 1] + ' ' + parts.day + '° ' + parts.year
       + ', ' + parts.hour + ':' + parts.minute + ':' + parts.second
       + ' ' + String(parts.dayPeriod || '').toLowerCase();
+  };
+
+  const formatDate = (value) => {
+    if (!value) return EMPTY_VALUE;
+    const normalized = typeof value === 'string'
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(value)
+      ? value + 'Z'
+      : value;
+    const date = new Date(normalized);
+    if (isNaN(date.getTime())) return displayValue(value);
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'America/Managua'
+    }).format(date);
   };
 
   const formatMoney = (value) => {
@@ -591,22 +594,21 @@
   };
 
   const exportColumns = [
-    { title: 'ID', width: 10, value: (record) => getValue(record, ['id', 'Id']) },
-    { title: 'Código', width: 18, value: (record) => getValue(record, ['code', 'Code']) },
-    { title: 'Notificado', width: 24, value: (record) => formatDateTime(getValue(record, claimPaths.notified)) },
-    { title: 'Reclamante', width: 28, value: (record) => personName(record, 'Claimer', ['claimantName', 'claimant']) },
-    { title: 'Asegurado', width: 28, value: (record) => personName(record, 'Contact', ['insuredName', 'insured']) },
-    { title: 'Póliza', width: 18, value: (record) => getValue(record, claimPaths.policy) },
-    { title: 'Tipo', width: 16, value: (record) => getValue(record, claimPaths.type) },
-    { title: 'CIE', width: 14, value: (record) => getValue(record, claimPaths.cie) },
-    { title: 'Suma asegurada', width: 18, value: (record) => {
+    { title: t('ID'), width: 10, value: (record) => getValue(record, ['id', 'Id']) },
+    { title: t('Code'), width: 18, value: (record) => getValue(record, ['code', 'Code']) },
+    { title: t('Notified'), width: 24, value: (record) => formatDateTime(getValue(record, claimPaths.notified)) },
+    { title: t('Occurrence'), width: 14, value: (record) => formatDate(getValue(record, claimPaths.occurrence)) },
+    { title: t('Claimant'), width: 28, value: (record) => personName(record, 'Claimer', ['claimantName', 'claimant']) },
+    { title: t('Insured'), width: 28, value: (record) => personName(record, 'Contact', ['insuredName', 'insured']) },
+    { title: t('Policy'), width: 18, value: (record) => getValue(record, claimPaths.policy) },
+    { title: t('Type'), width: 16, value: (record) => getValue(record, claimPaths.type) },
+    { title: t('Sum insured'), width: 18, value: (record) => {
       const value = getValue(record, claimPaths.insuredAmount);
       return value !== null && value !== '' && isFinite(Number(value)) ? Number(value) : value;
     } },
-    { title: 'Ramo', width: 16, value: (record) => getValue(record, claimPaths.branch) },
-    { title: 'Producto', width: 20, value: (record) => getValue(record, claimPaths.product) },
-    { title: 'Estado', width: 20, value: (record) => getValue(record, claimPaths.status) },
-    { title: 'Stage', width: 20, value: (record) => getValue(record, claimPaths.stage) }
+    { title: t('Line of business'), width: 16, value: (record) => lineOfBusinessName(getValue(record, claimPaths.branch)) },
+    { title: t('Product'), width: 20, value: (record) => getValue(record, claimPaths.product) },
+    { title: t('Stage'), width: 20, value: (record) => getValue(record, claimPaths.stage) }
   ];
 
   const isUsableXlsxExportLibrary = (xlsxLibrary) => Boolean(xlsxLibrary
@@ -635,7 +637,7 @@
       context: '{}'
     }).then((response) => {
       if (!response || response.ok === false) {
-        throw new Error(response && response.msg ? response.msg : 'No se pudo cargar el componente de Excel de SIS11.');
+        throw new Error(response && response.msg ? response.msg : t('The SIS11 Excel component could not be loaded.'));
       }
       const loadedLibraries = response.outData || {};
       const loadedXlsx = loadedLibraries.XLSX || loadedLibraries.xlsx || loadedLibraries.xlsxJs;
@@ -667,13 +669,13 @@
 
   const assertCompleteExportRows = (exportRows, total) => {
     if (exportRows.length !== total) {
-      throw new Error('La consulta de exportación quedó incompleta. No se generó ningún archivo.');
+      throw new Error(t('The export query was incomplete. No file was generated.'));
     }
     const seenIds = {};
     exportRows.forEach((record) => {
       const id = validRelatedId(getValue(record, ['id', 'Id']));
       if (id === null) return;
-      if (seenIds[id]) throw new Error('La consulta de exportación devolvió registros duplicados. No se generó ningún archivo.');
+      if (seenIds[id]) throw new Error(t('The export query returned duplicate records. No file was generated.'));
       seenIds[id] = true;
     });
   };
@@ -684,26 +686,26 @@
     const appliedOrdering = ordering;
     setExporting(true);
 
-    repoClaimRequest(0, EXPORT_PAGE_SIZE, appliedFilters, appliedOrdering)
+    claimCustomSearchRequest(0, EXPORT_PAGE_SIZE, appliedFilters, appliedOrdering)
       .then((firstResult) => {
         if (!firstResult || firstResult.ok === false) {
-          throw new Error(firstResult && firstResult.msg ? firstResult.msg : 'No se pudieron consultar los reclamos para exportar.');
+          throw new Error(firstResult && firstResult.msg ? firstResult.msg : t('Claims could not be queried for export.'));
         }
         const firstPage = normalizeClaimResponse(firstResult);
         if (firstPage.total === 0 || firstPage.data.length === 0) {
-          message.warning('No hay información disponible para exportar.');
+          message.warning(t('There is no information available to export.'));
           return null;
         }
         const pageCount = Math.ceil(firstPage.total / EXPORT_PAGE_SIZE);
         const remainingRequests = [];
         for (let page = 1; page < pageCount; page += 1) {
-          remainingRequests.push(repoClaimRequest(page, EXPORT_PAGE_SIZE, appliedFilters, appliedOrdering));
+          remainingRequests.push(claimCustomSearchRequest(page, EXPORT_PAGE_SIZE, appliedFilters, appliedOrdering));
         }
         return Promise.all(remainingRequests).then((remainingResults) => {
           const allRows = firstPage.data.slice();
           remainingResults.forEach((result) => {
             if (!result || result.ok === false) {
-              throw new Error(result && result.msg ? result.msg : 'No se pudieron consultar todos los reclamos para exportar.');
+              throw new Error(result && result.msg ? result.msg : t('Not all claims could be queried for export.'));
             }
             allRows.push.apply(allRows, normalizeClaimResponse(result).data);
           });
@@ -723,15 +725,15 @@
         worksheet['!cols'] = exportColumns.map((column) => ({ wch: column.width }));
         worksheet['!autofilter'] = { ref: worksheet['!ref'] || 'A1:M1' };
         const workbook = exportData.xlsxLibrary.utils.book_new();
-        exportData.xlsxLibrary.utils.book_append_sheet(workbook, worksheet, 'Reclamos');
+        exportData.xlsxLibrary.utils.book_append_sheet(workbook, worksheet, t('Claims'));
         exportData.xlsxLibrary.writeFile(workbook, 'reclamos-' + formatFilterDate(new Date()) + '.xlsx', {
           bookType: 'xlsx',
           compression: true
         });
-        message.success('Los reclamos fueron exportados correctamente.');
+        message.success(t('Claims were exported successfully.'));
       })
       .catch((exportError) => {
-        message.error(exportError && exportError.message ? exportError.message : 'No se pudieron exportar los reclamos.');
+        message.error(exportError && exportError.message ? exportError.message : t('Claims could not be exported.'));
       })
       .then(() => {
         if (mountedRef.current) setExporting(false);
@@ -740,14 +742,15 @@
 
   const columns = [
     {
-      title: 'ID',
+      title: t('ID'),
       key: 'id',
       width: '4%',
+      align: 'center',
       ...serverSortProps('id'),
       render: (_, record) => renderText(getValue(record, ['id', 'Id']))
     },
     {
-      title: 'Código',
+      title: t('Code'),
       key: 'code',
       width: '8%',
       ...serverSortProps('code'),
@@ -758,14 +761,22 @@
       )
     },
     {
-      title: 'Notificado',
+      title: t('Notified'),
       key: 'notified',
-      width: '10%',
+      width: '7%',
+      align: 'center',
       ...serverSortProps('notification'),
-      render: (_, record) => renderText(formatDateTime(getValue(record, claimPaths.notified)))
+      render: (_, record) => renderText(formatDate(getValue(record, claimPaths.notified)))
     },
     {
-      title: 'Reclamante',
+      title: t('Occurrence'),
+      key: 'occurrence',
+      width: '7%',
+      align: 'center',
+      render: (_, record) => renderText(formatDate(getValue(record, claimPaths.occurrence)))
+    },
+    {
+      title: t('Claimant'),
       key: 'claimant',
       width: '10%',
       ...serverSortProps('Claimer.name'),
@@ -776,7 +787,7 @@
       )
     },
     {
-      title: 'Asegurado',
+      title: t('Insured'),
       key: 'insured',
       width: '10%',
       ...serverSortProps('Contact.name'),
@@ -787,7 +798,7 @@
       )
     },
     {
-      title: 'Póliza',
+      title: t('Policy'),
       key: 'policy',
       width: '8%',
       ...serverSortProps('Policy.code'),
@@ -798,21 +809,15 @@
       )
     },
     {
-      title: 'Tipo',
+      title: t('Type'),
       key: 'type',
       width: '4%',
+      align: 'center',
       ...serverSortProps('claimType'),
       render: (_, record) => renderText(getValue(record, claimPaths.type))
     },
     {
-      title: 'CIE',
-      key: 'cie',
-      width: '4%',
-      ...serverSortProps('principalDiagnosis'),
-      render: (_, record) => renderText(getValue(record, claimPaths.cie))
-    },
-    {
-      title: 'Suma asegurada',
+      title: t('Sum insured'),
       key: 'insuredAmount',
       width: '9%',
       align: 'right',
@@ -820,39 +825,34 @@
       render: (_, record) => renderMoney(getValue(record, claimPaths.insuredAmount))
     },
     {
-      title: 'Ramo',
+      title: t('Line of business'),
       key: 'branch',
       width: '5%',
       ...serverSortProps('Policy.lob'),
-      render: (_, record) => renderText(getValue(record, claimPaths.branch))
+      render: (_, record) => renderText(lineOfBusinessName(getValue(record, claimPaths.branch)))
     },
     {
-      title: 'Producto',
+      title: t('Product'),
       key: 'product',
       width: '7%',
-      ...serverSortProps('Policy.productCode'),
+      ...serverSortProps('Policy.Product.name'),
       render: (_, record) => renderText(getValue(record, claimPaths.product))
     },
     {
-      title: 'Estado',
-      key: 'status',
-      width: '8%',
-      ...serverSortProps('Process.entityState'),
-      render: (_, record) => renderStatus(getValue(record, claimPaths.status))
-    },
-    {
-      title: 'Stage',
+      title: t('Stage'),
       key: 'stage',
       width: '7%',
+      align: 'center',
       ...serverSortProps('Stage.name'),
       render: (_, record) => renderStatus(getValue(record, claimPaths.stage))
     },
     {
-      title: 'Resumen',
+      title: t('Summary'),
       key: 'summary',
       width: '6%',
+      align: 'center',
       render: (_, record) => renderNavigationLink(
-        'Ver',
+        t('View'),
         getValue(record, ['id', 'Id']),
         'claim-summary'
       )
@@ -866,11 +866,11 @@
     setError('');
 
     try {
-      buildRepoClaimFilter(activeFilters);
+      buildClaimCustomSearchFilter(activeFilters);
     } catch (validationError) {
       if (requestId === listRequestRef.current) {
         const validationMessage = validationError && validationError.message
-          ? validationError.message : 'Revise los criterios de búsqueda.';
+          ? validationError.message : t('Review the search criteria.');
         setError(validationMessage);
         setLoading(false);
         message.warning(validationMessage);
@@ -880,7 +880,7 @@
 
     const requestOrdering = activeOrdering || ordering;
 
-    return repoClaimRequest(
+    return claimCustomSearchRequest(
       Math.max(0, Number(current || 1) - 1),
       Number(pageSize || PAGE_SIZE),
       activeFilters,
@@ -889,7 +889,7 @@
       .then((result) => {
         if (!mountedRef.current || requestId !== listRequestRef.current) return;
         if (!result || result.ok === false) {
-          throw new Error(result && result.msg ? result.msg : 'No se pudieron consultar los reclamos.');
+          throw new Error(result && result.msg ? result.msg : t('Claims could not be queried.'));
         }
 
         const normalized = normalizeClaimResponse(result);
@@ -903,7 +903,7 @@
       .catch((requestError) => {
         if (!mountedRef.current || requestId !== listRequestRef.current) return;
         const requestMessage = requestError && requestError.message
-          ? requestError.message : 'No se pudieron consultar los reclamos.';
+          ? requestError.message : t('Claims could not be queried.');
         setRows([]);
         setPagination({ current: Number(current || 1), pageSize: Number(pageSize || PAGE_SIZE), total: 0 });
         setError(requestMessage);
@@ -918,10 +918,10 @@
     if (exporting) return;
     const values = form.getFieldsValue();
     try {
-      buildRepoClaimFilter(values);
+      buildClaimCustomSearchFilter(values);
     } catch (validationError) {
       const validationMessage = validationError && validationError.message
-        ? validationError.message : 'Revise los criterios de búsqueda.';
+        ? validationError.message : t('Review the search criteria.');
       setError(validationMessage);
       message.warning(validationMessage);
       return;
@@ -937,6 +937,15 @@
     setFilters({});
     setError('');
     loadClaims(1, PAGE_SIZE, {});
+  };
+
+  const handleFilterKeyDown = (event) => {
+    if (!event || event.key !== 'Enter' || event.isComposing) return;
+    const target = event.target;
+    if (target && (target.tagName === 'TEXTAREA'
+      || (target.classList && target.classList.contains('ant-select-selection-search-input')))) return;
+    event.preventDefault();
+    handleSearch();
   };
 
   const handleTableChange = (nextPagination, tableFilters, sorter, extra) => {
@@ -1318,6 +1327,33 @@
         margin-bottom: 10px !important;
       }
 
+      .busqueda-reclamos-filter-form .ant-input,
+      .busqueda-reclamos-filter-form .ant-input-affix-wrapper,
+      .busqueda-reclamos-filter-form .ant-select-selector,
+      .busqueda-reclamos-filter-form .ant-picker {
+        border-color: #b8c4d1 !important;
+      }
+
+      .busqueda-reclamos-filter-form .ant-input:hover,
+      .busqueda-reclamos-filter-form .ant-input-affix-wrapper:hover,
+      .busqueda-reclamos-filter-form .ant-select:hover .ant-select-selector,
+      .busqueda-reclamos-filter-form .ant-picker:hover {
+        border-color: #8da9c2 !important;
+      }
+
+      .busqueda-reclamos-filter-form .ant-input:focus,
+      .busqueda-reclamos-filter-form .ant-input-affix-wrapper-focused,
+      .busqueda-reclamos-filter-form .ant-select-focused .ant-select-selector,
+      .busqueda-reclamos-filter-form .ant-picker-focused {
+        border-color: #1677ff !important;
+        box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.2) !important;
+      }
+
+      .busqueda-reclamos-filter-form .ant-input-affix-wrapper .ant-input {
+        border: 0 !important;
+        box-shadow: none !important;
+      }
+
       .busqueda-reclamos-filter-actions {
         display: flex;
         justify-content: flex-end;
@@ -1363,14 +1399,14 @@
     <div ref={shellRef} className="busqueda-reclamos-shell">
       <div className="busqueda-reclamos-page-header">
         <div className="busqueda-reclamos-breadcrumb">
-          <span>Inicio</span>
+          <span>{t('Home')}</span>
           <span className="busqueda-reclamos-breadcrumb-separator">/</span>
-          <strong>Lista de siniestros</strong>
+          <strong>{t('Claims list')}</strong>
         </div>
         <div className="busqueda-reclamos-heading-row">
           <div className="busqueda-reclamos-heading">
             <span className="busqueda-reclamos-folder" aria-hidden="true" />
-            <h2 className="busqueda-reclamos-title">Lista de siniestros</h2>
+            <h2 className="busqueda-reclamos-title">{t('Claims list')}</h2>
           </div>
           <div className="busqueda-reclamos-toolbar">
           <Space>
@@ -1381,7 +1417,7 @@
                 onClick={downloadFilteredClaims}
               >
                 <span className="busqueda-reclamos-download-icon" aria-hidden="true" />
-                <span>Exportar a Excel</span>
+                <span>{t('Export to Excel')}</span>
               </Button>
               <Button
                 type="primary"
@@ -1389,7 +1425,7 @@
                 disabled={loading || exporting}
                 onClick={() => setFilterDrawerOpen(true)}
               >
-                <span>Filtrar</span>
+                <span>{t('Filter')}</span>
               </Button>
           </Space>
           </div>
@@ -1414,62 +1450,54 @@
               disabled: exporting,
               showSizeChanger: true,
               pageSizeOptions: ['10', '20', '25', '50'],
-              showTotal: (total) => 'Total ' + total + ' items'
+              showTotal: (total) => t('Total') + ' ' + total + ' ' + t('items')
             }}
             onChange={handleTableChange}
-            locale={{ emptyText: loading ? 'Consultando...' : (error ? 'No fue posible cargar los reclamos' : 'No se encontraron reclamos') }}
+            locale={{ emptyText: loading ? t('Loading...') : (error ? t('Claims could not be loaded') : t('No claims found')) }}
           />
       </div>
 
       <Drawer
-          title="Filtros de búsqueda de siniestros"
+          title={t('Claim search filters')}
           placement="right"
           width={510}
           open={filterDrawerOpen}
           onClose={() => setFilterDrawerOpen(false)}
           destroyOnClose={false}
         >
-          <Form form={form} className="busqueda-reclamos-filter-form" layout="vertical" size="small">
-            <Row gutter={8}>
-              <Col span={24}>
-                <Form.Item label="Quick Filter" name="quickFilter">
-                  <Input maxLength={MAX_FILTER_LENGTH} placeholder="ID o código del reclamo" />
+          <Form form={form} className="busqueda-reclamos-filter-form" layout="vertical" onKeyDown={handleFilterKeyDown}>
+            <Tabs defaultActiveKey="general" className="busqueda-reclamos-filter-tabs">
+              <Tabs.TabPane tab={t('General filters')} key="general">
+                <Row gutter={8}>
+              <Col span={12}>
+                <Form.Item label={t('ID')} name="id">
+                  <Input inputMode="numeric" maxLength={16} placeholder={t('Claim ID')} />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="ID" name="id">
-                  <Input inputMode="numeric" maxLength={16} placeholder="ID del reclamo" />
+                <Form.Item label={t('Code')} name="code">
+                  <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('Claim code')} />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="ID de reclamo maestro" name="masterClaimId">
-                  <Input inputMode="numeric" maxLength={16} placeholder="ID maestro" />
-                </Form.Item>
-              </Col>
-              <Col span={24}>
-                <Form.Item label="Código" name="code">
-                  <Input maxLength={MAX_FILTER_LENGTH} placeholder="Código del reclamo" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Stage" name="stageCode">
+                <Form.Item label={t('Stage')} name="stageCode">
                   <Select
                     allowClear
                     showSearch
                     loading={catalogsLoading}
                     options={stageOptions}
                     optionFilterProp="label"
-                    placeholder="Seleccione el stage"
+                    placeholder={t('Select stage')}
                   />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="Fecha" name="date">
+                <Form.Item label={t('Date')} name="date">
                   <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col span={24}>
-                <Form.Item label="Reclamante" name="claimantId">
+                <Form.Item label={t('Claimant')} name="claimantId">
                   <Select
                     allowClear
                     showSearch
@@ -1477,13 +1505,13 @@
                     loading={contactSearchLoading.claimant}
                     options={claimantOptions}
                     onSearch={(value) => searchContacts('claimant', value)}
-                    placeholder="Escriba nombre, identificación o ID"
-                    notFoundContent={contactSearchLoading.claimant ? 'Buscando...' : 'Escriba al menos 2 caracteres'}
+                    placeholder={t('Enter name, ID number, or ID')}
+                    notFoundContent={contactSearchLoading.claimant ? t('Searching...') : t('Enter at least 2 characters')}
                   />
                 </Form.Item>
               </Col>
               <Col span={24}>
-                <Form.Item label="Asegurado" name="insuredId">
+                <Form.Item label={t('Insured')} name="insuredId">
                   <Select
                     allowClear
                     showSearch
@@ -1491,13 +1519,13 @@
                     loading={contactSearchLoading.insured}
                     options={insuredOptions}
                     onSearch={(value) => searchContacts('insured', value)}
-                    placeholder="Escriba nombre, identificación o ID"
-                    notFoundContent={contactSearchLoading.insured ? 'Buscando...' : 'Escriba al menos 2 caracteres'}
+                    placeholder={t('Enter name, ID number, or ID')}
+                    notFoundContent={contactSearchLoading.insured ? t('Searching...') : t('Enter at least 2 characters')}
                   />
                 </Form.Item>
               </Col>
-              <Col span={12}>
-                <Form.Item label="Póliza" name="lifePolicyId">
+              <Col span={24}>
+                <Form.Item label={t('Policy')} name="lifePolicyId">
                   <Select
                     allowClear
                     showSearch
@@ -1505,18 +1533,13 @@
                     loading={policySearchLoading}
                     options={policyOptions}
                     onSearch={searchPolicies}
-                    placeholder="Escriba código o ID de póliza"
-                    notFoundContent={policySearchLoading ? 'Buscando...' : 'Escriba al menos 2 caracteres'}
+                    placeholder={t('Enter policy code or ID')}
+                    notFoundContent={policySearchLoading ? t('Searching...') : t('Enter at least 2 characters')}
                   />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="Estado" name="status">
-                  <Input allowClear placeholder="Escriba el estado" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Ramo" name="lob">
+                <Form.Item label={t('Line of business')} name="lob">
                   <Select
                     allowClear
                     showSearch
@@ -1524,12 +1547,12 @@
                     options={lobOptions}
                     optionFilterProp="label"
                     onChange={loadProducts}
-                    placeholder="Seleccione el ramo"
+                    placeholder={t('Select line of business')}
                   />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="Producto" name="product">
+                <Form.Item label={t('Product')} name="product">
                   <Select
                     allowClear
                     showSearch
@@ -1537,45 +1560,67 @@
                     loading={productsLoading}
                     options={productCatalog}
                     optionFilterProp="label"
-                    placeholder="Seleccione el producto"
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Tipo de siniestro" name="claimType">
-                  <Input maxLength={MAX_FILTER_LENGTH} placeholder="Código del tipo de siniestro" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Estado de la auditoría" name="auditStatus">
-                  <Select
-                    allowClear
-                    options={AUDIT_STATUS_OPTIONS}
-                    placeholder="Seleccione el estado de auditoría"
+                    placeholder={t('Select product')}
                   />
                 </Form.Item>
               </Col>
               <Col span={24}>
-                <Form.Item label="Ocurrencia" name="occurrence">
+                <Form.Item label={t('Occurrence')} name="occurrence">
                   <RangePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col span={24}>
-                <Form.Item label="Notificación" name="notification">
+                <Form.Item label={t('Notification')} name="notification">
                   <RangePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col span={24}>
-                <Form.Item label="Código de migración" name="migrationCode">
-                  <Input maxLength={MAX_FILTER_LENGTH} placeholder="Código de migración" />
+              <Col span={12}>
+                <Form.Item label={t('Migration code')} name="migrationCode">
+                  <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('Migration code')} />
                 </Form.Item>
               </Col>
-              <Col span={24}>
-                <Form.Item label="External ID" name="externalId">
-                  <Input maxLength={MAX_FILTER_LENGTH} placeholder="External ID" />
+              <Col span={12}>
+                <Form.Item label={t('External ID')} name="externalId">
+                  <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('External ID')} />
                 </Form.Item>
               </Col>
-            </Row>
+                </Row>
+              </Tabs.TabPane>
+              <Tabs.TabPane tab={t('Affected object')} key="affectedObject">
+                <Row gutter={8}>
+                  <Col span={24}>
+                    <Form.Item label={t('Identification')} name="affectedIdentification">
+                      <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('Identification')} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label={t('License plate')} name="affectedLicensePlate">
+                      <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('License plate')} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label="VIN" name="affectedVin">
+                      <Input maxLength={MAX_FILTER_LENGTH} placeholder="VIN" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={24}>
+                    <Form.Item label={t('Notification date')} name="affectedNotificationDate">
+                      <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label={t('SIS number')} name="affectedSisNumber">
+                      <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('SIS number')} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item label={t('COBIS number')} name="affectedCobisNumber">
+                      <Input maxLength={MAX_FILTER_LENGTH} placeholder={t('COBIS number')} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Tabs.TabPane>
+            </Tabs>
 
             <div className="busqueda-reclamos-filter-actions">
               <Space>
@@ -1585,7 +1630,7 @@
                   disabled={loading || exporting}
                   onClick={handleReset}
                 >
-                  Reestablecer
+                  {t('Reset')}
                 </Button>
                 <Button
                   type="primary"
@@ -1594,7 +1639,7 @@
                   disabled={exporting}
                   onClick={handleSearch}
                 >
-                  Búsqueda
+                  {t('Search')}
                 </Button>
               </Space>
             </div>
