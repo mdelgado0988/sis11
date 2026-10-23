@@ -27,6 +27,7 @@ const DETAIL_SECTION = "Detalle del Siniestro";
 const EXTRA_SECTION = "InformacionResumenDelReclamo";
 const AFFECTED_SECTION = "ObjetosAfectados";
 const AFFECTED_FORM = "frmOATarjetaFraude";
+const PANAMA_UTC_OFFSET_HOURS = 5;
 const COVERAGE_CODES = ["40", "401", "41", "43", "109", "110"];
 const FIELDS = ["ajustador", "reclamante", "causa", "fSiniestro", "provincia", "ciudad", "lugar", "fNotificacionS",
   "descripSiniestro", "obserAdicional", "idPoliza", "poliza", "casegurado", "cedula", "tipoTrajeta", "cantSiniestro",
@@ -109,7 +110,7 @@ try {
   const jCustomForms = buildCustomForms(values, policy, chosen, objectValues);
 
   // 9. Creación del reclamo (mismo payload que la vista)
-  const notification = notificationDate === occurrence.date ? occurrence.iso : `${notificationDate}T00:00:00Z`;
+  const notification = notificationDate === occurrence.date ? occurrence.iso : panamaUtc(notificationDate, 0, 0).iso;
   const claimerId = Number(claimer.id);
   const coverageCode = String(chosen.coverage.code).trim();
   const entity = {
@@ -262,12 +263,12 @@ function parseDate(value, label) {
 
 function pad(n) { const t = String(n); return t.length < 2 ? "0" + t : t; }
 
-// FSiniestro se persiste en UTC; sin hora se usa 14:00Z para mostrar 08:00 AM en la aplicación.
+// FSiniestro llega en hora Panamá y se persiste en UTC; sin hora se usa 08:00 AM Panamá.
 function parseOccurrence(dateText) {
   if (!required(dateText, "FSiniestro")) return null;
   const date = parseDate(dateText, "FSiniestro");
   if (!date) return null;
-  let hour = 14, minute = 0;
+  let hour = 8, minute = 0;
   const text = String(dateText).trim();
   const serial = text.match(/^\d{1,5}(\.\d+)$/);
   const inline = text.match(/[ T](\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?\s*m?\.?$/i);
@@ -284,8 +285,16 @@ function parseOccurrence(dateText) {
     }
     if (hour > 23 || minute > 59) { errors.push(`FSiniestro '${dateText}': la hora no es válida.`); return null; }
   }
-  const hhmm = `${pad(hour)}:${pad(minute)}`;
-  return { date: date, iso: `${date}T${hhmm}:00Z`, stamp: `${date}T${hhmm}:00` };
+  const utc = panamaUtc(date, hour, minute);
+  return { date: date, iso: utc.iso, stamp: utc.stamp };
+}
+
+function panamaUtc(date, hour, minute) {
+  const parts = String(date).split("-").map(Number);
+  const utc = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], hour, minute) + PANAMA_UTC_OFFSET_HOURS * 3600000);
+  const utcDate = `${utc.getUTCFullYear()}-${pad(utc.getUTCMonth() + 1)}-${pad(utc.getUTCDate())}`;
+  const hhmm = `${pad(utc.getUTCHours())}:${pad(utc.getUTCMinutes())}`;
+  return { iso: `${utcDate}T${hhmm}:00Z`, stamp: `${utcDate}T${hhmm}:00` };
 }
 
 function number(value, label, integer, min, max) {

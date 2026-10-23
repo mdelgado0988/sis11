@@ -87,8 +87,9 @@ try {
     MainInsured: insuredEntry,
     Insureds: [insuredEntry],
     insuredSum: d.insuredSum,
-    start: `${d.start}T12:00:00`,
-    end: `${d.end}T12:00:00`,
+    // 05:01 UTC preserves the imported calendar day as 00:01 in Panama.
+    start: `${d.start}T05:01:00`,
+    end: `${d.end}T05:01:00`,
     duration: d.termYears,
     durationMonths: d.termMonths,
     durationDays: d.extraDays,
