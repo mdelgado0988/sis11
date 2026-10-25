@@ -117,7 +117,7 @@ function loadClaimReserves(claimId) {
     cmd: "LoadEntities",
     data: {
       entity: "LifeCoveragePayout",
-      fields: "id, lifeCoverageId, reserved, payed, reserveType, expenseType",
+      fields: "id, lifeCoverageId, status, reserved, payed, reserveType, expenseType",
       filter: `claimId = ${claimId} AND status <> 2`,
       noTracking: true
     }
@@ -156,12 +156,20 @@ function buildReserveClosingEntities(groups, claim, userEmail) {
   const entities = [];
 
   for (const group of Array.isArray(groups) ? groups : []) {
-    // In this reserve model, reserved already stores the signed reserve balance,
-    // so the closing amount is derived directly from reserved only.
+    // Reservations (0/1) establish the balance. Applied payments (3) consume it;
+    // their negative reserved value is only an accounting counterpart.
     const balance = round2(
       group.items.reduce((sum, item) => {
-        const reserved = Number(item?.reserved ?? 0);
-        return sum + reserved;
+        const status = Number(item?.status);
+        if (status === 0 || status === 1) {
+          return sum + Number(item?.reserved ?? 0);
+        }
+
+        if (status === 3) {
+          return sum - Number(item?.payed ?? 0);
+        }
+
+        return sum;
       }, 0)
     );
 
@@ -169,7 +177,10 @@ function buildReserveClosingEntities(groups, claim, userEmail) {
       continue;
     }
 
-    const firstItem = group.items[0];
+    const firstItem = group.items.find((item) => {
+      const status = Number(item?.status);
+      return status === 0 || status === 1;
+    }) || group.items[0];
     const closingAmount = round2(balance);
     const entity = {
       id: 0,

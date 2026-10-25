@@ -13,6 +13,7 @@
 
 const input = context || {};
 const lifePolicyId = Number(input.lifePolicyId || 0);
+const lifeCoverageId = Number(input.lifeCoverageId || 0);
 const reserved = Number(input.reserved || 0);
 const claimId = Number(input.claimId || 0);
 const reserveType = getReserveType(input);
@@ -58,26 +59,9 @@ try {
     };
   }
 
-  // Validate the resulting balance only inside the requested reserve type.
-  // The signed reserved amount already includes openings, increases and
-  // closures. Payments must not be subtracted again from this balance.
-  doCmd({cmd:'LoadEntities',data:{
-    entity:'LifeCoveragePayout',
-    fields:'reserveType,reserved',
-    filter:`lifePolicyId=${ lifePolicyId }`,
-    noTracking:true
-  }});
-
-  const payouts = LoadEntities && Array.isArray(LoadEntities.outData)
-    ? LoadEntities.outData
-    : [];
-  const currentBalance = payouts.reduce((total, payout) => {
-    if(getReserveType(payout) !== reserveType){
-      return total;
-    }
-
-    return total + toNumber(payout && payout.reserved);
-  }, 0);
+  const currentBalance = isReserveClosing(input) && claimId > 0 && lifeCoverageId > 0
+    ? getClaimReserveBalance(claimId, lifeCoverageId, reserveType)
+    : getPolicyReserveBalance(lifePolicyId, reserveType);
 
   const resultingBalance = currentBalance + reserved;
   const coverageLimit = toNumber(BasicCoverage.limit);
@@ -130,6 +114,59 @@ function getPolicyLob(lifePolicyId) {
 function getReserveType(item) {
   const value = item && (item.reserveType || item.expenseType);
   return String(value || '').trim().toUpperCase();
+}
+
+function isReserveClosing(item) {
+  return String(item && item.operation || '').toUpperCase() === 'RESERVE'
+    && toNumber(item && item.reserved) < 0
+    && /^Cierre de reserva de (pago|gasto)\b/i.test(String(item && item.concept || ''));
+}
+
+function getPolicyReserveBalance(lifePolicyId, reserveType) {
+  doCmd({cmd:'LoadEntities',data:{
+    entity:'LifeCoveragePayout',
+    fields:'reserveType,reserved',
+    filter:`lifePolicyId=${ lifePolicyId }`,
+    noTracking:true
+  }});
+
+  const payouts = LoadEntities && Array.isArray(LoadEntities.outData)
+    ? LoadEntities.outData
+    : [];
+
+  return payouts.reduce((total, payout) => {
+    return getReserveType(payout) === reserveType
+      ? total + toNumber(payout && payout.reserved)
+      : total;
+  }, 0);
+}
+
+function getClaimReserveBalance(claimId, lifeCoverageId, reserveType) {
+  doCmd({cmd:'LoadEntities',data:{
+    entity:'LifeCoveragePayout',
+    fields:'status,reserveType,expenseType,reserved,payed',
+    filter:`claimId=${claimId} AND lifeCoverageId=${lifeCoverageId} AND status <> 2`,
+    noTracking:true
+  }});
+
+  const payouts = LoadEntities && Array.isArray(LoadEntities.outData)
+    ? LoadEntities.outData
+    : [];
+
+  return payouts.reduce((total, payout) => {
+    if(getReserveType(payout) !== reserveType){
+      return total;
+    }
+
+    const status = Number(payout && payout.status);
+    if(status === 0 || status === 1){
+      return total + toNumber(payout && payout.reserved);
+    }
+
+    return status === 3
+      ? total - toNumber(payout && payout.payed)
+      : total;
+  }, 0);
 }
 
 function toNumber(value) {
