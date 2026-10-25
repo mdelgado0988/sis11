@@ -450,7 +450,7 @@
         const v = r[col.c];
         if (col.tipo === 'num') o[col.t] = num(v);
         else if (col.tipo === 'mov') o[col.t] = etiquetaMovimiento(r);
-        else if (col.tipo === 'fecha') o[col.t] = fecha(v);
+        else if (col.tipo === 'fecha') o[col.t] = fecha(v, col.c === 'fHasta' && r && r.fHastaSinZona);
         else if (col.tipo === 'ramo') o[col.t] = nombreRamo(v);
         else o[col.t] = (v === null || v === undefined) ? '' : v;
       });
@@ -480,7 +480,7 @@
         if (!X) { message.error('No es posible crear un archivo de Excel en este momento.'); return; }
         const exportColumns = esReaseguradores ? COLUMNAS_REASEGURADORES : COLUMNAS;
         const hoja = X.utils.json_to_sheet(filas.map(function(row) {
-          const out = {}; exportColumns.forEach(function(col) { out[col.t] = col.tipo === 'num' ? num(row[col.c]) : (col.tipo === 'fecha' ? fecha(row[col.c]) : (col.tipo === 'ramo' ? nombreRamo(row[col.c]) : (col.tipo === 'mov' ? etiquetaMovimiento(row) : (row[col.c] || '')))); }); return out;
+          const out = {}; exportColumns.forEach(function(col) { out[col.t] = col.tipo === 'num' ? num(row[col.c]) : (col.tipo === 'fecha' ? fecha(row[col.c], col.c === 'fHasta' && row.fHastaSinZona) : (col.tipo === 'ramo' ? nombreRamo(row[col.c]) : (col.tipo === 'mov' ? etiquetaMovimiento(row) : (row[col.c] || '')))); }); return out;
         }), { header: exportColumns.map(function(c){ return c.t; }) });
         const libro = X.utils.book_new();
         X.utils.book_append_sheet(libro, hoja, esReaseguradores ? 'Reaseguradores' : 'Bordero');
@@ -557,7 +557,10 @@
         };
       }
       else if (col.tipo === 'fecha') c.render = function(v, r){
-        return fecha(v, col.c === 'fDesde' && r && r.tipo === 'ChangeCoverageSurety');
+        return fecha(v,
+          (col.c === 'fDesde' && r && r.tipo === 'ChangeCoverageSurety')
+          || (col.c === 'fHasta' && r && r.fHastaSinZona)
+        );
       };
       else if (col.tipo === 'ramo') c.render = function(v){ return nombreRamo(v); };
       else if (col.tipo === 'mov') c.render = function(v, r){ return etiquetaMovimiento(r); };

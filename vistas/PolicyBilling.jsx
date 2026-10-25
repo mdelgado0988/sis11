@@ -854,7 +854,7 @@
 
   function isLiteralProceedOrderEndDateReinsurance(record) {
     const type = String(record && record.tipo || '').trim().toUpperCase();
-    return type === 'PROCEEDORDER';
+    return Number(record && record.fHastaSinZona) === 1 || type === 'PROCEEDORDER';
   }
 
   function formatMoney(value) {
