@@ -15,6 +15,7 @@ const policyId = context.policyId;
 let policy;
 let product;
 let holder;
+let insured;
 let resultado = {};
 let oaUserData;
 const objectDefinitionCode = 'OBJFIANZA';
@@ -35,6 +36,7 @@ const anio = partesHoy.anio;
 
 setPolicy();
 setHolder();
+setInsured();
 setInsuredObject();
 setSeller();
 const diasVigenciaDocumento = obtenerDiasVigenciaDocumento();
@@ -56,7 +58,7 @@ resultado.NumeroFianza = policy?.code ?? ""; //AXX-304 R2: poliza sin numero emi
 resultado.Tenedor = getNombreCompleto(holder);
 resultado.AFavor = oaUserData?.nombre ?? "No Definido";
 resultado.Descripcion = oaUserData?.desc_objeto_afianzado ?? "";
-resultado.Secuestrante = oaUserData?.secuestrante ?? "";
+resultado.Secuestrante = getNombreCompleto(insured);
 resultado.FechaActoPublico = toFecha(oaUserData?.f_acto_publico);
 const partesFechaActoPublico = partesFechaPanama(fechaComoUTC(oaUserData?.f_acto_publico));
 resultado.FechaActoPubTexto = partesFechaActoPublico
@@ -121,6 +123,7 @@ resultado.VigenciaTexto = vigenciaDocumento.texto;
 resultado.VigenciaTexto2 = vigenciaDocumento.textoTitulo;
 resultado.VigenciaTexto3 = vigenciaDocumento.textoTitulo.toLowerCase();
 resultado.VigenciaPrincipalTexto = vigenciaPrincipalDocumento.texto;
+resultado.VigenciaPrincipalTexto2 = vigenciaPrincipalDocumento.textoTitulo;
 resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
 resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
 resultado.Prestamo = "";
@@ -187,7 +190,7 @@ for (const clave of Object.keys(resultado)) {
 return resultado;
 
 function setPolicy() {
-  doCmd({cmd: "RepoLifePolicy", data: { operation: "GET", include: ["Coverages"], filter: `id = ${policyId}` }});
+  doCmd({cmd: "RepoLifePolicy", data: { operation: "GET", include: ["Insureds", "Coverages"], filter: `id = ${policyId}` }});
   policy = RepoLifePolicy.outData?.[0];
   if(!policy)
     throw new Error(`No se pudo recuperar la póliza: ${RepoLifePolicy.msg}`);
@@ -209,6 +212,18 @@ function setHolder() {
     throw new Error(`No se pudo recuperar el pagador de la póliza: ${GetContacts.msg}`);
 }
 
+function setInsured() {
+  const mainInsured = policy?.MainInsured
+    || (Array.isArray(policy?.Insureds) ? policy.Insureds[0] : null);
+  const contactId = Number(mainInsured?.contactId);
+  if (!Number.isFinite(contactId) || contactId <= 0) {
+    insured = null;
+    return;
+  }
+  doCmd({cmd: "GetContacts", data: { operation: "GET", filter: `id = ${contactId}` }});
+  insured = GetContacts.ok ? GetContacts.outData?.[0] ?? null : null;
+}
+
 function setInsuredObject() {
 
   doCmd({cmd: "RepoObjectDefinition", data: { operation: "GET", filter: `code = '${objectDefinitionCode}'` }});
@@ -224,15 +239,14 @@ function setInsuredObject() {
 }
 
 function getNombreCompleto(contact) {
-    return [
-        contact?.name,
-        contact?.middlename,
-        contact?.surname1,
-        contact?.surname2
-    ]
-    .filter(v => typeof v === "string" && v.trim() !== "")
-    .map(v => v.trim())
-    .join(" ");
+  if (!contact) return "";
+  if (Number(contact.isPerson) === 1) {
+    return [contact.name, contact.surname1]
+      .filter(value => typeof value === "string" && value.trim() !== "")
+      .map(value => value.trim())
+      .join(" ");
+  }
+  return typeof contact.surname2 === "string" ? contact.surname2.trim() : "";
 }
 
 function toFecha(value) {

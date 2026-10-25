@@ -88,7 +88,10 @@ SELECT
     CASE WHEN lp.productCode='81FIAGCCOG' THEN COALESCE(axxBondBeneficiary.name, CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(acref.Acreedor,'')='' THEN 'No Tiene' ELSE acref.Acreedor END ELSE ISNULL(benf.name, 'No Tiene') END) ELSE CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(acref.Acreedor,'')='' THEN 'No Tiene' ELSE acref.Acreedor END ELSE ISNULL(benf.name, 'No Tiene') END END AS Beneficiario,
     CASE WHEN lp.lob='81' THEN axxObject.description ELSE NULL END AS [Descrip Objeto Afianzado],
     CASE WHEN ISNULL(acref.Acreedor, '') = '' THEN 'No Tiene' ELSE acref.Acreedor END Acreedor,
-    ISNULL(c.nationalId, '0') AS [Cuenta Cobis],
+    CASE WHEN lp.lob IN ('20', '31', '71')
+        THEN ISNULL(NULLIF(LTRIM(RTRIM(cobisPolicy.txtPolizaCobis_valor)), ''), '0')
+        ELSE '0'
+    END AS [Cuenta Cobis],
     CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro,
     CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS [Es lider],
     ISNULL(cc.name, '') AS Canal,
@@ -192,6 +195,16 @@ OUTER APPLY (SELECT ISNULL(CONCAT_WS(' ',
 LEFT JOIN Product prod ON prod.code = lp.productCode
 LEFT JOIN Proceso prcp ON prcp.id = lp.processId
 LEFT JOIN ChannelCatalog cc ON cc.code = snap.channel
+OUTER APPLY (
+    SELECT TOP 1 JSON_VALUE(component.value, '$.userData[0]') AS txtPolizaCobis_valor
+    FROM InsuredObject io
+    INNER JOIN ObjectDefinition od ON od.id = io.objectDefinitionId
+        AND od.code = 'DT_ACCIDENTES_V1'
+    CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END) component
+    WHERE io.lifePolicyId = lp.id
+      AND JSON_VALUE(component.value, '$.name') = 'txtPolizaCobis'
+    ORDER BY io.id DESC
+) cobisPolicy
 /* MSN-000035: beneficiario = todo asegurado de la póliza que no sea el asegurado principal */
 OUTER APPLY (SELECT STRING_AGG(COALESCE(NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
                 NULLIF(LTRIM(RTRIM(oc.name)), ''),
@@ -547,7 +560,10 @@ SELECT
     ,CASE WHEN lp.productCode='81FIAGCCOG' THEN COALESCE(axxBondBeneficiary.name, CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(bf.name,'')='' THEN 'No Tiene' ELSE bf.name END ELSE ISNULL(benf.name, 'No Tiene') END) ELSE CASE WHEN lp.lob='81' THEN CASE WHEN ISNULL(bf.name,'')='' THEN 'No Tiene' ELSE bf.name END ELSE ISNULL(benf.name, 'No Tiene') END END AS Beneficiario
     ,CASE WHEN lp.lob='81' THEN axxObject.description ELSE NULL END AS [Descrip Objeto Afianzado]
     ,CASE WHEN ISNULL(bf.name,'') = '' THEN 'No Tiene' ELSE bf.name END AS Acreedor
-    ,ISNULL(c.nationalId, '0') AS [Cuenta Cobis]
+    ,CASE WHEN lp.lob IN ('20', '31', '71')
+        THEN ISNULL(NULLIF(LTRIM(RTRIM(cobisPolicy.txtPolizaCobis_valor)), ''), '0')
+        ELSE '0'
+    END AS [Cuenta Cobis]
     ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS Coaseguro
     ,CASE WHEN lp.coinsurance > 0 THEN 'Si' ELSE 'No' END AS [Es lider]
     ,ISNULL(cc.name, '') AS Canal
@@ -566,6 +582,16 @@ LEFT JOIN Product prod ON prod.code = lp.productCode
 LEFT JOIN Proceso prc ON prc.id = ed.processId
 LEFT JOIN PaymentMethodCatalog pym ON pym.code = ISNULL(ed.newpaymentMethod, lp.paymentMethod)
 LEFT JOIN ChannelCatalog cc ON cc.code = ISNULL(ed.newChannel , lp.channel)
+OUTER APPLY (
+    SELECT TOP 1 JSON_VALUE(component.value, '$.userData[0]') AS txtPolizaCobis_valor
+    FROM InsuredObject io
+    INNER JOIN ObjectDefinition od ON od.id = io.objectDefinitionId
+        AND od.code = 'DT_ACCIDENTES_V1'
+    CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END) component
+    WHERE io.lifePolicyId = lp.id
+      AND JSON_VALUE(component.value, '$.name') = 'txtPolizaCobis'
+    ORDER BY io.id DESC
+) cobisPolicy
 /* MSN-000035: beneficiario = todo asegurado de la póliza que no sea el asegurado principal */
 OUTER APPLY (SELECT STRING_AGG(COALESCE(NULLIF(LTRIM(RTRIM(CONCAT_WS(' ',
                 NULLIF(LTRIM(RTRIM(oc.name)), ''),
