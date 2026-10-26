@@ -46,6 +46,19 @@ const num = function (value) {
 };
 const txt = function (value) { return String(value == null ? '' : value).trim(); };
 const clone = function (value) { return JSON.parse(JSON.stringify(value || {})); };
+const isFacultativeLine = function (lineId) {
+  const line = txt(lineId).toUpperCase();
+  return line === 'FAC' || line.indexOf('FACULT') >= 0;
+};
+const isEmptyFacultativeDistribution = function (cession) {
+  return isFacultativeLine(cession.lineId)
+    && Math.abs(num(cession.sumInsuredCedant)) <= 0.01
+    && Math.abs(num(cession.premiumCedant)) <= 0.01
+    && Math.abs(num(cession.sumInsuredRe)) <= 0.01
+    && Math.abs(num(cession.premiumRe)) <= 0.01
+    && Math.abs(num(cession.comissionCedant)) <= 0.01
+    && Math.abs(num(cession.tax)) <= 0.01;
+};
 const keyOf = function (item) {
   const coverageKey = txt(item.coverageCode) || txt(item.coverageId);
   return Number(item.contractId || 0) + '|' + txt(item.lineId) + '|' + coverageKey;
@@ -403,8 +416,12 @@ if (mode === 'PREPARE') {
       });
       prepared.id = 0;
       prepared.lifePolicyId = policyId;
-      prepared.premium = money(requested.premiumMovement);
-      prepared.sumInsured = money(requested.sumInsuredMovement);
+      prepared.premium = money(requested.finalGrossPremium === undefined
+        ? (requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement)
+        : requested.finalGrossPremium);
+      prepared.sumInsured = money(requested.finalGrossSum === undefined
+        ? (requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement)
+        : requested.finalGrossSum);
       const variable = '@PreparedCession_' + (index + 1);
       prepareStatements.push('DECLARE ' + variable + ' INT;');
       prepareStatements.push(insertSql('Cession', CESSION_COLUMNS, prepared, { overwritten: 0, changeId: changeId }));
@@ -454,6 +471,22 @@ if (preserveActiveReinsurance) {
   }
 }
 if (alreadyApplied) {
+  // Versiones anteriores podían dejar FAC vigente con todos sus importes de
+  // distribución en cero. Un reintento limpia solo ese artefacto, sin borrar
+  // las anulaciones ni alterar las líneas con saldo.
+  const emptyFacultativeIds = reinsuranceFinalStateOnly
+    ? currentCessions.filter(isEmptyFacultativeDistribution).map(function (cession) { return Number(cession.id || 0); }).filter(Boolean)
+    : [];
+  if (emptyFacultativeIds.length) {
+    doCmd({ cmd: 'DoQuery', data: {
+      sql: 'UPDATE Cession SET overwritten = 1 WHERE lifePolicyId = ' + policyId
+        + ' AND changeId = ' + changeId + ' AND overwritten = 0 AND id IN (' + emptyFacultativeIds.join(',') + ');'
+    } });
+    if (!DoQuery || DoQuery.ok === false) return {
+      ok: false, stage: 'CLEANUP_ZERO_FACULTATIVE', changeId: changeId, policyId: policyId,
+      msg: 'No fue posible ocultar las líneas facultativas sin saldo: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia')
+    };
+  }
   return {
     ok: true,
     exact: true,
@@ -461,7 +494,8 @@ if (alreadyApplied) {
     stage: 'ALREADY_APPLIED',
     changeId: changeId,
     policyId: policyId,
-    created: currentCessions.length,
+    created: currentCessions.length - emptyFacultativeIds.length,
+    emptyFacultativeRemoved: emptyFacultativeIds.length,
     msg: 'El reaseguro del endoso ya estaba aplicado; no se duplicaron cesiones ni aceptantes.'
   };
 }
@@ -596,8 +630,8 @@ const finalCessions = positiveBaseCessions.map(function (source) {
   const coverage = coverageByCode[txt(source.coverageCode)] || coverageById[Number(source.coverageId || 0)];
   if (requested) {
     if (isLoadingEndorsement) result.premiumType = 'CHANGE';
-    result.premium = money(num(source.premium) + num(requested.premiumMovement));
-    result.sumInsured = money(num(source.sumInsured) + num(requested.sumInsuredMovement));
+    result.premium = money(num(source.premium) + num(requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement));
+    result.sumInsured = money(num(source.sumInsured) + num(requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement));
     result.sumInsuredCedant = money(requested.sumInsuredCedant);
     result.premiumCedant = money(requested.premiumCedant);
     result.sumInsuredRe = money(requested.sumInsuredRe);
@@ -688,8 +722,14 @@ requestedRows.forEach(function (requested) {
   if (isLoadingEndorsement) created.premiumType = 'CHANGE';
   created.start = coverage.start || created.start;
   created.end = coverage.end || created.end;
-  created.sumInsured = money(requested.sumInsuredMovement);
-  created.premium = money(requested.premiumMovement);
+  // Una linea creada por capacidad contractual (FAC) no tiene cesion previa:
+  // debe nacer con el total final de la cobertura, no solo con su diferencia.
+  created.sumInsured = money(requested.finalGrossSum === undefined
+    ? (requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement)
+    : requested.finalGrossSum);
+  created.premium = money(requested.finalGrossPremium === undefined
+    ? (requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement)
+    : requested.finalGrossPremium);
   created.sumInsuredCedant = money(requested.sumInsuredCedant);
   created.premiumCedant = money(requested.premiumCedant);
   created.sumInsuredRe = money(requested.sumInsuredRe);
@@ -701,6 +741,15 @@ requestedRows.forEach(function (requested) {
   created.changeId = changeId;
   finalCessions.push(created);
 });
+
+// Cuando una disminución agota FAC, la anulación histórica ya documenta la
+// salida. No se debe dejar una nueva cesión FAC vigente con saldo cero: además
+// de generar ruido, haría que el siguiente endoso detecte FAC inexistente.
+if (reinsuranceFinalStateOnly && !preserveActiveReinsurance) {
+  for (let i = finalCessions.length - 1; i >= 0; i--) {
+    if (isEmptyFacultativeDistribution(finalCessions[i])) finalCessions.splice(i, 1);
+  }
+}
 
 const finalParts = [];
 const cancellationParts = [];

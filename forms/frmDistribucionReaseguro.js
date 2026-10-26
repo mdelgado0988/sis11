@@ -1007,6 +1007,22 @@ function onRowSelected(row) {
     
   });
 
+  // Las proporciones guardadas describen la colocación original. Si un
+  // endoso agotó FAC, esas proporciones pueden conservar su porcentaje
+  // histórico aunque ya no exista saldo. La grilla debe mostrar la
+  // distribución vigente, calculada sobre las sumas aseguradas activas. Se
+  // limita al caso inconsistente para no alterar pólizas ya bien configuradas.
+  const totalSumaDistribuida = msret + mscp + msex1 + msfp + msfo;
+  const totalProporcionGuardada = pret + pcp + pex1 + pfp + pfo;
+  const proporcionesIncompletas = Math.abs(totalProporcionGuardada - 1) > 0.0001;
+  if (Math.abs(totalSumaDistribuida) > 0.01 && proporcionesIncompletas) {
+    pret = msret / totalSumaDistribuida;
+    pcp = mscp / totalSumaDistribuida;
+    pex1 = msex1 / totalSumaDistribuida;
+    pfp = msfp / totalSumaDistribuida;
+    pfo = msfo / totalSumaDistribuida;
+  }
+
   //redondeamos para ser mas precisos:
   //ret
   pret = normalizarPorcentaje(pret);

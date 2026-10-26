@@ -278,6 +278,8 @@ function setInsuredObject() {
 
   oaUserData.cobtar = oaUserData.hiddenCobtar ? JSON.parse(oaUserData.hiddenCobtar) : [];  
   oaUserData.cobtar = normalizeArray(oaUserData.cobtar);
+  //MSN-000059 (AXX-2334) - InclusionCobertura: tarifas de entrada de las coberturas que se incluyen
+  aplicarCobtarInclusion();
 
 }
 
@@ -521,3 +523,30 @@ poliza:
     contactId: 3
         
 */
+
+/*
+  *MSN-000059 (AXX-2334) - InclusionCobertura
+  *En el endoso ChangeAddCoverage que envía la vista InclusionCobertura, jAdditional.cobtar trae las filas de tarifa
+  *de entrada (mismo formato que hiddenCobtar) de las coberturas que se incluyen. Se agregan a la lectura de hiddenCobtar
+  *sólo para esas coberturas; las filas guardadas del resto no cambian. Sin el marcador INCLUSIONCOBERTURA no hace nada.
+*/
+function aplicarCobtarInclusion() {
+  if (String(action || "").toLowerCase() != "changeaddcoverage") return;
+  let dto = extra;
+  if (typeof dto === "string") { try { dto = JSON.parse(dto); } catch (errorDto) { dto = null; } }
+  let adicional = dto && dto.data ? dto.data.jAdditional : null;
+  if (!adicional && poliza && poliza.jChangeDto) {
+    let dtoPoliza = poliza.jChangeDto;
+    if (typeof dtoPoliza === "string") { try { dtoPoliza = JSON.parse(dtoPoliza); } catch (errorDtoPoliza) { dtoPoliza = null; } }
+    adicional = dtoPoliza && dtoPoliza.data ? dtoPoliza.data.jAdditional : null;
+  }
+  if (!adicional) return;
+  if (typeof adicional === "string") { try { adicional = JSON.parse(adicional); } catch (errorAdicional) { return; } }
+  if (!adicional || String(adicional.endorsementType || "") !== "INCLUSIONCOBERTURA") return;
+  let filas = adicional.cobtar;
+  if (typeof filas === "string") { try { filas = JSON.parse(filas); } catch (errorFilas) { return; } }
+  if (!Array.isArray(filas) || !filas.length) return;
+  const nuevas = normalizeArray(filas);
+  const codigos = nuevas.map(x => String(x.COVERAGECODE).trim());
+  oaUserData.cobtar = (oaUserData.cobtar || []).filter(x => codigos.indexOf(String(x.COVERAGECODE).trim()) < 0).concat(nuevas);
+}

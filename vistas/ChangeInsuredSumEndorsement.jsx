@@ -84,6 +84,7 @@
   // lote de React, asi que tres clics seguidos disparaban tres ejecuciones. El objeto que
   // devuelve useState conserva su identidad entre renders y se muta de forma sincrona.
   const [lock] = useState({ busy: false });
+  const [reinsuranceDiagnostics] = useState({ signature: '' });
   // Las cotizaciones y simulaciones son asincronas. Esta version evita que una
   // respuesta anterior reemplace el resultado calculado con los ajustes actuales.
   const [requestVersion] = useState({ calculation: 0, simulation: 0 });
@@ -112,6 +113,11 @@
     return String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim();
   };
   const isAutoPolicy = function () { return txt(policy && policy.lob) === '6'; };
+  // Solo Fianza usa la capacidad contractual para decidir entre proporcional y FAC.
+  // Los demas ramos conservan la simulacion historica por lineas vigentes.
+  const usesSuretyContractCapacity = function () {
+    return ['81', '82', '83', '84'].indexOf(txt(policy && policy.lob)) >= 0;
+  };
   const ramoLabel = function () {
     const name = txt(policy && (policy.lobName || (policy.Lob && policy.Lob.name)));
     if (name) return name.replace(/^\s*[^-]+\s+-\s*/, '').trim() || name;
@@ -259,6 +265,41 @@
       return String(cession.contractId) === String(group.contractId)
         && String(cession.coverageCode || cession.coverageId || '') === String(row.coverageCode || row.code || '');
     });
+  }
+
+  function baseCessionForRow(row) {
+    return (baseCessions || []).find(function (cession) {
+      return String(cession.id) === String(row && row.basedOnCessionId);
+    });
+  }
+
+  function hasFacultativeMovementOnly(group) {
+    return (group && group.rows || []).some(function (row) {
+      return row.facultativeMovementOnly === true || row.contractCapacityAllocation === true;
+    });
+  }
+
+  function normalizedReinsuranceLine(lineId) {
+    const line = txt(lineId).toUpperCase();
+    if (line === 'RET' || line.indexOf('RETEN') >= 0) return 'RETENCION';
+    if (line === 'CP' || line.indexOf('CUOTA') >= 0 || line.indexOf('QUOTA') >= 0) return 'CUOTA PARTE';
+    if (line === 'EX1' || line.indexOf('EXCEDENTE') >= 0) return 'EXCEDENTE 1';
+    if (line === 'FAC' || line.indexOf('FACULT') >= 0) return 'FAC';
+    if (line === 'FRO' || line.indexOf('FRONT') >= 0) return 'FRO';
+    return line;
+  }
+
+  function isRetentionOwner(group, groups) {
+    const line = normalizedReinsuranceLine(group && group.lineId);
+    if (line === 'RETENCION') return true;
+    const sameContract = (groups || []).filter(function (candidate) {
+      return String(candidate.contractId) === String(group && group.contractId);
+    });
+    if (sameContract.some(function (candidate) { return normalizedReinsuranceLine(candidate.lineId) === 'RETENCION'; })) return false;
+    if (line === 'CUOTA PARTE') return true;
+    return !sameContract.some(function (candidate) {
+      return normalizedReinsuranceLine(candidate.lineId) === 'CUOTA PARTE';
+    }) && sameContract[0] === group;
   }
 
   function participantCoverageCode(group, participant) {
@@ -486,6 +527,23 @@
       (next.contracts || []).forEach(function (group) {
         const rows = group.rows || [];
         const totals = group.totals || {};
+        if (hasFacultativeMovementOnly(group)) {
+          // Esta distribucion representa un exceso de limite. La variacion ya
+          // esta asignada a FAC y no debe reconstruirse proporcionalmente.
+          recalculateReinsuranceTotals(group);
+          (group.participants || []).forEach(function (participant) {
+            const row = rows.find(function (item) {
+              return String(item.coverageCode) === participantCoverageCode(group, participant);
+            });
+            const split = (Number(participant.split) || 0) / 100;
+            participant.sumInsured = money(numberFrom(row || group.totals, row ? ['sumInsuredRe'] : ['sumRe']) * split);
+            participant.premium = money(numberFrom(row || group.totals, row ? ['premiumRe'] : ['re']) * split);
+            participant.commission = money(numberFrom(row || group.totals, row ? ['commission'] : ['commission']) * split);
+            participant.tax = money(numberFrom(row || group.totals, row ? ['tax'] : ['tax']) * split);
+          });
+          redistributeParticipantRounding(group);
+          return;
+        }
         if (totals.distributionPercentageCed !== undefined) {
           const percentageCed = Math.max(0, Math.min(100, Number(totals.distributionPercentageCed) || 0)) / 100;
           rows.forEach(function (row) {
@@ -546,6 +604,7 @@
       const byCoverage = {};
       (next.contracts || []).forEach(function (group) {
         (group.rows || []).forEach(function (row) {
+          if (row.facultativeMovementOnly) return;
           const code = String(row.coverageCode);
           if (!byCoverage[code]) byCoverage[code] = { rows: [], expectedPremium: finalCoverageDistributionPremium(group, row), expectedSum: finalCoverageDistributionSum(group, row) };
           byCoverage[code].rows.push({ group: group, row: row });
@@ -705,7 +764,7 @@
     const base = rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, ['premiumMovement'])); }, 0);
     if (!base) return 0;
     const amountField = field === 'proportionCed' ? 'premiumCedant' : 'premiumRe';
-    return Number((rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, [amountField])); }, 0) / base * 100).toFixed(2));
+    return Number((rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, [amountField])); }, 0) / base * 100).toFixed(8));
   }
 
   function renderContractEditor(group, groupKey) {
@@ -785,9 +844,9 @@
             sum: 0,
             placement: 0,
             expectedPremium: finalCoveragePremium(group, row),
-            expectedSum: finalCoverageSum(group, row),
+            expectedSum: row.counts ? finalCoverageSum(group, row) : 0,
             coinsurancePremium: money(finalCoveragePremium(group, row) * coinsurancePercentage() / 100),
-            coinsuranceSum: money(finalCoverageSum(group, row) * coinsurancePercentage() / 100)
+            coinsuranceSum: row.counts ? money(finalCoverageSum(group, row) * coinsurancePercentage() / 100) : 0
           };
         }
         const totals = group.totals || {};
@@ -799,7 +858,9 @@
           : numberFrom(row, ['proportionRe']);
         coverageDistribution[code].placement += retention + ceded;
         coverageDistribution[code].premium += numberFrom(row, ['premiumCedant']) + numberFrom(row, ['premiumRe']);
-        coverageDistribution[code].sum += numberFrom(row, ['sumInsuredCedant']) + numberFrom(row, ['sumInsuredRe']);
+        if (row.counts) {
+          coverageDistribution[code].sum += numberFrom(row, ['sumInsuredCedant']) + numberFrom(row, ['sumInsuredRe']);
+        }
       });
 
       const contract = (contractRows || []).find(function (item) {
@@ -808,8 +869,9 @@
       const lineTotal = contract ? getDistributionRows(contract).find(function (item) {
         return String(item.groupKey) === String(group.contractId) + '-' + String(group.lineId);
       }) : null;
-      const cededPremium = lineTotal ? Number(lineTotal.premium || 0) : sumField(rows, ['premiumRe']);
-      const cededSum = lineTotal ? Number(lineTotal.sum || 0) : sumField(rows, ['sumInsuredRe']);
+      const isRetentionGroup = normalizedReinsuranceLine(group.lineId) === 'RETENCION';
+      const cededPremium = isRetentionGroup ? 0 : (lineTotal ? Number(lineTotal.premium || 0) : sumField(rows, ['premiumRe']));
+      const cededSum = isRetentionGroup ? 0 : (lineTotal ? Number(lineTotal.sum || 0) : sumField(rows, ['sumInsuredRe']));
       const participants = getLineParticipants(group, lineTotal);
       if (cededPremium > 0.01 || cededSum > 0.01) {
         if (!participants.length) {
@@ -874,6 +936,57 @@
           + ' ' + t('no coincide con el total emitido.') + ' ' + fmt(distributedPremium) + ' / ' + fmt(contract.movement));
       }
     });
+
+    const diagnosticSignature = errors.join('|');
+    if (errors.length && reinsuranceDiagnostics.signature !== diagnosticSignature && typeof console !== 'undefined') {
+      reinsuranceDiagnostics.signature = diagnosticSignature;
+      const coverageDetails = Object.keys(coverageDistribution).map(function (code) {
+        const item = coverageDistribution[code];
+        return {
+          coverageCode: code,
+          placement: item.placement * 100,
+          expectedPremium: item.expectedPremium,
+          distributedPremium: item.premium,
+          coinsurancePremium: item.coinsurancePremium,
+          expectedSum: item.expectedSum,
+          distributedSum: item.sum,
+          coinsuranceSum: item.coinsuranceSum
+        };
+      });
+      const simulationRows = (sim.contracts || []).reduce(function (result, group) {
+        (group.rows || []).forEach(function (row) {
+          result.push({
+            contractId: group.contractId,
+            lineId: group.lineId,
+            coverageCode: row.coverageCode,
+            counts: row.counts,
+            finalPremium: finalCoveragePremium(group, row),
+            finalSum: finalCoverageSum(group, row),
+            premiumMovement: row.premiumMovement,
+            sumMovement: row.sumInsuredMovement,
+            premiumCedant: row.premiumCedant,
+            premiumRe: row.premiumRe,
+            sumCedant: row.sumInsuredCedant,
+            sumRe: row.sumInsuredRe,
+            proportionCed: row.proportionCed,
+            proportionRe: row.proportionRe
+          });
+        });
+        return result;
+      }, []);
+      console.groupCollapsed('[ChangeInsuredSumEndorsement] Reinsurance validation diagnostics');
+      // Un solo objeto facilita copiar el diagnostico completo desde consola.
+      console.log({
+        errors: errors,
+        expectedEndorsementPremium: expectedPremium,
+        distributedPremium: distributedPremium,
+        coverageDetails: coverageDetails,
+        simulationRows: simulationRows
+      });
+      console.groupEnd();
+    } else if (!errors.length) {
+      reinsuranceDiagnostics.signature = '';
+    }
 
     return { ok: errors.length === 0, errors: errors };
   }
@@ -1376,6 +1489,11 @@
         syncParticipantContactNames(group);
         redistributeParticipantRounding(group);
       });
+      // La advertencia pertenece a la simulacion inicial. Si la validacion de
+      // aceptantes ya paso, no debe persistir despues de guardar la asignacion.
+      next.warnings = (next.warnings || []).filter(function (warning) {
+        return String(warning || '').toLowerCase().indexOf('facultativo sin aceptantes') < 0;
+      });
       return next;
     });
     setError(null);
@@ -1564,7 +1682,7 @@
     const toPercentage = function (value) {
       const numeric = Number(value);
       if (!Number.isFinite(numeric)) return null;
-      return Math.round((Math.abs(numeric) <= 1 ? numeric * 100 : numeric) * 10000) / 10000;
+      return Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
     };
     const sourceCed = rows.map(function (row) { return toPercentage(row.proportionCed); })
       .find(function (value) { return value !== null; });
@@ -1573,8 +1691,8 @@
     const hasSourceCed = sourceCed !== null && sourceCed !== undefined;
     const hasSourceRe = sourceRe !== null && sourceRe !== undefined;
     if (hasSourceCed || hasSourceRe) {
-      const ced = !hasSourceCed ? Math.max(0, 100 - sourceRe) : Math.round(sourceCed);
-      const re = !hasSourceRe ? Math.max(0, 100 - ced) : Math.round(sourceRe);
+      const ced = !hasSourceCed ? Math.max(0, 100 - sourceRe) : sourceCed;
+      const re = !hasSourceRe ? Math.max(0, 100 - ced) : sourceRe;
       return { ced: ced, re: re };
     }
     const retention = rows.reduce(function (sum, row) { return sum + numberFrom(row, ['premiumCedant']); }, 0);
@@ -1582,8 +1700,8 @@
     const total = retention + ceded;
     if (total > 0) {
       return {
-        ced: Number((retention / total * 100).toFixed(4)),
-        re: Number((ceded / total * 100).toFixed(4))
+        ced: retention / total * 100,
+        re: ceded / total * 100
       };
     }
     return {
@@ -1592,11 +1710,18 @@
     };
   }
 
-  function hydrateFinalDistribution(group) {
+  function hydrateFinalDistribution(group, groups) {
     const percentages = initialContractPercentages(group);
     const totals = group.totals || {};
-    totals.distributionPercentageCed = percentages.ced;
-    totals.distributionPercentageRe = percentages.re;
+    const routesMovementToFacultative = hasFacultativeMovementOnly(group);
+    if (routesMovementToFacultative) {
+      // FAC recibe la variacion; las lineas vigentes conservan sus saldos.
+      delete totals.distributionPercentageCed;
+      delete totals.distributionPercentageRe;
+    } else {
+      totals.distributionPercentageCed = percentages.ced;
+      totals.distributionPercentageRe = percentages.re;
+    }
     // La grilla muestra el estado final de la cesion. La variacion que la
     // compone ya incluye el recargo/descuento del endoso.
     const baseRows = (baseCessions || []).filter(function (cession) {
@@ -1619,6 +1744,51 @@
     (group.rows || []).forEach(function (row) {
       const finalPremium = finalCoverageDistributionPremium(group, row);
       const finalSum = finalCoverageDistributionSum(group, row);
+      if (row.contractCapacityAllocation) {
+        // cmdConfiguracionReaseguroPorSuma ya devolvio la fotografia final al
+        // centavo; no volver a proporcionalizarla en la vista.
+        return;
+      }
+      if (row.facultativeMovementOnly) {
+        const source = baseCessionForRow(row) || {};
+        const retentionOwner = isRetentionOwner(group, groups);
+        const asProportion = function (value) {
+          const numeric = Number(value || 0);
+          return Math.abs(numeric) <= 1 ? numeric : numeric / 100;
+        };
+        const movedCedantPremium = numberFrom(row, ['premiumCedantMovement']);
+        const movedRePremium = numberFrom(row, ['premiumReMovement']);
+        const movedCedantSum = numberFrom(row, ['sumInsuredCedantMovement']);
+        const movedReSum = numberFrom(row, ['sumInsuredReMovement']);
+        // La suma/prima de Cession puede ser una base tecnica acumulada por
+        // linea. El estado anterior correcto es el total cotizado menos la
+        // variacion del endoso, no ese valor almacenado por separado.
+        const sourcePremium = money(finalPremium - numberFrom(row, ['sourcePremiumMovement', 'premiumMovement']));
+        const sourceSum = money(finalSum - numberFrom(row, ['sourceSumInsuredMovement', 'sumInsuredMovement']));
+        // Los importes premiumCedant/premiumRe pueden repetirse en lineas
+        // complementarias. Las proporciones son la fuente unica de la
+        // colocacion base; luego se agrega solo el movimiento del endoso.
+        const premiumCedantRate = asProportion(source.proportionCed);
+        const premiumReRate = asProportion(source.proportionRe);
+        const sumCedantRate = asProportion(source.proportionCed);
+        const sumReRate = asProportion(source.proportionRe);
+        // Algunas lineas complementarias repiten los importes de retencion
+        // como referencia. Solo su linea propietaria puede contabilizarlos.
+        row.premiumCedant = retentionOwner ? money(sourcePremium * premiumCedantRate + movedCedantPremium) : 0;
+        row.premiumRe = money(sourcePremium * premiumReRate + movedRePremium);
+        // Solo las coberturas configuradas para sumar al contrato aportan a
+        // la suma asegurada de reaseguro. Las demas pueden tener prima, pero
+        // repetirian la misma suma de la fianza en cada linea.
+        row.sumInsuredCedant = row.counts && retentionOwner ? money(sourceSum * sumCedantRate + movedCedantSum) : 0;
+        row.sumInsuredRe = row.counts ? money(sourceSum * sumReRate + movedReSum) : 0;
+        row.commission = money(row.premiumRe * commissionRate);
+        row.tax = money(row.premiumRe * taxRate);
+        // Las proporciones de Cession representan la colocacion de suma.
+        // Mantener esa base permite contratos con prima y suma independientes.
+        row.proportionCed = retentionOwner ? sumCedantRate : 0;
+        row.proportionRe = sumReRate;
+        return;
+      }
       row.proportionCed = percentages.ced / 100;
       row.proportionRe = percentages.re / 100;
       row.premiumCedant = money(finalPremium * percentages.ced / 100);
@@ -1641,6 +1811,72 @@
       participant.tax = money(numberFrom(row || group.totals, row ? ['tax'] : ['tax']) * split);
     });
     return group;
+  }
+
+  function reconcileFacultativeFinalRounding(groups) {
+    const byCoverage = {};
+    (groups || []).forEach(function (group) {
+      if (!hasFacultativeMovementOnly(group)) return;
+      (group.rows || []).forEach(function (row) {
+        if (row.contractCapacityAllocation) return;
+        const key = String(group.contractId) + '|' + String(row.coverageCode);
+        if (!byCoverage[key]) {
+          byCoverage[key] = {
+            expectedPremium: finalCoverageDistributionPremium(group, row),
+            expectedSum: row.counts ? finalCoverageDistributionSum(group, row) : 0,
+            rows: []
+          };
+        }
+        byCoverage[key].rows.push({ group: group, row: row });
+      });
+    });
+    Object.keys(byCoverage).forEach(function (key) {
+      const item = byCoverage[key];
+      const assignedPremium = money(item.rows.reduce(function (sum, entry) {
+        return sum + numberFrom(entry.row, ['premiumCedant']) + numberFrom(entry.row, ['premiumRe']);
+      }, 0));
+      const premiumResidual = money(item.expectedPremium - assignedPremium);
+      if (premiumResidual) {
+        const candidates = [];
+        item.rows.forEach(function (entry) {
+          if (numberFrom(entry.row, ['premiumRe']) > 0) candidates.push({ entry: entry, field: 'premiumRe' });
+          if (numberFrom(entry.row, ['premiumCedant']) > 0) candidates.push({ entry: entry, field: 'premiumCedant' });
+        });
+        // Corregir sobre la porcion positiva mas grande evita crear saldos
+        // negativos cuando un facultativo se agota durante una disminucion.
+        candidates.sort(function (a, b) {
+          return Number(b.entry.row[b.field] || 0) - Number(a.entry.row[a.field] || 0);
+        });
+        const target = candidates[0];
+        if (target) {
+          const current = Number(target.entry.row[target.field] || 0);
+          const commissionRate = target.field === 'premiumRe' && current
+            ? Number(target.entry.row.commission || 0) / current
+            : 0;
+          const taxRate = target.field === 'premiumRe' && current
+            ? Number(target.entry.row.tax || 0) / current
+            : 0;
+          target.entry.row[target.field] = money(current + premiumResidual);
+          if (target.field === 'premiumRe') {
+            target.entry.row.commission = money(Number(target.entry.row[target.field] || 0) * commissionRate);
+            target.entry.row.tax = money(Number(target.entry.row[target.field] || 0) * taxRate);
+          }
+        }
+      }
+    });
+    (groups || []).forEach(function (group) {
+      recalculateReinsuranceTotals(group);
+      (group.participants || []).forEach(function (participant) {
+        const row = (group.rows || []).find(function (item) {
+          return String(item.coverageCode) === participantCoverageCode(group, participant);
+        });
+        const split = (Number(participant.split) || 0) / 100;
+        participant.sumInsured = money(numberFrom(row || group.totals, row ? ['sumInsuredRe'] : ['sumRe']) * split);
+        participant.premium = money(numberFrom(row || group.totals, row ? ['premiumRe'] : ['re']) * split);
+        participant.commission = money(numberFrom(row || group.totals, row ? ['commission'] : ['commission']) * split);
+        participant.tax = money(numberFrom(row || group.totals, row ? ['tax'] : ['tax']) * split);
+      });
+    });
   }
 
   // ------------------------------------------------------------- pestania 1
@@ -2225,7 +2461,16 @@
     }
     exe('ExeChain', {
       chain: 'cmdSimReaChangeCoverage',
-      context: JSON.stringify({ policyId: policyId, rows: rows, participants: splits, finalStateOnly: true })
+      context: JSON.stringify({
+        policyId: policyId,
+        rows: rows,
+        participants: splits,
+        finalStateOnly: true,
+        // El limite configurado sustituye la regla de "FAC ya existente" solo
+        // para los ramos de Fianza indicados.
+        suretyContractCapacity: usesSuretyContractCapacity(),
+        facultativeMovementOnly: !usesSuretyContractCapacity()
+      })
     })
       .then(function (r) {
         if (simulationVersion !== requestVersion.simulation) return;
@@ -2234,7 +2479,8 @@
         let o = r.outData;
         if (typeof o === 'string') o = JSON.parse(o);
         if (o && o.length !== undefined && !o.contracts) o = o[0];
-        (o.contracts || []).forEach(function (group) { hydrateFinalDistribution(group); });
+        (o.contracts || []).forEach(function (group) { hydrateFinalDistribution(group, o.contracts || []); });
+        reconcileFacultativeFinalRounding(o.contracts || []);
         const contactIds = [];
         (o.contracts || []).forEach(function (group) {
           (group.participants || []).forEach(function (participant) {
@@ -2393,6 +2639,8 @@
         reinsuranceSnapshot.distribution.push({
           contractId: group.contractId, lineId: group.lineId, coverageCode: row.coverageCode,
           premiumMovement: row.premiumMovement, sumInsuredMovement: row.sumInsuredMovement,
+          sourcePremiumMovement: row.sourcePremiumMovement, sourceSumInsuredMovement: row.sourceSumInsuredMovement,
+          finalGrossPremium: row.finalGrossPremium, finalGrossSum: row.finalGrossSum,
           premiumCedant: row.premiumCedant, sumInsuredCedant: row.sumInsuredCedant,
           premiumRe: row.premiumRe, sumInsuredRe: row.sumInsuredRe,
           commission: row.commission, tax: row.tax,
@@ -2996,7 +3244,7 @@
       </span>;
     } },
     { title: t('Porcentaje (%)'), dataIndex: 'percentage', align: 'right', width: 135, render: function (v, row) {
-      return <EditableFormattedNumber value={v} decimals={4} readOnly={row.isCoinsurance} onCommit={function (x) { editContractPercentage(row.groupKey, row.percentageField, x); }} />;
+      return <EditableFormattedNumber value={v} decimals={8} readOnly={row.isCoinsurance} onCommit={function (x) { editContractPercentage(row.groupKey, row.percentageField, x); }} />;
     } },
     { title: t('Suma'), dataIndex: 'sum', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, row.manualPrefix + 'Sum', x); }} />;
@@ -3103,10 +3351,19 @@
       const inferredCed = groupTotalPremium ? base.premiumCed / groupTotalPremium * 100 : 0;
       const retentionPercentage = configuredRet === null ? inferredRet : configuredRet;
       const cededPercentage = configuredCed === null ? inferredCed : configuredCed;
-      const finalPremiumRet = isRetention ? groupTotalPremium * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100 : 0;
-      const finalSumRet = isRetention ? groupTotalSum * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100 : 0;
-      const finalPremiumCed = isCededLine ? groupTotalPremium * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100 : 0;
-      const finalSumCed = isCededLine ? groupTotalSum * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100 : 0;
+      const routesMovementToFacultative = g && hasFacultativeMovementOnly(g);
+      const finalPremiumRet = isRetention
+        ? (routesMovementToFacultative ? numberFrom(totals, ['cedant']) : groupTotalPremium * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100)
+        : 0;
+      const finalSumRet = isRetention
+        ? (routesMovementToFacultative ? numberFrom(totals, ['sumCedant']) : groupTotalSum * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100)
+        : 0;
+      const finalPremiumCed = isCededLine
+        ? (routesMovementToFacultative ? numberFrom(totals, ['re']) : groupTotalPremium * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100)
+        : 0;
+      const finalSumCed = isCededLine
+        ? (routesMovementToFacultative ? numberFrom(totals, ['sumRe']) : groupTotalSum * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100)
+        : 0;
       const manualSumField = isRetention ? 'manualRetentionSum' : 'manualCededSum';
       const manualPremiumField = isRetention ? 'manualRetentionPremium' : 'manualCededPremium';
       const displaySum = isCoinsurance ? coinsurance.sum : (totals[manualSumField] !== undefined ? Number(totals[manualSumField]) : (isRetention ? finalSumRet : finalSumCed));
@@ -3122,10 +3379,12 @@
         canViewReinsurers: isCededLine,
         manualPrefix: isRetention ? 'Retention' : 'Ceded',
         percentageField: isRetention ? 'proportionCed' : 'proportionRe',
-        percentageConfigured: isCoinsurance || (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined),
-        percentage: isCoinsurance ? 0 : (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined
+        percentageConfigured: isCoinsurance || (!routesMovementToFacultative && g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined),
+        percentage: isCoinsurance ? 0 : (routesMovementToFacultative
+          ? ((isRetention ? finalSumRet : finalSumCed) / (groupTotalSum || 1) * 100)
+          : (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined
           ? Number(totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'])
-          : (g ? contractPercentage(g, isRetention ? 'proportionCed' : 'proportionRe') : 0)),
+          : (g ? contractPercentage(g, isRetention ? 'proportionCed' : 'proportionRe') : 0))),
         sum: displaySum,
         premium: displayPremium,
         amountField: isRetention ? 'sumInsuredCedant' : 'sumInsuredRe',
@@ -3157,7 +3416,7 @@
     }
     rows.forEach(function (row) {
       if (!row.percentageConfigured) {
-        row.percentage = totalSum ? Number((Number(row.sum || 0) / totalSum * 100).toFixed(2)) : 0;
+        row.percentage = totalSum ? Number((Number(row.sum || 0) / totalSum * 100).toFixed(8)) : 0;
       }
     });
     return rows;
@@ -3179,13 +3438,25 @@
           : (group && group.rows || []).reduce(function (total, item) {
           // La suma asegurada del movimiento solo considera las coberturas
           // configuradas para sumar al contrato; la prima mantiene su propio movimiento.
-          if (item.counts) total.sum += numberFrom(item, ['sumInsuredMovement']);
-          total.premium += numberFrom(item, ['premiumMovement']);
+          if (hasFacultativeMovementOnly(group)) {
+            if (row.isRetention) {
+              if (item.counts) total.sum += numberFrom(item, ['sumInsuredCedantMovement']);
+              total.premium += numberFrom(item, ['premiumCedantMovement']);
+            } else {
+              if (item.counts) total.sum += numberFrom(item, ['sumInsuredReMovement']);
+              total.premium += numberFrom(item, ['premiumReMovement']);
+            }
+          } else {
+            if (item.counts) total.sum += numberFrom(item, ['sumInsuredMovement']);
+            total.premium += numberFrom(item, ['premiumMovement']);
+          }
           return total;
         }, { sum: 0, premium: 0 });
         const factor = row.isCoinsurance
           ? coinsurancePercentageForContract(contract) / 100
-          : reinsuranceBaseFactorForContract(contract) * Number(row.percentage || 0) / 100;
+          : (group && hasFacultativeMovementOnly(group)
+            ? 1
+            : reinsuranceBaseFactorForContract(contract) * Number(row.percentage || 0) / 100);
         const premium = money(movement.premium * factor);
         const sum = money(movement.sum * factor);
         const commissionRate = Number(row.premium || 0) ? Number(row.commission || 0) / Number(row.premium || 0) : 0;
@@ -3201,6 +3472,20 @@
           // Retención y No Técnica no tienen aceptantes que consultar.
           canViewReinsurers: !row.isRetention && row.contractLabel !== 'No Técnica'
         });
+      });
+      // Esta pestaña describe únicamente el cambio. Sus porcentajes no son
+      // los del estado final: se calculan sobre la suma movida del endoso.
+      const movementSumBase = rows.reduce(function (total, row) {
+        return total + Math.abs(Number(row.sum || 0));
+      }, 0);
+      const movementPremiumBase = rows.reduce(function (total, row) {
+        return total + Math.abs(Number(row.premium || 0));
+      }, 0);
+      const movementUsesSum = movementSumBase > 0;
+      const movementPercentageBase = movementUsesSum ? movementSumBase : movementPremiumBase;
+      rows.forEach(function (row) {
+        const value = Math.abs(Number(movementUsesSum ? row.sum : row.premium) || 0);
+        row.percentage = movementPercentageBase ? Number((value / movementPercentageBase * 100).toFixed(8)) : 0;
       });
       const selected = rows.find(function (row) {
         return row.canViewReinsurers && row.groupKey === selectedReinsuranceLineKey;
@@ -3222,7 +3507,7 @@
               onClick={function (event) { event.stopPropagation(); setSelectedReinsuranceLineKey(row.groupKey); }}><FolderIcon /></Button> : null}</span>;
           } });
         }
-        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
+        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(8); } });
         if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax' || column.dataIndex === 'reinsuranceBalance') return Object.assign({}, column, { render: function (v) { return fmt(v); } });
         if (column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
         return column;
@@ -3236,7 +3521,7 @@
             };
             return <Table.Summary><Table.Summary.Row className="axx-rea-total-row">
               <Table.Summary.Cell index={0}><b>{t('Totales')}</b></Table.Summary.Cell>
-              <Table.Summary.Cell index={1} align="right">{pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? 0 : Number(row.percentage || 0)); }, 0).toFixed(4)}</Table.Summary.Cell>
+              <Table.Summary.Cell index={1} align="right">{pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? 0 : Number(row.percentage || 0)); }, 0).toFixed(8)}</Table.Summary.Cell>
               <Table.Summary.Cell index={2} align="right">{fmt(total('sum'))}</Table.Summary.Cell>
               <Table.Summary.Cell index={3} align="right">{fmt(total('premium'))}</Table.Summary.Cell>
               <Table.Summary.Cell index={4}></Table.Summary.Cell>
