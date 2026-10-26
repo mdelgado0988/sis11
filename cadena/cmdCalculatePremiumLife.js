@@ -16,6 +16,12 @@ const objectDefinitionCode = "DT_ACCIDENTES_V1";
 let tarifas;
 let oaUserData;
 let resultCoverages = [];
+//MSN-000089 (AXX-5758) - TASAEG: la tabla tbRiesgoAnual se lee sólo si la tarifa del producto usa la variable TASAEG
+let usaTasaEG = false;
+let tablaRiesgoAnual = null;
+let sexoAsegurado;
+//MSN-000090 (AXX-5809) - ProrrataVigencia: coberturas cuya fila de tarifa trae usaProrrata = true
+let coberturasProrrata = [];
 const tarifaVida = [
   { lob: 20, name: "tarificacionSIS9VidaColectivo"  }, 
   { lob: 31, name: "tarificacionSIS9Vida"  },   
@@ -67,6 +73,7 @@ try {
         resultCoverage.premium = evalConfig(obj, tarifa.prima);    
         resultCoverage.premium = n(resultCoverage.premium);   // a dos decimales
         oaUserData[`PRIMA${cov.code}`] = resultCoverage.premium;
+        if (vEqual(tarifa.usaProrrata) == "TRUE") coberturasProrrata.push(String(cov.code));
 
         // log(`Evaluando deducible}: ${tarifa.deducible}`);
         resultCoverage.dedutible = evalConfig(obj, tarifa.deducible);    
@@ -93,6 +100,9 @@ try {
     }
     
   }
+
+  //MSN-000090 (AXX-5809): prima de la vigencia en las filas de tarifa con usaProrrata
+  aplicarProrrataVigencia();
 
   //MSN-000030 (AXX-1589): prima fija del endoso EndosoTarjetaProtegida
   aplicarPrimaFijaEndoso();
@@ -216,6 +226,8 @@ function getQuotationObject(coverageCode) {
   obj.txtSalario = n(obj.txtSalario);
   obj.XMONTH = getMonthsBetween(poliza.start, poliza.end);
   obj.edadReal = calcularEdad();
+  //MSN-000089 (AXX-5758) - variable TASAEG de las fórmulas de tarifa (tasa por cobertura y edad de tbRiesgoAnual)
+  if (usaTasaEG) obj.TASAEG = TASAEG(coverageCode, obj.edadReal);
 
   //Calculo de factor de vigencia, ojo
   //* calculamos la duración de la cobertura
@@ -247,6 +259,7 @@ function setTarifas() {
 
   tarifas = mapearTablaConfig(GetFullTable.outData ?? []);
   tarifas = tarifas.filter(x => vEqual(x.cramo) == vEqual(poliza.lob) && vEqual(x.codigoplan) == vEqual(poliza.productCode));
+  usaTasaEG = tarifas.some(x => /\bTASAEG\b/.test([x.condicion, x.prima, x.deducible, x.sumaasegurada, x.etiqueta].join(" ")));
   
 }
 
@@ -376,6 +389,38 @@ function calcularEdad(fechaCalculo = new Date()) {
     }
 
     return edad;
+}
+
+/*
+  *MSN-000089 (AXX-5758) - TASAEG
+  *Equivale a la variable {TASAEG} de SIS9: SELECT * FROM dbo.tbRiesgoAnual r WHERE cramo={CRAMO} AND r.ccober={CCOBER}
+  *AND edad >= r.Rango1 AND edad <= r.Rango2. Lee la tabla dinámica tbRiesgoAnual con la misma lógica: ramo de la póliza,
+  *cobertura que se tarifa y edad del asegurado (edadReal, edad a la fecha) dentro del rango, ambos extremos incluidos.
+  *Devuelve TasaM si el asegurado es de sexo femenino y TasaH en otro caso. Sin fila que aplique devuelve 0.
+*/
+function TASAEG(coverageCode, edad) {
+  if (!tablaRiesgoAnual) {
+    doCmd({cmd: "GetFullTable", data: {table: "tbRiesgoAnual"}});
+    if (!GetFullTable.ok)
+      throw "Error leyendo la tabla tbRiesgoAnual";
+    tablaRiesgoAnual = mapearTablaConfig(GetFullTable.outData ?? []);
+  }
+  const edadAsegurado = Number(edad);
+  const fila = tablaRiesgoAnual.find(x => vEqual(x.cramo) == vEqual(poliza.lob)
+    && vEqual(x.ccober) == vEqual(coverageCode)
+    && edadAsegurado >= Number(x.Rango1)
+    && edadAsegurado <= Number(x.Rango2));
+  if (!fila) return 0;
+  const tasa = getSexoAsegurado() == "F" ? fila.TasaM : fila.TasaH;
+  return Number(tasa) || 0;
+}
+
+function getSexoAsegurado() {
+  if (sexoAsegurado === undefined) {
+    doCmd({cmd: "LoadEntity", data: { entity: "Contact", fields: "gender", filter: `id = ${poliza.MainInsured?.contactId ?? 0}` }});
+    sexoAsegurado = vEqual(LoadEntity.outData?.gender);
+  }
+  return sexoAsegurado;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -549,4 +594,38 @@ function aplicarCobtarInclusion() {
   const nuevas = normalizeArray(filas);
   const codigos = nuevas.map(x => String(x.COVERAGECODE).trim());
   oaUserData.cobtar = (oaUserData.cobtar || []).filter(x => codigos.indexOf(String(x.COVERAGECODE).trim()) < 0).concat(nuevas);
+}
+
+/*
+  *MSN-000090 (AXX-5809) - ProrrataVigencia
+  *Las filas de tarifa con usaProrrata = true (columna de las tablas tarificacionSIS9*) cobran la prima de la vigencia:
+  *prima de tarifa x días de vigencia / días del año que empieza en la fecha de inicio. Un año completo da factor 1.
+  *Sólo en la cotización de la póliza (alta y renovación): en los endosos (action Change*) la tarifa queda anual,
+  *porque el producto ya prorratea el movimiento del endoso sobre base anual (changeProrateMode).
+  *Sin filas en true no hace nada: el cálculo queda idéntico. Hoy sólo EG6 tiene filas en true.
+*/
+function aplicarProrrataVigencia() {
+  if (!coberturasProrrata.length) return;
+  if (/^change/i.test(String(action || ""))) return;
+  const inicio = fechaUTCms(poliza.start);
+  const fin = fechaUTCms(poliza.end);
+  if (inicio === null || fin === null || fin <= inicio) return;
+  const unAnio = new Date(inicio);
+  unAnio.setUTCFullYear(unAnio.getUTCFullYear() + 1);
+  const diasAnio = Math.round((unAnio.getTime() - inicio) / 86400000);
+  const diasVigencia = Math.round((fin - inicio) / 86400000);
+  if (diasAnio <= 0 || diasVigencia >= diasAnio) return;
+  const factor = diasVigencia / diasAnio;
+  resultCoverages.forEach(c => {
+    if (coberturasProrrata.indexOf(String(c.code)) < 0) return;
+    c.premium = round2(Number(c.premium || 0) * factor);
+  });
+}
+
+function fechaUTCms(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor.getTime();
+  const texto = String(valor).trim();
+  const fecha = new Date(/(Z|[+-]\d\d:?\d\d)$/i.test(texto) ? texto : texto + "Z");
+  return isNaN(fecha.getTime()) ? null : fecha.getTime();
 }
