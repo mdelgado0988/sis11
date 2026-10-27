@@ -13,12 +13,32 @@ Calculations:
       const result = doCmd({cmd: "ExeChain", data: { chain: "cmdGetLifeInsuredAge", context: '{ policyId: ' + context.pol.id + ' }' }});
       const edad = Number(result.outData.edad);
       let tasaEdad = 0;
-      if (edad >= 0 && edad <= 20) tasaEdad = 1.5;
-      else if (edad >= 21 && edad <= 30) tasaEdad = 2.58;
-      else if (edad >= 31 && edad <= 40) tasaEdad = 5.01;
-      else if (edad >= 41 && edad <= 50) tasaEdad = 9.62;
-      else if (edad >= 51 && edad <= 65) tasaEdad = 15.04;
-      return { edad, tasaEdad };
+      if (edad >= 0 && edad <= 29) tasaEdad = 1.5;
+      else if (edad >= 30 && edad <= 39) tasaEdad = 2.58;
+      else if (edad >= 40 && edad <= 49) tasaEdad = 5.01;
+      else if (edad >= 50 && edad <= 59) tasaEdad = 9.62;
+      else if (edad >= 60 && edad <= 65) tasaEdad = 15.04;
+      else if (edad >= 66 && edad <= 70) tasaEdad = 15.04;
+      // La prima por tasa se prorratea por los días de vigencia. La vigencia
+      // anual normal y la de año bisiesto conservan factor 1 para no alterar
+      // la prima anual por la diferencia de un día.
+      const coverage = context.cov || context.coverage || context._cov || {};
+      const startValue = coverage.start || coverage.startDate || context.pol.start || context.pol.startDate;
+      const endValue = coverage.end || coverage.endDate || context.pol.end || context.pol.endDate;
+      const parseDate = function(value){
+        if (!value) return null;
+        const text = String(value);
+        const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text) ? text + 'T00:00:00Z' : text;
+        const date = new Date(normalized);
+        return Number.isNaN(date.getTime()) ? null : date;
+      };
+      const start = parseDate(startValue);
+      const end = parseDate(endValue);
+      const days = start && end && end >= start
+        ? Math.round((end.getTime() - start.getTime()) / 86400000) + 1
+        : 365;
+      const prorrata = days === 365 || days === 366 ? 1 : days / 365;
+      return { edad, tasaEdad, prorrata };
   - name: tasaRea
     formula: |
       //block
@@ -42,7 +62,7 @@ Lines:
   - condition: '_dt.edad <= 65 && !["UNICACLA", "UNICAPLA"].includes(_product.code)'
     ced: +(_cov.limit * 0.5).toFixed(2);
     re: +(_cov.limit - _ced).toFixed(2);
-    cedantPremium: +((_cov.premium > 0 && ((_cov.limit * _dt.tasaEdad / 1000.00) * _proportionCed)) || 0).toFixed(2);
-    reinsurerPremium: +((_cov.premium > 0 && ((_cov.limit * _dt.tasaEdad / 1000.00) * _proportionRe)) || 0).toFixed(2);
+    cedantPremium: +((_cov.premium > 0 && ((_cov.limit * _dt.tasaEdad / 1000.00) * _dt.prorrata * _proportionCed)) || 0).toFixed(2);
+    reinsurerPremium: +((_cov.premium > 0 && ((_cov.limit * _dt.tasaEdad / 1000.00) * _dt.prorrata * _proportionRe)) || 0).toFixed(2);
     commission: 0;
     id: Cuota Parte
