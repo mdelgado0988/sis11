@@ -44,8 +44,22 @@ const diasAnio = Math.round((Date.UTC(anio + 1, mes, dia) - diaInicio) / msDia);
 const fin = new Date(inicio.getTime() + dias * msDia);
 const fechaTexto = ms => new Date(ms).toISOString().slice(0, 10);
 
+// MSN-000111: monthly installments strictly before the local expiry day.
+const cuotas = [];
+let fechaCuota = new Date(local.getTime());
+while (Date.UTC(fechaCuota.getUTCFullYear(),fechaCuota.getUTCMonth(),fechaCuota.getUTCDate()) < objetivo && cuotas.length < 12) {
+  cuotas.push(new Date(fechaCuota.getTime() - offsetHoras * 3600000).toISOString());
+  const diaCuota = fechaCuota.getUTCDate();
+  fechaCuota.setUTCDate(1);
+  fechaCuota.setUTCMonth(fechaCuota.getUTCMonth()+1);
+  const ultimoDia = new Date(Date.UTC(fechaCuota.getUTCFullYear(),fechaCuota.getUTCMonth()+1,0)).getUTCDate();
+  fechaCuota.setUTCDate(Math.min(diaCuota,ultimoDia));
+}
+
 return {
   ok: true,
+  installments: cuotas.length,
+  dueDates: cuotas,
   end: fin.toISOString(),
   dias: dias,
   diasAnio: diasAnio,

@@ -1,4 +1,20 @@
 Rules:
+  - condition: "_pol.productCode===\"EG6\" && !_pol.activeDate && _pol.periodicity===\"m\""
+    name: "EG6 cuotas mensuales dentro de vigencia MSN-000111"
+    extraContext: "chain cmdFinVigencia30Junio {start:_pol.start}"
+    defaultInstallments: "Number(_extra.installments)"
+    maxInstallments: 12
+    Detail:
+      - condition: "true"
+        amount: "/*block*/ const n=Number(_extra.installments); const part=Math.round(Number(_pol.tax)*100/n)/100; const tax=_installment.numberInYear===n ? Math.round((Number(_pol.tax)-part*(n-1))*100)/100 : part; Math.round((_installment.minimum-tax)*100)/100;"
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: "_lineNumber"
+      - condition: "true"
+        amount: "/*block*/ const n=Number(_extra.installments); const part=Math.round(Number(_pol.tax)*100/n)/100; _installment.numberInYear===n ? Math.round((Number(_pol.tax)-part*(n-1))*100)/100 : part;"
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: "_lineNumber"
   - condition: /*block*/ doCmd({cmd:'ExeChain',data:{chain:'cmdRenewalKeepRestructuredPlanAxx1083',context:'{id:'+_pol.id+'}'}}); ExeChain.ok && !!ExeChain.outData && ExeChain.outData.ok === true
     extraContext: chain cmdRenewalKeepRestructuredPlanAxx1083 {id:_pol.id}
     name: AXX-1083 Keep Restructured Plan On Renewal
@@ -158,11 +174,6 @@ Rules:
         concept: "'Detalle de cuota #'+_installment.numberInYear"
         detail: "'Prima Cobertura'"
         order: _lineNumber
-   #   - condition: 1==1
-   #     amount: Math.round(_pol.fee/1*100)/100;
-   #     concept: "'Detalle de cuota #'+_installment.numberInYear"
-   #     detail: "'Fees'"
-   #     order: _lineNumber
       - condition: 1==1
         amount: Math.round(_pol.tax/1*100)/100;
         concept: "'Detalle de cuota #'+_installment.numberInYear"
@@ -242,6 +253,47 @@ Rules:
         order: _lineNumber
       - condition: 1==1
         amount: Math.round(_pol.tax/1*100)/100;
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+  - condition: _pol.periodicity=="m1"
+    name: "10 Installments / Monthly"
+    payPlanStartsAfterMonths: -1
+    maxInstallments: 10
+    defaultInstallments: 10
+    defaultPremiumPeriodicity: "m1"
+    Detail:
+      - condition: _installment.numberInYear < 10
+        amount: |
+          /*block*/
+          /* MSN-000055: 10 cuotas mensuales; el impuesto se reparte en 10 y la prima es el resto de la cuota */
+          const n2 = (value) => Number(value.toFixed(2));
+          n2(_installment.minimum - n2(_pol.tax/10));
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+      - condition: _installment.numberInYear < 10
+        amount: |
+          /*block*/
+          const n2 = (value) => Number(value.toFixed(2));
+          n2(_pol.tax/10);
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Impuesto de Seguros'"
+        order: _lineNumber
+      - condition: _installment.numberInYear==10
+        amount: |
+          /*block*/
+          const n2 = (value) => Number(value.toFixed(2));
+          const impuesto = n2(n2(_pol.tax / 10) + (_pol.tax - (n2(_pol.tax / 10) * 10)));
+          n2(_installment.minimum - impuesto);
+        concept: "'Detalle de cuota #'+_installment.numberInYear"
+        detail: "'Prima Cobertura'"
+        order: _lineNumber
+      - condition: _installment.numberInYear==10
+        amount: |
+          /*block*/
+          const n2 = (value) => Number(value.toFixed(2));
+          n2(n2(_pol.tax / 10) + (_pol.tax - (n2(_pol.tax / 10) * 10)));
         concept: "'Detalle de cuota #'+_installment.numberInYear"
         detail: "'Impuesto de Seguros'"
         order: _lineNumber

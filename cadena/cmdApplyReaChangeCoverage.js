@@ -487,6 +487,49 @@ if (preserveActiveReinsurance) {
   }
 }
 if (alreadyApplied) {
+  let preservedRowsRepaired = 0;
+  // ExeChangeCoverage puede recalcular la distribucion despues de PREPARE_EXECUTION.
+  // En ProceedOrder el reaseguro no cambia; si el motor altero las filas ya
+  // versionadas, se restaura el snapshot confirmado antes de finalizar.
+  if (preserveActiveReinsurance) {
+    const requestedByKey = {};
+    requestedRows.forEach(function (row) { requestedByKey[keyOf(row)] = row; });
+    const repairStatements = [];
+    currentCessions.forEach(function (active) {
+      const requested = requestedByKey[keyOf(active)];
+      if (!requested) return;
+      const amountDrift = Math.abs(num(active.sumInsuredCedant) - num(requested.sumInsuredCedant)) > 0.01
+        || Math.abs(num(active.premiumCedant) - num(requested.premiumCedant)) > 0.01
+        || Math.abs(num(active.sumInsuredRe) - num(requested.sumInsuredRe)) > 0.01
+        || Math.abs(num(active.premiumRe) - num(requested.premiumRe)) > 0.01
+        || Math.abs(num(active.comissionCedant) - num(requested.commission)) > 0.01
+        || Math.abs(num(active.tax) - num(requested.tax)) > 0.01;
+      const percentageDrift = Math.abs(num(active.proportionCed) - num(requested.proportionCed)) > 0.0001
+        || Math.abs(num(active.proportionRe) - num(requested.proportionRe)) > 0.0001;
+      if (!amountDrift && !percentageDrift) return;
+      repairStatements.push('UPDATE Cession SET '
+        + 'sumInsuredCedant = ' + sqlValue(money(requested.sumInsuredCedant)) + ', '
+        + 'premiumCedant = ' + sqlValue(money(requested.premiumCedant)) + ', '
+        + 'sumInsuredRe = ' + sqlValue(money(requested.sumInsuredRe)) + ', '
+        + 'premiumRe = ' + sqlValue(money(requested.premiumRe)) + ', '
+        + 'comissionCedant = ' + sqlValue(money(requested.commission)) + ', '
+        + 'tax = ' + sqlValue(money(requested.tax))
+        + (requested.proportionCed === undefined ? '' : ', proportionCed = ' + sqlValue(requested.proportionCed))
+        + (requested.proportionRe === undefined ? '' : ', proportionRe = ' + sqlValue(requested.proportionRe))
+        + ' WHERE id = ' + Number(active.id)
+        + ' AND lifePolicyId = ' + policyId
+        + ' AND changeId = ' + changeId
+        + ' AND overwritten = 0;');
+    });
+    if (repairStatements.length) {
+      doCmd({ cmd: 'DoQuery', data: { sql: ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'].concat(repairStatements, ['COMMIT TRANSACTION;']).join('\n') } });
+      if (!DoQuery || DoQuery.ok === false) return {
+        ok: false, stage: 'REPAIR_PRESERVED_REINSURANCE', changeId: changeId, policyId: policyId,
+        msg: 'No fue posible restaurar la distribucion preservada: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia')
+      };
+      preservedRowsRepaired = repairStatements.length;
+    }
+  }
   // Versiones anteriores podían dejar FAC vigente con todos sus importes de
   // distribución en cero. Un reintento limpia solo ese artefacto, sin borrar
   // las anulaciones ni alterar las líneas con saldo.
@@ -511,6 +554,7 @@ if (alreadyApplied) {
     changeId: changeId,
     policyId: policyId,
     created: currentCessions.length - emptyFacultativeIds.length,
+    preservedRowsRepaired: preservedRowsRepaired,
     emptyFacultativeRemoved: emptyFacultativeIds.length,
     msg: 'El reaseguro del endoso ya estaba aplicado; no se duplicaron cesiones ni aceptantes.'
   };

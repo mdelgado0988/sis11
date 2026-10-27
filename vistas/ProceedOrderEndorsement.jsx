@@ -974,7 +974,11 @@
       jOldPayPlan: Array.isArray(oldPayPlan) ? JSON.stringify(oldPayPlan) : null,
       jNewPayPlan: Array.isArray(newPayPlan) ? JSON.stringify(newPayPlan) : null,
       jEditedPayPlan: Array.isArray(newPayPlan) ? JSON.stringify(newPayPlan) : null,
-      jAdditional: JSON.stringify({ endorsementType: 'PROCEEDORDER' })
+      jAdditional: JSON.stringify({
+        endorsementType: 'PROCEEDORDER',
+        // Orden de proceder no debe volver a aplicar la distribucion del movimiento.
+        preserveActiveReinsurance: true
+      })
     };
   };
 
@@ -1029,6 +1033,8 @@
   const persistReinsuranceSnapshot = async function (changeId, snapshot) {
     const json = JSON.stringify({
       endorsementType: 'PROCEEDORDER',
+      // El comando debe versionar la distribucion vigente sin sumarle el movimiento.
+      preserveActiveReinsurance: true,
       reinsuranceSnapshot: snapshot
     }).replace(/'/g, "''");
     const response = await exe('SetField', {
@@ -1661,6 +1667,91 @@
     return applyCoinsuranceToSnapshot(next);
   };
 
+  const buildReinsuranceExecutionDebug = function (currentSnapshot, simulatedSnapshot, payload) {
+    const amountFields = [
+      'sumInsuredCedant', 'sumInsuredRe', 'premiumCedant', 'premiumRe', 'commission', 'tax'
+    ];
+    const retentionByCoverage = function (snapshot) {
+      const grouped = {};
+      (snapshot && Array.isArray(snapshot.distribution) ? snapshot.distribution : []).forEach((row) => {
+        const coverageCode = String(row.coverageCode || '');
+        if (!grouped[coverageCode]) grouped[coverageCode] = {
+          coverageCode: coverageCode,
+          sumInsuredCedant: 0,
+          premiumCedant: 0
+        };
+        grouped[coverageCode].sumInsuredCedant += Number(row.sumInsuredCedant || 0);
+        grouped[coverageCode].premiumCedant += Number(row.premiumCedant || 0);
+      });
+      return Object.keys(grouped).sort().map((coverageCode) => ({
+        coverageCode: coverageCode,
+        sumInsuredCedant: Number(grouped[coverageCode].sumInsuredCedant.toFixed(2)),
+        premiumCedant: Number(grouped[coverageCode].premiumCedant.toFixed(2))
+      }));
+    };
+    const snapshotRows = function (snapshot) {
+      return (snapshot && Array.isArray(snapshot.distribution) ? snapshot.distribution : []).map((row) => {
+        const item = {
+          key: [row.contractId, row.lineId, row.coverageCode, row.cessionId || row.id].join('|'),
+          contractId: row.contractId,
+          lineId: row.lineId,
+          coverageCode: row.coverageCode,
+          cessionId: row.cessionId || row.id
+        };
+        amountFields.forEach((field) => { item[field] = Number(row[field] || 0); });
+        return item;
+      }).sort((left, right) => left.key.localeCompare(right.key));
+    };
+    const currentRows = snapshotRows(currentSnapshot);
+    const simulatedRows = snapshotRows(simulatedSnapshot);
+    const currentByKey = currentRows.reduce((result, row) => { result[row.key] = row; return result; }, {});
+    const simulatedByKey = simulatedRows.reduce((result, row) => { result[row.key] = row; return result; }, {});
+    const keys = Array.from(new Set(currentRows.map((row) => row.key).concat(simulatedRows.map((row) => row.key)))).sort();
+    const variation = keys.map((key) => {
+      const before = currentByKey[key] || {};
+      const after = simulatedByKey[key] || {};
+      const delta = {};
+      amountFields.forEach((field) => { delta[field] = Number((Number(after[field] || 0) - Number(before[field] || 0)).toFixed(2)); });
+      return {
+        key: key,
+        before: before,
+        after: after,
+        delta: delta,
+        changed: amountFields.some((field) => Math.abs(delta[field]) > 0.01)
+      };
+    });
+    return {
+      request: {
+        policyId: policyId,
+        effectiveDate: payload && payload.effectiveDate,
+        endorsementType: 'PROCEEDORDER'
+      },
+      coverageChangePayload: payload,
+      currentReinsurance: {
+        snapshot: currentSnapshot,
+        distribution: currentRows,
+        participants: currentSnapshot && currentSnapshot.participants || []
+      },
+      simulatedExecution: {
+        snapshot: simulatedSnapshot,
+        distribution: simulatedRows,
+        participants: simulatedSnapshot && simulatedSnapshot.participants || []
+      },
+      executionPreview: {
+        preserveActiveReinsurance: true,
+        source: 'reinsuranceBaseline',
+        hasReinsuranceVariation: variation.some((item) => item.changed),
+        retentionByCoverage: retentionByCoverage(simulatedSnapshot),
+        expectedActiveDistribution: simulatedRows
+      },
+      comparison: {
+        hasVariation: variation.some((item) => item.changed),
+        variations: variation.filter((item) => item.changed),
+        allRowsCompared: variation
+      }
+    };
+  };
+
   const validateProceedReinsurance = function (snapshotOverride) {
     const source = snapshotOverride || buildEditedReinsuranceSnapshot() || reinsuranceSnapshot;
     const sourceRows = source && Array.isArray(source.distribution) ? source.distribution : [];
@@ -2029,7 +2120,24 @@
       message.success(t('Calculation completed successfully.'));
       // La carga de reaseguro no debe bloquear el resultado de la cotización.
       // La pestaña conserva su propio indicador, igual que cambio de vigencia.
-      void loadReinsuranceForView(true);
+      void loadReinsuranceForView(true).then((snapshot) => {
+        if (!snapshot) return;
+        const simulatedSnapshot = recalculateReinsuranceParticipants(JSON.parse(JSON.stringify(snapshot)));
+        const simulatedPayload = Object.assign({}, coverageChangePayload);
+        Object.keys(quote.outData || {}).forEach((key) => {
+          if (simulatedPayload[key] === undefined) simulatedPayload[key] = quote.outData[key];
+        });
+        simulatedPayload.operation = 'ADD';
+        simulatedPayload.jAdditional = JSON.stringify({
+          endorsementType: 'PROCEEDORDER',
+          preserveActiveReinsurance: true,
+          reinsuranceSnapshot: simulatedSnapshot
+        });
+        const debug = buildReinsuranceExecutionDebug(snapshot, simulatedSnapshot, simulatedPayload);
+        debug.calculation = { quote: quote.outData };
+        // Objeto deliberadamente estructurado para copiarlo antes de ejecutar.
+        console.log('[ProceedOrderEndorsement] reinsurance-execution-debug', debug);
+      });
     } catch (err) {
       const errorMessage = err && err.message ? err.message : String(err);
       pushStep(t('Calculate the term change'), false, translatedMessage(errorMessage, 'Unexpected error'));
@@ -2113,8 +2221,14 @@
         calculation.oldPayPlan,
         calculation.newPayPlan
       );
-      const editedReinsurance = buildEditedReinsuranceSnapshot()
-        || applyCoinsuranceToSnapshot(await loadCurrentReinsuranceSnapshot());
+      // ProceedOrder no genera una variacion de reaseguro. No reconstruir el
+      // snapshot desde las filas sinteticas, porque esas filas representan el
+      // movimiento y pueden volver a sumar la retencion al estado vigente.
+      const editedReinsurance = reinsuranceBaseline
+        ? JSON.parse(JSON.stringify(reinsuranceBaseline))
+        : (reinsuranceSnapshot
+          ? JSON.parse(JSON.stringify(reinsuranceSnapshot))
+          : applyCoinsuranceToSnapshot(await loadCurrentReinsuranceSnapshot()));
       const reinsuranceSnapshot = recalculateReinsuranceParticipants(editedReinsurance);
       if (!reinsuranceSnapshot) throw new Error(t('The reinsurance distribution could not be prepared.'));
       // Solo se persisten los datos de distribución; los auxiliares visuales
@@ -2123,6 +2237,8 @@
       delete reinsuranceSnapshot._coinsuranceGrossByContract;
       addPayload.jAdditional = JSON.stringify({
         endorsementType: 'PROCEEDORDER',
+        // La orden de proceder conserva el reaseguro vigente; no se suma otra vez el movimiento.
+        preserveActiveReinsurance: true,
         reinsuranceSnapshot: reinsuranceSnapshot
       });
       Object.keys(calculation.quote).forEach((k) => { if (addPayload[k] === undefined) addPayload[k] = calculation.quote[k]; });
