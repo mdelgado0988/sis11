@@ -1,0 +1,40 @@
+nonTechnicalPremium: 0
+Calculations:  
+  - name: calc
+    formula: |
+      //block
+      //doCmd({cmd: "GetPing", data: {contexto: JSON.stringify(context)}});
+      const n2 = value => Number(Number(value || 0).toFixed(2));
+
+      const resultado = {}
+      resultado.suma = n2(context.cov.limit);
+      resultado.prima = n2(context.cov.premium);
+      resultado.re = n2(resultado.suma * 0);
+      resultado.ced = n2(resultado.suma * 0);      
+
+      //calculso finales
+      resultado.cedantPremium = n2(resultado.prima * 0);
+      resultado.reinsurerPremium = n2(resultado.prima * 0);
+
+      resultado.sumaFac = n2(resultado.suma - (resultado.re + resultado.ced));
+      resultado.primaFac = n2(resultado.prima - (resultado.cedantPremium + resultado.reinsurerPremium));
+
+      //doCmd({cmd: "GetPing", data: {resultado: resultado}});
+      
+      return resultado
+Lines:
+  - ced: _calc.ced;
+    re: _calc.re;
+    cedantPremium: _calc.cedantPremium;
+    reinsurerPremium: _calc.reinsurerPremium;
+    commission: 0
+    id: Cuota Parte
+
+  - condition: _calc.sumaFac != 0
+    ced: 0;
+    re: _calc.sumaFac
+    cedantPremium: 0;
+    reinsurerPremium: _calc.primaFac
+    #commission: Math.round((((_rsi / _insuredSum) * (_cov.premium * 0.9) * 0.30) * 100)) / 100;
+    tax: 0
+    id: FAC

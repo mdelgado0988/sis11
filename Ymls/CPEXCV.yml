@@ -17,16 +17,16 @@ Lines:
     re: +(_cfg[_cov.code].mscp - +(_cfg[_cov.code].mscp * _perc.pret).toFixed(2)).toFixed(2);
     cedantPremium: +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2);
     reinsurerPremium: +(_cfg[_cov.code].mpcp - +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2)).toFixed(2);
-    commission: +(+(_cfg[_cov.code].mpcp - +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2)).toFixed(2) * 0.35);
+    commission: +((+(_cfg[_cov.code].mpcp - +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2)).toFixed(2) * 0.35).toFixed(2));
     tax: 0
     id: Cuota Parte
     
   - condition: _cfg[_cov.code].msex1 != 0
     ced: 0
-    re: _cfg[_cov.code].msex1;
+    re: +Number(_cfg[_cov.code].msex1 || 0).toFixed(2);
     cedantPremium: 0
-    reinsurerPremium: _cfg[_cov.code].mpex1;
+    reinsurerPremium: +Number(_cfg[_cov.code].mpex1 || 0).toFixed(2);
     commission: 0
     tax: 0
     id: Excedente 1
-    
+

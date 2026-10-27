@@ -46,9 +46,9 @@ Calculations:
       return { tasa: 0.292 }
 Lines:
   - condition: '_dt.edad > 65'
-    ced: _cov.limit;
+    ced: +Number(_cov.limit || 0).toFixed(2);
     re: 0;
-    cedantPremium: _cov.premium;
+    cedantPremium: +Number(_cov.premium || 0).toFixed(2);
     reinsurerPremium: 0;
     commission: 0;
     id: RET
