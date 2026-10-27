@@ -39,7 +39,10 @@ const COCESSION_COLUMNS = [
   'tax', 'changeId', 'overwritten', 'allocationId', 'lifeCoverageId', 'brokerId'
 ];
 
-const money = function (value) { return Number(Number(value || 0).toFixed(2)); };
+const money = function (value) {
+  const rounded = Number(Number(value || 0).toFixed(2));
+  return Object.is(rounded, -0) ? 0 : rounded;
+};
 const num = function (value) {
   const result = Number(value);
   return Number.isFinite(result) ? result : 0;
@@ -52,6 +55,19 @@ const isFacultativeLine = function (lineId) {
 };
 const isEmptyFacultativeDistribution = function (cession) {
   return isFacultativeLine(cession.lineId)
+    && Math.abs(num(cession.sumInsuredCedant)) <= 0.01
+    && Math.abs(num(cession.premiumCedant)) <= 0.01
+    && Math.abs(num(cession.sumInsuredRe)) <= 0.01
+    && Math.abs(num(cession.premiumRe)) <= 0.01
+    && Math.abs(num(cession.comissionCedant)) <= 0.01
+    && Math.abs(num(cession.tax)) <= 0.01;
+};
+const isFrontingLine = function (lineId) {
+  const line = txt(lineId).toUpperCase();
+  return line === 'FRO' || line.indexOf('FRONT') >= 0;
+};
+const isEmptyFrontingDistribution = function (cession) {
+  return isFrontingLine(cession.lineId)
     && Math.abs(num(cession.sumInsuredCedant)) <= 0.01
     && Math.abs(num(cession.premiumCedant)) <= 0.01
     && Math.abs(num(cession.sumInsuredRe)) <= 0.01
@@ -747,7 +763,12 @@ requestedRows.forEach(function (requested) {
 // de generar ruido, haría que el siguiente endoso detecte FAC inexistente.
 if (reinsuranceFinalStateOnly && !preserveActiveReinsurance) {
   for (let i = finalCessions.length - 1; i >= 0; i--) {
-    if (isEmptyFacultativeDistribution(finalCessions[i])) finalCessions.splice(i, 1);
+    // No persistir lineas de colocacion vacias. En particular, un -0 en la
+    // distribucion sintetica de FRO no debe crear una cesion vigente con
+    // suma/prima bruta del movimiento pero sin importe cedido.
+    if (isEmptyFacultativeDistribution(finalCessions[i]) || isEmptyFrontingDistribution(finalCessions[i])) {
+      finalCessions.splice(i, 1);
+    }
   }
 }
 

@@ -328,9 +328,36 @@ if (useSuretyContractCapacity) {
       const next = JSON.parse(JSON.stringify(template));
       next.id = 0;
       next.lineId = lineId;
-      next.sumInsuredCedant = 0; next.premiumCedant = 0;
+      // Una linea RET sintetica representa el saldo final de retencion cuando
+      // la poliza solo tiene RET implícita dentro de Cuota Parte. Debe partir
+      // del saldo vigente para que no se convierta en movimiento completo.
+      // Caso funcional: si un aumento rebasa el limite proporcional, el
+      // incremento debe ir a FAC. El saldo RET existente no es movimiento;
+      // inicializarlo en cero haria que msret se contabilizara nuevamente.
+      const retentionOwner = lineId === 'RET'
+        ? (base.find(function (cession) {
+          const line = up(cession.lineId);
+          return Number(cession.contractId) === contractId
+            && txt(cession.coverageCode) === code
+            && (line === 'RET' || line.indexOf('RETEN') >= 0);
+        }) || base.find(function (cession) {
+          const line = up(cession.lineId);
+          return Number(cession.contractId) === contractId
+            && txt(cession.coverageCode) === code
+            && (line === 'CP' || line.indexOf('CUOTA') >= 0 || line.indexOf('QUOTA') >= 0);
+        }))
+        : null;
+      if (retentionOwner) {
+        next.sumInsuredCedant = Number(retentionOwner.sumInsuredCedant || 0);
+        next.premiumCedant = Number(retentionOwner.premiumCedant || 0);
+        next.proportionCed = Number(retentionOwner.proportionCed || 0);
+      } else {
+        next.sumInsuredCedant = 0;
+        next.premiumCedant = 0;
+        next.proportionCed = 0;
+      }
       next.sumInsuredRe = 0; next.premiumRe = 0;
-      next.proportionCed = 0; next.proportionRe = 0;
+      next.proportionRe = 0;
       synthetic.push(next);
     };
     if (!hasLine('RET') && (Math.abs(Number(capacity.msret || 0)) >= 0.01 || Math.abs(Number(capacity.mpret || 0)) >= 0.01)) addLine('RET');

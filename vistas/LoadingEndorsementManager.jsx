@@ -2076,6 +2076,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 // The movement grid displays premium participation for CPEXCV;
                 // the sum participation remains separate for its amount calculation.
                 percentage:isCpexCcv ? premiumPercentage : sumPercentage,
+                percentageBasis:isCpexCcv ? 'premium' : 'both',
                 sumPercentage:sumPercentage, premiumPercentage:premiumPercentage,
                 commissionPct:line.premium ? line.commission / line.premium * 100 : 0,
                 taxPct:line.premium ? line.tax / line.premium * 100 : 0,
@@ -2167,7 +2168,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 <Column title='Contrato' dataIndex='contractLabel' render={function(value, row){ return <span className='lem-rea-line-label'><span>{value}</span>
                     {row.canViewReinsurers ? <Button type='text' size='small' className='lem-rea-folder-btn' title='Ver reaseguradores' aria-label='Ver reaseguradores' onClick={function(){ setSelectedLine(row); }}><FolderIcon /></Button> : null}
                 </span>; }} />
-                <Column title='Porcentaje (%)' dataIndex='percentage' align='right' render={renderNumber} />
+                <Column title='Porcentaje (%)' dataIndex='percentage' align='right' render={renderPercentage} />
                 <Column title='Suma' dataIndex='sum' align='right' render={renderNumber} />
                 <Column title='Prima' dataIndex='premium' align='right' render={renderNumber} />
                 <Column title='Pct. Comisión' dataIndex='commissionPct' align='right' render={renderNumber} />
@@ -2292,6 +2293,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                     : premiumPercentage;
                 return {
                     key:key, contractLabel:label, percentage:sumPercentage, premiumPercentage:premiumPercentage,
+                    percentageBasis:isCpexCcv ? 'sum' : 'both',
                     sum:Number((line.sum * reinsuranceFactor).toFixed(2)),
                     premium:Number((line.premium * reinsuranceFactor).toFixed(2)),
                     commissionPct:line.premium ? line.commission / line.premium * 100 : 0,
@@ -2383,10 +2385,11 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const number = Number(value);
             if(!Number.isFinite(number)) return '';
             const isPercentage = name === 'percentage' || name === 'commissionPct' || name === 'taxPct';
+            const percentageDigits = name === 'percentage' ? percentageDecimals(number) : 4;
             return number.toLocaleString('en-US', {
                 useGrouping:true,
                 minimumFractionDigits:isPercentage ? 0 : 2,
-                maximumFractionDigits:isPercentage ? 4 : 2
+                maximumFractionDigits:isPercentage ? percentageDigits : 2
             });
         };
         const field = function(record, name){
@@ -3047,10 +3050,46 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         const state = safeAmount > 0 ? 'lem-positive' : (safeAmount < 0 ? 'lem-negative' : 'lem-zero');
         return renderText(<span className={state}>{text}</span>, record)
     }
+    function percentageDecimals(value){
+        const numeric = Number(value || 0);
+        if(!Number.isFinite(numeric)) return 2;
+        return Math.abs(numeric - Number(numeric.toFixed(2))) < 0.0000001 ? 2 : 8;
+    }
+    function renderPercentage(value, record){
+        const numeric = Number(value || 0);
+        const safeValue = Number.isFinite(numeric) ? numeric : 0;
+        const decimals = percentageDecimals(safeValue);
+        const text = safeValue.toLocaleString('en-US', {
+            minimumFractionDigits:decimals,
+            maximumFractionDigits:decimals
+        });
+        const state = safeValue > 0 ? 'lem-positive' : (safeValue < 0 ? 'lem-negative' : 'lem-zero');
+        return renderText(<span className={state}>{text}</span>, record);
+    }
     function roundDisplayedPercentages(rows){
         const eligible = (rows || []).filter(function(row){ return !row.isCoinsurance; });
-        const raw = eligible.map(function(row){ return Number(row.percentage || 0); });
         if(!eligible.length) return;
+        const basisFor = function(row){
+            if(row.percentageBasis === 'sum') return 'sum';
+            if(row.percentageBasis === 'premium') return 'premium';
+            return 'both';
+        };
+        const amountFor = function(row, basis){ return Math.abs(Number(row[basis] || 0)); };
+        const totalFor = function(basis){
+            return eligible.reduce(function(total, row){ return total + amountFor(row, basis); }, 0);
+        };
+        const raw = eligible.map(function(row){
+            const basis = basisFor(row);
+            if(basis === 'sum' || basis === 'premium'){
+                const total = totalFor(basis);
+                return total > 0 ? amountFor(row, basis) / total * 100 : Number(row.percentage || 0);
+            }
+            const totalSum = totalFor('sum');
+            const totalPremium = totalFor('premium');
+            if(totalSum > 0) return amountFor(row, 'sum') / totalSum * 100;
+            if(totalPremium > 0) return amountFor(row, 'premium') / totalPremium * 100;
+            return Number(row.percentage || 0);
+        });
         for(let decimals = 2; decimals <= 8; decimals += 1){
             const rounded = raw.map(function(value){ return Number(value.toFixed(decimals)); });
             const total = rounded.reduce(function(sum, value){ return sum + value; }, 0);
@@ -3059,6 +3098,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const lastIndex = rounded.length - 1;
             rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
             if(Math.abs(rounded.reduce(function(sum, value){ return sum + value; }, 0) - 100) > 0.000001) continue;
+            const changesWithinTolerance = rounded.every(function(value, index){
+                const row = eligible[index];
+                const basis = basisFor(row);
+                if(basis === 'sum' || basis === 'premium'){
+                    const total = totalFor(basis);
+                    const calculated = Number((total * value / 100).toFixed(2));
+                    return Math.abs(calculated - Number(Number(row[basis] || 0).toFixed(2))) <= 0.01;
+                }
+                const totalSum = totalFor('sum');
+                const totalPremium = totalFor('premium');
+                const calculatedSum = Number((totalSum * value / 100).toFixed(2));
+                const calculatedPremium = Number((totalPremium * value / 100).toFixed(2));
+                return Math.abs(calculatedSum - Number(Number(row.sum || 0).toFixed(2))) <= 0.01
+                    && Math.abs(calculatedPremium - Number(Number(row.premium || 0).toFixed(2))) <= 0.01;
+            });
+            if(!changesWithinTolerance) continue;
             eligible.forEach(function(row, index){ row.percentage = rounded[index]; });
             return;
         }

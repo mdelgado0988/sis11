@@ -815,7 +815,13 @@
 
   function roundedSyntheticPercentages(rows) {
     const eligible = (rows || []).filter(function (row) { return !row.isCoinsurance; });
-    const raw = eligible.map(function (row) { return Number(row.percentage || 0); });
+    const totalSum = eligible.reduce(function (sum, row) { return sum + Math.abs(Number(row.sum || 0)); }, 0);
+    const totalPremium = eligible.reduce(function (sum, row) { return sum + Math.abs(Number(row.premium || 0)); }, 0);
+    const raw = eligible.map(function (row) {
+      if (totalSum > 0) return Math.abs(Number(row.sum || 0)) / totalSum * 100;
+      if (totalPremium > 0) return Math.abs(Number(row.premium || 0)) / totalPremium * 100;
+      return Number(row.percentage || 0);
+    });
     const result = {};
     if (!eligible.length) return result;
 
@@ -838,6 +844,16 @@
       const lastIndex = rounded.length - 1;
       rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
       if (Math.abs(rounded.reduce(function (sum, value) { return sum + value; }, 0) - 100) > 0.000001) continue;
+      const totalSum = eligible.reduce(function (sum, row) { return sum + Number(row.sum || 0); }, 0);
+      const totalPremium = eligible.reduce(function (sum, row) { return sum + Number(row.premium || 0); }, 0);
+      const changesWithinTolerance = rounded.every(function (value, index) {
+        const row = eligible[index];
+        const calculatedSum = money(totalSum * value / 100);
+        const calculatedPremium = money(totalPremium * value / 100);
+        return Math.abs(calculatedSum - money(Number(row.sum || 0))) <= 0.01
+          && Math.abs(calculatedPremium - money(Number(row.premium || 0))) <= 0.01;
+      });
+      if (!changesWithinTolerance) continue;
       return apply(rounded);
     }
 
@@ -853,6 +869,11 @@
       if (Number(numeric.toFixed(decimals)) === numeric) return numeric.toFixed(decimals);
     }
     return numeric.toFixed(8);
+  }
+
+  function syntheticPercentageDecimals(value) {
+    const numeric = Number(value || 0);
+    return Number.isFinite(numeric) && Math.abs(numeric - Number(numeric.toFixed(2))) < 0.0000001 ? 2 : 8;
   }
 
   function renderContractEditor(group, groupKey) {
@@ -2602,6 +2623,62 @@
         }, null, 2));
         (o.contracts || []).forEach(function (group) { hydrateFinalDistribution(group, o.contracts || []); });
         reconcileFacultativeFinalRounding(o.contracts || []);
+        // Diagnostico de origen: permite identificar si la suma mostrada en
+        // Retencion viene del payload, de Cuota Parte o de la linea FAC.
+        const movementSourceDebug = {
+          policyId: policyId,
+          contracts: (o.contracts || []).map(function (contract) {
+            const groups = o.contracts || [];
+            const retentionGroup = groups.find(function (group) {
+              return String(group.contractId) === String(contract.contractId)
+                && normalizedReinsuranceLine(group.lineId) === 'RETENCION';
+            }) || groups.find(function (group) {
+              return String(group.contractId) === String(contract.contractId)
+                && normalizedReinsuranceLine(group.lineId) === 'CUOTA PARTE';
+            });
+            const facultativeGroup = groups.find(function (group) {
+              return String(group.contractId) === String(contract.contractId)
+                && normalizedReinsuranceLine(group.lineId) === 'FAC';
+            });
+            const projectGroup = function (group) {
+              if (!group) return null;
+              return {
+                contractId: group.contractId,
+                lineId: group.lineId,
+                totals: group.totals || {},
+                participants: group.participants || [],
+                rows: (group.rows || []).map(function (row) {
+                  return {
+                    coverageCode: row.coverageCode,
+                    counts: row.counts,
+                    contractCapacityAllocation: row.contractCapacityAllocation,
+                    facultativeMovementOnly: row.facultativeMovementOnly,
+                    sumInsuredMovement: row.sumInsuredMovement,
+                    sourceSumInsuredMovement: row.sourceSumInsuredMovement,
+                    sumInsuredCedantMovement: row.sumInsuredCedantMovement,
+                    sumInsuredReMovement: row.sumInsuredReMovement,
+                    sumInsuredCedant: row.sumInsuredCedant,
+                    sumInsuredRe: row.sumInsuredRe,
+                    premiumMovement: row.premiumMovement,
+                    sourcePremiumMovement: row.sourcePremiumMovement,
+                    premiumCedantMovement: row.premiumCedantMovement,
+                    premiumReMovement: row.premiumReMovement,
+                    premiumCedant: row.premiumCedant,
+                    premiumRe: row.premiumRe
+                  };
+                })
+              };
+            };
+            return {
+              contractId: contract.contractId,
+              lineId: contract.lineId,
+              retentionSource: retentionGroup ? normalizedReinsuranceLine(retentionGroup.lineId) : null,
+              retentionGroup: projectGroup(retentionGroup),
+              facultativeGroup: projectGroup(facultativeGroup)
+            };
+          })
+        };
+        console.log('[ChangeInsuredSumEndorsement] movement-source-debug ' + JSON.stringify(movementSourceDebug, null, 2));
         const contactIds = [];
         (o.contracts || []).forEach(function (group) {
           (group.participants || []).forEach(function (participant) {
@@ -3365,7 +3442,7 @@
       </span>;
     } },
     { title: t('Porcentaje (%)'), dataIndex: 'percentage', align: 'right', width: 135, render: function (v, row) {
-      return <EditableFormattedNumber value={v} decimals={8} readOnly={row.isCoinsurance} onCommit={function (x) { editContractPercentage(row.groupKey, row.percentageField, x); }} />;
+      return <EditableFormattedNumber value={v} decimals={syntheticPercentageDecimals(v)} readOnly={row.isCoinsurance} onCommit={function (x) { editContractPercentage(row.groupKey, row.percentageField, x); }} />;
     } },
     { title: t('Suma'), dataIndex: 'sum', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, row.manualPrefix + 'Sum', x); }} />;
