@@ -3661,8 +3661,15 @@
       </div>;
     }
     if (mode === 'distribution') {
+      const distributionRows = getDistributionRows(contract).map(function (row) {
+        return Object.assign({}, row);
+      });
+      // La distribucion final puede conservar residuos de punto flotante
+      // aunque la colocacion real sea, por ejemplo, 40/60. Redondeamos solo
+      // la copia que se muestra para no modificar el estado persistido.
+      roundedSyntheticPercentages(distributionRows);
       return <Table size="small" pagination={false} rowKey="key" scroll={{ x: 1250 }}
-        dataSource={getDistributionRows(contract)} columns={colsDistribution}
+        dataSource={distributionRows} columns={colsDistribution}
         summary={function (pageData) {
           const total = function (field) { return money(pageData.reduce(function (sum, row) { return sum + Number(row[field] || 0); }, 0)); };
           return (

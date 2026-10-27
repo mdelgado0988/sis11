@@ -707,6 +707,14 @@
     const result = {};
     if (!eligible.length) return result;
 
+    const apply = function (values) {
+      eligible.forEach(function (row, index) {
+        row.percentage = values[index];
+        result[row.key] = values[index];
+      });
+      return result;
+    };
+
     for (let decimals = 2; decimals <= 8; decimals += 1) {
       const rounded = raw.map(function (value) { return Number(value.toFixed(decimals)); });
       const total = rounded.reduce(function (sum, value) { return sum + value; }, 0);
@@ -717,21 +725,17 @@
       const lastIndex = rounded.length - 1;
       rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
       if (Math.abs(rounded.reduce(function (sum, value) { return sum + value; }, 0) - 100) > 0.000001) continue;
-      eligible.forEach(function (row, index) {
-        result[row.key] = rounded[index];
-      });
-      return result;
+      return apply(rounded);
     }
 
-    eligible.forEach(function (row, index) {
-      result[row.key] = raw[index];
-    });
-    return result;
+    return apply(raw);
   }
 
   function formatSyntheticPercentage(value) {
     const numeric = Number(value || 0);
     if (!Number.isFinite(numeric)) return '0.00';
+    const roundedToCents = Number(numeric.toFixed(2));
+    if (Math.abs(numeric - roundedToCents) < 0.00001) return roundedToCents.toFixed(2);
     for (let decimals = 2; decimals <= 8; decimals += 1) {
       if (Number(numeric.toFixed(decimals)) === numeric) return numeric.toFixed(decimals);
     }
@@ -2914,8 +2918,12 @@
       </div>;
     }
     if (mode === 'distribution') {
+      const distributionRows = getDistributionRows(contract).map(function (row) {
+        return Object.assign({}, row);
+      });
+      roundedSyntheticPercentages(distributionRows);
       return <Table size="small" pagination={false} rowKey="key" scroll={{ x: 1250 }}
-        dataSource={getDistributionRows(contract)} columns={colsDistribution}
+        dataSource={distributionRows} columns={colsDistribution}
         summary={function (pageData) {
           const total = function (field) { return money(pageData.reduce(function (sum, row) { return sum + Number(row[field] || 0); }, 0)); };
           return (

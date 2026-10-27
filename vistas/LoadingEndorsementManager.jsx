@@ -2120,6 +2120,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             }
             return row;
         });
+        roundDisplayedPercentages(rows);
         const totals = rows.reduce(function(total, row){
             total.percentage += Number(row.percentage || 0);
             total.sum += Number(row.sum || 0);
@@ -2368,7 +2369,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 return updated;
             });
         };
-        const rows = lines;
+        const rows = lines.map(function(row){ return Object.assign({}, row); });
+        roundDisplayedPercentages(rows);
         const totals = rows.reduce(function(total, row){
             total.percentage += Number(row.percentage || 0);
             total.sumInsured += Number(row.sum || 0);
@@ -3044,6 +3046,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         const text = safeAmount.toLocaleString('en-us',{ minimumFractionDigits: 2, maximumFractionDigits: 4 });
         const state = safeAmount > 0 ? 'lem-positive' : (safeAmount < 0 ? 'lem-negative' : 'lem-zero');
         return renderText(<span className={state}>{text}</span>, record)
+    }
+    function roundDisplayedPercentages(rows){
+        const eligible = (rows || []).filter(function(row){ return !row.isCoinsurance; });
+        const raw = eligible.map(function(row){ return Number(row.percentage || 0); });
+        if(!eligible.length) return;
+        for(let decimals = 2; decimals <= 8; decimals += 1){
+            const rounded = raw.map(function(value){ return Number(value.toFixed(decimals)); });
+            const total = rounded.reduce(function(sum, value){ return sum + value; }, 0);
+            const residual = Number((100 - total).toFixed(decimals));
+            if(Math.abs(residual) > 0.01) continue;
+            const lastIndex = rounded.length - 1;
+            rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
+            if(Math.abs(rounded.reduce(function(sum, value){ return sum + value; }, 0) - 100) > 0.000001) continue;
+            eligible.forEach(function(row, index){ row.percentage = rounded[index]; });
+            return;
+        }
     }
     /**
      * @function calcExtraPremium
