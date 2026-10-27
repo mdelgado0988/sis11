@@ -463,6 +463,10 @@
             const line = String(value || '').trim().toUpperCase();
             return line === 'FAC' || line.indexOf('FACULT') >= 0;
         };
+        const isRetentionLine = function(value){
+            const line = String(value || '').trim().toUpperCase();
+            return line === 'RET' || line.indexOf('RETEN') >= 0;
+        };
         const isVisibleReinsuranceParticipant = function(item){
             return isReinsuranceCoverage(item) || isFacultativeLine(item && item.lineId);
         };
@@ -673,6 +677,7 @@
             const confirmationDraft = restoreSimulationParticipants(JSON.parse(JSON.stringify(reinsuranceDraft || reinsuranceSimulation)));
             const contracts = confirmationDraft.contracts || [];
             let validationDetail = '';
+            const validationDiagnostics = [];
             const invalid = contracts.some(function(group){
                 const manualDistribution = group.manualDistribution || [];
                 if(manualDistribution.length){
@@ -734,6 +739,36 @@
                             || Math.abs(premium - expectedPremium) > 0.01
                             || Math.abs(commission - expectedCommission) > 0.01
                             || Math.abs(tax - expectedTax) > 0.01;
+                        if(lineInvalid){
+                            validationDiagnostics.push({
+                                stage: 'manualDistribution',
+                                contract: {
+                                    key: group.key,
+                                    contractId: group.contractId,
+                                    contractLabel: group.contractLabel,
+                                    lineId: line.key,
+                                    lineLabel: line.label || line.contractLabel
+                                },
+                                expected: {
+                                    participants: '>= 1',
+                                    split: 100,
+                                    sum: expectedSum,
+                                    premium: expectedPremium,
+                                    commission: expectedCommission,
+                                    tax: expectedTax
+                                },
+                                actual: {
+                                    participants: lineParticipants.length,
+                                    split,
+                                    sum,
+                                    premium,
+                                    commission,
+                                    tax
+                                },
+                                participants: lineParticipants,
+                                rawParticipants: rawLineParticipants
+                            });
+                        }
                         if(lineInvalid && !validationDetail){
                             validationDetail = line.contractLabel + ': aceptantes ' + lineParticipants.length
                                 + ', participación ' + split.toFixed(4) + '%'
@@ -746,12 +781,35 @@
                 const participants = group.participants || [];
                 const linesInvalid = lines.some(function(row){
                     const invalidLine = Math.abs((Number(row.premiumCedant || 0) + Number(row.premiumRe || 0) + Number(row.nonTechnicalPremium || 0)) - Number(row.premiumMovement || 0)) > 0.01;
+                    if(invalidLine){
+                        validationDiagnostics.push({
+                            stage: 'movementPremium',
+                            contract: {
+                                key: group.key,
+                                contractId: group.contractId,
+                                contractLabel: group.contractLabel,
+                                lineId: row.lineId
+                            },
+                            coverage: row.coverageCode || row.cover,
+                            row,
+                            expected: { premiumMovement: Number(row.premiumMovement || 0) },
+                            actual: {
+                                premiumCedant: Number(row.premiumCedant || 0),
+                                premiumRe: Number(row.premiumRe || 0),
+                                nonTechnicalPremium: Number(row.nonTechnicalPremium || 0),
+                                total: Number(row.premiumCedant || 0) + Number(row.premiumRe || 0) + Number(row.nonTechnicalPremium || 0)
+                            }
+                        });
+                    }
                     if(invalidLine && !validationDetail){
                         validationDetail = 'Cobertura ' + (row.coverageCode || row.cover || '-') + ': la prima distribuida no coincide con la variación.';
                     }
                     return invalidLine;
                 });
                 const participantsInvalid = lines.some(function(row){
+                    // RET represents the cedant/retained portion. Its
+                    // participants belong to the ceded line, not to RET.
+                    if(isRetentionLine(row.lineId)) return false;
                     if(Math.abs(Number(row.premiumRe || 0)) <= 0.01) return false;
                     const rowParticipants = participants.filter(function(participant){
                         const sameLine = !participant.lineId || !row.lineId
@@ -775,6 +833,35 @@
                     const rowInvalid = !rowParticipants.length || rowParticipants.some(function(participant){ return !participant.contactId; })
                         || Math.abs(participantSplit - 100) > 0.01
                         || (!matchesMovement && !matchesFinalBalance);
+                    if(rowInvalid){
+                        validationDiagnostics.push({
+                            stage: 'participants',
+                            contract: {
+                                key: group.key,
+                                contractId: group.contractId,
+                                contractLabel: group.contractLabel,
+                                lineId: row.lineId
+                            },
+                            coverage: row.coverageCode || row.cover,
+                            expected: {
+                                participants: '>= 1',
+                                split: 100,
+                                premiumMovement: movementPremium,
+                                premiumFinalBalance: finalPremium
+                            },
+                            actual: {
+                                participants: rowParticipants.length,
+                                split: participantSplit,
+                                premium: participantPremium,
+                                matchesMovement,
+                                matchesFinalBalance
+                            },
+                            row,
+                            baseCession,
+                            participants: rowParticipants,
+                            allParticipants: participants
+                        });
+                    }
                     if(rowInvalid && !validationDetail){
                         validationDetail = 'Cobertura ' + (row.coverageCode || row.cover || '-') + ': aceptantes ' + rowParticipants.length
                             + ', participación ' + participantSplit.toFixed(4) + '%'
@@ -785,6 +872,11 @@
                 return linesInvalid || participantsInvalid;
             });
             if(invalid){
+                console.log('[LoadingEndorsementManager] Validación de reaseguro', {
+                    validationDetail,
+                    diagnostics: validationDiagnostics,
+                    contracts: confirmationDraft.contracts || []
+                });
                 setReinsuranceDraft(confirmationDraft);
                 message.error(validationDetail || 'La distribución debe cuadrar y los aceptantes cedidos deben sumar 100% antes de confirmar.');
                 return;
@@ -2515,29 +2607,31 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
 
         const now = new Date();
         const startDate = parseUtcDate(policyStart);
-        const selectedTime = Date.UTC(
+        // DatePicker supplies a calendar date. Build it in the browser's local
+        // timezone first, then serialize it as UTC so the local day is kept.
+        const selectedLocalTime = new Date(
             selectedDate.getUTCFullYear(),
             selectedDate.getUTCMonth(),
             selectedDate.getUTCDate(),
-            now.getUTCHours(),
-            now.getUTCMinutes(),
-            now.getUTCSeconds(),
-            now.getUTCMilliseconds()
+            now.getHours(),
+            now.getMinutes(),
+            now.getSeconds(),
+            now.getMilliseconds()
         );
 
-        if (startDate && selectedTime < startDate.getTime()) {
-            return formatUtcDateTime7(new Date(Date.UTC(
+        if (startDate && selectedLocalTime.getTime() < startDate.getTime()) {
+            return formatUtcDateTime7(new Date(
                 selectedDate.getUTCFullYear(),
                 selectedDate.getUTCMonth(),
                 selectedDate.getUTCDate(),
-                startDate.getUTCHours(),
-                startDate.getUTCMinutes(),
-                startDate.getUTCSeconds(),
-                startDate.getUTCMilliseconds()
-            )));
+                startDate.getHours(),
+                startDate.getMinutes(),
+                startDate.getSeconds(),
+                startDate.getMilliseconds()
+            ));
         }
 
-        return formatUtcDateTime7(new Date(selectedTime));
+        return formatUtcDateTime7(selectedLocalTime);
     }
 
     function formatLocalDate(value) {

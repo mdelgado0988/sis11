@@ -253,8 +253,13 @@
   }
 
   function finalCoveragePremium(group, row) {
+    // CP, FAC y demas lineas de Cession repiten la prima bruta de la misma
+    // cobertura. La cotizacion final es la unica base que no duplica prima.
+    if (row && row.finalPremium !== undefined && row.finalPremium !== null) {
+      return money(row.finalPremium);
+    }
     const base = getBaseCoverageRows(group, row);
-    const persisted = base.reduce(function (sum, cession) { return sum + numberFrom(cession, ['premium']); }, 0);
+    const persisted = base.length ? numberFrom(base[0], ['premium']) : 0;
     return money(persisted + numberFrom(row, ['premiumMovement']));
   }
 
@@ -694,6 +699,43 @@
     if (!base) return 0;
     const amountField = field === 'proportionCed' ? 'premiumCedant' : 'premiumRe';
     return Number((rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, [amountField])); }, 0) / base * 100).toFixed(2));
+  }
+
+  function roundedSyntheticPercentages(rows) {
+    const eligible = (rows || []).filter(function (row) { return !row.isCoinsurance; });
+    const raw = eligible.map(function (row) { return Number(row.percentage || 0); });
+    const result = {};
+    if (!eligible.length) return result;
+
+    for (let decimals = 2; decimals <= 8; decimals += 1) {
+      const rounded = raw.map(function (value) { return Number(value.toFixed(decimals)); });
+      const total = rounded.reduce(function (sum, value) { return sum + value; }, 0);
+      // A residual of up to one hundredth of a percentage point can produce
+      // only a cent-level monetary difference after applying the split.
+      const residual = Number((100 - total).toFixed(decimals));
+      if (Math.abs(residual) > 0.01) continue;
+      const lastIndex = rounded.length - 1;
+      rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
+      if (Math.abs(rounded.reduce(function (sum, value) { return sum + value; }, 0) - 100) > 0.000001) continue;
+      eligible.forEach(function (row, index) {
+        result[row.key] = rounded[index];
+      });
+      return result;
+    }
+
+    eligible.forEach(function (row, index) {
+      result[row.key] = raw[index];
+    });
+    return result;
+  }
+
+  function formatSyntheticPercentage(value) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) return '0.00';
+    for (let decimals = 2; decimals <= 8; decimals += 1) {
+      if (Number(numeric.toFixed(decimals)) === numeric) return numeric.toFixed(decimals);
+    }
+    return numeric.toFixed(8);
   }
 
   function renderContractEditor(group, groupKey) {
@@ -1707,7 +1749,16 @@
     for (let i = 0; i < calculationSnapshot.rows.length; i++) {
       // variation contiene la prima final del movimiento, incluyendo recargos
       // o descuentos. El prorrateado se conserva solo como referencia.
-      rows.push({ code: calculationSnapshot.rows[i].code, variation: calculationSnapshot.rows[i].variation, prorated: calculationSnapshot.rows[i].prorated });
+      rows.push({
+        code: calculationSnapshot.rows[i].code,
+        variation: calculationSnapshot.rows[i].variation,
+        prorated: calculationSnapshot.rows[i].prorated,
+        // La simulacion conserva la fotografia final para no reconstruirla
+        // sumando Cession de lineas complementarias (CP/FAC).
+        finalPremium: calculationSnapshot.rows[i].adjustedPremium !== undefined
+          ? calculationSnapshot.rows[i].adjustedPremium
+          : calculationSnapshot.rows[i].newPremium
+      });
     }
     exe('ExeChain', {
       chain: 'cmdSimReaChangeCoverage',
@@ -2444,12 +2495,6 @@
         row.commission += numberFrom(cession, ['comissionCedant', 'commission']);
         row.tax += numberFrom(cession, ['tax']);
       });
-      // Las lineas nuevas de distribucion se crean en memoria y pueden traer
-      // nuevamente el movimiento del endoso. El movimiento final del contrato
-      // debe sumar la cartera vigente mas la variacion una sola vez.
-      const basePremium = currentRows.reduce(function (sum, cession) {
-        return sum + numberFrom(cession, ['premium']);
-      }, 0);
       const coverageRows = {};
       (row.groups || []).forEach(function (group) {
         (group.rows || []).forEach(function (coverage) {
@@ -2461,8 +2506,10 @@
         const item = coverageRows[code];
         return sum + finalCoverageSum(item.group, item.coverage);
       }, 0));
-      const endorsementMovement = numberFrom(calc && calc.billing && calc.billing.movement, ['premium']);
-      row.movement = basePremium + endorsementMovement;
+      // Cession repite la prima bruta por linea (RET/CP/FAC); sumarla y luego
+      // agregar el movimiento duplica la prima. La facturacion ya entrega la
+      // prima nueva total de la poliza para esta extension.
+      row.movement = numberFrom(calc && calc.billing && calc.billing.premium, ['after']);
       // El encabezado representa el estado final de la distribucion. La
       // pestana de movimiento calcula su suma (cero) de forma independiente.
       row.sum = row.distributionSum;
@@ -2714,6 +2761,7 @@
         return total;
       }, { sum: 0, premium: 0 });
       const finalDistributionRows = getDistributionRows(contract);
+      const roundedPercentages = roundedSyntheticPercentages(finalDistributionRows);
       // El movimiento conserva la distribucion vigente de la poliza.
       // Solo cambia el importe aplicado, no el porcentaje de cada linea.
       const finalDistributionPremium = finalDistributionRows.reduce(function (total, row) {
@@ -2726,8 +2774,12 @@
         const policyPercentage = row.isCoinsurance
           ? 0
           : (finalDistributionPremium
-            ? Math.abs(Number(row.premium || 0)) / finalDistributionPremium * 100
-            : Number(row.percentage || 0));
+            ? (roundedPercentages[row.key] !== undefined
+              ? roundedPercentages[row.key]
+              : Math.abs(Number(row.premium || 0)) / finalDistributionPremium * 100)
+            : (roundedPercentages[row.key] !== undefined
+              ? roundedPercentages[row.key]
+              : Number(row.percentage || 0)));
         const movement = row.isCoinsurance
           ? movementTotals
           : (group && group.rows || []).reduce(function (total, item) {
@@ -2775,7 +2827,7 @@
               onClick={function (event) { event.stopPropagation(); setSelectedReinsuranceLineKey(row.groupKey); }}><FolderIcon /></Button> : null}</span>;
           } });
         }
-        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(8); } });
+        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return formatSyntheticPercentage(v); } });
         if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax' || column.dataIndex === 'reinsuranceBalance') return Object.assign({}, column, { render: function (v) { return fmt(v); } });
         if (column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
         return column;

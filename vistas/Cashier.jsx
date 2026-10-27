@@ -8106,8 +8106,14 @@
           }
         });
 
-        setReversalCauses(getRows(results[0]));
-        setReversalSubcauses(getRows(results[1]));
+        const alphabetical = function (left, right) {
+          const leftName = getTrimmedString(left && left.name);
+          const rightName = getTrimmedString(right && right.name);
+          const byName = leftName.localeCompare(rightName, 'es', { sensitivity: 'base' });
+          return byName || getTrimmedString(left && left.code).localeCompare(getTrimmedString(right && right.code), 'es', { sensitivity: 'base' });
+        };
+        setReversalCauses(getRows(results[0]).slice().sort(alphabetical));
+        setReversalSubcauses(getRows(results[1]).slice().sort(alphabetical));
       })
       .finally(() => setReversalCatalogLoading(false));
   }

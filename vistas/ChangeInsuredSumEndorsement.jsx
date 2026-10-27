@@ -279,6 +279,12 @@
     });
   }
 
+  function hasDirectFacultativeMovement(group) {
+    return (group && group.rows || []).some(function (row) {
+      return row.facultativeMovementOnly === true;
+    });
+  }
+
   function normalizedReinsuranceLine(lineId) {
     const line = txt(lineId).toUpperCase();
     if (line === 'RET' || line.indexOf('RETEN') >= 0) return 'RETENCION';
@@ -287,6 +293,42 @@
     if (line === 'FAC' || line.indexOf('FACULT') >= 0) return 'FAC';
     if (line === 'FRO' || line.indexOf('FRONT') >= 0) return 'FRO';
     return line;
+  }
+
+  function contractHasFacultativeTransition(contract) {
+    const hasCurrentFacultative = (baseCessions || []).some(function (cession) {
+      if (String(cession.contractId) !== String(contract && contract.contractId)) return false;
+      if (normalizedReinsuranceLine(cession.lineId) !== 'FAC') return false;
+      return Math.abs(numberFrom(cession, ['sumInsuredRe'])) > 0.01
+        || Math.abs(numberFrom(cession, ['premiumRe'])) > 0.01;
+    });
+    const hasFinalOrMovementFacultative = (contract && contract.groups || []).some(function (group) {
+      if (normalizedReinsuranceLine(group.lineId) !== 'FAC') return false;
+      return (group.rows || []).some(function (row) {
+        return Math.abs(numberFrom(row, ['sumInsuredRe'])) > 0.01
+          || Math.abs(numberFrom(row, ['premiumRe'])) > 0.01
+          || Math.abs(numberFrom(row, ['sumInsuredReMovement'])) > 0.01
+          || Math.abs(numberFrom(row, ['premiumReMovement'])) > 0.01;
+      });
+    });
+    return hasCurrentFacultative || hasFinalOrMovementFacultative;
+  }
+
+  function syntheticMovementForGroup(group) {
+    const byCoverage = {};
+    (group && group.rows || []).forEach(function (row) {
+      const key = String(row.coverageCode || '');
+      if (byCoverage[key]) return;
+      byCoverage[key] = {
+        sum: numberFrom(row, ['sourceSumInsuredMovement', 'sumInsuredMovement']),
+        premium: numberFrom(row, ['sourcePremiumMovement', 'premiumMovement'])
+      };
+    });
+    return Object.keys(byCoverage).reduce(function (total, key) {
+      total.sum += byCoverage[key].sum;
+      total.premium += byCoverage[key].premium;
+      return total;
+    }, { sum: 0, premium: 0 });
   }
 
   function isRetentionOwner(group, groups) {
@@ -824,7 +866,11 @@
       const groupName = t('Contrato') + ' ' + group.contractId + ' ' + t('linea') + ' ' + group.lineId;
       const rows = group.rows || [];
       const placementRows = rows.filter(function (row) {
-        return Math.abs(finalCoveragePremium(group, row)) > 0.01 || Math.abs(finalCoverageSum(group, row)) > 0.01;
+        // Las coberturas dependientes pueden conservar una suma tecnica de la
+        // fianza, aun sin prima ni participacion de suma propia. No forman
+        // parte de la colocacion que debe completar el 100%.
+        return Math.abs(finalCoveragePremium(group, row)) > 0.01
+          || (row.counts === true && Math.abs(finalCoverageSum(group, row)) > 0.01);
       });
 
       placementRows.forEach(function (row) {
@@ -850,10 +896,14 @@
           };
         }
         const totals = group.totals || {};
-        const retention = totals.distributionPercentageCed !== undefined
+        // En fianzas, la capacidad contractual puede definir una colocacion
+        // distinta por cobertura. El total de la linea solo sirve para la
+        // grilla y no debe reemplazar la colocacion devuelta por el comando.
+        const usesCoveragePlacement = row.contractCapacityAllocation === true;
+        const retention = !usesCoveragePlacement && totals.distributionPercentageCed !== undefined
           ? Number(totals.distributionPercentageCed) / 100
           : numberFrom(row, ['proportionCed']);
-        const ceded = totals.distributionPercentageRe !== undefined
+        const ceded = !usesCoveragePlacement && totals.distributionPercentageRe !== undefined
           ? Number(totals.distributionPercentageRe) / 100
           : numberFrom(row, ['proportionRe']);
         coverageDistribution[code].placement += retention + ceded;
@@ -955,11 +1005,14 @@
       });
       const simulationRows = (sim.contracts || []).reduce(function (result, group) {
         (group.rows || []).forEach(function (row) {
+          const totals = group.totals || {};
+          const usesCoveragePlacement = row.contractCapacityAllocation === true;
           result.push({
             contractId: group.contractId,
             lineId: group.lineId,
             coverageCode: row.coverageCode,
             counts: row.counts,
+            contractCapacityAllocation: usesCoveragePlacement,
             finalPremium: finalCoveragePremium(group, row),
             finalSum: finalCoverageSum(group, row),
             premiumMovement: row.premiumMovement,
@@ -969,21 +1022,32 @@
             sumCedant: row.sumInsuredCedant,
             sumRe: row.sumInsuredRe,
             proportionCed: row.proportionCed,
-            proportionRe: row.proportionRe
+            proportionRe: row.proportionRe,
+            groupPercentageCed: totals.distributionPercentageCed,
+            groupPercentageRe: totals.distributionPercentageRe,
+            validatedPercentageCed: (usesCoveragePlacement
+              ? numberFrom(row, ['proportionCed'])
+              : (totals.distributionPercentageCed !== undefined
+                ? Number(totals.distributionPercentageCed) / 100
+                : numberFrom(row, ['proportionCed']))) * 100,
+            validatedPercentageRe: (usesCoveragePlacement
+              ? numberFrom(row, ['proportionRe'])
+              : (totals.distributionPercentageRe !== undefined
+                ? Number(totals.distributionPercentageRe) / 100
+                : numberFrom(row, ['proportionRe']))) * 100
           });
         });
         return result;
       }, []);
-      console.groupCollapsed('[ChangeInsuredSumEndorsement] Reinsurance validation diagnostics');
-      // Un solo objeto facilita copiar el diagnostico completo desde consola.
-      console.log({
+      const diagnostic = {
         errors: errors,
         expectedEndorsementPremium: expectedPremium,
         distributedPremium: distributedPremium,
         coverageDetails: coverageDetails,
         simulationRows: simulationRows
-      });
-      console.groupEnd();
+      };
+      // Se registra como texto JSON para poder copiarlo completo desde consola.
+      console.log('[ChangeInsuredSumEndorsement] ' + JSON.stringify(diagnostic, null, 2));
     } else if (!errors.length) {
       reinsuranceDiagnostics.signature = '';
     }
@@ -3433,28 +3497,27 @@
         const group = (contract.groups || []).find(function (item) {
           return String(item.contractId) + '-' + String(item.lineId) === row.groupKey;
         });
+        const useDirectFacultativeMovement = group && (hasDirectFacultativeMovement(group)
+          || (hasFacultativeMovementOnly(group) && contractHasFacultativeTransition(contract)));
         const movement = row.isCoinsurance
           ? movementTotals
-          : (group && group.rows || []).reduce(function (total, item) {
+          : (useDirectFacultativeMovement
+            ? (group && group.rows || []).reduce(function (total, item) {
           // La suma asegurada del movimiento solo considera las coberturas
           // configuradas para sumar al contrato; la prima mantiene su propio movimiento.
-          if (hasFacultativeMovementOnly(group)) {
-            if (row.isRetention) {
-              if (item.counts) total.sum += numberFrom(item, ['sumInsuredCedantMovement']);
-              total.premium += numberFrom(item, ['premiumCedantMovement']);
-            } else {
-              if (item.counts) total.sum += numberFrom(item, ['sumInsuredReMovement']);
-              total.premium += numberFrom(item, ['premiumReMovement']);
-            }
-          } else {
-            if (item.counts) total.sum += numberFrom(item, ['sumInsuredMovement']);
-            total.premium += numberFrom(item, ['premiumMovement']);
-          }
-          return total;
-        }, { sum: 0, premium: 0 });
+              if (row.isRetention) {
+                if (item.counts) total.sum += numberFrom(item, ['sumInsuredCedantMovement']);
+                total.premium += numberFrom(item, ['premiumCedantMovement']);
+              } else {
+                if (item.counts) total.sum += numberFrom(item, ['sumInsuredReMovement']);
+                total.premium += numberFrom(item, ['premiumReMovement']);
+              }
+              return total;
+            }, { sum: 0, premium: 0 })
+            : syntheticMovementForGroup(group));
         const factor = row.isCoinsurance
           ? coinsurancePercentageForContract(contract) / 100
-          : (group && hasFacultativeMovementOnly(group)
+          : (useDirectFacultativeMovement
             ? 1
             : reinsuranceBaseFactorForContract(contract) * Number(row.percentage || 0) / 100);
         const premium = money(movement.premium * factor);
