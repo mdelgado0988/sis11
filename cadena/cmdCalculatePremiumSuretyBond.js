@@ -627,8 +627,12 @@ function getEndorsementType() {
 
   try {
     const changeData = extra && extra.data ? extra.data : null;
+    const contextAdditional = context && context.data && context.data.jAdditional
+      ? context.data.jAdditional
+      : (context && context.jAdditional ? context.jAdditional : "");
     jAdditional = (changeData && changeData.jAdditional)
       || (extra && extra.jAdditional)
+      || contextAdditional
       || "";
 
     if (!jAdditional && poliza.jChangeDto && poliza.jChangeDto.data) {

@@ -122,15 +122,37 @@
   };
   const getInsuredObjectValue = (insuredObject, fieldName) => {
     if (!insuredObject) return null;
-    let values = parseJson(insuredObject.userData, insuredObject.userData);
-    if (!values || (typeof values === 'object' && !Array.isArray(values) && !Object.keys(values).length)) {
-      values = parseJson(insuredObject.jValues, insuredObject.jValues);
-    }
-    if (Array.isArray(values)) {
-      const field = values.find((item) => item && txt(item.name) === fieldName);
-      return field ? field.userData : null;
-    }
-    return values && typeof values === 'object' ? values[fieldName] : null;
+    const readField = (values) => {
+      if (Array.isArray(values)) {
+        const field = values.find((item) => item && txt(item.name) === fieldName);
+        if (!field) return { found: false, value: null };
+        const hasUserData = field.userData !== undefined
+          && field.userData !== null
+          && !(Array.isArray(field.userData) && field.userData.length === 0)
+          && !(typeof field.userData === 'string' && field.userData.trim() === '');
+        if (hasUserData) return { found: true, value: field.userData };
+        if (Array.isArray(field.values)) {
+          return {
+            found: true,
+            value: field.values
+              .filter((item) => item && item.selected)
+              .map((item) => item.value !== undefined ? item.value : item.label)
+          };
+        }
+        return { found: true, value: field.value !== undefined ? field.value : null };
+      }
+      if (values && typeof values === 'object' && Object.prototype.hasOwnProperty.call(values, fieldName)) {
+        return { found: true, value: values[fieldName] };
+      }
+      return { found: false, value: null };
+    };
+
+    const userDataValues = parseJson(insuredObject.userData, insuredObject.userData);
+    const userDataResult = readField(userDataValues);
+    if (userDataResult.found) return userDataResult.value;
+
+    const jValues = parseJson(insuredObject.jValues, insuredObject.jValues);
+    return readField(jValues).value;
   };
   // AXX-1978: the insured-object tariff tab (hiddenCobtar) stores the configured
   // duration of every coverage. Those days are the source of truth for the view.
@@ -331,7 +353,7 @@
         if (!policyId) {
           throw new Error(t('No policy was supplied. Open this view with ?policyId=<id>.'));
         }
-        const polRes = await exe('RepoLifePolicy', { operation: 'GET', filter: 'id = ' + policyId, include: ['Product', 'Coverages'] });
+        const polRes = await exe('RepoLifePolicy', { operation: 'GET', filter: 'id = ' + policyId, include: ['Product', 'Coverages', 'Coverages.Loadings'] });
         if (!polRes || !polRes.ok) {
           throw new Error(translatedMessage(polRes && polRes.msg, 'The policy could not be loaded.'));
         }
@@ -340,7 +362,26 @@
 
         const proceedOrderInsuredObject = await loadProceedOrderInsuredObject(pol);
         const proceedOrderField = proceedOrderFieldName(pol);
-        const hasProceedOrder = isCheckedValue(getInsuredObjectValue(proceedOrderInsuredObject, proceedOrderField));
+        const proceedOrderValue = getInsuredObjectValue(proceedOrderInsuredObject, proceedOrderField);
+        const hasProceedOrder = isCheckedValue(proceedOrderValue);
+        const proceedOrderDebugValues = parseJson(proceedOrderInsuredObject && proceedOrderInsuredObject.userData,
+          proceedOrderInsuredObject && proceedOrderInsuredObject.userData);
+        const proceedOrderDebugJValues = parseJson(proceedOrderInsuredObject && proceedOrderInsuredObject.jValues,
+          proceedOrderInsuredObject && proceedOrderInsuredObject.jValues);
+        console.log('[ProceedOrderEndorsement] proceed-order-debug', {
+          policyId: pol.id,
+          policyCode: pol.code,
+          lob: pol.lob,
+          objectDefinitionCode: proceedOrderDefinitionCode(pol),
+          objectDefinitionId: proceedOrderInsuredObject && proceedOrderInsuredObject.objectDefinitionId,
+          insuredObjectId: proceedOrderInsuredObject && proceedOrderInsuredObject.id,
+          fieldName: proceedOrderField,
+          extractedValue: proceedOrderValue,
+          isChecked: hasProceedOrder,
+          userData: proceedOrderDebugValues,
+          jValues: proceedOrderDebugJValues,
+          insuredObject: proceedOrderInsuredObject
+        });
         const configuredDays = getTariffDaysByCoverage(proceedOrderInsuredObject);
 
         const cfgTableByLob = {
@@ -844,7 +885,7 @@
   const pushStep = (name, ok, msg) => setSteps((prev) => prev.concat([{ name: name, ok: ok, msg: msg || '' }]));
 
   const reloadPolicy = async function () {
-    const res = await exe('RepoLifePolicy', { operation: 'GET', filter: 'id = ' + policyId, include: ['Product', 'Coverages'] });
+    const res = await exe('RepoLifePolicy', { operation: 'GET', filter: 'id = ' + policyId, include: ['Product', 'Coverages', 'Coverages.Loadings'] });
     if (res && res.ok) {
       const fresh = (res.outData || [])[0];
       if (fresh) { setPolicy(fresh); setCoverages(Array.isArray(fresh.Coverages) ? fresh.Coverages : []); }
@@ -1930,7 +1971,8 @@
         toLocalDate(eff),
         getPayPlanFrequencyMonths()
       );
-      const quote = await exe('ChangeCoverage', getCoverageChangePayload(eff, oldPayPlan, newPayPlan));
+      const coverageChangePayload = getCoverageChangePayload(eff, oldPayPlan, newPayPlan);
+      const quote = await exe('ChangeCoverage', coverageChangePayload);
 
       if (!quote || !quote.ok || !quote.outData) {
         pushStep(t('Calculate the coverage change'), false, translatedMessage(quote && quote.msg, 'no response'));
@@ -1940,7 +1982,16 @@
         return;
       }
 
-      const billingValidation = validateBilling(quote.outData, getCurrentPolicyBill(policy));
+      const currentPolicyBill = getCurrentPolicyBill(policy);
+      const billingValidation = validateBilling(quote.outData, currentPolicyBill);
+      console.log('[ProceedOrderEndorsement] billing-debug', {
+        payload: coverageChangePayload,
+        currentPolicyBill: currentPolicyBill,
+        calculatedBill: quote.outData.Bill || null,
+        billDiff: quote.outData.BillDiff || null,
+        calculatedCoverages: quote.outData.jNewCoverages || null,
+        validation: billingValidation
+      });
       if (!billingValidation.ok) {
         setPremiumValidationError(billingValidation.msg);
         pushStep(t('Billing invariant'), false, billingValidation.msg);

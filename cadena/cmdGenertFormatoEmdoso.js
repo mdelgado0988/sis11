@@ -878,7 +878,7 @@ function buildSuretyRisk(userData, catalogs) {
     Secuestrante: suretyValue(data, ['secuestrante']),
     VigenciaFianza: catalogText(lookup.vigenciaFianza, suretyValue(data, ['vigencia_fianza']), 0, 1),
     OrdenDeProceder: suretyValue(data, ['orden_de_proceder']),
-    NumeroContrato: suretyValue(data, ['txtNumeroContrato', 'text-1770999106315']),
+    NumeroContrato: suretyValue(data, ['txtNumeroContratoFianza', 'txtNumeroContrato', 'text-1770999106315']),
     ActoPublico: suretyValue(data, ['n_acto_publico']),
     SolicitudPrecio: suretyValue(data, ['n_sol_precio']),
     Licitacion: numeroLicitacion,

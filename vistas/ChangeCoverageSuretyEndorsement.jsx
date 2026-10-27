@@ -1638,7 +1638,6 @@
 
     const rowsByCode = {};
     (result.rows || []).forEach(function (row) { rowsByCode[txt(row.code)] = row; });
-    const expectedPremium = Number(result.billing && result.billing.premium ? result.billing.premium.after : 0);
     // El recargo/descuento pertenece únicamente a la cobertura seleccionada.
     // Las demás coberturas solo cambian su vigencia.
     const adjustmentToAllocate = adjustment;
@@ -1660,13 +1659,73 @@
 
       const row = rowsByCode[code];
       if (row) {
-        row.newPremium = coverage.premium;
-        row.adjustedPremium = coverage.premium;
-        row.variation = money(coverage.premium - Number(row.oldPremium || 0));
+        const commandPremium = selected && row.newPremium !== undefined
+          ? money(row.newPremium)
+          : money(coverage.premium);
+        const nativePremium = money(coverage.premium);
+        console.log('[ChangeCoverageSuretyEndorsement] premium-reconciliation-debug', {
+          policyId: policyId,
+          coverageCode: code,
+          selectedCoverageCode: covCode,
+          oldStart: row.oldStart,
+          oldEnd: row.oldEnd,
+          newStart: row.newStart,
+          newEnd: row.newEnd,
+          deltaDays: row.deltaDays,
+          oldPremium: row.oldPremium,
+          commandNewPremium: row.newPremium,
+          commandVariation: row.variation,
+          proratedVariation: row.proratedVariation,
+          nativeQuotedPremium: nativePremium,
+          nativePremiumVariation: money(nativePremium - Number(row.oldPremium || 0)),
+          premiumUsedByView: commandPremium,
+          adjustment: adjustment,
+          source: 'quote.jNewCoverages'
+        });
+        if (selected) coverage.premium = commandPremium;
+        row.newPremium = commandPremium;
+        row.adjustedPremium = commandPremium;
+        row.variation = money(commandPremium - Number(row.oldPremium || 0));
       }
     });
 
     const finalPremium = money(coverages.reduce(function (sum, coverage) { return sum + Number(coverage.premium || 0); }, 0));
+    const beforePremium = Number(result.billing && result.billing.premium ? result.billing.premium.before : 0);
+    const commandMovementPremium = money((result.rows || []).reduce(function (sum, row) {
+      return sum + Number(row.variation || 0);
+    }, 0));
+    const commandFinalPremium = money(beforePremium + commandMovementPremium);
+    const nativeFinalPremium = Number(result.billing && result.billing.premium ? result.billing.premium.after : 0);
+    const nativeFinalTax = Number(result.billing && result.billing.tax ? result.billing.tax.after : 0);
+    const nativeTaxRate = nativeFinalPremium ? nativeFinalTax / nativeFinalPremium : 0;
+    const finalTax = money(commandFinalPremium * nativeTaxRate);
+    const finalFee = money(result.billing && result.billing.fee ? result.billing.fee.after : 0);
+    const finalTotal = money(commandFinalPremium + finalTax + finalFee);
+    const calculatedPremium = money(commandFinalPremium - adjustment);
+    const calculatedTax = money(calculatedPremium * nativeTaxRate);
+    if (result.billing && result.billing.premium) {
+      result.billing.premium.calculated = calculatedPremium;
+      result.billing.premium.after = commandFinalPremium;
+      result.billing.tax.calculated = calculatedTax;
+      result.billing.tax.after = finalTax;
+      result.billing.total.calculated = money(calculatedPremium + calculatedTax + finalFee);
+      result.billing.total.after = finalTotal;
+      result.billing.movement.premium = money(commandFinalPremium - beforePremium);
+      result.billing.movement.tax = money(finalTax - Number(result.billing.tax.before || 0));
+      result.billing.movement.total = money(finalTotal - Number(result.billing.total.before || 0));
+    }
+    const expectedPremium = Number(result.billing && result.billing.premium ? result.billing.premium.after : 0);
+    console.log('[ChangeCoverageSuretyEndorsement] premium-source-applied', {
+      policyId: policyId,
+      selectedCoverageCode: covCode,
+      nativeFinalPremium: nativeFinalPremium,
+      commandFinalPremium: commandFinalPremium,
+      finalPremiumUsedByView: finalPremium,
+      commandMovementPremium: commandMovementPremium,
+      nativeTaxRate: nativeTaxRate,
+      finalTax: finalTax,
+      finalTotal: finalTotal
+    });
     if (!closeEnough(allocated, adjustmentToAllocate) || !closeEnough(finalPremium, expectedPremium)) {
       throw new Error(t('La distribución del recargo o descuento no coincide con la prima final calculada'));
     }

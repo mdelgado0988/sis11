@@ -320,7 +320,11 @@
       const key = String(row.coverageCode || '');
       if (byCoverage[key]) return;
       byCoverage[key] = {
-        sum: numberFrom(row, ['sourceSumInsuredMovement', 'sumInsuredMovement']),
+        // Las coberturas dependientes pueden repetir la suma final de la
+        // principal, pero no deben aportar suma al movimiento sintetico.
+        sum: row.counts === false
+          ? 0
+          : numberFrom(row, ['sourceSumInsuredMovement', 'sumInsuredMovement']),
         premium: numberFrom(row, ['sourcePremiumMovement', 'premiumMovement'])
       };
     });
@@ -807,6 +811,48 @@
     if (!base) return 0;
     const amountField = field === 'proportionCed' ? 'premiumCedant' : 'premiumRe';
     return Number((rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, [amountField])); }, 0) / base * 100).toFixed(8));
+  }
+
+  function roundedSyntheticPercentages(rows) {
+    const eligible = (rows || []).filter(function (row) { return !row.isCoinsurance; });
+    const raw = eligible.map(function (row) { return Number(row.percentage || 0); });
+    const result = {};
+    if (!eligible.length) return result;
+
+    // Apply the rounded value directly to the row as well as returning the
+    // map. This keeps the displayed synthetic movement independent of row-key
+    // matching and avoids exposing floating-point residue in the table.
+    const apply = function (values) {
+      eligible.forEach(function (row, index) {
+        row.percentage = values[index];
+        result[row.key] = values[index];
+      });
+      return result;
+    };
+
+    for (let decimals = 2; decimals <= 8; decimals += 1) {
+      const rounded = raw.map(function (value) { return Number(value.toFixed(decimals)); });
+      const total = rounded.reduce(function (sum, value) { return sum + value; }, 0);
+      const residual = Number((100 - total).toFixed(decimals));
+      if (Math.abs(residual) > 0.01) continue;
+      const lastIndex = rounded.length - 1;
+      rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
+      if (Math.abs(rounded.reduce(function (sum, value) { return sum + value; }, 0) - 100) > 0.000001) continue;
+      return apply(rounded);
+    }
+
+    return apply(raw);
+  }
+
+  function formatSyntheticPercentage(value) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) return '0.00';
+    const roundedToCents = Number(numeric.toFixed(2));
+    if (Math.abs(numeric - roundedToCents) < 0.00001) return roundedToCents.toFixed(2);
+    for (let decimals = 2; decimals <= 8; decimals += 1) {
+      if (Number(numeric.toFixed(decimals)) === numeric) return numeric.toFixed(decimals);
+    }
+    return numeric.toFixed(8);
   }
 
   function renderContractEditor(group, groupKey) {
@@ -2512,29 +2558,36 @@
     setSimLoading(true); setError(null);
     const rows = [];
     for (let i = 0; i < calculationSnapshot.rows.length; i++) {
+      const calculationRow = calculationSnapshot.rows[i];
       // variation contiene la prima final del movimiento, incluyendo recargos
       // o descuentos. El prorrateado se conserva solo como referencia.
       rows.push({
-        code: calculationSnapshot.rows[i].code,
-        variation: calculationSnapshot.rows[i].variation,
-        prorated: calculationSnapshot.rows[i].prorated,
-        sumInsuredMovement: calculationSnapshot.rows[i].sumInsuredMovement || 0,
-        finalPremium: calculationSnapshot.rows[i].adjustedPremium,
-        finalSum: calculationSnapshot.rows[i].newSum
+        code: calculationRow.code,
+        variation: calculationRow.variation,
+        prorated: calculationRow.prorated,
+        // Solo las coberturas que aportan suma al contrato deben alimentar
+        // el movimiento sintetico. Las dependientes conservan finalSum para
+        // referencia, pero no vuelven a sumar la variacion de la principal.
+        sumInsuredMovement: calculationRow.sums === true
+          ? (calculationRow.sumInsuredMovement || 0)
+          : 0,
+        finalPremium: calculationRow.adjustedPremium,
+        finalSum: calculationRow.newSum
       });
     }
+    const simulationPayload = {
+      policyId: policyId,
+      rows: rows,
+      participants: splits,
+      finalStateOnly: true,
+      // El limite configurado sustituye la regla de "FAC ya existente" solo
+      // para los ramos de Fianza indicados.
+      suretyContractCapacity: usesSuretyContractCapacity(),
+      facultativeMovementOnly: !usesSuretyContractCapacity()
+    };
     exe('ExeChain', {
       chain: 'cmdSimReaChangeCoverage',
-      context: JSON.stringify({
-        policyId: policyId,
-        rows: rows,
-        participants: splits,
-        finalStateOnly: true,
-        // El limite configurado sustituye la regla de "FAC ya existente" solo
-        // para los ramos de Fianza indicados.
-        suretyContractCapacity: usesSuretyContractCapacity(),
-        facultativeMovementOnly: !usesSuretyContractCapacity()
-      })
+      context: JSON.stringify(simulationPayload)
     })
       .then(function (r) {
         if (simulationVersion !== requestVersion.simulation) return;
@@ -2543,6 +2596,10 @@
         let o = r.outData;
         if (typeof o === 'string') o = JSON.parse(o);
         if (o && o.length !== undefined && !o.contracts) o = o[0];
+        console.log('[ChangeInsuredSumEndorsement] synthetic-movement-debug ' + JSON.stringify({
+          request: simulationPayload,
+          response: o
+        }, null, 2));
         (o.contracts || []).forEach(function (group) { hydrateFinalDistribution(group, o.contracts || []); });
         reconcileFacultativeFinalRounding(o.contracts || []);
         const contactIds = [];
@@ -3550,6 +3607,10 @@
         const value = Math.abs(Number(movementUsesSum ? row.sum : row.premium) || 0);
         row.percentage = movementPercentageBase ? Number((value / movementPercentageBase * 100).toFixed(8)) : 0;
       });
+      const roundedPercentages = roundedSyntheticPercentages(rows);
+      rows.forEach(function (row) {
+        if (roundedPercentages[row.key] !== undefined) row.percentage = roundedPercentages[row.key];
+      });
       const selected = rows.find(function (row) {
         return row.canViewReinsurers && row.groupKey === selectedReinsuranceLineKey;
       }) || rows.find(function (row) { return row.canViewReinsurers; });
@@ -3570,7 +3631,7 @@
               onClick={function (event) { event.stopPropagation(); setSelectedReinsuranceLineKey(row.groupKey); }}><FolderIcon /></Button> : null}</span>;
           } });
         }
-        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(8); } });
+        if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return formatSyntheticPercentage(v); } });
         if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax' || column.dataIndex === 'reinsuranceBalance') return Object.assign({}, column, { render: function (v) { return fmt(v); } });
         if (column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
         return column;
