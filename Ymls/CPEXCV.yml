@@ -1,0 +1,32 @@
+nonTechnicalPremium: 0
+Calculations:  
+  - name: cfg
+    formula: |
+      //block
+      //noreplace
+      const contextDTO = JSON.stringify({ policyId: context.pol.id, coverages: context.pol.Coverages });
+      const resultado = doCmd({cmd: "ExeChain", data: { chain: "cmdGetReinsuranceDataVC", context: contextDTO }})
+      return resultado.outData
+  - name: perc
+    formula: |
+      //block      
+      return { pret: 0.55, pcp: 0.45 }
+Lines:
+
+  - ced: +(_cfg[_cov.code].mscp * _perc.pret).toFixed(2);
+    re: +(_cfg[_cov.code].mscp - +(_cfg[_cov.code].mscp * _perc.pret).toFixed(2)).toFixed(2);
+    cedantPremium: +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2);
+    reinsurerPremium: +(_cfg[_cov.code].mpcp - +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2)).toFixed(2);
+    commission: +(+(_cfg[_cov.code].mpcp - +(_cfg[_cov.code].mpcp * _perc.pret).toFixed(2)).toFixed(2) * 0.35);
+    tax: 0
+    id: Cuota Parte
+    
+  - condition: _cfg[_cov.code].msex1 != 0
+    ced: 0
+    re: _cfg[_cov.code].msex1;
+    cedantPremium: 0
+    reinsurerPremium: _cfg[_cov.code].mpex1;
+    commission: 0
+    tax: 0
+    id: Excedente 1
+    

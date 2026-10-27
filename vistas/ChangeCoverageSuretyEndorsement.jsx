@@ -703,7 +703,13 @@
 
   function roundedSyntheticPercentages(rows) {
     const eligible = (rows || []).filter(function (row) { return !row.isCoinsurance; });
-    const raw = eligible.map(function (row) { return Number(row.percentage || 0); });
+    const totalSum = eligible.reduce(function (sum, row) { return sum + Math.abs(Number(row.sum || 0)); }, 0);
+    const totalPremium = eligible.reduce(function (sum, row) { return sum + Math.abs(Number(row.premium || 0)); }, 0);
+    const raw = eligible.map(function (row) {
+      if (totalSum > 0) return Math.abs(Number(row.sum || 0)) / totalSum * 100;
+      if (totalPremium > 0) return Math.abs(Number(row.premium || 0)) / totalPremium * 100;
+      return Number(row.percentage || 0);
+    });
     const result = {};
     if (!eligible.length) return result;
 
@@ -725,6 +731,14 @@
       const lastIndex = rounded.length - 1;
       rounded[lastIndex] = Number((rounded[lastIndex] + residual).toFixed(decimals));
       if (Math.abs(rounded.reduce(function (sum, value) { return sum + value; }, 0) - 100) > 0.000001) continue;
+      const changesWithinTolerance = rounded.every(function (value, index) {
+        const row = eligible[index];
+        const calculatedSum = money(totalSum * value / 100);
+        const calculatedPremium = money(totalPremium * value / 100);
+        return Math.abs(calculatedSum - money(Number(row.sum || 0))) <= 0.01
+          && Math.abs(calculatedPremium - money(Number(row.premium || 0))) <= 0.01;
+      });
+      if (!changesWithinTolerance) continue;
       return apply(rounded);
     }
 

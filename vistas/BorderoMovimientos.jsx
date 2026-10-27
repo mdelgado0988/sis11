@@ -457,6 +457,23 @@
       return o;
     }
 
+    function aplicarFormatoMonetario(X, hoja, columnas){
+      const rango = hoja['!ref'] ? X.utils.decode_range(hoja['!ref']) : null;
+      if (!rango) return;
+      const indicesMonetarios = columnas.reduce(function(result, col, index){
+        if (col.tipo === 'num') result.push(index);
+        return result;
+      }, []);
+      for (let fila = rango.s.r + 1; fila <= rango.e.r; fila += 1) {
+        indicesMonetarios.forEach(function(columna){
+          const direccion = X.utils.encode_cell({ r: fila, c: columna });
+          if (hoja[direccion] && typeof hoja[direccion].v === 'number') {
+            hoja[direccion].z = '#,##0.00;[Red]-#,##0.00';
+          }
+        });
+      }
+    }
+
     /* CA-08 / CA-09 / alcance 6-7 — el archivo NO sale de lo cargado en el navegador:
        se pide de nuevo al servidor con los MISMOS filtros y `exportar:true`, y la cadena
        responde el conjunto completo de la búsqueda en el mismo orden, sin paginar. */
@@ -482,6 +499,10 @@
         const hoja = X.utils.json_to_sheet(filas.map(function(row) {
           const out = {}; exportColumns.forEach(function(col) { out[col.t] = col.tipo === 'num' ? num(row[col.c]) : (col.tipo === 'fecha' ? fecha(row[col.c], col.c === 'fHasta' && row.fHastaSinZona) : (col.tipo === 'ramo' ? nombreRamo(row[col.c]) : (col.tipo === 'mov' ? etiquetaMovimiento(row) : (row[col.c] || '')))); }); return out;
         }), { header: exportColumns.map(function(c){ return c.t; }) });
+        // La grilla muestra los importes con dos decimales. Se conservan como
+        // números en Excel, pero se fija el formato monetario para movimientos
+        // y reaseguradores por igual, evitando exponer la precisión cruda.
+        aplicarFormatoMonetario(X, hoja, exportColumns);
         const libro = X.utils.book_new();
         X.utils.book_append_sheet(libro, hoja, esReaseguradores ? 'Reaseguradores' : 'Bordero');
         X.writeFile(libro, 'Bordero-' + (esReaseguradores ? 'Reaseguradores-' : 'Movimientos-') + crit.fdesde + '_' + crit.fhasta

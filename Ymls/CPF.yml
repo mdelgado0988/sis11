@@ -1,4 +1,5 @@
 nonTechnicalPremium: 0
+insuredSum: "_reaDist.base == null ? _insuredSum : _reaDist.base"
 Calculations:  
   - name: reaDist
     formula: |
@@ -10,6 +11,13 @@ Calculations:
       //de la base, el resto quedaba sin colocar y se marcaba como facultativo pendiente, bloqueando
       //la emision del endoso. _coSumInsured/_coPremium (importes por cobertura) se usan solo como
       //tope de seguridad por si algun flujo entregara la base sin netear.
+      //MSN-000070 (AXX-4520): el motor netea el coaseguro de poliza SIN redondear (23,396,787.86 x 40% = 9,358,715.144)
+      //y cada cobertura redondeaba por su lado, asi que retencion + cuota parte + coaseguro no daban la suma de la poliza
+      //(25,799,999.98 contra 25,799,999.99) y una base redondeada hacia arriba dejaba la linea FAC con error (-0.004).
+      //Ahora la cadena reparte los TOTALES de la poliza con el residuo en la cobertura mayor: recibe cada cobertura con su
+      //emitido y si es de este contrato, el modo y el porcentaje retenido de coaseguro y la base del motor, y devuelve la
+      //base neta de esta cobertura al centavo (base), que la clave insuredSum del contrato le entrega al motor.
+      //Suma y Prima quedan como respaldo: con ellas reparte por cobertura si la base calculada no coincide con la del motor.
       var n2 = function(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; };
       var polId = _pol.id;
       var covId = _cov.id;
@@ -44,22 +52,43 @@ Calculations:
       var coRet = _pol.coRetention != null ? Number(_pol.coRetention) : 100;
       var coCes = _pol.CoinsuranceCessions || [];
       var covs = _pol.Coverages || [];
+
+      //MSN-000070: contrato de cada cobertura como lo resuelve el motor: el de la cobertura, si no el del producto.
+      var prodCovs = null;
+      var contratoDe = function(cv) {
+        var codigo = String(cv.reinsuranceCode || '').trim();
+        if (codigo) return codigo;
+        if (prodCovs === null) {
+          try { prodCovs = JSON.parse(_pol.Product.configJson).Coverages || []; } catch (e) { prodCovs = []; }
+        }
+        for (var p = 0; p < prodCovs.length; p++)
+          if (String(prodCovs[p].code) == String(cv.code)) return String(prodCovs[p].reinsurance || '').trim();
+        return '';
+      };
+      var contratoActual = contratoDe(_cov);
+
       var Coberturas = [];
       for (var i = 0; i < covs.length; i++) {
         var c = covs[i];
         var neta;
+        var cedS = 0, cedP = 0;
+        if (coModo == 3)
+          for (var k = 0; k < coCes.length; k++)
+            if (coCes[k].lifeCoverageId == c.id) {
+              cedS += Number(coCes[k].sumInsuredCeded || 0) || 0;
+              cedP += Number(coCes[k].premiumCeded || 0) || 0;
+            }
         if (c.id == covId) neta = Suma;
-        else if (coModo == 3) {
-          var ced = 0;
-          for (var k = 0; k < coCes.length; k++) if (coCes[k].lifeCoverageId == c.id) ced += Number(coCes[k].sumInsuredCeded || 0) || 0;
-          neta = n2(Number(c.limit || 0) - ced);
-        }
+        else if (coModo == 3) neta = n2(Number(c.limit || 0) - cedS);
         else if (coModo > 0) neta = n2(Number(c.limit || 0) * coRet / 100);
         else neta = n2(Number(c.limit || 0));
-        Coberturas.push({codigo: String(c.code), suma: neta});
+        var item = {codigo: String(c.code), suma: neta, id: c.id, limite: Number(c.limit || 0) || 0, prima: Number(c.premium || 0) || 0,
+                    contrato: contratoDe(c) == contratoActual};
+        if (coModo == 3) { item.coSuma = cedS; item.coPrima = cedP; }
+        Coberturas.push(item);
       }
 
-      var rea = doCmd({cmd:'ExeChain',data:{chain:'cmdConfiguracionReaseguroPorSuma',context:JSON.stringify({CodigoContrato:'CPF',Suma:Suma,Prima:Prima,SumaCoaseguro:SumaCoaseguro,PrimaCoaseguro:PrimaCoaseguro,PolizaId:polId,CoberturaId:covId,ProductoCodigo:_pol.productCode,Coberturas:Coberturas})}});
+      var rea = doCmd({cmd:'ExeChain',data:{chain:'cmdConfiguracionReaseguroPorSuma',context:JSON.stringify({CodigoContrato:'CPF',Suma:Suma,Prima:Prima,SumaCoaseguro:SumaCoaseguro,PrimaCoaseguro:PrimaCoaseguro,PolizaId:polId,CoberturaId:covId,ProductoCodigo:_pol.productCode,Coberturas:Coberturas,ModoCoaseguro:coModo,PorcentajeRetenido:coRet,SumaMotor:Number(_insuredSum || 0) || 0,PrimaMotor:Number(_premium || 0) || 0})}});
       //propagar el motivo real: sin esto un fallo de la cadena llega como "Value cannot be null (Parameter 'o')"
       if (!rea || !rea.ok || !rea.outData)
         throw 'cmdConfiguracionReaseguroPorSuma no pudo calcular la distribucion (contrato CPF, poliza ' + polId + ', cobertura ' + covId + '): ' + (rea ? rea.msg : 'sin respuesta');

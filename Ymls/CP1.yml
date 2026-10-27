@@ -1,0 +1,24 @@
+nonTechnicalPremium: Math.round((_cov.premium * 0.1) * 100) / 100;
+Calculations:  
+  - name: calc
+    formula: |
+      //block
+      const resultado = doCmd({cmd:'ExeChain',data:{chain:'cmdReinsuranceFireDistribution',context:JSON.stringify({pol:_pol,cov:_cov})}}).outData;
+      //doCmd({cmd: "GetPing", data: {contexto: JSON.stringify(resultado)}});
+      return resultado
+Lines:
+  - ced: _calc.ced;
+    re: _calc.re;
+    cedantPremium: _calc.cedantPremium;
+    reinsurerPremium: _calc.reinsurerPremium;
+    commission: Math.round((_calc.reinsurerPremium * 0.30) * 100) / 100;
+    id: Cuota Parte
+
+  - condition: _calc.sumaFac != 0
+    ced: 0;
+    re: _calc.sumaFac
+    cedantPremium: 0;
+    reinsurerPremium: _calc.primaFac
+    #commission: Math.round((((_rsi / _insuredSum) * (_cov.premium * 0.9) * 0.30) * 100)) / 100;
+    #tax: Math.round((_calc.primaFac * 0.02) * 100) / 100;
+    id: FAC
