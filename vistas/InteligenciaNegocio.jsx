@@ -1,13 +1,13 @@
 /**
  * @author aiden_mission_configurator (AIDEN Missions)
  * @name InteligenciaNegocio
- * @version 1.0.0
+ * @version 1.1.0
  * @created 2026-10-21
- * @mission MSN-000091 (globaluat) / AXX-5288
+ * @mission MSN-000091 (globaluat) / AXX-5288; MSN-000112 / AXX-5991
  * @purpose Reportes de usuario por area: la lista nativa del Vizualizador (#/reportlist) con las mismas columnas y
- *          acciones (Abrir, Editar informacion, Exportar, Restricciones, Eliminar, Importar, Actualizar), precedida por
- *          dos selectores: Area (las areas de los reportes configurados; un reporte sin area cae en "General") y
- *          Reporte (los reportes del area elegida). La grilla no muestra nada hasta que se elige un area.
+ *          acciones (Abrir, Filtros, Editar informacion, Exportar, Restricciones, Eliminar, Importar, Actualizar),
+ *          precedida por dos selectores: Area (las areas de los reportes configurados; un reporte sin area cae en
+ *          "General") y Reporte (los reportes del area elegida). La grilla no muestra nada hasta que se elige un area.
  *          Solo comandos nativos: GetReports, RepoReport, ExportReport, ImportReport, DeleteReport,
  *          GetReportRestrictions, SetReportRestrictions, GetUsers.
  */
@@ -52,6 +52,209 @@
   const areaAvatarColor = area => {
     const hash = Array.from(String(area)).reduce((total, character) => total + character.charCodeAt(0), 0);
     return AREA_AVATAR_COLORS[hash % AREA_AVATAR_COLORS.length];
+  };
+
+  const decodeReportLayout = base64 => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes);
+    let escaped = '';
+    for (let i = 0; i < bytes.length; i++) escaped += '%' + bytes[i].toString(16).padStart(2, '0');
+    return decodeURIComponent(escaped);
+  };
+
+  const parseReportParameters = base64 => {
+    const xml = new DOMParser().parseFromString(decodeReportLayout(base64), 'application/xml');
+    if (xml.getElementsByTagName('parsererror').length) throw new Error('El diseño del reporte no contiene XML válido.');
+
+    const root = xml.documentElement;
+    let container = null;
+    for (let i = 0; root && i < root.childNodes.length; i++) {
+      const node = root.childNodes[i];
+      if (node.nodeType === 1 && String(node.nodeName).split(':').pop() === 'Parameters') {
+        container = node;
+        break;
+      }
+    }
+    if (!container) return [];
+
+    const refs = {};
+    const all = xml.getElementsByTagName('*');
+    for (let i = 0; i < all.length; i++) {
+      const ref = all[i].getAttribute('Ref');
+      if (ref) refs[ref] = all[i];
+    }
+
+    const parameters = [];
+    const attribute = (node, name) => {
+      const value = node.getAttribute(name);
+      return value == null ? '' : value;
+    };
+    const boolAttribute = (node, name, defaultValue) => {
+      const value = attribute(node, name);
+      return value === '' ? defaultValue : String(value).toLowerCase() === 'true';
+    };
+    const referencedContent = value => {
+      const match = /^#Ref-(\d+)$/.exec(String(value || ''));
+      const target = match ? refs[match[1]] : null;
+      return target ? attribute(target, 'Content') : value;
+    };
+    for (let i = 0; i < container.childNodes.length; i++) {
+      const node = container.childNodes[i];
+      if (node.nodeType !== 1) continue;
+      const name = node.getAttribute('Name');
+      if (!name) continue;
+
+      let type = 'String';
+      const typeRef = node.getAttribute('Type');
+      if (typeRef) {
+        const match = /^#Ref-(\d+)$/.exec(typeRef);
+        const target = match ? refs[match[1]] : null;
+        const content = target && target.getAttribute('Content');
+        type = content ? content.replace(/^System\./, '') : 'No disponible';
+      }
+      if (String(node.getAttribute('MultiValue')).toLowerCase() === 'true') type += '[]';
+      const lookupNode = Array.from(node.childNodes || []).find(child => child.nodeType === 1
+        && String(child.nodeName).split(':').pop() === 'LookUpSettings');
+      const lookupReference = /^#Ref-(\d+)$/.exec(attribute(node, 'ValueSourceSettings'));
+      const lookup = lookupReference
+        ? refs[lookupReference[1]]
+        : lookupNode ? Array.from(lookupNode.childNodes || []).find(child => child.nodeType === 1) : null;
+      const lookupType = lookup ? attribute(lookup, 'ObjectType') : '';
+      const lookupName = lookup ? String(lookupType || lookup.nodeName).split(',')[0].split('.').pop().split(':').pop() : '';
+      const lookupValues = lookup && Array.from(lookup.childNodes || []).find(child => child.nodeType === 1
+        && String(child.nodeName).split(':').pop() === 'LookUpValues');
+      const staticItems = lookup && lookupName === 'StaticListLookUpSettings' && lookupValues
+        ? Array.from(lookupValues.childNodes || []).filter(child => child.nodeType === 1).map((item, itemIndex) => ({
+          key: name + '-option-' + itemIndex,
+          value: referencedContent(attribute(item, 'Value') || attribute(item, 'ValueInfo')),
+          label: attribute(item, 'Description') || attribute(item, 'DisplayValue') || attribute(item, 'DisplayValueInfo') || referencedContent(attribute(item, 'Value') || attribute(item, 'ValueInfo'))
+        }))
+        : [];
+      const contact = contactParameterMetadata(name, node.getAttribute('Description') || name, lookup ? attribute(lookup, 'ValueMember') : '');
+      const cashDesk = cashDeskParameterMetadata(name, node.getAttribute('Description') || name);
+      const isLob = lobParameterMetadata(name, node.getAttribute('Description') || name);
+      parameters.push({
+        key: name + '-' + i,
+        name: name,
+        label: node.getAttribute('Description') || name,
+        type: type,
+        allowNull: boolAttribute(node, 'AllowNull', false),
+        requestParameters: boolAttribute(node, 'RequestParameters', true),
+        visible: boolAttribute(node, 'Visible', true),
+        defaultValue: attribute(node, 'ValueInfo'),
+        lookupType: lookupName || null,
+        lookupDataSource: lookup ? attribute(lookup, 'DataSource') : '',
+        lookupDataMember: lookup ? attribute(lookup, 'DataMember') : '',
+        valueMember: lookup ? attribute(lookup, 'ValueMember') : '',
+        displayMember: lookup ? attribute(lookup, 'DisplayMember') : '',
+        options: staticItems,
+        isContact: contact.isContact,
+        contactValueField: contact.valueField,
+        isCashDesk: cashDesk.isCashDesk,
+        cashDeskValueField: cashDesk.valueField,
+        isLob: isLob,
+      });
+    }
+    return parameters;
+  };
+
+  const parseReportLookupQueries = base64 => {
+    const xml = new DOMParser().parseFromString(decodeReportLayout(base64), 'application/xml');
+    const queries = {};
+    const collectQueries = source => {
+      Array.from(source.getElementsByTagName('*')).forEach(query => {
+        if (String(query.nodeName).split(':').pop() !== 'Query') return;
+        const name = query.getAttribute('Name');
+        const sqlNode = Array.from(query.childNodes || []).find(child => child.nodeType === 1
+          && String(child.nodeName).split(':').pop() === 'Sql');
+        const sql = sqlNode && String(sqlNode.textContent || '').trim();
+        if (name && sql) queries[name] = sql;
+      });
+    };
+    // DevExpress persists SqlDataSource instances either directly or in a Base64 property.
+    collectQueries(xml);
+    Array.from(xml.getElementsByTagName('*')).forEach(node => {
+      const encoded = node.getAttribute('Base64');
+      if (!encoded) return;
+      try {
+        const source = new DOMParser().parseFromString(decodeReportLayout(encoded), 'application/xml');
+        if (!source.getElementsByTagName('parsererror').length) collectQueries(source);
+      } catch (error) {
+        // Base64 is also used by non-data-source report elements; those are intentionally ignored.
+      }
+    });
+    return queries;
+  };
+
+  const lookupQueryFor = (queries, dataMember) => {
+    const name = String(dataMember || '').trim();
+    const normalize = value => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
+    const target = normalize(name);
+    const matchedName = Object.keys(queries).find(key => normalize(key) === target);
+    return matchedName ? queries[matchedName] : '';
+  };
+
+  const dynamicLookupOptions = (rows, row, queryResult) => {
+    let data = queryResult && queryResult.outData;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (error) { data = []; }
+    }
+    // DoQuery commonly returns an array, but some report data sources wrap it in a result collection.
+    if (data && !Array.isArray(data) && typeof data === 'object') {
+      data = data.data || data.rows || data.items || data.result || [];
+    }
+    const items = Array.isArray(data) ? data : [];
+    const memberValue = (item, member) => {
+      if (!item || !member) return undefined;
+      if (item[member] !== undefined) return item[member];
+      const key = Object.keys(item).find(current => String(current).toLowerCase() === String(member).toLowerCase());
+      return key ? item[key] : undefined;
+    };
+    const firstValue = (item, fields, fallback) => {
+      for (let i = 0; i < fields.length; i++) {
+        const value = memberValue(item, fields[i]);
+        if (value !== undefined && value !== null && value !== '') return value;
+      }
+      return fallback;
+    };
+    return items.map((item, index) => {
+      const value = firstValue(item, [row.valueMember, 'value', 'code', 'valor'], '');
+      const label = firstValue(item, [row.displayMember, 'label', 'name', 'descripcion', 'etiqueta'], String(value));
+      return { key: row.name + '-dynamic-' + index, value: String(value), label: String(label) };
+    }).filter(item => item.value !== '');
+  };
+
+  const contactParameterMetadata = (name, label, valueMember) => {
+    const text = String(name || '') + ' ' + String(label || '');
+    const normalized = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const isContact = /(contact|contacto|holder|tomador|asegurad|insured|beneficiari|cliente|cobis|identific|cedula|document|\bcnp\b|\bnif\b)/i.test(normalized);
+    if (!isContact) return { isContact: false, valueField: null };
+
+    const fieldName = String(name || '').toLowerCase();
+    const lookupField = String(valueMember || '').toLowerCase();
+    if (lookupField === 'id' || lookupField === 'contactid') return { isContact: true, valueField: 'id' };
+    if (lookupField === 'nationalid' || lookupField === 'cobis') return { isContact: true, valueField: 'nationalId' };
+    if (lookupField === 'cnp' || lookupField === 'nif' || lookupField === 'passport' || lookupField === 'identification') return { isContact: true, valueField: 'identification' };
+    if (lookupField === 'name' || lookupField === 'fullname') return { isContact: true, valueField: 'name' };
+    if (/cobis|nationalid/.test(normalized)) return { isContact: true, valueField: 'nationalId' };
+    if (/identific|cedula|document|\bcnp\b|\bnif\b/.test(normalized)) return { isContact: true, valueField: 'identification' };
+    if (/(^|[^a-z])id($|[^a-z])|contactid|holderid|insuredid|aseguradoid|beneficiarioid|clienteid/.test(fieldName)) return { isContact: true, valueField: 'id' };
+    if (/name|nombre|holder|tomador|asegurad|insured|beneficiari|cliente/.test(normalized)) return { isContact: true, valueField: 'name' };
+    return { isContact: true, valueField: 'id' };
+  };
+
+  const cashDeskParameterMetadata = (name, label) => {
+    const text = (String(name || '') + ' ' + String(label || '')).toLowerCase();
+    return /(cashdesk|cash.?desk|cash.?box|caja|workspace)/i.test(text)
+      ? { isCashDesk: true, valueField: 'id' }
+      : { isCashDesk: false, valueField: null };
+  };
+
+  const lobParameterMetadata = (name, label) => {
+    const text = (String(name || '') + ' ' + String(label || '')).toLowerCase();
+    return /(\bramo\b|\blob\b|linea.?de.?negocio|line.?of.?business)/i.test(text);
   };
 
   // User picker of the restrictions window (same behaviour as the native one: search and filter by group).
@@ -221,6 +424,10 @@
     const [loading, setLoading] = useState(false);
     const [area, setArea] = useState(undefined);
     const [reportIdRestrictions, setReportIdRestrictions] = useState(null);
+    const [parameterModal, setParameterModal] = useState({ visible: false, loading: false, report: null, rows: [], values: {}, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: '' });
+    const parameterRequestRef = React.useRef(0);
+    const contactSearchRefs = React.useRef({});
+    const cashDeskSearchRefs = React.useRef({});
     const searchInput = React.useRef(null);
     const workspaceRef = React.useRef(null);
     const tableViewportRef = React.useRef(null);
@@ -262,6 +469,34 @@
     const areaReports = area ? data.filter(r => areaOf(r) === area) : [];
     const rows = areaReports.slice().sort((a, b) => byText(a.name || a.fileName, b.name || b.fileName));
 
+    const reportUrl = (report, values) => {
+      const reportName = String(report && report.fileName || '').replace(/\.repx$/i, '').toLowerCase();
+      const isCustomerStatementDate = name => reportName === 'estadocuentacliente'
+        && ['fechadesde', 'fechahasta', 'fechacorte'].indexOf(String(name || '').toLowerCase()) >= 0;
+      const pairs = Object.keys(values || {}).filter(name => values[name] !== undefined && values[name] !== null)
+        .map(name => {
+          const raw = values[name];
+          const value = isCustomerStatementDate(name) && String(raw == null ? '' : raw).trim() === ''
+            ? '(none)'
+            : raw && typeof raw.format === 'function'
+              ? raw.format(isCustomerStatementDate(name) ? 'YYYY-MM-DD' : 'YYYY-MM-DDTHH:mm:ss')
+              : isCustomerStatementDate(name) && /^\d{4}-\d{2}-\d{2}/.test(String(raw || ''))
+                ? String(raw).slice(0, 10)
+                : raw;
+          return name + '=' + encodeURIComponent(Array.isArray(value) ? value.join(',') : value);
+        });
+      return '#/reportview/' + report.fileName + (pairs.length ? '/' + pairs.join('&') : '');
+    };
+    const openReportWithValues = (report, values) => {
+      if (report.restricted && report.AllowedUsers && report.AllowedUsers.map(q => q.user).indexOf(localStorage.email) === -1) {
+        A.message.error(t('This report is restricted and only authorized users can access it'));
+        return;
+      }
+      const url = reportUrl(report, values);
+      console.debug('[InteligenciaNegocio] parámetros del reporte', { report: report.fileName, values: values, url: url });
+      window.open(url, '_blank', 'noopener,noreferrer');
+    };
+
     const openReport = r => {
       if (r.restricted) {
         //checking if user is authorized
@@ -270,7 +505,7 @@
           return;
         }
       }
-      window.location.href = '#/reportview/' + r.fileName;
+      openReportWithValues(r, {});
     };
 
     const updateReport = () => {
@@ -336,6 +571,309 @@
         } else A.message.error(res.msg);
       });
     };
+
+    const closeReportParameters = () => {
+      parameterRequestRef.current += 1;
+      setParameterModal(current => Object.assign({}, current, { visible: false }));
+    };
+
+    const initialParameterValues = rows => rows.reduce((result, row) => {
+      if (row.defaultValue !== '' && !(row.isLob && String(row.defaultValue).trim() === '0')) result[row.name] = row.defaultValue;
+      return result;
+    }, {});
+
+    const showReportParameters = r => {
+      const request = ++parameterRequestRef.current;
+      setParameterModal({ visible: true, loading: true, report: r, rows: [], values: {}, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: '' });
+      exe('ExportReport', { reportName: r.fileName }).then(res => {
+        if (request !== parameterRequestRef.current) return;
+        if (!res.ok) {
+          setParameterModal({ visible: true, loading: false, report: r, rows: [], values: {}, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: res.msg || 'No se pudo leer el diseño del reporte.' });
+          return;
+        }
+        try {
+          const reportLayout = res.outData && res.outData.pdf;
+          const rows = parseReportParameters(reportLayout);
+          const values = initialParameterValues(rows);
+          setParameterModal({ visible: true, loading: false, report: r, rows: rows, values: values, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: '' });
+          if (rows.some(row => row.isLob)) {
+            setParameterModal(current => Object.assign({}, current, { lobLoading: true }));
+            const lookupQueries = parseReportLookupQueries(reportLayout);
+            const lobRow = rows.find(row => row.isLob);
+            // Some report versions omit DataMember even though the query name follows the parameter name.
+            const reportQuery = lobRow && lookupQueryFor(lookupQueries, lobRow.lookupDataMember || lobRow.name);
+            const numericLobWithoutDataSource = rows.find(row => row.isLob
+              && !row.lookupDataSource
+              && !row.lookupDataMember
+              && /Int|Decimal|Double|Single|Float|Numeric|Long|Short|Byte/.test(row.type || ''));
+            // Keep this visible in the browser console while onboarding report layouts from DevExpress.
+            console.log('[InteligenciaNegocio] resolución catálogo de ramo', {
+              parameter: lobRow && lobRow.name,
+              dataSource: lobRow && lobRow.lookupDataSource,
+              dataMember: lobRow && lobRow.lookupDataMember,
+              valueMember: lobRow && lobRow.valueMember,
+              displayMember: lobRow && lobRow.displayMember,
+              availableQueries: Object.keys(lookupQueries),
+              queryFound: Boolean(reportQuery),
+              usesRepoLobFallback: Boolean(numericLobWithoutDataSource),
+            });
+            const lookupRequest = reportQuery
+              ? exe('DoQuery', { sql: reportQuery })
+              : numericLobWithoutDataSource
+                ? exe('RepoLob', { operation: 'GET' })
+                : Promise.resolve({ ok: true, outData: [] });
+            lookupRequest.then(result => {
+              const options = lobRow && reportQuery
+                ? dynamicLookupOptions(rows, lobRow, result)
+                : numericLobWithoutDataSource && result && result.ok !== false
+                  ? (result.outData || []).map(item => ({ value: String(item.code), label: item.name || String(item.code) }))
+                  : [];
+              if (lobRow) {
+                console.debug('[InteligenciaNegocio] catálogo de ramo', {
+                  parameter: lobRow.name,
+                  dataSource: lobRow.lookupDataSource,
+                  dataMember: lobRow.lookupDataMember,
+                  queryFound: Boolean(reportQuery),
+                  availableQueries: Object.keys(lookupQueries),
+                  response: result && result.outData,
+                  optionCount: options.length,
+                });
+              }
+              setParameterModal(current => Object.assign({}, current, { lobOptions: options, lobLoading: false }));
+            }).catch(error => {
+              console.error('[InteligenciaNegocio] no se pudo cargar el catálogo de ramo', {
+                parameter: lobRow && lobRow.name,
+                dataMember: lobRow && lobRow.lookupDataMember,
+                queryFound: Boolean(reportQuery),
+                error: error && (error.message || error),
+              });
+              setParameterModal(current => Object.assign({}, current, { lobLoading: false }));
+            });
+          }
+        } catch (error) {
+          setParameterModal({ visible: true, loading: false, report: r, rows: [], values: {}, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: error.message || 'No se pudieron leer los parámetros.' });
+        }
+      }).catch(error => {
+        if (request !== parameterRequestRef.current) return;
+        setParameterModal({ visible: true, loading: false, report: r, rows: [], values: {}, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: error.message || 'No se pudo consultar el reporte.' });
+      });
+    };
+
+    const updateParameterValue = (name, value) => {
+      setParameterModal(current => Object.assign({}, current, { values: Object.assign({}, current.values, { [name]: value }) }));
+    };
+    const datePickerValue = value => {
+      if (value === undefined || value === null || value === '') return undefined;
+      if (typeof moment !== 'undefined') return moment(value);
+      return value;
+    };
+    const updateDateParameterValue = (row, value) => {
+      if (!value) {
+        updateParameterValue(row.name, undefined);
+        return;
+      }
+      const format = row.type.indexOf('DateTime') >= 0 ? 'YYYY-MM-DDTHH:mm:ss' : 'YYYY-MM-DD';
+      updateParameterValue(row.name, typeof value.format === 'function' ? value.format(format) : value);
+    };
+
+    const contactName = contact => contact && (contact.FullName || contact.fullName || contact.name || [contact.firstName, contact.middleName, contact.surname1, contact.surname2].filter(Boolean).join(' ')) || '';
+    const contactIdentification = contact => contact && (contact.cnp || contact.nif || contact.passport || contact.identification || '') || '';
+    const contactValue = (contact, field) => {
+      if (!contact) return '';
+      if (field === 'id') return contact.id;
+      if (field === 'nationalId') return contact.nationalId;
+      if (field === 'identification') return contactIdentification(contact);
+      return contactName(contact);
+    };
+    const contactLabel = contact => {
+      const id = contact && contact.id != null ? 'ID ' + contact.id : '';
+      const identification = contactIdentification(contact);
+      const cobis = contact && contact.nationalId != null ? 'COBIS ' + contact.nationalId : '';
+      return [contactName(contact), id, identification, cobis].filter(Boolean).join(' | ');
+    };
+    const contactFilter = text => {
+      const value = String(text || '').trim().replace(/'/g, "''");
+      if (!value) return '';
+      const nameExpression = "RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(middleName,''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,''))";
+      const like = "LIKE N'%" + value + "%'";
+      return "(" + nameExpression + " " + like + " OR ISNULL(cnp,'') " + like + " OR ISNULL(nif,'') " + like + " OR ISNULL(nationalId,'') " + like + (/^\d+$/.test(value) ? " OR id = " + value : '') + ")";
+    };
+    const searchContactParameter = (row, text) => {
+      const key = row.name;
+      const query = String(text || '').trim();
+      if (query.length < 2 && !/^\d+$/.test(query)) {
+        setParameterModal(current => Object.assign({}, current, { contactOptions: Object.assign({}, current.contactOptions, { [key]: [] }) }));
+        return;
+      }
+      const request = (contactSearchRefs.current[key] || 0) + 1;
+      contactSearchRefs.current[key] = request;
+      setParameterModal(current => Object.assign({}, current, { contactLoading: Object.assign({}, current.contactLoading, { [key]: true }) }));
+      exe('GetContacts', { operation: 'GET', filter: contactFilter(query), size: 15 }).then(result => {
+        if (contactSearchRefs.current[key] !== request) return;
+        const contacts = result && result.ok !== false ? (result.outData || []) : [];
+        const options = contacts.map(contact => ({ value: contactValue(contact, row.contactValueField), label: contactLabel(contact), contact: contact }));
+        setParameterModal(current => Object.assign({}, current, {
+          contactOptions: Object.assign({}, current.contactOptions, { [key]: options }),
+          contactLoading: Object.assign({}, current.contactLoading, { [key]: false }),
+        }));
+      }).catch(() => {
+        if (contactSearchRefs.current[key] !== request) return;
+        setParameterModal(current => Object.assign({}, current, { contactLoading: Object.assign({}, current.contactLoading, { [key]: false }) }));
+      });
+    };
+    const cashDeskLabel = desk => {
+      const branch = desk && (desk.Branch || desk.branch);
+      const branchText = branch && (branch.name || branch.code || branch.id) || desk && (desk.branchCode || desk.branch) || '-';
+      const cashier = desk && (desk.user || desk.cashier || desk.cashierEmail || desk.email || desk.User && (desk.User.name || desk.User.email));
+      const code = desk && desk.code && String(desk.code) !== String(desk.id) ? 'Código: ' + desk.code : '';
+      return ['Caja ' + (desk && desk.id != null ? desk.id : ''), code, 'Sucursal: ' + branchText, 'Cajero: ' + (cashier || '-')].filter(Boolean).join(' | ');
+    };
+    const cashDeskFilter = text => {
+      const value = String(text || '').trim().replace(/'/g, "''");
+      if (!value) return '';
+      const like = "LIKE N'%" + value + "%'";
+      return '(id = ' + (/^\d+$/.test(value) ? value : '0') + " OR branchCode " + like + " OR [user] " + like + ')';
+    };
+    const searchCashDeskParameter = (row, text) => {
+      const key = row.name;
+      const query = String(text || '').trim();
+      if (query.length < 2) {
+        setParameterModal(current => Object.assign({}, current, { cashDeskOptions: Object.assign({}, current.cashDeskOptions, { [key]: [] }) }));
+        return;
+      }
+      const request = (cashDeskSearchRefs.current[key] || 0) + 1;
+      cashDeskSearchRefs.current[key] = request;
+      setParameterModal(current => Object.assign({}, current, { cashDeskLoading: Object.assign({}, current.cashDeskLoading, { [key]: true }) }));
+      exe('RepoTransferWorkspace', { operation: 'GET', include: ['Branch'], filter: cashDeskFilter(query), size: 15, page: 0 }).then(result => {
+        if (cashDeskSearchRefs.current[key] !== request) return;
+        const desks = result && result.ok !== false ? (result.outData || []) : [];
+        const options = desks.map(desk => ({ value: desk.id, label: cashDeskLabel(desk) }));
+        setParameterModal(current => Object.assign({}, current, {
+          cashDeskOptions: Object.assign({}, current.cashDeskOptions, { [key]: options }),
+          cashDeskLoading: Object.assign({}, current.cashDeskLoading, { [key]: false }),
+        }));
+      }).catch(() => {
+        if (cashDeskSearchRefs.current[key] !== request) return;
+        setParameterModal(current => Object.assign({}, current, { cashDeskLoading: Object.assign({}, current.cashDeskLoading, { [key]: false }) }));
+      });
+    };
+
+    const saveAndOpenReport = () => {
+      const report = parameterModal.report;
+      if (!report) return;
+      const isNumericParameter = row => /Int|Decimal|Double|Single|Float|Numeric|Long|Short|Byte/.test(row.type || '');
+      const normalizeParameterValue = (row, value) => {
+        if (!row.isLob || value === undefined || value === null || value === '') return value;
+        return String(value).split(' - ')[0].trim();
+      };
+      const values = Object.assign({}, parameterModal.values);
+      parameterModal.rows.forEach(row => {
+        if (row.requestParameters === false || values[row.name] !== undefined && values[row.name] !== null && values[row.name] !== '') return;
+        if (row.allowNull) values[row.name] = '';
+        else if (isNumericParameter(row) && !row.isLob) values[row.name] = 0;
+        else if (row.defaultValue !== '' && !(row.isLob && String(row.defaultValue).trim() === '0')) values[row.name] = row.defaultValue;
+      });
+      parameterModal.rows.forEach(row => {
+        if (Object.prototype.hasOwnProperty.call(values, row.name)) values[row.name] = normalizeParameterValue(row, values[row.name]);
+      });
+      const isEmptyParameterValue = (row, value) => row.isLob && String(value).trim() === '0' || value === undefined || value === null || value === '' && !row.allowNull;
+      const missing = parameterModal.rows.filter(row => row.visible !== false && row.requestParameters !== false
+        && !row.allowNull && (row.defaultValue === '' || row.isLob && String(row.defaultValue).trim() === '0')
+        && isEmptyParameterValue(row, values[row.name]));
+      if (missing.length) {
+        A.message.error('Completa los parámetros obligatorios: ' + missing.map(row => row.label).join(', '));
+        return;
+      }
+      const reportName = String(report.fileName || '').replace(/\.repx$/i, '').toLowerCase();
+      if (reportName === 'estadocuentacliente') {
+        const valueFor = name => {
+          const row = parameterModal.rows.find(item => String(item.name || '').toLowerCase() === name.toLowerCase());
+          return row ? values[row.name] : undefined;
+        };
+        const hasValue = value => value !== undefined && value !== null && String(value).trim() !== '';
+        const from = valueFor('FechaDesde');
+        const to = valueFor('FechaHasta');
+        const cutoff = valueFor('FechaCorte');
+        if (hasValue(from) !== hasValue(to)) {
+          A.message.error('Para Estado de cuenta de un cliente, completa Fecha Desde y Fecha Hasta o indica Fecha Corte.');
+          return;
+        }
+        if (!hasValue(cutoff) && !hasValue(from)) {
+          A.message.error('Para Estado de cuenta de un cliente, indica un rango de fechas o una Fecha Corte.');
+          return;
+        }
+      }
+      openReportWithValues(report, values);
+    };
+
+    const renderParameterInput = row => {
+      const value = parameterModal.values[row.name];
+      const common = { style: { width: '100%' }, value: value, onChange: next => updateParameterValue(row.name, next) };
+      if (row.isLob) {
+        return <A.Select
+          {...common}
+          allowClear
+          showSearch
+          loading={parameterModal.lobLoading}
+          optionFilterProp="label"
+          optionLabelProp="label"
+          placeholder="Seleccione un ramo">
+          {parameterModal.lobOptions.map(option => <A.Select.Option key={String(option.value)} value={option.value} label={option.label}>{option.label}</A.Select.Option>)}
+        </A.Select>;
+      }
+      if (row.isCashDesk) {
+        const options = parameterModal.cashDeskOptions[row.name] || [];
+        return <A.Select
+          {...common}
+          showSearch
+          allowClear
+          filterOption={false}
+          optionFilterProp="label"
+          optionLabelProp="label"
+          loading={!!parameterModal.cashDeskLoading[row.name]}
+          onSearch={text => searchCashDeskParameter(row, text)}
+          notFoundContent="Escribe al menos 2 caracteres">
+          {options.map(option => <A.Select.Option key={String(option.value)} value={option.value} label={option.label}>{option.label}</A.Select.Option>)}
+        </A.Select>;
+      }
+      if (row.isContact) {
+        const options = parameterModal.contactOptions[row.name] || [];
+        return <A.Select
+          {...common}
+          showSearch
+          allowClear
+          filterOption={false}
+          optionFilterProp="label"
+          optionLabelProp="label"
+          loading={!!parameterModal.contactLoading[row.name]}
+          onSearch={text => searchContactParameter(row, text)}
+          notFoundContent="Escribe al menos 2 caracteres o un ID">
+          {options.map(option => <A.Select.Option key={String(option.value)} value={option.value} label={option.label}>{option.label}</A.Select.Option>)}
+        </A.Select>;
+      }
+      if (row.options && row.options.length) {
+        return <A.Select {...common} mode={row.type.indexOf('[]') >= 0 ? 'multiple' : undefined} allowClear showSearch optionFilterProp="children">
+          {row.options.map(option => <A.Select.Option key={option.key} value={option.value}>{option.label}</A.Select.Option>)}
+        </A.Select>;
+      }
+      if (row.type.indexOf('DateTime') >= 0 || row.type === 'Date') {
+        return <A.DatePicker
+          style={{ width: '100%' }}
+          value={datePickerValue(value)}
+          onChange={next => updateDateParameterValue(row, next)}
+        />;
+      }
+      if (row.type.indexOf('Int') >= 0 || row.type.indexOf('Decimal') >= 0 || row.type.indexOf('Double') >= 0) return <A.InputNumber {...common} />;
+      // Ant Input emits a DOM event, unlike Select and InputNumber which emit the selected scalar value.
+      return <A.Input style={{ width: '100%' }} value={value == null ? '' : value} onChange={event => updateParameterValue(row.name, event.target.value)} />;
+    };
+    const parameterHint = row => row.isCashDesk
+      ? 'Caja: busca por código, sucursal o cajero. Se enviará el ID de la caja.'
+      : row.isContact
+      ? 'Contacto: busca por nombre, identificación, COBIS o ID. Se enviará ' + (row.contactValueField === 'id' ? 'el ID' : row.contactValueField === 'nationalId' ? 'el número COBIS' : row.contactValueField === 'identification' ? 'la identificación' : 'el nombre')
+      : row.lookupType === 'DynamicListLookUpSettings'
+      ? 'Lista dinámica: ' + [row.lookupDataSource, row.lookupDataMember].filter(Boolean).join('.')
+      : (row.allowNull ? 'Opcional' : 'Obligatorio');
 
     const onImport = file => {
       const reader = new FileReader();
@@ -426,6 +964,131 @@
             scrollbar-gutter: stable;
             min-height: var(--bi-grid-body-height);
             box-sizing: border-box;
+          }
+          .bi-parameter-modal .ant-form-item {
+            margin-bottom: 10px;
+          }
+          .bi-parameter-modal .bi-parameter-item {
+            display: flex !important;
+            align-items: flex-start;
+            width: 100% !important;
+          }
+          .bi-parameter-modal .ant-form {
+            display: block !important;
+            width: 100% !important;
+          }
+          .bi-parameter-modal .bi-parameter-form {
+            width: 100%;
+          }
+          .bi-parameter-modal .bi-parameter-row {
+            display: flex;
+            align-items: flex-start;
+            width: 100%;
+            margin-bottom: 10px;
+          }
+          .bi-parameter-modal .bi-parameter-label {
+            flex: 0 0 260px;
+            width: 260px;
+            padding: 5px 12px 0 0;
+            color: #262626;
+            line-height: 20px;
+          }
+          .bi-parameter-modal .bi-parameter-required {
+            margin-right: 4px;
+            color: #ff4d4f;
+          }
+          .bi-parameter-modal .bi-parameter-control {
+            flex: 1 1 0;
+            min-width: 0;
+          }
+          .bi-parameter-modal .bi-parameter-control .ant-input,
+          .bi-parameter-modal .bi-parameter-control .ant-input-number,
+          .bi-parameter-modal .bi-parameter-control .ant-picker,
+          .bi-parameter-modal .bi-parameter-control .ant-select {
+            width: 100% !important;
+          }
+          .bi-parameter-modal .bi-parameter-hint {
+            margin-top: 3px;
+            color: #8c8c8c;
+            line-height: 20px;
+          }
+          .bi-parameter-modal .bi-parameter-item > .ant-form-item-label {
+            flex: 0 0 190px !important;
+            width: 190px !important;
+            max-width: 190px !important;
+            padding: 0 12px 0 0;
+            text-align: left;
+          }
+          .bi-parameter-modal .ant-form-item-label > label {
+            color: #262626;
+            display: block;
+            height: auto;
+            line-height: 20px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+          }
+          .bi-parameter-modal .bi-parameter-item > .ant-form-item-control-wrapper,
+          .bi-parameter-modal .bi-parameter-item > .ant-form-item-control {
+            flex: 1 1 0 !important;
+            width: 0 !important;
+            max-width: none !important;
+            min-width: 0;
+          }
+          .bi-parameter-modal .bi-parameter-item .ant-form-item-control,
+          .bi-parameter-modal .bi-parameter-item .ant-form-item-control-input,
+          .bi-parameter-modal .bi-parameter-item .ant-form-item-control-input-content,
+          .bi-parameter-modal .bi-parameter-item .ant-select,
+          .bi-parameter-modal .bi-parameter-item .ant-picker,
+          .bi-parameter-modal .bi-parameter-item .ant-input-number {
+            width: 100% !important;
+          }
+          .bi-parameter-modal .ant-form-item-control-input,
+          .bi-parameter-modal .ant-form-item-control-input-content {
+            width: 100%;
+          }
+          .bi-parameter-modal .ant-input,
+          .bi-parameter-modal .ant-input-number,
+          .bi-parameter-modal .ant-picker,
+          .bi-parameter-modal .ant-select-selector {
+            border: 1px solid #b8c4d1 !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+          }
+          .bi-parameter-modal .ant-input:hover,
+          .bi-parameter-modal .ant-input-number:hover,
+          .bi-parameter-modal .ant-picker:hover,
+          .bi-parameter-modal .ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+            border-color: #7f9fc8 !important;
+          }
+          .bi-parameter-modal .ant-input:focus,
+          .bi-parameter-modal .ant-input-number-focused,
+          .bi-parameter-modal .ant-picker-focused,
+          .bi-parameter-modal .ant-select-focused .ant-select-selector {
+            border-color: #1677ff !important;
+            box-shadow: 0 0 0 2px rgba(22,119,255,.12) !important;
+          }
+          @media (max-width: 620px) {
+            .bi-parameter-modal .bi-parameter-row {
+              display: block;
+            }
+            .bi-parameter-modal .bi-parameter-label {
+              width: auto;
+              padding: 0 0 4px;
+            }
+            .bi-parameter-modal .bi-parameter-item {
+              display: block !important;
+            }
+            .bi-parameter-modal .bi-parameter-item > .ant-form-item-label {
+              flex: none !important;
+              width: auto !important;
+              max-width: none !important;
+              padding: 0 0 4px;
+            }
+            .bi-parameter-modal .bi-parameter-item > .ant-form-item-control-wrapper,
+            .bi-parameter-modal .bi-parameter-item > .ant-form-item-control {
+              width: 100% !important;
+              max-width: 100% !important;
+            }
           }
         `}</style>
         <DefaultPage
@@ -527,7 +1190,7 @@
             />
             <A.Table.Column
               title={t('Action')}
-              width={180}
+              width={205}
               align="center"
               render={(v, r) => (
                 <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
@@ -535,6 +1198,9 @@
                     <A.Button type="link" size="small" icon={<ActionIcon name="eye" />} onClick={() => openReport(r)}>
                       {t('Open')}
                     </A.Button>
+                  </A.Tooltip>
+                  <A.Tooltip title="Filtros">
+                    <A.Button type="link" size="small" style={{ minWidth: 24, padding: '0 4px' }} aria-label="Filtros" icon={<Ic name="filter" />} onClick={() => showReportParameters(r)} />
                   </A.Tooltip>
                   <A.Tooltip title={t('Edit Info')}>
                     <A.Button type="link" size="small" style={{ minWidth: 24, padding: '0 4px' }} aria-label={t('Edit Info')} icon={<ActionIcon name="edit" />} onClick={() => setEditReport(Object.assign({}, r, { fileName: r.fileName }))} />
@@ -573,6 +1239,51 @@
                 <A.Input.TextArea value={editReport.description} onChange={v => setEditReport(Object.assign({}, editReport, { description: v.target.value }))} />
               </A.Form.Item>
             </A.Form>
+          </A.Modal>
+          <A.Modal
+            className="bi-parameter-modal"
+            title={'Filtros de ' + ((parameterModal.report && (parameterModal.report.name || parameterModal.report.fileName)) || '')}
+            visible={parameterModal.visible}
+            onCancel={closeReportParameters}
+            maskClosable={false}
+            keyboard={false}
+            width={760}
+            footer={[
+              <A.Button key="close" onClick={closeReportParameters}>Cerrar</A.Button>,
+              <A.Button key="open" type="primary" onClick={saveAndOpenReport}>Abrir reporte</A.Button>
+            ]}>
+            {parameterModal.report && (
+              <A.Typography.Paragraph type="secondary">
+                Diseño: <A.Typography.Text code>{parameterModal.report.fileName + '.repx'}</A.Typography.Text>
+              </A.Typography.Paragraph>
+            )}
+            {parameterModal.loading && (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <A.Spin tip="Leyendo filtros del reporte..." />
+              </div>
+            )}
+            {!parameterModal.loading && parameterModal.error && (
+              <A.Alert type="error" showIcon message="No se pudieron leer los filtros" description={parameterModal.error} />
+            )}
+            {!parameterModal.loading && !parameterModal.error && parameterModal.rows.length === 0 && (
+              <A.Empty description="Este reporte no declara parámetros" />
+            )}
+            {!parameterModal.loading && !parameterModal.error && parameterModal.rows.length > 0 && (
+              <div className="bi-parameter-form">
+                {parameterModal.rows.filter(row => row.visible !== false && row.requestParameters !== false).map(row => (
+                  <div className="bi-parameter-row" key={row.key}>
+                    <div className="bi-parameter-label">
+                      {!row.allowNull && (row.defaultValue === '' || row.isLob && String(row.defaultValue).trim() === '0') ? <span className="bi-parameter-required">*</span> : null}
+                      {row.label}
+                    </div>
+                    <div className="bi-parameter-control">
+                      {renderParameterInput(row)}
+                      <div className="bi-parameter-hint">{parameterHint(row)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </A.Modal>
           <ReportRestrictions
             reportId={reportIdRestrictions}

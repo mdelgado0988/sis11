@@ -2875,9 +2875,9 @@
     const params = [
       `holderId=${Number.isInteger(holderId) && holderId > 0 ? holderId : ''}`,
       `policyId=${Number.isInteger(policyId) && policyId > 0 ? policyId : ''}`,
-      `FechaCorte=${customerStatementDateMode === 'cutoff' ? encodeURIComponent(fechaCorte) : ''}`,
-      `FechaDesde=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaDesde) : ''}`,
-      `FechaHasta=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaHasta) : ''}`
+      `FechaCorte=${customerStatementDateMode === 'cutoff' ? encodeURIComponent(fechaCorte) : encodeURIComponent('(none)')}`,
+      `FechaDesde=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaDesde) : encodeURIComponent('(none)')}`,
+      `FechaHasta=${customerStatementDateMode === 'range' ? encodeURIComponent(fechaHasta) : encodeURIComponent('(none)')}`
     ];
 
     const url = `${window.location.origin}/#/reportview/EstadoCuentaCliente/${params.join('&')}`;

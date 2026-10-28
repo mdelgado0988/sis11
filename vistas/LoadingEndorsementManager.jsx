@@ -87,6 +87,8 @@
         const [reinsuranceDraft, setReinsuranceDraft] = useState(null);
         const [reinsuranceCalculating, setReinsuranceCalculating] = useState(false);
         const [reinsuranceConfirmed, setReinsuranceConfirmed] = useState(false);
+        const [premiumPreview, setPremiumPreview] = useState(null);
+        const [premiumPreviewLoading, setPremiumPreviewLoading] = useState(false);
         const [reinsurersReady, setReinsurersReady] = useState(false);
         const [selectedReinsurerLine, setSelectedReinsurerLine] = useState(null);
 
@@ -314,6 +316,7 @@
                 }
 
                 setCoverages(tempCoverages);
+                setPremiumPreview(null);
 
                 const updatedCov =
                     tempCoverages.find(function(cov){
@@ -354,6 +357,7 @@
             const index = tempCoverages.findIndex( cov => cov.id === selectedCov.id );
             tempCoverages[index].Loadings = loadings;
             setCoverages(tempCoverages);
+            setPremiumPreview(null);
             const updatedCov = tempCoverages.find(cov => cov.id === selectedCov.id);
             setSelectCov(updatedCov);
             setHasPendingLoadingChanges(false);
@@ -369,6 +373,7 @@
                 const { Coverages, active, start } = policy;
                 setCover(Coverages);
                 setCoverages(Coverages.filter( cov => cov.basePremium > 0))
+                setPremiumPreview(null);
                 setisActive(active);
                 setPolicyStart(start || null);
                 setPolicySnapshot(policy);
@@ -565,6 +570,72 @@
                 return { code:String(coverage.code || ''), variation:Number((premium - Number(original.premium || 0)).toFixed(2)), prorated:Number((premium - Number(original.premium || 0)).toFixed(2)) };
             }).filter(function(row){ return row.code && Math.abs(row.variation) > 0.0001; });
         };
+        const buildLoadingSimulationPayload = function(){
+            const coverageIds = (coverages || []).map(function(item){ return item.id; });
+            const simulatedCoverages = JSON.parse(JSON.stringify(coverages || []));
+            simulatedCoverages.forEach(function(coverage){
+                coverage.Loadings = (coverage.Loadings || []).filter(function(item){ return !item.toRemove; });
+                coverage.Loadings.forEach(function(loading){
+                    if(isNaN(loading.id) || typeof loading.id === 'string') loading.id = 0;
+                });
+            });
+            const newCoverages = [...(Coverages || []).filter(function(item){ return coverageIds.indexOf(item.id) < 0; }), ...simulatedCoverages];
+            return {
+                jOldCoverages: JSON.stringify(Coverages || []),
+                jNewCoverages: JSON.stringify(newCoverages),
+                policyId: policyId,
+                lifePolicyId: policyId,
+                effectiveDate: buildEffectiveDateTime(policyStart, effectiveDate),
+                note: '',
+                jAdditional: JSON.stringify({ endorsementType:'LOADING' })
+            };
+        };
+        async function calculatePremiumPreview(){
+            setPremiumPreviewLoading(true);
+            try {
+                // ChangeLoading without operation ADD calculates the endorsement
+                // in memory and returns the resulting coverages without saving.
+                const response = await exe('ChangeLoading', buildLoadingSimulationPayload());
+                if(!response || response.ok === false) throw errorText(response, 'No fue posible calcular la prima.');
+                let quoted = response.outData;
+                if(typeof quoted === 'string') quoted = JSON.parse(quoted);
+                quoted = quoted && (quoted.quote || quoted.calculation || quoted);
+                let quotedCoverages = quoted && (quoted.jNewCoverages || quoted.coverages || quoted);
+                if(typeof quotedCoverages === 'string') quotedCoverages = JSON.parse(quotedCoverages);
+                if(Array.isArray(quotedCoverages) && quotedCoverages.length === 1 && Array.isArray(quotedCoverages[0])) quotedCoverages = quotedCoverages[0];
+                if(!Array.isArray(quotedCoverages)) quotedCoverages = [];
+                if(!quotedCoverages.length) throw 'ChangeLoading no retornó coberturas calculadas.';
+                const details = (coverages || []).map(function(coverage){
+                    const quote = quotedCoverages.find(function(row){ return String(row.code || '') === String(coverage.code || ''); });
+                    const original = (Coverages || []).find(function(row){ return String(row.code || '') === String(coverage.code || ''); }) || coverage;
+                    const previousPremium = Number(original.premium || original.basePremium || 0);
+                    const calculatedPremium = Number(quote && quote.premium !== undefined ? quote.premium : 0);
+                    return { code:String(coverage.code || ''), name:coverage.name || coverage.description || '', previousPremium:Number(previousPremium.toFixed(2)), basePremium:Number(calculatedPremium.toFixed(2)), loadingAmount:Number((calculatedPremium - previousPremium).toFixed(2)), calculatedPremium:Number(calculatedPremium.toFixed(2)), variation:Number((calculatedPremium - previousPremium).toFixed(2)) };
+                });
+                const total = details.reduce(function(result, row){
+                    result.previousPremium += row.previousPremium;
+                    result.basePremium += row.basePremium;
+                    result.loadingAmount += row.loadingAmount;
+                    result.calculatedPremium += row.calculatedPremium;
+                    result.variation += row.variation;
+                    return result;
+                }, { previousPremium:0, basePremium:0, loadingAmount:0, calculatedPremium:0, variation:0 });
+                Object.keys(total).forEach(function(key){ total[key] = Number(total[key].toFixed(2)); });
+                setPremiumPreview({ details:details, total:total, chain:'ChangeLoading' });
+                return true;
+            } catch(error) {
+                setPremiumPreview(null);
+                showError(error, 'No fue posible calcular la prima sin guardar.');
+                return false;
+            } finally {
+                setPremiumPreviewLoading(false);
+            }
+        }
+        async function calculateEndorsement(){
+            const premiumCalculated = await calculatePremiumPreview();
+            if(!premiumCalculated) return;
+            await calculateReinsurance();
+        }
         const restoreSimulationParticipants = function(simulation){
             const source = simulation || {};
             const lineKey = function(value){
@@ -1710,7 +1781,8 @@
             coinsuranceCessions, coinsuranceContacts, policySnapshot,
             reinsuranceDraft, updateReinsuranceLine, saveReinsuranceDistribution, openReinsurers,
             reinsurersReady, selectedReinsurerLine, updateReinsuranceParticipant, addReinsuranceParticipant,
-            removeReinsuranceParticipant, saveReinsuranceParticipants, reinsuranceCalculating, reinsuranceConfirmed, calculateReinsurance, confirmReinsurance
+            removeReinsuranceParticipant, saveReinsuranceParticipants, reinsuranceCalculating, reinsuranceConfirmed, calculateReinsurance, confirmReinsurance,
+            premiumPreview, premiumPreviewLoading, calculatePremiumPreview, calculateEndorsement
         }
 
         return <AppContext.Provider value={ value }>
@@ -1728,8 +1800,9 @@
     const App=()=>{
         const { policyId, coverages, loadingCov, onSaveLoading, isPolicyActive, activeWorkspaceTab, setActiveWorkspaceTab,
             baseCessions, reinsuranceSimulation, reinsuranceCalculating, reinsuranceConfirmed,
+            premiumPreviewLoading,
             coinsuranceCessions, coinsuranceContacts, policySnapshot,
-            calculateReinsurance, confirmReinsurance } = useAppContext();
+            confirmReinsurance, calculateEndorsement } = useAppContext();
         const hasChanges = (coverages || [] ).some( cov => cov.Loadings.some( load => isNaN(load.id) || load.toRemove || load.toUpdate  ));
         const designStyles = `
 .loading-endorsement-manager { font-size:13px; min-height:0; }
@@ -1779,6 +1852,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
 .lem-modal .ant-modal-header { border-bottom:1px solid #cbd1d8; }
 .lem-modal .ant-modal-body { padding:6px; }
 .lem-positive { color:#237804; } .lem-negative { color:#cf1322; } .lem-zero { color:#262626; }
+.lem-premium-preview { margin:0 0 8px; padding:8px; border:1px solid #91caff; border-radius:6px; background:#f0f8ff; }
+.lem-premium-preview-summary { display:flex; flex-wrap:wrap; gap:22px; padding:8px 2px; color:#16324f; }
 `;
 
         return <DefaultPage 
@@ -1786,7 +1861,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             icon='calculator'
             subTitle={t('Endoso')}
             extra={<Space>
-                {isPolicyActive && baseCessions.length ? <Button type='primary' htmlType='button' loading={reinsuranceCalculating} onClick={calculateReinsurance}>Calcular Endoso</Button> : null}
+                {isPolicyActive && baseCessions.length ? <Button type='primary' htmlType='button' loading={reinsuranceCalculating || premiumPreviewLoading} onClick={calculateEndorsement}>Calcular Endoso</Button> : null}
                 {isPolicyActive && baseCessions.length ? <Button type='primary' htmlType='button' disabled={!reinsuranceSimulation || reinsuranceCalculating || reinsuranceConfirmed} onClick={confirmReinsurance}>Confirmar reaseguro</Button> : null}
                 <Button className='lem-primary-action' icon={<SaveIcon />} onClick={onSaveLoading}
                     disabled={!hasChanges || (isPolicyActive && baseCessions.length && !reinsuranceConfirmed)}
@@ -2708,17 +2783,18 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
      * @returns {JSX.Element}
      */
     function CoveragesTable(){
-        const { coverages, loadingCov, openModal } = useAppContext();
+        const { coverages, loadingCov, openModal, premiumPreview } = useAppContext();
         const totals = (coverages || []).reduce(function(total, coverage){
             const loadingRate = Number(getTotalLoading(coverage.Loadings || []) || 0) / 100;
             const basePremium = Number(coverage.basePremium || 0);
             total.limit += Number(coverage.limit || 0);
             total.basePremium += basePremium;
-            total.extraPremium += basePremium * loadingRate;
-            total.premium += basePremium * (1 + loadingRate);
+            total.extraPremium += roundMoney(basePremium * loadingRate);
+            total.premium += roundMoney(basePremium * (1 + loadingRate));
             return total;
         }, { limit:0, basePremium:0, extraPremium:0, premium:0 });
-        return <Table className='lem-grid' size='small' rowKey='id' dataSource={ coverages || []} loading={loadingCov}
+        return <div>
+            <Table className='lem-grid' size='small' rowKey='id' dataSource={ coverages || []} loading={loadingCov}
             summary={function(){ return <Table.Summary.Row className='lem-rea-totals'>
                 <Table.Summary.Cell index={0} colSpan={2}>Totales</Table.Summary.Cell>
                 <Table.Summary.Cell index={2} align='right'>{renderNumber(totals.limit)}</Table.Summary.Cell>
@@ -2736,7 +2812,16 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             <Column title={t('Extra Premium')}  dataIndex='Loadings' key='extraPremium' align='right' render={calcExtraPremium} />
             <Column title={t('Premium')}        dataIndex='Loadings' key='premium' align='right' render={calcPremium} />
             <Column title={t('Acción')}         dataIndex='id' key='action' render={(_, cov)=> renderAction(cov, openModal)} />
-        </Table>
+            </Table>
+            {premiumPreview ? <div className='lem-premium-preview'>
+                <Alert type='info' showIcon message='Resumen neto de facturación de la póliza' />
+                <div className='lem-premium-preview-summary'>
+                    <span>Prima anterior: <b>{renderNumber(premiumPreview.total.previousPremium)}</b></span>
+                    <span>Prima calculada: <b>{renderNumber(premiumPreview.total.calculatedPremium)}</b></span>
+                    <span className={premiumPreview.total.variation < 0 ? 'lem-negative' : premiumPreview.total.variation > 0 ? 'lem-positive' : 'lem-zero'}>Variación neta: <b>{renderNumber(premiumPreview.total.variation)}</b></span>
+                </div>
+            </div> : null}
+        </div>
     }
     /**
      * @function ModalLoading
@@ -3131,7 +3216,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
      * @returns {string} Formatted extra premium value
      */
     function calcExtraPremium(value, record){
-        return renderNumber( getTotalLoading(value) * record.basePremium / 100 )
+        return renderNumber(roundMoney(getTotalLoading(value) * record.basePremium / 100))
     }
     /**
      * @function calcPremium
@@ -3147,7 +3232,11 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
      */
     function calcPremium(value, record){
         const totalLoading = getTotalLoading(value) / 100;
-        return renderNumber( record.basePremium * (1 + totalLoading)  )
+        return renderNumber(roundMoney(record.basePremium * (1 + totalLoading)))
+    }
+    function roundMoney(value){
+        const amount = Number(value || 0);
+        return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
     }
     function renderAction(coverage, action){
         return <Button type='link' htmlType='button' onClick={ ()=> action(coverage) }>

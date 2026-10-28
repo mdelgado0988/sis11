@@ -600,13 +600,16 @@ function aplicarCobtarInclusion() {
   *MSN-000090 (AXX-5809) - ProrrataVigencia
   *Las filas de tarifa con usaProrrata = true (columna de las tablas tarificacionSIS9*) cobran la prima de la vigencia:
   *prima de tarifa x días de vigencia / días del año que empieza en la fecha de inicio. Un año completo da factor 1.
-  *Sólo en la cotización de la póliza (alta y renovación): en los endosos (action Change*) la tarifa queda anual,
-  *porque el producto ya prorratea el movimiento del endoso sobre base anual (changeProrateMode).
+  *En la cotización de la póliza (alta y renovación) y en el endoso de recargo/descuento (ChangeLoading, MSN-000113):
+  *la póliza guarda la prima del plazo y ChangeLoading la compara contra ella (Bill/BillDiff y el plan de cuotas de
+  *cmdValidateLoadingInstallment usan el total del endoso sin prorrata por días), así que tiene que cotizar sobre la misma base.
+  *En los demás endosos (action Change*) la tarifa queda anual, porque reparten con el modo nativo (changeProrateMode 3).
   *Sin filas en true no hace nada: el cálculo queda idéntico. Hoy sólo EG6 tiene filas en true.
 */
 function aplicarProrrataVigencia() {
   if (!coberturasProrrata.length) return;
-  if (/^change/i.test(String(action || ""))) return;
+  const accion = String(action || "");
+  if (/^change/i.test(accion) && !/^changeloading$/i.test(accion)) return;
   const inicio = fechaUTCms(poliza.start);
   const fin = fechaUTCms(poliza.end);
   if (inicio === null || fin === null || fin <= inicio) return;
