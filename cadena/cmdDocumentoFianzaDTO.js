@@ -108,10 +108,17 @@ const vigenciaPrincipalDocumento = obtenerTextoVigencia(
   diasVigenciaPrincipal,
   oaUserData?.tipo_calendario ?? oaUserData?.tipo_vigencia
 );
-resultado.DesdeTexto = `${diaIni} DE ${String(mesIni).toUpperCase()} DEL ${anioIni}`;
-resultado.HastaTexto = `${diaFin} DE ${String(mesFin).toUpperCase()} DEL ${anioFin}`;
+const coberturaPrincipal = obtenerCoberturaVigenciaPrincipal();
+const partesHastaPrincipal = partesFechaPanama(fechaComoUTC(coberturaPrincipal?.end || policy?.end)) || { dia: "", mes: 1, anio: "" };
+const diaTextoDosDigitos = value => {
+  const diaNumero = Number(value);
+  return Number.isInteger(diaNumero) && diaNumero > 0 && diaNumero < 10 ? `0${diaNumero}` : String(value ?? "");
+};
+resultado.DesdeTexto = `${diaTextoDosDigitos(diaIni)} DE ${String(mesIni).toUpperCase()} DEL ${anioIni}`;
+resultado.HastaTexto = `${diaTextoDosDigitos(diaFin)} DE ${String(mesFin).toUpperCase()} DEL ${anioFin}`;
 const partesHasta2 = partesFechaPanama(sumarDiasUTC(dateFin, 30)) || { dia: "", mes: 1, anio: "" };
-resultado.Hasta2Texto = `${partesHasta2.dia} DE ${String(meses[partesHasta2.mes - 1]).toUpperCase()} DEL ${partesHasta2.anio}`;
+resultado.Hasta2Texto = `${diaTextoDosDigitos(partesHasta2.dia)} DE ${String(meses[partesHasta2.mes - 1]).toUpperCase()} DEL ${partesHasta2.anio}`;
+resultado.HastaPrincipalTexto = `${diaTextoDosDigitos(partesHastaPrincipal.dia)} DE ${String(meses[partesHastaPrincipal.mes - 1]).toUpperCase()} DEL ${partesHastaPrincipal.anio}`;
 const coberturaVicio = (Array.isArray(policy?.Coverages) ? policy.Coverages : [])
   .find(coverage => String(coverage?.code ?? "").trim() === "314");
 const partesFinVicio = coberturaVicio ? partesFechaPanama(fechaComoUTC(coberturaVicio.end)) : null;
@@ -125,7 +132,7 @@ resultado.VigenciaTexto3 = vigenciaDocumento.textoTitulo.toLowerCase();
 resultado.VigenciaPrincipalTexto = vigenciaPrincipalDocumento.texto;
 resultado.VigenciaPrincipalTexto2 = vigenciaPrincipalDocumento.textoTitulo;
 resultado.SumaTextoTotal = `${monedaMonto} ${sumaMonto} ${sumaEnLetras}`.trim().toUpperCase();
-resultado.MonedaMonto = `${monedaMonto} ${sumaMonto}`.trim();
+resultado.MonedaMonto = `${monedaMonto}${sumaMonto}`.trim();
 resultado.Prestamo = "";
 resultado.TipoLicitacion = getTipoLicitacionTexto(oaUserData?.tipo_licitacion);
 
@@ -477,10 +484,9 @@ function obtenerDiasVigenciaDocumento() {
     : vigenciaPoliza;
 }
 
-function obtenerDiasVigenciaCoberturaBasica() {
-  const vigenciaPoliza = calcularDiasEntre(policy?.start, policy?.end);
+function obtenerCoberturaVigenciaPrincipal() {
   const coverages = Array.isArray(policy?.Coverages) ? policy.Coverages : [];
-  if (!coverages.length) return vigenciaPoliza;
+  if (!coverages.length) return null;
 
   const productConfig = leerConfiguracionProducto(product);
   const configRows = Array.isArray(productConfig?.Coverages)
@@ -499,6 +505,12 @@ function obtenerDiasVigenciaCoberturaBasica() {
     return config && isBasic(config.basic);
   });
 
+  return basicCoverage || null;
+}
+
+function obtenerDiasVigenciaCoberturaBasica() {
+  const vigenciaPoliza = calcularDiasEntre(policy?.start, policy?.end);
+  const basicCoverage = obtenerCoberturaVigenciaPrincipal();
   return basicCoverage
     ? calcularDiasEntre(basicCoverage.start, basicCoverage.end)
     : vigenciaPoliza;

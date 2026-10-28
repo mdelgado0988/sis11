@@ -376,6 +376,9 @@
                 setPremiumPreview(null);
                 setisActive(active);
                 setPolicyStart(start || null);
+                // The simulation runs before the endorsement confirmation modal is opened.
+                // Keep its default effective day aligned with the policy from the first calculation.
+                effectiveDate = formatLocalDate(start) || effectiveDate;
                 setPolicySnapshot(policy);
                 const responses = await Promise.all([
                     exe('GetFullTable', { table: reinsuranceConfigTable(policy.lob) }).catch(function(){ return { outData: [] }; }),
@@ -1488,6 +1491,9 @@
                                 },
                                 defaultValue: moment(defaultEffectiveDate, 'YYYY-MM-DD'),
                                 format: 'YYYY-MM-DD',
+                                disabledDate: function(date){
+                                    return date && date.clone().startOf('day').isBefore(moment(defaultEffectiveDate, 'YYYY-MM-DD').startOf('day'));
+                                },
                                 onChange: function(date, dateString){
                                     effectiveDate = dateString;
                                 }
@@ -2685,33 +2691,26 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         const selectedDate = parseSelectedDate(selectedValue);
         if (!selectedDate) return '';
 
-        const now = new Date();
         const startDate = parseUtcDate(policyStart);
-        // DatePicker supplies a calendar date. Build it in the browser's local
-        // timezone first, then serialize it as UTC so the local day is kept.
-        const selectedLocalTime = new Date(
+        const sixHours = 6 * 60 * 60 * 1000;
+        // A calendar date at midnight can move to the previous day in downstream
+        // timezone conversions. Use 06:00 UTC, and keep a minimum six-hour buffer
+        // over the policy start when the selected date is the start date or earlier.
+        const selectedDateTime = new Date(Date.UTC(
             selectedDate.getUTCFullYear(),
             selectedDate.getUTCMonth(),
             selectedDate.getUTCDate(),
-            now.getHours(),
-            now.getMinutes(),
-            now.getSeconds(),
-            now.getMilliseconds()
-        );
+            6,
+            0,
+            0,
+            0
+        ));
 
-        if (startDate && selectedLocalTime.getTime() < startDate.getTime()) {
-            return formatUtcDateTime7(new Date(
-                selectedDate.getUTCFullYear(),
-                selectedDate.getUTCMonth(),
-                selectedDate.getUTCDate(),
-                startDate.getHours(),
-                startDate.getMinutes(),
-                startDate.getSeconds(),
-                startDate.getMilliseconds()
-            ));
+        if (startDate && selectedDateTime.getTime() <= startDate.getTime()) {
+            return formatUtcDateTime7(new Date(startDate.getTime() + sixHours));
         }
 
-        return formatUtcDateTime7(selectedLocalTime);
+        return formatUtcDateTime7(selectedDateTime);
     }
 
     function formatLocalDate(value) {
@@ -2755,7 +2754,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
     function parseUtcDate(value) {
         if (!value) return null;
 
-        const parsed = new Date(value);
+        const raw = String(value).trim();
+        const parsed = new Date(/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : raw + 'Z');
         return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 

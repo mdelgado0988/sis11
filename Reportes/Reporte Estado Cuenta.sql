@@ -2,10 +2,10 @@ USE SIS11
 GO
 
 DECLARE @holderId INT = null --3;
-DECLARE @FechaDesde DATE = NULL;
-DECLARE @FechaHasta DATE = null;
-DECLARE @FechaCorte DATE = GETDATE()
-DECLARE @policyId INT = 1;
+DECLARE @FechaDesde DATE = '20250101';
+DECLARE @FechaHasta DATE = '20261231';
+DECLARE @FechaCorte DATE = null
+DECLARE @policyId INT = 0;
 
 SELECT
     holder.id AS [Id Holder],
@@ -170,9 +170,9 @@ LEFT JOIN dbo.Insured insured
     ON insured.lifePolicyId = lp.id AND insured.role = 0
 LEFT JOIN dbo.Contact insuredContact ON insuredContact.id = insured.contactId
 WHERE (@HolderId IS NULL OR lp.holderId = @HolderId)
-  AND (@PolicyId IS NULL OR lp.id = @PolicyId)
+  AND (ISNULL(@PolicyId,0) = 0 OR lp.id = ISNULL(@PolicyId,0))
   AND (
-      (@PolicyId IS NOT NULL)
+      (ISNULL(@PolicyId,0) <> 0)
       OR
       (@FechaCorte IS NOT NULL
        AND CAST(DATEADD(HOUR, -5, lp.[start]) AS DATE) <= @FechaCorte
