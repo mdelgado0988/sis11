@@ -933,7 +933,11 @@
       jOldPayPlan: Array.isArray(oldPayPlan) ? JSON.stringify(oldPayPlan) : null,
       jNewPayPlan: Array.isArray(newPayPlan) ? JSON.stringify(newPayPlan) : null,
       jEditedPayPlan: Array.isArray(newPayPlan) ? JSON.stringify(newPayPlan) : null,
-      jAdditional: JSON.stringify({ endorsementType: 'ChangeActLicitation' })
+      jAdditional: JSON.stringify({
+        endorsementType: 'ChangeActLicitation',
+        // Este endoso solo cambia vigencias; no debe volver a aplicar el movimiento.
+        preserveActiveReinsurance: true
+      })
     };
   };
 
@@ -1030,6 +1034,8 @@
   const persistReinsuranceSnapshot = async function (changeId, snapshot) {
     const json = JSON.stringify({
       endorsementType: 'ChangeActLicitation',
+      // Versionar la distribucion vigente sin alterar retencion ni cesion.
+      preserveActiveReinsurance: true,
       reinsuranceSnapshot: snapshot
     }).replace(/'/g, "''");
     const response = await exe('SetField', {
@@ -2104,8 +2110,13 @@
         calculation.oldPayPlan,
         calculation.newPayPlan
       );
-      const editedReinsurance = buildEditedReinsuranceSnapshot()
-        || applyCoinsuranceToSnapshot(await loadCurrentReinsuranceSnapshot());
+      // El cambio de vigencia no genera variacion de reaseguro. Usar la linea
+      // base evita reconstruir importes desde la distribucion sintetica.
+      const editedReinsurance = reinsuranceBaseline
+        ? JSON.parse(JSON.stringify(reinsuranceBaseline))
+        : (reinsuranceSnapshot
+          ? JSON.parse(JSON.stringify(reinsuranceSnapshot))
+          : applyCoinsuranceToSnapshot(await loadCurrentReinsuranceSnapshot()));
       const reinsuranceSnapshot = recalculateReinsuranceParticipants(editedReinsurance);
       if (!reinsuranceSnapshot) throw new Error(t('The reinsurance distribution could not be prepared.'));
       // Solo se persisten los datos de distribución; los auxiliares visuales
@@ -2114,6 +2125,7 @@
       delete reinsuranceSnapshot._coinsuranceGrossByContract;
       addPayload.jAdditional = JSON.stringify({
         endorsementType: 'ChangeActLicitation',
+        preserveActiveReinsurance: true,
         reinsuranceSnapshot: reinsuranceSnapshot
       });
       Object.keys(calculation.quote).forEach((k) => { if (addPayload[k] === undefined) addPayload[k] = calculation.quote[k]; });
