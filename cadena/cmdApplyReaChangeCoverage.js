@@ -12,6 +12,13 @@
  * La distribucion recibida representa el estado final confirmado por la
  * vista para las combinaciones contrato/linea/cobertura afectadas. Las
  * combinaciones no afectadas se copian sin cambios.
+ *
+ * Cuando el snapshot activa persistFinalSnapshotOnly, la vista es la unica
+ * responsable de calcular los importes finales. En ese modo este comando no
+ * suma movimientos, no recalcula primas ni reconstruye sumas: persiste
+ * finalGrossPremium, finalGrossSum, retencion, cesion, comision, impuesto y
+ * proporciones exactamente como llegan en el snapshot. Si el snapshot llega
+ * incorrecto, se persiste incorrecto; no se intenta corregirlo aqui.
  */
 
 const CESSION_COLUMNS = [
@@ -121,6 +128,8 @@ try {
 const snapshot = additional.reinsuranceSnapshot || {};
 const isLoadingEndorsement = txt(additional.endorsementType).toUpperCase() === 'LOADING';
 const preserveActiveReinsurance = additional.preserveActiveReinsurance === true;
+const persistFinalSnapshotOnly = snapshot.persistFinalSnapshotOnly === true
+  || additional.persistFinalSnapshotOnly === true;
 // Solo el cambio de suma por cobertura persiste una fotografía limitada a
 // las coberturas que sobreviven en jNewCoverages. Los demás endosos siguen
 // versionando todas las cesiones vigentes.
@@ -156,6 +165,16 @@ if (snapshot && Array.isArray(snapshot.distribution)) {
   requestedCoinsurance = Array.isArray(snapshot.coinsurance) ? snapshot.coinsurance : [];
 }
 if (!requestedRows.length && mode !== 'CANCEL_ONLY') throw 'El endoso no tiene distribucion de reaseguro guardada';
+
+if (persistFinalSnapshotOnly && mode !== 'CANCEL_ONLY' && !preserveActiveReinsurance) {
+  const incompleteRows = requestedRows.filter(function (row) {
+    return row.finalGrossPremium === undefined || row.finalGrossPremium === null
+      || row.finalGrossSum === undefined || row.finalGrossSum === null;
+  });
+  if (incompleteRows.length) {
+    throw 'El snapshot final de reaseguro no contiene la prima y suma finales de todas las filas afectadas';
+  }
+}
 
 let finalCoverages = [];
 try { finalCoverages = JSON.parse(change.jNewCoverages || '[]'); }
@@ -680,9 +699,9 @@ const positiveBaseCessions = reinsuranceFinalStateOnly
   })
   : baseCessions;
 
-// Construye el estado final completo. Para una fila afectada, premium es el
-// total vigente mas el movimiento del endoso; los importes cedente/cedido,
-// comision e impuesto son los valores finales confirmados en la vista.
+// Construye el estado final completo. En el modo snapshot-only, todos los
+// valores finales vienen calculados por la vista; no se permite sumar el
+// movimiento a la fila vigente porque eso duplica la prima o la suma.
 const finalCessions = positiveBaseCessions.map(function (source) {
   const result = clone(source);
   result._sourceId = Number(source.id || 0);
@@ -690,8 +709,12 @@ const finalCessions = positiveBaseCessions.map(function (source) {
   const coverage = coverageByCode[txt(source.coverageCode)] || coverageById[Number(source.coverageId || 0)];
   if (requested) {
     if (isLoadingEndorsement) result.premiumType = 'CHANGE';
-    result.premium = money(num(source.premium) + num(requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement));
-    result.sumInsured = money(num(source.sumInsured) + num(requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement));
+    result.premium = persistFinalSnapshotOnly
+      ? money(requested.finalGrossPremium)
+      : money(num(source.premium) + num(requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement));
+    result.sumInsured = persistFinalSnapshotOnly
+      ? money(requested.finalGrossSum)
+      : money(num(source.sumInsured) + num(requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement));
     result.sumInsuredCedant = money(requested.sumInsuredCedant);
     result.premiumCedant = money(requested.premiumCedant);
     result.sumInsuredRe = money(requested.sumInsuredRe);
@@ -782,14 +805,18 @@ requestedRows.forEach(function (requested) {
   if (isLoadingEndorsement) created.premiumType = 'CHANGE';
   created.start = coverage.start || created.start;
   created.end = coverage.end || created.end;
-  // Una linea creada por capacidad contractual (FAC) no tiene cesion previa:
-  // debe nacer con el total final de la cobertura, no solo con su diferencia.
-  created.sumInsured = money(requested.finalGrossSum === undefined
-    ? (requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement)
-    : requested.finalGrossSum);
-  created.premium = money(requested.finalGrossPremium === undefined
-    ? (requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement)
-    : requested.finalGrossPremium);
+  // Una fila nueva tambien debe recibir el estado final calculado por la
+  // vista. En snapshot-only no se usa el movimiento como sustituto.
+  created.sumInsured = persistFinalSnapshotOnly
+    ? money(requested.finalGrossSum)
+    : money(requested.finalGrossSum === undefined
+      ? (requested.sourceSumInsuredMovement === undefined ? requested.sumInsuredMovement : requested.sourceSumInsuredMovement)
+      : requested.finalGrossSum);
+  created.premium = persistFinalSnapshotOnly
+    ? money(requested.finalGrossPremium)
+    : money(requested.finalGrossPremium === undefined
+      ? (requested.sourcePremiumMovement === undefined ? requested.premiumMovement : requested.sourcePremiumMovement)
+      : requested.finalGrossPremium);
   created.sumInsuredCedant = money(requested.sumInsuredCedant);
   created.premiumCedant = money(requested.premiumCedant);
   created.sumInsuredRe = money(requested.sumInsuredRe);

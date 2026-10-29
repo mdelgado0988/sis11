@@ -96,7 +96,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Retención", id: "lblRetencion" },
-    { tipo: "percent8", nombre: "", id: "pret", valor: 0 },
+    { tipo: "percent10", nombre: "", id: "pret", valor: 0 },
     { tipo: "number2", nombre: "", id: "msret", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpret", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcret", valor: 0, readonly: true },
@@ -107,7 +107,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Cuota Parte", id: "lblCuotaParte", tieneAceptante: true, contrato: "Cuota Parte" },
-    { tipo: "percent8", nombre: "", id: "pcp", valor: 0 },
+    { tipo: "percent10", nombre: "", id: "pcp", valor: 0 },
     { tipo: "number2", nombre: "", id: "mscp", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpcp", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pccp", valor: 0 },
@@ -118,7 +118,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Excedente 1", id: "lblExcedente1", tieneAceptante: true, contrato: "Excedente 1" },
-    { tipo: "percent8", nombre: "", id: "pex1", valor: 0 },
+    { tipo: "percent10", nombre: "", id: "pex1", valor: 0 },
     { tipo: "number2", nombre: "", id: "msex1", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpex1", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcex1", valor: 0 },
@@ -129,7 +129,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Facultativo", id: "lblFacultativo", tieneAceptante: true, contrato: "FAC" },
-    { tipo: "percent8", nombre: "", id: "pfp", valor: 0 },
+    { tipo: "percent10", nombre: "", id: "pfp", valor: 0 },
     { tipo: "number2", nombre: "", id: "msfp", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpfp", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcfp", valor: 0 },
@@ -140,7 +140,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Fronting", id: "lblFronting", tieneAceptante: true, contrato: "FRO" },
-    { tipo: "percent8", nombre: "", id: "pfo", valor: 0 },
+    { tipo: "percent10", nombre: "", id: "pfo", valor: 0 },
     { tipo: "number2", nombre: "", id: "msfo", valor: 0 },
     { tipo: "number2", nombre: "", id: "mpfo", valor: 0 },
     { tipo: "percent8", nombre: "", id: "pcfo", valor: 0 },
@@ -151,7 +151,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Coaseguro", id: "lblCoaseguro", contrato: "COASEGURO" },
-    { tipo: "percent8", nombre: "", id: "pco", valor: 0, readonly: true },
+    { tipo: "percent10", nombre: "", id: "pco", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "msco", valor: 0, readonly: true },
     { tipo: "number2", nombre: "", id: "mpco", valor: 0, readonly: true },
     { tipo: "percent8", nombre: "", id: "pcco", valor: 0, readonly: true },
@@ -162,7 +162,7 @@ const filasControles = [
   ],
   [
     { tipo: "label", nombre: "Totales", id: "lblTotal" },
-    { tipo: "percent8", nombre: "", id: "tp", valor: 0, readonly: true, clase: "input-verde-negrita" },
+    { tipo: "percent10", nombre: "", id: "tp", valor: 0, readonly: true, clase: "input-verde-negrita" },
     { tipo: "number2", nombre: "", id: "tms", valor: 0, readonly: true, clase: "input-verde-negrita" },
     { tipo: "number2", nombre: "", id: "tmp", valor: 0, readonly: true, clase: "input-verde-negrita" },
     { tipo: "percent8", nombre: "", id: "tpc", valor: 0, readonly: true, clase: "input-verde-negrita" },
@@ -282,11 +282,15 @@ function distribuyeContrato() {
       pcex1, mcex1, piex1, miex1
     };
     
-    // Recorrer y asignar valor al elemento con id igual al nombre de la variable
+    const placementPercentageIds = new Set(["pret", "pcp", "pex1", "pfp", "pfo"]);
+    // Los porcentajes de colocacion se muestran con 10 decimales. Al dividirlos
+    // entre 100 se persisten como proporciones de hasta 12 decimales.
     Object.entries(valores).forEach(([name, value]) => {
         const $elem = $(`#${name}`);
         if ($elem.length) {
-          if (name.startsWith("p")) {
+          if (placementPercentageIds.has(name)) {
+            resultado[name] = redondear($elem.val(), 10, true);
+          } else if (name.startsWith("p")) {
             resultado[name] = redondear($elem.val() , 8, true);
           } else {
             resultado[name] = redondear($elem.val());
@@ -434,7 +438,7 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
     if (usaCedant) {
       ces.sumInsuredCedant = redondear(resultado[keys.porcentajeCed] * ces.sumInsured / 100);
       ces.premiumCedant = redondear(resultado[keys.porcentajeCed] * primaCob / 100);
-      ces.proportionCed = redondear(resultado[keys.porcentajeCed] / 100, 8, forzar);
+      ces.proportionCed = redondear(resultado[keys.porcentajeCed] / 100, 12, forzar);
     } else {
       ces.sumInsuredCedant = 0;
       ces.premiumCedant = 0;
@@ -446,7 +450,7 @@ function distribuyeSegunContrato(newCessions, resultado, config) {
     // =========================
     ces.sumInsuredRe = redondear(resultado[keys.porcentajeRe] * ces.sumInsured / 100);
     ces.premiumRe = redondear(resultado[keys.porcentajeRe] * primaCob / 100);
-    ces.proportionRe = redondear(resultado[keys.porcentajeRe] / 100, 8, forzar);
+    ces.proportionRe = redondear(resultado[keys.porcentajeRe] / 100, 12, forzar);
 
     ces.err = false;
     ces.msg = "";
@@ -757,7 +761,7 @@ function validaTotales() {
       }
   });
 
-  if(redondear(resultado["tp"],8) != 100){
+  if(redondear(resultado["tp"],10, true) != 100){
     mostrarNotificacion(`Existe diferencia en el total % distribuido, debe ser 100%.`, "warning");
     return false;
   }
@@ -1026,7 +1030,7 @@ function onRowSelected(row) {
   //redondeamos para ser mas precisos:
   //ret
   pret = normalizarPorcentaje(pret);
-  pret = redondear(pret * 100,8, true);
+  pret = redondear(pret * 100, 10, true);
   msret = redondear(msret,2);
   mpret = redondear(mpret,2);
   premium = redondear(premium,2);
@@ -1034,7 +1038,7 @@ function onRowSelected(row) {
 
   //cp
   pcp = normalizarPorcentaje(pcp);
-  pcp = redondear(pcp * 100,8, true);
+  pcp = redondear(pcp * 100, 10, true);
   mscp = redondear(mscp,2);
   mpcp = redondear(mpcp,2);
   mccp = redondear(mccp,2);  
@@ -1045,7 +1049,7 @@ function onRowSelected(row) {
 
   //ex1
   pex1 = normalizarPorcentaje(pex1);
-  pex1 = redondear(pex1 * 100,8, true);
+  pex1 = redondear(pex1 * 100, 10, true);
   msex1 = redondear(msex1,2);
   mpex1 = redondear(mpex1,2);
   mcex1 = redondear(mcex1,2);  
@@ -1056,7 +1060,7 @@ function onRowSelected(row) {
 
   //fac
   pfp = normalizarPorcentaje(pfp);
-  pfp = redondear(pfp * 100,8, true);
+  pfp = redondear(pfp * 100, 10, true);
   msfp = redondear(msfp,2);
   mpfp = redondear(mpfp,2);
   mcfp = redondear(mcfp,2);  
@@ -1067,7 +1071,7 @@ function onRowSelected(row) {
 
   //fro
   pfo = normalizarPorcentaje(pfo);
-  pfo = redondear(pfo * 100,8, true);
+  pfo = redondear(pfo * 100, 10, true);
   msfo = redondear(msfo,2);
   mpfo = redondear(mpfo,2);
   mcfo = redondear(mcfo,2);  
@@ -1147,11 +1151,11 @@ function onRowSelected(row) {
   const diff = 100 - total;
 
   if (Math.abs(diff) < 1e-8) {
-      if (pret > 0) pret = redondear(pret + diff, 8, true);
-      else if (pcp > 0) pcp = redondear(pcp + diff, 8, true);
-      else if (pex1 > 0) pex1 = redondear(pex1 + diff, 8, true);
-      else if (pfp > 0) pfp = redondear(pfp + diff, 8, true);
-      else if (pfo > 0) pfo = redondear(pfo + diff, 8, true);
+      if (pret > 0) pret = redondear(pret + diff, 10, true);
+      else if (pcp > 0) pcp = redondear(pcp + diff, 10, true);
+      else if (pex1 > 0) pex1 = redondear(pex1 + diff, 10, true);
+      else if (pfp > 0) pfp = redondear(pfp + diff, 10, true);
+      else if (pfo > 0) pfo = redondear(pfo + diff, 10, true);
   }
 
   // Creamos un arreglo con los nombres de todas las variables
@@ -1411,7 +1415,7 @@ function calculaTotales() {
     const forzar = true;
   
     // Coaseguro es informativo y no forma parte del 100% distribuido por el contrato.
-    totales.tp = redondear($("#pret").val(),8, forzar) + redondear($("#pcp").val(),8, forzar) + redondear($("#pex1").val(),8, forzar) + redondear($("#pfp").val(),8, forzar) + redondear($("#pfo").val(),8, forzar) + redondear($("#pnot").val(),8, forzar);
+    totales.tp = redondear($("#pret").val(),10, forzar) + redondear($("#pcp").val(),10, forzar) + redondear($("#pex1").val(),10, forzar) + redondear($("#pfp").val(),10, forzar) + redondear($("#pfo").val(),10, forzar) + redondear($("#pnot").val(),10, forzar);
     totales.tms = redondear($("#msret").val()) + redondear($("#mscp").val()) + redondear($("#msex1").val()) + redondear($("#msfp").val()) + redondear($("#msfo").val()) + redondear($("#msnot").val()) + redondear($("#msco").val());
     totales.tmp = redondear($("#mpret").val()) + redondear($("#mpcp").val()) + redondear($("#mpex1").val()) + redondear($("#mpfp").val()) + redondear($("#mpfo").val()) + redondear($("#mpnot").val()) + redondear($("#mpco").val());
     totales.tpc = redondear($("#pcret").val(),8, forzar) + redondear($("#pccp").val(),8, forzar) + redondear($("#pcex1").val(),8, forzar) + redondear($("#pcfp").val(),8, forzar) + redondear($("#pcfo").val(),8, forzar) + redondear($("#pcnot").val(),8, forzar);
@@ -1420,7 +1424,7 @@ function calculaTotales() {
     totales.tmi = redondear($("#miret").val()) + redondear($("#micp").val()) + redondear($("#miex1").val()) + redondear($("#mifp").val()) + redondear($("#mifo").val()) + redondear($("#minot").val());
     totales.tsr = redondear($("#srcp").val()) + redondear($("#srfp").val()) + redondear($("#srex1").val()) + redondear($("#srfo").val());
   
-    totales.tp = redondear(totales.tp, 8, forzar);
+    totales.tp = redondear(totales.tp, 10, forzar);
     totales.tms = redondear(totales.tms);
     totales.tmp = redondear(totales.tmp);
     totales.tpc = redondear(totales.tpc, 8, forzar); 
@@ -2553,7 +2557,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
         html = `
           <div style="${baseStyle}">
             <label>${c.nombre}</label>
-            <input 
+            <input
               type="text"
               id="${c.id}"
               value="${val}" class="number ${c.clase || ''}"
@@ -2581,6 +2585,24 @@ function renderControlesDistribucion(containerId = "#tabControles") {
         `;
       }
 
+      // ===== PORCENTAJE DE COLOCACION 10 DECIMALES =====
+      if (c.tipo === "percent10") {
+
+        const val = redondear(valor, 10, true);
+
+        html = `
+          <div style="${baseStyle}">
+            <label>${c.nombre}</label>
+            <input
+              type="text"
+              id="${c.id}"
+              value="${val}" class="percent percent10 ${c.clase || ''}"
+              ${c.readonly ? "readonly" : ""}
+            />
+          </div>
+        `;
+      }
+
       $row.append(html);
     });
 
@@ -2596,7 +2618,7 @@ function renderControlesDistribucion(containerId = "#tabControles") {
     const isNumber = $(input).hasClass("number");
 
     //Redondemos a dos decimales, según tarea GLOB-633
-    const maxDecimals = isNumber ? 2 : 8;
+    const maxDecimals = isNumber ? 2 : ($(input).hasClass("percent10") ? 10 : 8);
     //const maxDecimals = 2;
 
     // Guardar la posición actual del cursor

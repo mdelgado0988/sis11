@@ -7,7 +7,15 @@ SELECT c.id, c.contractId, c.changeId, c.cover, c.sumInsured, c.premium, c.premi
 		, cob.code
 FROM Cession c
 INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
-WHERE c.lifePolicyId = 4398
+WHERE c.lifePolicyId = 4686
+/*and cob.code = ''*/
+ORDER BY c.overwritten desc, c.id
+
+delete c
+FROM Cession c
+INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
+WHERE c.lifePolicyId = 4600
+AND c.changeId = 1685 and c.lineId = 'FRO'
 /*and cob.code = ''*/
 ORDER BY c.overwritten desc, c.id
 
@@ -17,7 +25,7 @@ SELECT c.id, c.contractId, c.changeId, c.cover, c.sumInsured, c.premium, c.premi
 		, cob.code
 FROM Cession c
 INNER JOIN LifeCoverage cob ON cob.id = c.coverageId
-WHERE c.changeId = 4398
+WHERE c.changeId = 1726
 ORDER BY c.overwritten desc, c.id
 
 select id, code, originalPolicyId, version, policyVersion, originalPolicyId, originalStart from LifePolicy where code = 'IN-GL-000722'

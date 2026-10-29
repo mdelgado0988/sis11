@@ -103,6 +103,10 @@
   const [reinsuranceConfirmed, setReinsuranceConfirmed] = useState(false);
 
   const money = function (v) { return Number(Number(v || 0).toFixed(2)); };
+  // Los porcentajes se muestran con 10 decimales y se conservan como
+  // proporciones con 12 decimales, igual que en el cambio de vigencia.
+  const placementPercentage = function (v) { return Number(Number(v || 0).toFixed(10)); };
+  const placementProportion = function (v) { return Number((placementPercentage(v) / 100).toFixed(12)); };
   const txt = function (v) { return String(v === null || v === undefined ? '' : v).trim(); };
   const day10 = function (v) { return txt(v).slice(0, 10); };
   const fmt = function (v) {
@@ -572,6 +576,10 @@
       };
       (next.contracts || []).forEach(function (group) {
         const rows = group.rows || [];
+        // Las filas de capacidad ya vienen cerradas por cobertura desde la
+        // simulacion. Solo las filas normales pueden ser editadas/repartidas
+        // por la grilla de contrato.
+        const editableRows = rows.filter(function (row) { return !row.contractCapacityAllocation; });
         const totals = group.totals || {};
         if (hasFacultativeMovementOnly(group)) {
           // Esta distribucion representa un exceso de limite. La variacion ya
@@ -591,8 +599,12 @@
           return;
         }
         if (totals.distributionPercentageCed !== undefined) {
-          const percentageCed = Math.max(0, Math.min(100, Number(totals.distributionPercentageCed) || 0)) / 100;
-          rows.forEach(function (row) {
+          const percentageCed = placementProportion(Math.max(0, Math.min(100, Number(totals.distributionPercentageCed) || 0)));
+          editableRows.forEach(function (row) {
+            // En fianzas, cmdConfiguracionReaseguroPorSuma ya entrega la
+            // fotografia final por cobertura. Volver a calcular estas filas
+            // aqui duplica CP/FAC y puede crear retencion dentro de FAC.
+            if (row.contractCapacityAllocation) return;
             row.proportionCed = percentageCed;
             const finalPremium = finalCoverageDistributionPremium(group, row);
             const finalSum = finalCoverageDistributionSum(group, row);
@@ -601,8 +613,10 @@
           });
         }
         if (totals.distributionPercentageRe !== undefined) {
-          const percentageRe = Math.max(0, Math.min(100, Number(totals.distributionPercentageRe) || 0)) / 100;
-          rows.forEach(function (row) {
+          const percentageRe = placementProportion(Math.max(0, Math.min(100, Number(totals.distributionPercentageRe) || 0)));
+          editableRows.forEach(function (row) {
+            // La colocacion de capacidad es la fuente de verdad de la fila.
+            if (row.contractCapacityAllocation) return;
             row.proportionRe = percentageRe;
             const finalPremium = finalCoverageDistributionPremium(group, row);
             const finalSum = finalCoverageDistributionSum(group, row);
@@ -610,20 +624,20 @@
             row.sumInsuredRe = money(finalSum * percentageRe);
           });
         }
-        if (totals.manualRetentionSum !== undefined) allocate(group, rows, 'sumInsuredCedant', Number(totals.manualRetentionSum) || 0, finalCoverageSum);
-        if (totals.manualRetentionPremium !== undefined) allocate(group, rows, 'premiumCedant', Number(totals.manualRetentionPremium) || 0, finalCoveragePremium);
-        if (totals.manualCededSum !== undefined) allocate(group, rows, 'sumInsuredRe', Number(totals.manualCededSum) || 0, finalCoverageSum);
-        if (totals.manualCededPremium !== undefined) allocate(group, rows, 'premiumRe', Number(totals.manualCededPremium) || 0, finalCoveragePremium);
+        if (totals.manualRetentionSum !== undefined) allocate(group, editableRows, 'sumInsuredCedant', Number(totals.manualRetentionSum) || 0, finalCoverageSum);
+        if (totals.manualRetentionPremium !== undefined) allocate(group, editableRows, 'premiumCedant', Number(totals.manualRetentionPremium) || 0, finalCoveragePremium);
+        if (totals.manualCededSum !== undefined) allocate(group, editableRows, 'sumInsuredRe', Number(totals.manualCededSum) || 0, finalCoverageSum);
+        if (totals.manualCededPremium !== undefined) allocate(group, editableRows, 'premiumRe', Number(totals.manualCededPremium) || 0, finalCoveragePremium);
         if (totals.commissionPercentage !== undefined) {
           const rate = (Number(totals.commissionPercentage) || 0) / 100;
-          rows.forEach(function (row) { row.commission = money(numberFrom(row, ['premiumRe']) * rate); });
+          editableRows.forEach(function (row) { row.commission = money(numberFrom(row, ['premiumRe']) * rate); });
         }
         if (totals.taxPercentage !== undefined) {
           const rate = (Number(totals.taxPercentage) || 0) / 100;
-          rows.forEach(function (row) { row.tax = money(numberFrom(row, ['premiumRe']) * rate); });
+          editableRows.forEach(function (row) { row.tax = money(numberFrom(row, ['premiumRe']) * rate); });
         }
-        if (totals.manualCommission !== undefined) allocate(group, rows, 'commission', Number(totals.manualCommission) || 0, function (item, row) { return numberFrom(row, ['premiumRe']); });
-        if (totals.manualTax !== undefined) allocate(group, rows, 'tax', Number(totals.manualTax) || 0, function (item, row) { return numberFrom(row, ['premiumRe']); });
+        if (totals.manualCommission !== undefined) allocate(group, editableRows, 'commission', Number(totals.manualCommission) || 0, function (item, row) { return numberFrom(row, ['premiumRe']); });
+        if (totals.manualTax !== undefined) allocate(group, editableRows, 'tax', Number(totals.manualTax) || 0, function (item, row) { return numberFrom(row, ['premiumRe']); });
 
         recalculateReinsuranceTotals(group);
         const participants = group.participants || [];
@@ -650,7 +664,9 @@
       const byCoverage = {};
       (next.contracts || []).forEach(function (group) {
         (group.rows || []).forEach(function (row) {
-          if (row.facultativeMovementOnly) return;
+          // No reconciliar filas de capacidad: sus importes ya vienen
+          // distribuidos por cobertura y deben persistirse sin reconstruirlos.
+          if (row.facultativeMovementOnly || row.contractCapacityAllocation) return;
           const code = String(row.coverageCode);
           if (!byCoverage[code]) byCoverage[code] = { rows: [], expectedPremium: finalCoverageDistributionPremium(group, row), expectedSum: finalCoverageDistributionSum(group, row) };
           byCoverage[code].rows.push({ group: group, row: row });
@@ -674,8 +690,8 @@
             : 0;
           const taxRate = previousCededPremium ? numberFrom(pair.row, ['tax']) / previousCededPremium : 0;
 
-          pair.row.proportionCed = retentionPercentage / 100;
-          pair.row.proportionRe = cededPercentage / 100;
+          pair.row.proportionCed = placementProportion(retentionPercentage);
+          pair.row.proportionRe = placementProportion(cededPercentage);
           pair.row.premiumCedant = money(item.expectedPremium * retentionPercentage / 100);
           pair.row.premiumRe = money(item.expectedPremium * cededPercentage / 100);
           pair.row.sumInsuredCedant = money(item.expectedSum * retentionPercentage / 100);
@@ -729,7 +745,7 @@
       const distributionPercentageField = field === 'proportionCed'
         ? 'distributionPercentageCed'
         : 'distributionPercentageRe';
-      const percentageValue = Math.max(0, Math.min(100, Number(value || 0)));
+      const percentageValue = placementPercentage(Math.max(0, Math.min(100, Number(value || 0))));
       const totalsBefore = group.totals || {};
       const baseCedSum = getGroupCurrentAmount(group, 'sumInsuredRe');
       const baseRetSum = getGroupCurrentAmount(group, 'sumInsuredCedant');
@@ -810,7 +826,7 @@
     const base = rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, ['premiumMovement'])); }, 0);
     if (!base) return 0;
     const amountField = field === 'proportionCed' ? 'premiumCedant' : 'premiumRe';
-    return Number((rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, [amountField])); }, 0) / base * 100).toFixed(8));
+    return placementPercentage(rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, [amountField])); }, 0) / base * 100);
   }
 
   function roundedSyntheticPercentages(rows) {
@@ -1920,8 +1936,8 @@
         row.proportionRe = sumReRate;
         return;
       }
-      row.proportionCed = percentages.ced / 100;
-      row.proportionRe = percentages.re / 100;
+      row.proportionCed = placementProportion(percentages.ced);
+      row.proportionRe = placementProportion(percentages.re);
       row.premiumCedant = money(finalPremium * percentages.ced / 100);
       row.premiumRe = money(finalPremium * percentages.re / 100);
       row.sumInsuredCedant = money(finalSum * percentages.ced / 100);
@@ -2805,6 +2821,9 @@
       return next;
     });
     const reinsuranceSnapshot = {
+      // La vista entrega la fotografia final por cobertura y linea. El
+      // comando solo debe versionarla; no debe volver a sumar el movimiento.
+      persistFinalSnapshotOnly: true,
       distribution: [],
       participants: [],
       coinsurance: [],
@@ -2834,11 +2853,15 @@
     });
     (sim && sim.contracts || []).forEach(function (group) {
       (group.rows || []).forEach(function (row) {
+        // No deduplicar `premiumMovement` en el snapshot: la vista sintetica
+        // deduplica solo para mostrar el movimiento una vez, pero el comando
+        // necesita la variacion por fila para persistir CP/FAC correctamente.
         reinsuranceSnapshot.distribution.push({
           contractId: group.contractId, lineId: group.lineId, coverageCode: row.coverageCode,
           premiumMovement: row.premiumMovement, sumInsuredMovement: row.sumInsuredMovement,
           sourcePremiumMovement: row.sourcePremiumMovement, sourceSumInsuredMovement: row.sourceSumInsuredMovement,
-          finalGrossPremium: row.finalGrossPremium, finalGrossSum: row.finalGrossSum,
+          finalGrossPremium: row.finalGrossPremium === undefined ? row.finalPremium : row.finalGrossPremium,
+          finalGrossSum: row.finalGrossSum === undefined ? row.finalSum : row.finalGrossSum,
           premiumCedant: row.premiumCedant, sumInsuredCedant: row.sumInsuredCedant,
           premiumRe: row.premiumRe, sumInsuredRe: row.sumInsuredRe,
           commission: row.commission, tax: row.tax,
@@ -3293,10 +3316,10 @@
     { title: t('Suma movimiento'), dataIndex: 'sumInsuredMovement', align: 'right', width: 130, render: function (v, row) { return fmt(rowSumMovement(row)); } },
     { title: t('Movimiento'), dataIndex: 'premiumMovement', align: 'right', width: 120, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
     { title: t('Base prorrateada'), dataIndex: 'proratedMovement', align: 'right', width: 140, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
-    { title: t('Pct. Retencion'), dataIndex: 'proportionCed', align: 'right', width: 120, render: function (v) { return (Number(v || 0) * 100).toFixed(2) + '%'; } },
+    { title: t('Pct. Retencion'), dataIndex: 'proportionCed', align: 'right', width: 120, render: function (v) { return placementPercentage(Number(v || 0) * 100).toFixed(10) + '%'; } },
     { title: t('Suma retencion'), dataIndex: 'sumInsuredCedant', align: 'right', width: 130, render: function (v) { return fmt(v); } },
     { title: t('Prima retencion'), dataIndex: 'premiumCedant', align: 'right', width: 130, render: function (v) { return fmt(v); } },
-    { title: t('Pct. Cedido'), dataIndex: 'proportionRe', align: 'right', width: 110, render: function (v) { return (Number(v || 0) * 100).toFixed(2) + '%'; } },
+    { title: t('Pct. Cedido'), dataIndex: 'proportionRe', align: 'right', width: 110, render: function (v) { return placementPercentage(Number(v || 0) * 100).toFixed(10) + '%'; } },
     { title: t('Suma cedida'), dataIndex: 'sumInsuredRe', align: 'right', width: 130, render: function (v) { return fmt(v); } },
     { title: t('Prima cedida'), dataIndex: 'premiumRe', align: 'right', width: 130, render: function (v) { return fmt(v); } },
     { title: t('Comision'), dataIndex: 'commission', align: 'right', width: 120, render: function (v) { return fmt(v); } },
@@ -3442,7 +3465,7 @@
       </span>;
     } },
     { title: t('Porcentaje (%)'), dataIndex: 'percentage', align: 'right', width: 135, render: function (v, row) {
-      return <EditableFormattedNumber value={v} decimals={syntheticPercentageDecimals(v)} readOnly={row.isCoinsurance} onCommit={function (x) { editContractPercentage(row.groupKey, row.percentageField, x); }} />;
+      return <EditableFormattedNumber value={v} decimals={10} readOnly={row.isCoinsurance} onCommit={function (x) { editContractPercentage(row.groupKey, row.percentageField, x); }} />;
     } },
     { title: t('Suma'), dataIndex: 'sum', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, row.manualPrefix + 'Sum', x); }} />;
@@ -3614,7 +3637,7 @@
     }
     rows.forEach(function (row) {
       if (!row.percentageConfigured) {
-        row.percentage = totalSum ? Number((Number(row.sum || 0) / totalSum * 100).toFixed(8)) : 0;
+        row.percentage = totalSum ? placementPercentage(Number(row.sum || 0) / totalSum * 100) : 0;
       }
     });
     return rows;
@@ -3622,9 +3645,38 @@
 
   function renderSelectedLines(contract, mode) {
     if (mode === 'movementDistribution') {
+      // En fianzas, CP y FAC pueden repetir la misma cobertura y cada grupo
+      // puede traer la variacion completa. La variacion debe contarse una vez
+      // por cobertura en la vista sintetica; de lo contrario el movimiento
+      // queda duplicado al coexistir ambas lineas. Las transiciones directas
+      // hacia FAC conservan su calculo especifico.
+      const hasDirectFacultativeMovementInContract = (contract.groups || []).some(function (group) {
+        return hasDirectFacultativeMovement(group);
+      });
+      const movementByCoverage = {};
+      if (!hasDirectFacultativeMovementInContract) {
+        (contract.groups || []).forEach(function (group) {
+          (group.rows || []).forEach(function (item, index) {
+            const coverageCode = String(item.coverageCode || item.code || ('row-' + index));
+            if (movementByCoverage[coverageCode]) return;
+            movementByCoverage[coverageCode] = {
+              sum: item.counts === false
+                ? 0
+                : numberFrom(item, ['sourceSumInsuredMovement', 'sumInsuredMovement']),
+              premium: numberFrom(item, ['sourcePremiumMovement', 'premiumMovement'])
+            };
+          });
+        });
+      }
       const movementTotals = (contract.groups || []).reduce(function (total, group) {
         total.sum += numberFrom(group.totals, ['sumMovement']);
         total.premium += numberFrom(group.totals, ['movement']);
+        return total;
+      }, { sum: 0, premium: 0 });
+      const deduplicatedMovementTotals = Object.keys(movementByCoverage).reduce(function (total, coverageCode) {
+        const movement = movementByCoverage[coverageCode];
+        total.sum += movement.sum;
+        total.premium += movement.premium;
         return total;
       }, { sum: 0, premium: 0 });
       const rows = getDistributionRows(contract).map(function (row) {
@@ -3634,7 +3686,7 @@
         const useDirectFacultativeMovement = group && (hasDirectFacultativeMovement(group)
           || (hasFacultativeMovementOnly(group) && contractHasFacultativeTransition(contract)));
         const movement = row.isCoinsurance
-          ? movementTotals
+          ? (hasDirectFacultativeMovementInContract ? movementTotals : deduplicatedMovementTotals)
           : (useDirectFacultativeMovement
             ? (group && group.rows || []).reduce(function (total, item) {
           // La suma asegurada del movimiento solo considera las coberturas
@@ -3648,7 +3700,9 @@
               }
               return total;
             }, { sum: 0, premium: 0 })
-            : syntheticMovementForGroup(group));
+            : (hasDirectFacultativeMovementInContract
+              ? syntheticMovementForGroup(group)
+              : deduplicatedMovementTotals));
         const factor = row.isCoinsurance
           ? coinsurancePercentageForContract(contract) / 100
           : (useDirectFacultativeMovement
@@ -3682,7 +3736,7 @@
       const movementPercentageBase = movementUsesSum ? movementSumBase : movementPremiumBase;
       rows.forEach(function (row) {
         const value = Math.abs(Number(movementUsesSum ? row.sum : row.premium) || 0);
-        row.percentage = movementPercentageBase ? Number((value / movementPercentageBase * 100).toFixed(8)) : 0;
+        row.percentage = movementPercentageBase ? placementPercentage(value / movementPercentageBase * 100) : 0;
       });
       const roundedPercentages = roundedSyntheticPercentages(rows);
       rows.forEach(function (row) {
@@ -3722,7 +3776,7 @@
             };
             return <Table.Summary><Table.Summary.Row className="axx-rea-total-row">
               <Table.Summary.Cell index={0}><b>{t('Totales')}</b></Table.Summary.Cell>
-              <Table.Summary.Cell index={1} align="right">{pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? 0 : Number(row.percentage || 0)); }, 0).toFixed(8)}</Table.Summary.Cell>
+              <Table.Summary.Cell index={1} align="right">{placementPercentage(pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? 0 : Number(row.percentage || 0)); }, 0)).toFixed(10)}</Table.Summary.Cell>
               <Table.Summary.Cell index={2} align="right">{fmt(total('sum'))}</Table.Summary.Cell>
               <Table.Summary.Cell index={3} align="right">{fmt(total('premium'))}</Table.Summary.Cell>
               <Table.Summary.Cell index={4}></Table.Summary.Cell>
@@ -3753,7 +3807,7 @@
             <Table.Summary>
               <Table.Summary.Row className="axx-rea-total-row">
                 <Table.Summary.Cell index={0}><b>{t('Totales')}</b></Table.Summary.Cell>
-                <Table.Summary.Cell index={1} align="right">{(total('percentage') - pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? Number(row.percentage || 0) : 0); }, 0)).toFixed(2)}</Table.Summary.Cell>
+                <Table.Summary.Cell index={1} align="right">{placementPercentage(total('percentage') - pageData.reduce(function (sum, row) { return sum + (row.isCoinsurance ? Number(row.percentage || 0) : 0); }, 0)).toFixed(10)}</Table.Summary.Cell>
                 <Table.Summary.Cell index={2} align="right">{fmt(total('sum'))}</Table.Summary.Cell>
                 <Table.Summary.Cell index={3} align="right">{fmt(total('premium'))}</Table.Summary.Cell>
                 <Table.Summary.Cell index={4}></Table.Summary.Cell>
