@@ -1330,6 +1330,20 @@
   };
   const buildReinsuranceLines = function (snapshot) {
     const rows = snapshot && Array.isArray(snapshot.distribution) ? snapshot.distribution : [];
+    const storedPercentageForRows = (sourceRows, field) => {
+      const values = (sourceRows || []).map((row) => {
+        const number = Number(row[field]);
+        if (!Number.isFinite(number)) return null;
+        return Math.abs(number) <= 1.000000001 ? number * 100 : number;
+      }).filter((value) => value !== null);
+      const positive = field === 'proportionCed'
+        ? values.filter((value) => value > 0)
+        : values;
+      const candidates = positive.length ? positive : values;
+      if (!candidates.length) return null;
+      const first = candidates[0];
+      return candidates.every((value) => Math.abs(value - first) <= 0.000001) ? first : null;
+    };
     const groups = {};
     rows.forEach((row) => {
       const lineId = normalizedReinsuranceLine(row.lineId);
@@ -1346,10 +1360,14 @@
         premiumRe: 0,
         commission: 0,
         tax: 0,
+        storedPercentageCedant: null,
+        storedPercentageRe: null,
         rows: []
       };
       const line = groups[key];
       line.rows.push(row);
+      line.storedPercentageCedant = storedPercentageForRows(line.rows, 'proportionCed');
+      line.storedPercentageRe = storedPercentageForRows(line.rows, 'proportionRe');
       const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
         || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
       if (configuredForSum) {
@@ -1385,6 +1403,8 @@
         premiumRe: 0,
         commission: 0,
         tax: 0,
+        storedPercentageCedant: null,
+        storedPercentageRe: null,
         rows: []
       };
       contract.lines.forEach((line) => {
@@ -1393,6 +1413,7 @@
         retained.sumCedant += Number(line.sumCedant || 0);
         retained.premiumCedant += Number(line.premiumCedant || 0);
         retained.rows = retained.rows.concat(line.rows || []);
+        retained.storedPercentageCedant = storedPercentageForRows(retained.rows, 'proportionCed');
         line.sum = Number(line.sumRe || 0);
         line.premium = Number(line.premiumRe || 0);
         line.sumCedant = 0;
@@ -1453,8 +1474,20 @@
       }
       const contractSum = contract.lines.filter((line) => !line.isCoinsurance).reduce((sum, line) => sum + Number(line.sum || 0), 0);
       const contractPremium = contract.lines.filter((line) => !line.isCoinsurance).reduce((sum, line) => sum + Number(line.premium || 0), 0);
+      const hasFacultativeLine = contract.lines.some((line) => {
+        return normalizedReinsuranceLine(line.lineId) === 'Facultativo'
+          && (line.rows.length || Math.abs(Number(line.sum || 0)) > 0.005 || Math.abs(Number(line.premium || 0)) > 0.005);
+      });
       contract.lines.forEach((line) => {
-        line.percentage = line.isCoinsurance ? coinsurancePct : (contractSum ? (line.sum / contractSum) * 100 : 0);
+        const storedPercentage = normalizedReinsuranceLine(line.lineId) === 'Retención'
+          ? line.storedPercentageCedant
+          : line.storedPercentageRe;
+        line.hasFacultativeLine = hasFacultativeLine;
+        line.percentage = line.isCoinsurance
+          ? coinsurancePct
+          : (storedPercentage !== null && storedPercentage !== undefined
+            ? storedPercentage
+            : (contractSum ? (line.sum / contractSum) * 100 : 0));
         line.commissionPercentage = line.premiumRe ? (line.commission / line.premiumRe) * 100 : 0;
         line.taxPercentage = line.premiumRe ? (line.tax / line.premiumRe) * 100 : 0;
         line.contractSum = contractSum;
@@ -1548,13 +1581,31 @@
     const number = Number(value || 0);
     return Number.isFinite(number) ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
   };
-  const reinsurancePercentage = (value) => {
+  // GLOB-1201: sin FAC solo se corrige ruido de coma flotante cercano a 2
+  // decimales; con FAC se conserva la precision original del reaseguro.
+  const normalizeReinsuranceRate = (value, hasFacultativeLine, premium, amount) => {
+    const number = Number(value || 0);
+    if (!Number.isFinite(number) || hasFacultativeLine) return number;
+    const basePremium = Number(premium);
+    const expectedAmount = Number(amount);
+    if (!Number.isFinite(basePremium) || !Number.isFinite(expectedAmount)) {
+      const rounded = Number(number.toFixed(2));
+      return Math.abs(number - rounded) <= 0.0001 ? rounded : number;
+    }
+    for (let decimals = 2; decimals <= 10; decimals += 1) {
+      const rounded = Number(number.toFixed(decimals));
+      if (Math.abs(moneyValue(basePremium * rounded / 100) - moneyValue(expectedAmount)) <= 0.01) {
+        return rounded;
+      }
+    }
+    return number;
+  };
+  const reinsurancePercentage = (value, row, field) => {
     const number = Number(value || 0);
     if (!Number.isFinite(number)) return '0.0000000000';
-    // Evita mostrar residuos binarios como 40.9999990280 cuando el valor
-    // real es un porcentaje exacto (por ejemplo, 41%).
-    const nearestHundredth = Number(number.toFixed(2));
-    const displayValue = Math.abs(number - nearestHundredth) <= 0.00001 ? nearestHundredth : number;
+    const amount = field === 'commissionPercentage' ? row && row.commission : field === 'taxPercentage' ? row && row.tax : undefined;
+    const premium = field === 'commissionPercentage' || field === 'taxPercentage' ? row && row.premiumRe : undefined;
+    const displayValue = normalizeReinsuranceRate(number, row && row.hasFacultativeLine, premium, amount);
     return displayValue.toLocaleString('en-US', { minimumFractionDigits: 10, maximumFractionDigits: 10 });
   };
   const roundedFinalReinsuranceLines = function (rows) {
@@ -1565,6 +1616,11 @@
       || Math.abs(Number(row.percentage || 0)) > 0.000000001
     ));
     if (!eligible.length) return result;
+
+    // Con FAC se conserva el porcentaje persistido de cada línea. La
+    // normalización a 2 decimales solo aplica cuando no existe FAC, para no
+    // perder precisión real de la colocación facultativa.
+    if (result.some((row) => row.hasFacultativeLine)) return result;
 
     const totalSum = eligible.reduce((sum, row) => sum + Math.abs(Number(row.sum || 0)), 0);
     const totalPremium = eligible.reduce((sum, row) => sum + Math.abs(Number(row.premium || 0)), 0);
@@ -2600,11 +2656,11 @@
     { title: t('Premium'), dataIndex: 'premium', key: 'premium', width: 170, align: 'right',
       render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={145} onCommit={(next) => updateReinsuranceLine(row.key, 'premium', next)} /> },
     { title: t('Commission %'), dataIndex: 'commissionPercentage', key: 'commissionPercentage', width: 180, align: 'right',
-      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={10} value={value} width={145} onCommit={(next) => updateReinsuranceLine(row.key, 'commissionPercentage', next)} /> },
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={10} value={normalizeReinsuranceRate(value, row.hasFacultativeLine, row.premiumRe, row.commission)} width={145} onCommit={(next) => updateReinsuranceLine(row.key, 'commissionPercentage', next)} /> },
     { title: t('Commission'), dataIndex: 'commission', key: 'commission', width: 160, align: 'right',
       render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={125} onCommit={(next) => updateReinsuranceLine(row.key, 'commission', next)} /> },
     { title: t('Tax %'), dataIndex: 'taxPercentage', key: 'taxPercentage', width: 180, align: 'right',
-      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={10} value={value} width={125} onCommit={(next) => updateReinsuranceLine(row.key, 'taxPercentage', next)} /> },
+      render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} decimals={10} value={normalizeReinsuranceRate(value, row.hasFacultativeLine, row.premiumRe, row.tax)} width={125} onCommit={(next) => updateReinsuranceLine(row.key, 'taxPercentage', next)} /> },
     { title: t('Tax'), dataIndex: 'tax', key: 'tax', width: 140, align: 'right',
       render: (value, row) => <EditableFormattedNumber disabled={isReinsuranceReadonlyLine(row)} value={value} width={105} onCommit={(next) => updateReinsuranceLine(row.key, 'tax', next)} /> },
     { title: t('Balance'), key: 'balance', width: 140, align: 'right', render: (value, row) => {
@@ -2626,7 +2682,10 @@
       premium: total.premium + reinsuranceNumber(row.premiumMovement)
     }), { sum: 0, premium: 0 });
     const coinsurancePct = coinsurancePercentage(reinsuranceSnapshot);
-    const rows = selectedReinsuranceLines.map((line) => {
+    // Aplicar la misma normalización tolerante en la distribución sintética.
+    // La función devuelve una copia, por lo que no modifica el snapshot.
+    const displayedReinsuranceLines = roundedFinalReinsuranceLines(selectedReinsuranceLines);
+    const rows = displayedReinsuranceLines.map((line) => {
       const factor = normalizedReinsuranceLine(line.lineId) === 'Coaseguro'
         ? coinsurancePct / 100
         : ((100 - coinsurancePct) / 100) * reinsuranceNumber(line.percentage) / 100;
@@ -2655,7 +2714,7 @@
       : [];
     const columns = reinsuranceLineColumns.map((column) => {
       if (column.dataIndex === 'lineId') return Object.assign({}, column, { render: (value, row) => <span>{value}<Button type="link" size="small" className="proceed-order-folder-button" title={t('View reinsurers')} onClick={(event) => { event.stopPropagation(); setReinsuranceLineKey(row.key); }}><ProceedFolderIcon /></Button></span> });
-      if (column.dataIndex === 'percentage' || column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: reinsurancePercentage });
+      if (column.dataIndex === 'percentage' || column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: (value, row) => reinsurancePercentage(value, row, column.dataIndex) });
       if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax') return Object.assign({}, column, { render: reinsuranceMoney });
       if (column.key === 'balance') return Object.assign({}, column, { render: (value, row) => reinsuranceMoney(Number(row.premium || 0) - Number(row.commission || 0) - Number(row.tax || 0)) });
       return column;

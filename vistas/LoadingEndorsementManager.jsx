@@ -1980,7 +1980,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                             participants={selectedGroup ? selectedGroup.participants || [] : []} reinsurerContacts={reinsuranceContacts} coinsuranceCessions={coinsuranceCessions} isReinsuranceCoverage={isReinsuranceCoverage} />
                     </Tabs.TabPane>
                     <Tabs.TabPane tab='Distribución' key='distribution'>
-                        <ReinsuranceDistributionEditor contractCode={selectedContractCode} data={selectedLines} savedLines={selectedGroup && selectedGroup.manualDistribution} policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' === selected.key; })} coinsuranceCessions={coinsuranceCessions} groupKey={selected.key} onSave={saveReinsuranceDistribution} onOpenReinsurers={openReinsurers} />
+                        <ReinsuranceDistributionEditor contractCode={selectedContractCode} data={selectedLines} savedLines={selectedGroup && selectedGroup.manualDistribution} policyRows={configuredReinsuranceCessions().filter(function(cession){ return String(cession.contractId || '') + '|' === selected.key; })} coinsuranceCessions={coinsuranceCessions} isReinsuranceCoverage={isReinsuranceCoverage} groupKey={selected.key} onSave={saveReinsuranceDistribution} onOpenReinsurers={openReinsurers} />
                     </Tabs.TabPane>
                     <Tabs.TabPane tab='Reaseguradores' key='reinsurers' disabled={!reinsurerLineReady}>
                         {reinsurerLineReady
@@ -2081,16 +2081,27 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             facultative:{ sum:0, premium:0, commission:0, tax:0 },
             fronting:{ sum:0, premium:0, commission:0, tax:0 }
         };
+        const hasCoverageRows = (data || []).some(function(row){ return isReinsuranceCoverage(row); });
+        const countedSumRows = {};
         (data || []).forEach(function(row){
             const kind = lineKind(row.lineId || row.lineName || row.contractName);
             const line = movementLines[kind] || movementLines.quota;
-            movementLines.retention.sum += Number(row.sumInsuredCedant || 0);
             movementLines.retention.premium += Number(row.premiumCedant || 0);
+
+            // Ajuste de sumas: isCoverage identifica la cobertura que representa
+            // la suma asegurable. Las dependientes pueden repetirla y no deben
+            // duplicarla; sin configuración se conserva el comportamiento previo.
+            const sumKey = String(row.coverageCode || row.coverageId || row.code || row.cover || '') + '|' + kind;
+            const includeSum = !hasCoverageRows || (isReinsuranceCoverage(row) && !countedSumRows[sumKey]);
+            if(includeSum){
+                countedSumRows[sumKey] = true;
+                movementLines.retention.sum += Number(row.sumInsuredCedant || 0);
+            }
             if(kind !== 'retention'){
-                line.sum += Number(row.sumInsuredRe || 0);
                 line.premium += Number(row.premiumRe || 0);
                 line.commission += Number(row.commission || row.comissionCedant || 0);
                 line.tax += Number(row.tax || 0);
+                if(includeSum) line.sum += Number(row.sumInsuredRe || 0);
             }
         });
         const movementBase = Object.keys(movementLines).reduce(function(total, key){
@@ -2203,6 +2214,10 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             return row;
         });
         roundDisplayedPercentages(rows);
+        const hasFacultativeLine = (data || []).some(function(row){
+            return lineKind(row.lineId || row.lineName || row.contractName) === 'facultative';
+        });
+        rows.forEach(function(row){ row.hasFacultativeLine = hasFacultativeLine; });
         const totals = rows.reduce(function(total, row){
             total.percentage += Number(row.percentage || 0);
             total.sum += Number(row.sum || 0);
@@ -2252,9 +2267,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 <Column title='Porcentaje (%)' dataIndex='percentage' align='right' render={renderPercentage} />
                 <Column title='Suma' dataIndex='sum' align='right' render={renderNumber} />
                 <Column title='Prima' dataIndex='premium' align='right' render={renderNumber} />
-                <Column title='Pct. Comisión' dataIndex='commissionPct' align='right' render={renderPercentage} />
+                <Column title='Pct. Comisión' dataIndex='commissionPct' align='right' render={function(value, row){ return renderRatePercentage(value, row, 'commissionPct'); }} />
                 <Column title='Comisión' dataIndex='commission' align='right' render={renderNumber} />
-                <Column title='Pct. Impuesto' dataIndex='taxPct' align='right' render={renderPercentage} />
+                <Column title='Pct. Impuesto' dataIndex='taxPct' align='right' render={function(value, row){ return renderRatePercentage(value, row, 'taxPct'); }} />
                 <Column title='Impuesto' dataIndex='tax' align='right' render={renderNumber} />
                 <Column title='Saldo Rea.' dataIndex='balance' align='right' render={renderNumber} />
             </Table>
@@ -2273,7 +2288,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             </div> : null}
         </>;
     }
-    function ReinsuranceDistributionEditor({ contractCode, data, savedLines, policyRows, coinsuranceCessions, groupKey, onSave, onOpenReinsurers }){
+    function ReinsuranceDistributionEditor({ contractCode, data, savedLines, policyRows, coinsuranceCessions, isReinsuranceCoverage, groupKey, onSave, onOpenReinsurers }){
         const coinsurancePercentage = Math.max(0, Math.min(100, (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0)));
         const coinsuranceRate = function(field){
             const totals = (coinsuranceCessions || []).reduce(function(result, row){
@@ -2328,6 +2343,16 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             (policyRows && policyRows.length ? policyRows : source || []).forEach(function(row){
                 configuredLineKinds[lineKind(row.lineId || row.lineName || row.contractName)] = true;
             });
+            // Regla reutilizable para distribuciones finales: los porcentajes
+            // deben leerse del reaseguro persistido, no derivarse de sumas/primas
+            // redondeadas a centavos. Si existe FAC, se conserva siempre la
+            // precision recibida (hasta 10 decimales), porque ese porcentaje
+            // representa una colocacion real y no debe alterarse. Solo cuando
+            // no existe FAC se corrige el ruido minimo de coma flotante, por
+            // ejemplo 40.0000107679/59.9999892320 -> 40/60.
+            const hasFacultativeLine = (policyRows || []).concat(source || []).some(function(row){
+                return lineKind(row.lineId || row.lineName || row.contractName) === 'facultative';
+            });
             const lineTotals = {
                 retention:{ sum:0, premium:0, commission:0, tax:0 },
                 quota:{ sum:0, premium:0, commission:0, tax:0 },
@@ -2335,19 +2360,167 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 facultative:{ sum:0, premium:0, commission:0, tax:0 },
                 fronting:{ sum:0, premium:0, commission:0, tax:0 }
             };
+            // La normalizacion solo elimina residuos numericos; nunca reduce una
+            // proporcion que requiera precision real para la colocacion.
+            const storedPercentageValues = {};
+            const storedRetentionValues = [];
+            const storedRows = policyRows && policyRows.length ? policyRows : (source || []);
+            const asPercentage = function(value){
+                const number = Number(value);
+                if(!Number.isFinite(number)) return null;
+                return Math.abs(number) <= 1.000000001 ? number * 100 : number;
+            };
+            // Corrige únicamente el ruido de coma flotante que deja valores como
+            // 40.0000107679; no reduce porcentajes que requieren más precisión.
+            const normalizeStoredPercentage = function(value){
+                if(hasFacultativeLine) return Number(value);
+                const rounded = Number(Number(value).toFixed(2));
+                return Math.abs(Number(value) - rounded) <= 0.0001 ? rounded : Number(value);
+            };
+            storedRows.forEach(function(row){
+                const kind = lineKind(row.lineId || row.lineName || row.contractName);
+                const rePercentage = asPercentage(row.proportionRe);
+                const cedantPercentage = asPercentage(row.proportionCed);
+                if(kind !== 'retention' && rePercentage !== null){
+                    if(!storedPercentageValues[kind]) storedPercentageValues[kind] = [];
+                    storedPercentageValues[kind].push(normalizeStoredPercentage(rePercentage));
+                }
+                if(cedantPercentage !== null && cedantPercentage > 0){
+                    storedRetentionValues.push(normalizeStoredPercentage(cedantPercentage));
+                }
+            });
+            Object.keys(storedPercentageValues).forEach(function(key){
+                const values = storedPercentageValues[key];
+                const first = values[0];
+                if(values.every(function(value){ return Math.abs(value - first) <= 0.000001; })){
+                    storedPercentageValues[key] = normalizeStoredPercentage(first);
+                } else {
+                    delete storedPercentageValues[key];
+                }
+            });
+            if(storedRetentionValues.length){
+                const firstRetention = storedRetentionValues[0];
+                if(storedRetentionValues.every(function(value){ return Math.abs(value - firstRetention) <= 0.000001; })){
+                    storedPercentageValues.retention = normalizeStoredPercentage(firstRetention);
+                }
+            }
+            if(storedPercentageValues.retention === undefined){
+                const cededStoredTotal = Object.keys(storedPercentageValues).reduce(function(total, key){
+                    return total + Number(storedPercentageValues[key] || 0);
+                }, 0);
+                if(cededStoredTotal > 0.01){
+                    storedPercentageValues.retention = normalizeStoredPercentage(100 - cededStoredTotal);
+                }
+            }
+            const storedPercentageKeys = ['retention'].concat(Object.keys(configuredLineKinds).filter(function(key){ return key !== 'retention'; }));
+            const hasAllStoredPercentages = storedPercentageKeys.every(function(key){ return storedPercentageValues[key] !== undefined; });
+            const storedPercentageTotal = storedPercentageKeys.reduce(function(total, key){
+                return total + (storedPercentageValues[key] === undefined ? 0 : Number(storedPercentageValues[key]));
+            }, 0);
+            // La distribución del endoso conserva los porcentajes persistidos de
+            // la póliza. Sin FAC deben ser completos y sumar 100%; con FAC se
+            // conservan tal como vienen y nunca se recalculan desde importes.
+            const useStoredPercentages = !((savedLines || []).length)
+                && hasAllStoredPercentages
+                && (hasFacultativeLine || Math.abs(storedPercentageTotal - 100) <= 0.01);
+            const storedPercentageReason = (savedLines || []).length
+                ? 'MANUAL_DISTRIBUTION_EXISTS'
+                : !hasAllStoredPercentages
+                ? 'MISSING_LINE_PERCENTAGE'
+                : !hasFacultativeLine && Math.abs(storedPercentageTotal - 100) > 0.01
+                ? 'PERCENTAGE_TOTAL_IS_NOT_100'
+                : hasFacultativeLine
+                ? 'FACULTATIVE_PRESERVES_STORED_PERCENTAGES'
+                : 'STORED_PERCENTAGES_USED';
+            const storedPercentageDiagnostic = {
+                contractCode:contractCode,
+                savedLinesLength:(savedLines || []).length,
+                savedLineKeys:(savedLines || []).map(function(row){ return row.key; }),
+                policyRows:(storedRows || []).map(function(row){
+                    return {
+                        lineId:row.lineId || row.lineName || row.contractName || '',
+                        coverageCode:row.coverageCode || row.coverageId || row.code || '',
+                        proportionCed:row.proportionCed,
+                        proportionRe:row.proportionRe,
+                        isCoverage:isReinsuranceCoverage(row)
+                    };
+                }),
+                storedPercentageValues:storedPercentageValues,
+                storedPercentageKeys:storedPercentageKeys,
+                storedPercentageTotal:storedPercentageTotal,
+                hasFacultativeLine:hasFacultativeLine,
+                useStoredPercentages:useStoredPercentages,
+                reason:storedPercentageReason
+            };
+            if(typeof console !== 'undefined' && console.log){
+                console.warn('[LoadingEndorsementManager] stored percentage diagnostic', storedPercentageDiagnostic);
+                console.log('[LoadingEndorsementManager] stored percentage diagnostic JSON', JSON.stringify(storedPercentageDiagnostic, null, 2));
+            }
+            if(typeof window !== 'undefined'){
+                window.__loadingEndorsementStoredPercentageDiagnostic = storedPercentageDiagnostic;
+            }
+            const movementAmounts = function(row){
+                if(!row) return { cedantPremium:0, rePremium:0, cedantSum:0, reSum:0 };
+                const premiumMovement = row.premiumMovement !== undefined
+                    ? Number(row.premiumMovement || 0) : null;
+                const sumMovement = row.sumInsuredMovement !== undefined
+                    ? Number(row.sumInsuredMovement || 0)
+                    : (row.sumMovement !== undefined ? Number(row.sumMovement || 0) : null);
+                const proportionRe = Number(row.proportionRe || 0);
+                const hasSplitMovement = row.premiumCedantMovement !== undefined || row.premiumReMovement !== undefined;
+                const hasSumSplitMovement = row.sumInsuredCedantMovement !== undefined || row.sumInsuredReMovement !== undefined;
+                const premiumSplitMatches = premiumMovement !== null
+                    && Math.abs(Number(row.premiumCedant || 0) + Number(row.premiumRe || 0) - premiumMovement) <= 0.01;
+                const sumSplitMatches = sumMovement !== null
+                    && Math.abs(Number(row.sumInsuredCedant || 0) + Number(row.sumInsuredRe || 0) - sumMovement) <= 0.01;
+                const rePremium = hasSplitMovement
+                    ? Number(row.premiumReMovement || 0)
+                    : premiumMovement === null
+                    ? Number(row.premiumRe || 0)
+                    : (premiumSplitMatches ? Number(row.premiumRe || 0) : Number((premiumMovement * proportionRe).toFixed(2)));
+                const reSum = hasSumSplitMovement
+                    ? Number(row.sumInsuredReMovement || 0)
+                    : sumMovement === null
+                    ? Number(row.sumInsuredRe || 0)
+                    : (sumSplitMatches ? Number(row.sumInsuredRe || 0) : Number((sumMovement * proportionRe).toFixed(2)));
+                return {
+                    cedantPremium: hasSplitMovement
+                        ? Number(row.premiumCedantMovement || 0)
+                        : (premiumMovement === null ? Number(row.premiumCedant || 0) : Number((premiumMovement - rePremium).toFixed(2))),
+                    rePremium: rePremium,
+                    cedantSum: hasSumSplitMovement
+                        ? Number(row.sumInsuredCedantMovement || 0)
+                        : (sumMovement === null ? Number(row.sumInsuredCedant || 0) : Number((sumMovement - reSum).toFixed(2))),
+                    reSum: reSum,
+                    commission: row.commissionMovement !== undefined
+                        ? Number(row.commissionMovement || 0) : Number(row.commission || row.comissionCedant || 0),
+                    tax: row.taxMovement !== undefined ? Number(row.taxMovement || 0) : Number(row.tax || 0)
+                };
+            };
+            const hasCoverageRows = (policyRows || []).concat(source || []).some(function(row){ return isReinsuranceCoverage(row); });
+            const countedSumRows = {};
             const addLineValue = function(target, row, isMovement){
                 const kind = lineKind(row.lineId || row.lineName || row.contractName);
                 if(kind !== 'retention' && !configuredLineKinds[kind]) return;
                 const line = lineTotals[kind] || lineTotals.quota;
                 // Retention is stored inside each cession, usually on the
                 // Cuota Parte row, not necessarily as a separate lineId.
-                lineTotals.retention.sum += Number(row.sumInsuredCedant || 0);
-                lineTotals.retention.premium += Number(row.premiumCedant || 0);
+                const amounts = isMovement
+                    ? movementAmounts(row)
+                    : { cedantPremium:Number(row.premiumCedant || 0), rePremium:Number(row.premiumRe || 0), cedantSum:Number(row.sumInsuredCedant || 0), reSum:Number(row.sumInsuredRe || 0) };
+                const sumKey = (isMovement ? 'movement|' : 'policy|')
+                    + String(row.coverageCode || row.coverageId || row.code || row.cover || '') + '|' + kind;
+                const includeSum = !hasCoverageRows || (isReinsuranceCoverage(row) && !countedSumRows[sumKey]);
+                if(includeSum){
+                    countedSumRows[sumKey] = true;
+                    lineTotals.retention.sum += amounts.cedantSum;
+                }
+                lineTotals.retention.premium += amounts.cedantPremium;
                 if(kind !== 'retention'){
-                    line.sum += Number(row.sumInsuredRe || 0);
-                    line.premium += Number(row.premiumRe || 0);
-                    line.commission += Number(row.commission || row.comissionCedant || 0);
-                    line.tax += Number(row.tax || 0);
+                    if(includeSum) line.sum += amounts.reSum;
+                    line.premium += amounts.rePremium;
+                    line.commission += isMovement ? amounts.commission : Number(row.commission || row.comissionCedant || 0);
+                    line.tax += isMovement ? amounts.tax : Number(row.tax || 0);
                 }
             };
             (policyRows || []).forEach(function(row){ addLineValue(lineTotals, row, false); });
@@ -2373,7 +2546,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                     ? (distributedSum ? line.sum / distributedSum * 100 : 0)
                     : premiumPercentage;
                 return {
-                    key:key, contractLabel:label, percentage:sumPercentage, premiumPercentage:premiumPercentage,
+                    key:key, contractLabel:label,
+                    percentage:useStoredPercentages ? Number(storedPercentageValues[key]) : sumPercentage,
+                    premiumPercentage:useStoredPercentages ? Number(storedPercentageValues[key]) : premiumPercentage,
                     percentageBasis:isCpexCcv ? 'sum' : 'both',
                     sum:Number((line.sum * reinsuranceFactor).toFixed(2)),
                     premium:Number((line.premium * reinsuranceFactor).toFixed(2)),
@@ -2418,12 +2593,14 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 }
                 return next;
             };
-            return storedLines && storedLines.length ? storedLines.map(function(row){
+            const builtLines = storedLines && storedLines.length ? storedLines.map(function(row){
                 const definition = distribution.find(function(item){ return item.key === row.key; }) || {};
                 // Ignore previously saved values for lines no longer present
                 // in the selected contract configuration.
                 return definition.inactive ? definition : recalculate(Object.assign({}, definition, row));
             }) : distribution.map(recalculate);
+            builtLines.preserveStoredPercentages = hasFacultativeLine || useStoredPercentages;
+            return builtLines;
         };
         const [lines, setLines] = useState(function(){ return buildLines(data, policyRows, savedLines); });
         useEffect(function(){ setLines(buildLines(data, policyRows, savedLines)); }, [data, policyRows, savedLines]);
@@ -2449,11 +2626,32 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                     : Number((next.premium - next.commission - next.tax).toFixed(2));
                 return next;
                 });
+                updated.preserveStoredPercentages = current.preserveStoredPercentages;
                 return updated;
             });
         };
         const rows = lines.map(function(row){ return Object.assign({}, row); });
-        roundDisplayedPercentages(rows);
+        if(!lines.preserveStoredPercentages) roundDisplayedPercentages(rows);
+        // GLOB-1201: los porcentajes de comision e impuesto siguen la misma
+        // regla que la colocacion. Sin FAC solo se corrige ruido de coma
+        // flotante cercano a 2 decimales; con FAC se conserva la precision.
+        const hasFacultativeLine = rows.some(function(row){
+            return row.key === 'facultative' && !row.inactive;
+        });
+        const normalizeRatePercentage = function(value, premium, amount){
+            const number = Number(value || 0);
+            if(!Number.isFinite(number) || hasFacultativeLine) return number;
+            const basePremium = Number(premium);
+            const expectedAmount = Number(amount);
+            for(let decimals = 2; decimals <= 10; decimals += 1){
+                const rounded = Number(number.toFixed(decimals));
+                if(!Number.isFinite(basePremium) || !Number.isFinite(expectedAmount)
+                    || Math.abs(Number((basePremium * rounded / 100).toFixed(2)) - Number(expectedAmount.toFixed(2))) <= 0.01){
+                    return rounded;
+                }
+            }
+            return number;
+        };
         const totals = rows.reduce(function(total, row){
             total.percentage += Number(row.percentage || 0);
             total.sumInsured += Number(row.sum || 0);
@@ -2462,12 +2660,15 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             total.tax += Number(row.tax || 0);
             return total;
         }, { percentage:0, sumInsured:0, premium:0, commission:0, tax:0 });
-        const formatDistributionInput = function(value, name){
+        const formatDistributionInput = function(value, name, record){
             const number = Number(value);
             if(!Number.isFinite(number)) return '';
             const isPercentage = name === 'percentage' || name === 'commissionPct' || name === 'taxPct';
-            const percentageDigits = isPercentage ? percentageDecimals(number) : 0;
-            return number.toLocaleString('en-US', {
+            const displayNumber = isPercentage && (name === 'commissionPct' || name === 'taxPct')
+                ? normalizeRatePercentage(number, record && record.premium, record && (name === 'commissionPct' ? record.commission : record.tax))
+                : number;
+            const percentageDigits = isPercentage ? percentageDecimals(displayNumber) : 0;
+            return displayNumber.toLocaleString('en-US', {
                 useGrouping:true,
                 minimumFractionDigits:isPercentage ? percentageDigits : 2,
                 maximumFractionDigits:isPercentage ? percentageDigits : 2
@@ -2478,7 +2679,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const isCommissionOrTax = name === 'commissionPct' || name === 'commission' || name === 'taxPct' || name === 'tax';
             const disabled = isCommissionOrTax ? !isCededLine : (record.key === 'nonTechnical' || record.key === 'coinsurance');
             return <Input className='lem-rea-financial-input' disabled={disabled} inputMode='decimal'
-                value={record[name] == null ? '' : formatDistributionInput(record[name], name)}
+                value={record[name] == null ? '' : formatDistributionInput(record[name], name, record)}
                 onChange={function(event){ editLine(record.key, name, event.target.value); }} />;
         };
         return <>
@@ -3139,14 +3340,38 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         // Keep percentage presentation consistent with the other reinsurance views.
         return 10;
     }
+    function normalizeDisplayedRate(value, record, field){
+        const numeric = Number(value || 0);
+        const safeValue = Number.isFinite(numeric) ? numeric : 0;
+        if(record && record.hasFacultativeLine) return safeValue;
+        const premium = field === 'commissionPct' || field === 'taxPct' ? Number(record && record.premium) : NaN;
+        const amount = field === 'commissionPct' ? Number(record && record.commission) : field === 'taxPct' ? Number(record && record.tax) : NaN;
+        if(Number.isFinite(premium) && Number.isFinite(amount)){
+            for(let decimals = 2; decimals <= 10; decimals += 1){
+                const rounded = Number(safeValue.toFixed(decimals));
+                if(Math.abs(Number((premium * rounded / 100).toFixed(2)) - Number(amount.toFixed(2))) <= 0.01) return rounded;
+            }
+        }
+        const roundedRate = Number(safeValue.toFixed(2));
+        return Math.abs(safeValue - roundedRate) <= 0.0001 ? roundedRate : safeValue;
+    }
     function renderPercentage(value, record){
         const numeric = Number(value || 0);
         const safeValue = Number.isFinite(numeric) ? numeric : 0;
+        const displayValue = normalizeDisplayedRate(value, record);
         const decimals = percentageDecimals(safeValue);
-        const text = safeValue.toLocaleString('en-US', {
+        const text = displayValue.toLocaleString('en-US', {
             minimumFractionDigits:decimals,
             maximumFractionDigits:decimals
         });
+        const state = safeValue > 0 ? 'lem-positive' : (safeValue < 0 ? 'lem-negative' : 'lem-zero');
+        return renderText(<span className={state}>{text}</span>, record);
+    }
+    function renderRatePercentage(value, record, field){
+        const displayValue = normalizeDisplayedRate(value, record, field);
+        const numeric = Number(value || 0);
+        const safeValue = Number.isFinite(numeric) ? numeric : 0;
+        const text = displayValue.toLocaleString('en-US', { minimumFractionDigits:10, maximumFractionDigits:10 });
         const state = safeValue > 0 ? 'lem-positive' : (safeValue < 0 ? 'lem-negative' : 'lem-zero');
         return renderText(<span className={state}>{text}</span>, record);
     }

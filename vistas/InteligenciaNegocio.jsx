@@ -47,6 +47,13 @@
     const a = r && r.area != null ? String(r.area).trim() : '';
     return a ? a : GENERAL;
   };
+  const canAccessRestrictedReport = report => {
+    if (!report || !report.restricted) return true;
+
+    const sessionEmail = String(localStorage.email || '').trim().toLowerCase();
+    const allowedUsers = Array.isArray(report.AllowedUsers) ? report.AllowedUsers : [];
+    return allowedUsers.some(user => String(user && user.user || '').trim().toLowerCase() === sessionEmail);
+  };
   const byText = (a, b) => String(a).localeCompare(String(b), 'es', { sensitivity: 'base' });
   const AREA_AVATAR_COLORS = ['#1677ff', '#13a8a8', '#52a41a', '#d46b08', '#722ed1', '#c41d7f', '#2f54eb', '#389e0d'];
   const areaAvatarColor = area => {
@@ -423,6 +430,7 @@
     const [editReport, setEditReport] = useState({});
     const [loading, setLoading] = useState(false);
     const [area, setArea] = useState(undefined);
+    const [showRestricted, setShowRestricted] = useState(false);
     const [reportIdRestrictions, setReportIdRestrictions] = useState(null);
     const [parameterModal, setParameterModal] = useState({ visible: false, loading: false, report: null, rows: [], values: {}, contactOptions: {}, contactLoading: {}, cashDeskOptions: {}, cashDeskLoading: {}, lobOptions: [], lobLoading: false, error: '' });
     const parameterRequestRef = React.useRef(0);
@@ -464,9 +472,13 @@
       });
     };
 
+    // Restricted reports outside the current user's allow-list stay hidden by default.
+    // The toggle is intentionally only a visibility aid; opening still validates access.
+    const visibleData = showRestricted ? data : data.filter(canAccessRestrictedReport);
+
     // The selected area controls the report grid shown alongside the area list.
-    const areas = Array.from(new Set(data.map(areaOf))).sort(byText);
-    const areaReports = area ? data.filter(r => areaOf(r) === area) : [];
+    const areas = Array.from(new Set(visibleData.map(areaOf))).sort(byText);
+    const areaReports = area ? visibleData.filter(r => areaOf(r) === area) : [];
     const rows = areaReports.slice().sort((a, b) => byText(a.name || a.fileName, b.name || b.fileName));
 
     const reportUrl = (report, values) => {
@@ -488,7 +500,7 @@
       return '#/reportview/' + report.fileName + (pairs.length ? '/' + pairs.join('&') : '');
     };
     const openReportWithValues = (report, values) => {
-      if (report.restricted && report.AllowedUsers && report.AllowedUsers.map(q => q.user).indexOf(localStorage.email) === -1) {
+      if (!canAccessRestrictedReport(report)) {
         A.message.error(t('This report is restricted and only authorized users can access it'));
         return;
       }
@@ -498,12 +510,9 @@
     };
 
     const openReport = r => {
-      if (r.restricted) {
-        //checking if user is authorized
-        if (r.AllowedUsers && r.AllowedUsers.map(q => q.user).indexOf(localStorage.email) === -1) {
-          A.message.error(t('This report is restricted and only authorized users can access it'));
-          return;
-        }
+      if (!canAccessRestrictedReport(r)) {
+        A.message.error(t('This report is restricted and only authorized users can access it'));
+        return;
       }
       openReportWithValues(r, {});
     };
@@ -1117,7 +1126,7 @@
                 }}
                 renderItem={item => {
                   const selected = item === area;
-                  const count = data.filter(r => areaOf(r) === item).length;
+                  const count = visibleData.filter(r => areaOf(r) === item).length;
                   return (
                     <A.List.Item
                       onClick={() => setArea(item)}
@@ -1143,11 +1152,15 @@
             <section style={{ display: 'flex', flex: '1 1 640px', flexDirection: 'column', minWidth: 0, minHeight: 0, maxWidth: '100%' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2, padding: '4px 0', background: '#e6f4ff', border: '1px solid #cbd1d8', borderRadius: 0 }}>
                 <strong style={{ marginLeft: 4 }}>{area || t('Reports')}</strong>
-                <A.Tooltip title={t('Reload')}>
-                  <A.Button type="link" icon={<Ic name="reload" />} style={{ marginRight: 4 }} onClick={() => getReports()}>
-                    {t('Reload')}
-                  </A.Button>
-                </A.Tooltip>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 8 }}>
+                  <A.Tooltip title={t('Reload')}>
+                    <A.Button type="link" icon={<Ic name="reload" />} onClick={() => getReports()}>
+                      {t('Reload')}
+                    </A.Button>
+                  </A.Tooltip>
+                  <span>Visualizar Restringidos</span>
+                  <A.Switch checked={showRestricted} onChange={setShowRestricted} />
+                </div>
               </div>
               <div ref={tableViewportRef} style={{ flex: '1 1 auto', width: '100%', maxWidth: '100%', minHeight: 0, overflow: 'hidden' }}>
                 <A.Table

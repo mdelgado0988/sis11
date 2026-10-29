@@ -1,11 +1,11 @@
 USE SIS11
 GO
 
-DECLARE @holderId INT = null --3;
-DECLARE @FechaDesde DATE = '20250101';
-DECLARE @FechaHasta DATE = '20261231';
+DECLARE @holderId INT = 12 /*3;*/
+DECLARE @FechaDesde DATE = null; /*'20250101'*/;
+DECLARE @FechaHasta DATE = null; /*'20261231'*/;
 DECLARE @FechaCorte DATE = null
-DECLARE @policyId INT = 0;
+DECLARE @policyId INT = 4666;
 
 SELECT
     holder.id AS [Id Holder],
@@ -76,6 +76,8 @@ SELECT
              (@FechaCorte IS NULL AND @FechaDesde IS NOT NULL AND @FechaHasta IS NOT NULL
               AND CAST(DATEADD(HOUR, -5, pp.payedDate) AS DATE)
                   BETWEEN @FechaDesde AND @FechaHasta)
+             OR
+             (@FechaCorte IS NULL AND @FechaDesde IS NULL AND @FechaHasta IS NULL)
          )
         THEN CONVERT(VARCHAR(10), DATEADD(HOUR, -5, pp.payedDate), 103)
         ELSE NULL
@@ -90,6 +92,8 @@ SELECT
              (@FechaCorte IS NULL AND @FechaDesde IS NOT NULL AND @FechaHasta IS NOT NULL
               AND CAST(DATEADD(HOUR, -5, pp.payedDate) AS DATE)
                   BETWEEN @FechaDesde AND @FechaHasta)
+             OR
+             (@FechaCorte IS NULL AND @FechaDesde IS NULL AND @FechaHasta IS NULL)
          )
         THEN ISNULL(pp.payed, 0)
         ELSE 0
@@ -172,7 +176,13 @@ LEFT JOIN dbo.Contact insuredContact ON insuredContact.id = insured.contactId
 WHERE (@HolderId IS NULL OR lp.holderId = @HolderId)
   AND (ISNULL(@PolicyId,0) = 0 OR lp.id = ISNULL(@PolicyId,0))
   AND (
-      (ISNULL(@PolicyId,0) <> 0)
+      /* Si solo se filtra por póliza, no se aplica ninguna restricción de fecha.
+         Cuando llega cualquier fecha, la póliza debe pasar también la rama
+         temporal correspondiente. */
+      (ISNULL(@PolicyId,0) <> 0
+       AND @FechaDesde IS NULL
+       AND @FechaHasta IS NULL
+       AND @FechaCorte IS NULL)
       OR
       (@FechaCorte IS NOT NULL
        AND CAST(DATEADD(HOUR, -5, lp.[start]) AS DATE) <= @FechaCorte
@@ -196,5 +206,12 @@ GROUP BY
     pp.minimum,
     pp.expected,
     pp.payed,
-    pp.payedDate
-ORDER BY lp.lob, lp.code, pp.dueDate;
+    pp.payedDate,
+    pp.concept
+ORDER BY lp.lob, lp.code,
+    CASE
+        WHEN ISNULL(pp.numberInYear, 0) = 1
+         AND UPPER(LTRIM(RTRIM(ISNULL(pp.concept, '')))) IN ('PRIMA', 'PREMIUM')
+        THEN 0 ELSE 1
+    END,
+    pp.dueDate;

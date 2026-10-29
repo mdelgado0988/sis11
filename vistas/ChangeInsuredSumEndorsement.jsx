@@ -941,6 +941,21 @@
       return result;
     };
 
+    // Regla común con LoadingEndorsementManager: si existe FAC, la colocación
+    // es una proporción real y debe conservarse tal como viene de la póliza.
+    // El redondeo por tolerancia solo aplica cuando no hay FAC; así no se
+    // altera una colocación facultativa que requiera precision adicional.
+    const hasFacultativeLine = (rows || []).some(function (row) {
+      const line = String(row.contractLabel || row.lineId || '').trim().toUpperCase();
+      const active = Math.abs(Number(row.percentage || 0)) > 0.000000001
+        || Math.abs(Number(row.sum || 0)) > 0.005
+        || Math.abs(Number(row.premium || 0)) > 0.005;
+      return active && (line === 'FAC' || line.indexOf('FACULT') >= 0);
+    });
+    if (hasFacultativeLine) {
+      return apply(eligible.map(function (row) { return Number(row.percentage || 0); }));
+    }
+
     for (let decimals = 2; decimals <= 8; decimals += 1) {
       const rounded = raw.map(function (value) { return Number(value.toFixed(decimals)); });
       const total = rounded.reduce(function (sum, value) { return sum + value; }, 0);
@@ -974,6 +989,23 @@
       if (Number(numeric.toFixed(decimals)) === numeric) return numeric.toFixed(decimals);
     }
     return numeric.toFixed(8);
+  }
+
+  // GLOB-1201: sin FAC solo se corrige ruido de coma flotante cercano a 2
+  // decimales; con FAC se conserva la precision original del reaseguro.
+  function normalizeRatePercentage(value, hasFacultativeLine, premium, amount) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric) || hasFacultativeLine) return numeric;
+    const basePremium = Number(premium);
+    const expectedAmount = Number(amount);
+    for (let decimals = 2; decimals <= 10; decimals += 1) {
+      const rounded = Number(numeric.toFixed(decimals));
+      if (!Number.isFinite(basePremium) || !Number.isFinite(expectedAmount)
+        || Math.abs(money(basePremium * rounded / 100) - money(expectedAmount)) <= 0.01) {
+        return rounded;
+      }
+    }
+    return numeric;
   }
 
   function syntheticPercentageDecimals(value) {
@@ -3641,13 +3673,13 @@
       return <EditableFormattedNumber value={v} decimals={2} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, row.manualPrefix + 'Premium', x); }} />;
     } },
     { title: t('Pct. Comision'), dataIndex: 'commissionPercentage', align: 'right', width: 135, render: function (v, row) {
-      return <EditableFormattedNumber value={v} decimals={4} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { editContractRate(row.groupKey, 'commission', x); }} />;
+      return <EditableFormattedNumber value={normalizeRatePercentage(v, row.hasFacultativeLine, row.premium, row.commission)} decimals={10} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { editContractRate(row.groupKey, 'commission', x); }} />;
     } },
     { title: t('Comision'), dataIndex: 'commission', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, 'Commission', x); }} />;
     } },
     { title: t('Pct. Impuesto'), dataIndex: 'taxPercentage', align: 'right', width: 135, render: function (v, row) {
-      return <EditableFormattedNumber value={v} decimals={4} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { editContractRate(row.groupKey, 'tax', x); }} />;
+      return <EditableFormattedNumber value={normalizeRatePercentage(v, row.hasFacultativeLine, row.premium, row.tax)} decimals={10} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { editContractRate(row.groupKey, 'tax', x); }} />;
     } },
     { title: t('Impuesto'), dataIndex: 'tax', align: 'right', width: 135, render: function (v, row) {
       return <EditableFormattedNumber value={v} decimals={2} disabled={row.isRetention} readOnly={row.isCoinsurance} onCommit={function (x) { setManualContractAmount(row.groupKey, 'Tax', x); }} />;
@@ -3833,6 +3865,16 @@
         row.percentage = totalSum ? placementPercentage(Number(row.sum || 0) / totalSum * 100) : 0;
       }
     });
+    const hasFacultativeLine = rows.some(function (row) {
+      const label = String(row.contractLabel || '').toUpperCase();
+      const configured = row.percentageConfigured === true;
+      return label.indexOf('FAC') >= 0 && (configured || (
+        Math.abs(Number(row.sum || 0)) > 0.005
+        || Math.abs(Number(row.premium || 0)) > 0.005
+        || Math.abs(Number(row.percentage || 0)) > 0.000000001
+      ));
+    });
+    rows.forEach(function (row) { row.hasFacultativeLine = hasFacultativeLine; });
     return rows;
   }
 
@@ -3957,7 +3999,10 @@
         }
         if (column.dataIndex === 'percentage') return Object.assign({}, column, { render: function (v) { return formatSyntheticPercentage(v); } });
         if (column.dataIndex === 'sum' || column.dataIndex === 'premium' || column.dataIndex === 'commission' || column.dataIndex === 'tax' || column.dataIndex === 'reinsuranceBalance') return Object.assign({}, column, { render: function (v) { return fmt(v); } });
-        if (column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: function (v) { return Number(v || 0).toFixed(4); } });
+        if (column.dataIndex === 'commissionPercentage' || column.dataIndex === 'taxPercentage') return Object.assign({}, column, { render: function (v, row) {
+          const amount = column.dataIndex === 'commissionPercentage' ? row.commission : row.tax;
+          return normalizeRatePercentage(v, row.hasFacultativeLine, row.premium, amount).toFixed(10);
+        } });
         return column;
       });
       return <div className="axx-rea-line-detail">
