@@ -501,7 +501,14 @@ for (let i = 0; i < base.length; i++) {
   const premiumPRe = isCpexCcv && premiumBase !== 0
     ? Number(c.premiumRe || 0) / premiumBase : pRe;
   const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
-  const commissionRate = Number(c.premium) === 0 ? 0 : commissionBase / Number(c.premium);
+  // La comision de reaseguro se calcula sobre la prima cedida, no sobre la
+  // prima total de la cobertura. `premium` es la prima bruta y `premiumRe`
+  // es su porcion cedida; dividir contra `premium` y luego multiplicar por
+  // `premiumRe` aplicaria la participacion cedida dos veces y subestimaria la
+  // comision del movimiento. Esta base debe mantenerse alineada con
+  // cmdChangeLoadingReinsuranceAdjustment y cmdRedistribuyeReaseguroEndoso.
+  const commissionBasePremium = Number(c.premiumRe || 0);
+  const commissionRate = commissionBasePremium === 0 ? 0 : commissionBase / commissionBasePremium;
   const counts = sums[code] === true;
   const facultativeLine = facultativeLineByCoverage[txt(c.contractId) + '|' + code];
   const routesMovementToFacultative = !!facultativeLine;

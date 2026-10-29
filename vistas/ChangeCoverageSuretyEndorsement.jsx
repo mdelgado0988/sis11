@@ -3156,9 +3156,11 @@
       const distributionRows = getDistributionRows(contract).map(function (row) {
         return Object.assign({}, row);
       });
-      // El saldo final representa la colocacion persistida de la poliza. No
-      // se simplifica aunque una version con menos decimales mantenga los
-      // importes a centavos; el usuario debe ver su porcentaje original.
+      // GLOB-1201: the final balance grid uses a derived copy of the active
+      // distribution. Apply the same cent-tolerance normalization used by
+      // the movement grid when no effective FAC line exists. Real FAC keeps
+      // its stored precision, and the persisted snapshot is not modified.
+      roundedSyntheticPercentages(distributionRows);
       return <Table size="small" pagination={false} rowKey="key" scroll={{ x: 1250 }}
         dataSource={distributionRows} columns={colsDistribution}
         summary={function (pageData) {

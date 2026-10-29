@@ -2213,7 +2213,16 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             }
             return row;
         });
-        roundDisplayedPercentages(rows);
+        // GLOB-1201: when the policy already has a persisted distribution,
+        // keep those percentages for the synthetic movement. Recalculating
+        // them from cent-rounded loading premiums changes a stored 40/60
+        // split into values such as 40.01/59.99. Only the effective movement
+        // case, or a policy without distribution data, may derive percentages
+        // from the movement amounts.
+        const hasStoredPolicyDistribution = policyBasePremium > 0 || policyBaseSum > 0;
+        if(usesEffectiveMovementDistribution || !hasStoredPolicyDistribution){
+            roundDisplayedPercentages(rows);
+        }
         const hasFacultativeLine = (data || []).some(function(row){
             return lineKind(row.lineId || row.lineName || row.contractName) === 'facultative';
         });

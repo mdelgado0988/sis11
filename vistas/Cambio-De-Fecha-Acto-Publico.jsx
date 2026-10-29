@@ -1474,9 +1474,14 @@
       }
       const contractSum = contract.lines.filter((line) => !line.isCoinsurance).reduce((sum, line) => sum + Number(line.sum || 0), 0);
       const contractPremium = contract.lines.filter((line) => !line.isCoinsurance).reduce((sum, line) => sum + Number(line.premium || 0), 0);
+      // GLOB-1201: an empty FAC placeholder must not disable percentage
+      // normalization; only a FAC line with real amounts preserves precision.
       const hasFacultativeLine = contract.lines.some((line) => {
-        return normalizedReinsuranceLine(line.lineId) === 'Facultativo'
-          && (line.rows.length || Math.abs(Number(line.sum || 0)) > 0.005 || Math.abs(Number(line.premium || 0)) > 0.005);
+        if (normalizedReinsuranceLine(line.lineId) !== 'Facultativo') return false;
+        return Math.abs(Number(line.sum || 0)) > 0.005
+          || Math.abs(Number(line.premium || 0)) > 0.005
+          || Math.abs(Number(line.sumRe || 0)) > 0.005
+          || Math.abs(Number(line.premiumRe || 0)) > 0.005;
       });
       contract.lines.forEach((line) => {
         const storedPercentage = normalizedReinsuranceLine(line.lineId) === 'Retención'
@@ -1603,8 +1608,16 @@
   const reinsurancePercentage = (value, row, field) => {
     const number = Number(value || 0);
     if (!Number.isFinite(number)) return '0.0000000000';
-    const amount = field === 'commissionPercentage' ? row && row.commission : field === 'taxPercentage' ? row && row.tax : undefined;
-    const premium = field === 'commissionPercentage' || field === 'taxPercentage' ? row && row.premiumRe : undefined;
+    // The movement tab can have zero movement premium/commission while the
+    // stored final reinsurance still carries the rate basis.
+    const amount = field === 'commissionPercentage'
+      ? row && (row._rateBasisCommission !== undefined ? row._rateBasisCommission : row.commission)
+      : field === 'taxPercentage'
+        ? row && (row._rateBasisTax !== undefined ? row._rateBasisTax : row.tax)
+        : undefined;
+    const premium = field === 'commissionPercentage' || field === 'taxPercentage'
+      ? row && (row._rateBasisPremiumRe !== undefined ? row._rateBasisPremiumRe : row.premiumRe)
+      : undefined;
     const displayValue = normalizeReinsuranceRate(number, row && row.hasFacultativeLine, premium, amount);
     return displayValue.toLocaleString('en-US', { minimumFractionDigits: 10, maximumFractionDigits: 10 });
   };
@@ -2682,18 +2695,35 @@
       premium: total.premium + reinsuranceNumber(row.premiumMovement)
     }), { sum: 0, premium: 0 });
     const coinsurancePct = coinsurancePercentage(reinsuranceSnapshot);
-    // Aplicar la misma normalización tolerante en la distribución sintética.
-    // La función devuelve una copia, por lo que no modifica el snapshot.
-    const displayedReinsuranceLines = roundedFinalReinsuranceLines(selectedReinsuranceLines);
+    // GLOB-1201: determine FAC from effective amounts in the movement view.
+    // Empty FAC placeholders must not prevent percentage normalization.
+    const movementHasFacultativeLine = selectedReinsuranceLines.some((line) => {
+      if (normalizedReinsuranceLine(line.lineId) !== 'Facultativo') return false;
+      return Math.abs(Number(line.sum || 0)) > 0.005
+        || Math.abs(Number(line.premium || 0)) > 0.005
+        || Math.abs(Number(line.sumRe || 0)) > 0.005
+        || Math.abs(Number(line.premiumRe || 0)) > 0.005;
+    });
+    const movementLines = selectedReinsuranceLines.map((line) => Object.assign({}, line, {
+      hasFacultativeLine: movementHasFacultativeLine
+    }));
+    // The function returns copies and does not modify the persisted snapshot.
+    const displayedReinsuranceLines = roundedFinalReinsuranceLines(movementLines);
     const rows = displayedReinsuranceLines.map((line) => {
       const factor = normalizedReinsuranceLine(line.lineId) === 'Coaseguro'
         ? coinsurancePct / 100
         : ((100 - coinsurancePct) / 100) * reinsuranceNumber(line.percentage) / 100;
+      const rateBasisPremiumRe = reinsuranceNumber(line.premiumRe);
+      const rateBasisCommission = reinsuranceNumber(line.commission);
+      const rateBasisTax = reinsuranceNumber(line.tax);
       const premium = moneyValue(movement.premium * factor);
       const sum = moneyValue(movement.sum * factor);
       const commissionRate = reinsuranceNumber(line.premium) ? reinsuranceNumber(line.commission) / reinsuranceNumber(line.premium) : 0;
       const taxRate = reinsuranceNumber(line.premium) ? reinsuranceNumber(line.tax) / reinsuranceNumber(line.premium) : 0;
       return Object.assign({}, line, {
+        _rateBasisPremiumRe: rateBasisPremiumRe,
+        _rateBasisCommission: rateBasisCommission,
+        _rateBasisTax: rateBasisTax,
         sum,
         premium,
         commission: moneyValue(premium * commissionRate),
