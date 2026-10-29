@@ -259,6 +259,9 @@ if (contractIdsForCode.length) {
 // Se calcula por contrato y cobertura con el mismo comando usado al emitir,
 // y luego el movimiento se obtiene contra la cesion vigente.
 const capacityByCoverage = {};
+// Se mantiene vacio para ramos no sujetos a capacidad de fianzas. Debe vivir
+// fuera del bloque de capacidad porque se consulta al proyectar cada fila.
+const retentionPlacementLineByCoverage = {};
 if (useSuretyContractCapacity) {
   const coverageIdByCode = {};
   for (let i = 0; i < base.length; i++) {
@@ -307,6 +310,37 @@ if (useSuretyContractCapacity) {
 
   // El facultativo puede no existir aun en Cession. Cuando el limite lo exige,
   // agregamos una fila de simulacion neutra para que el guardado cree la linea.
+  // La retencion no debe salir de Cuota Parte/Excedente solo porque la
+  // configuracion la devuelva como `msret`: mientras exista una de esas lineas,
+  // esa misma linea conserva el cedente. RET solo es valido como fallback si
+  // no existe ninguna linea proporcional donde alojar la retencion.
+  const capacityCessionsByCoverage = {};
+  base.forEach(function (cession) {
+    const key = Number(cession.contractId) + '|' + txt(cession.coverageCode);
+    if (!capacityCessionsByCoverage[key]) capacityCessionsByCoverage[key] = [];
+    capacityCessionsByCoverage[key].push(cession);
+  });
+  Object.keys(capacityCessionsByCoverage).forEach(function (key) {
+    const cessions = capacityCessionsByCoverage[key];
+    const proportional = cessions.find(function (cession) {
+      const line = up(cession.lineId);
+      return line === 'CP' || line.indexOf('CUOTA') >= 0
+        || line.indexOf('QUOTA') >= 0 || line === 'EX1'
+        || line.indexOf('EXCEDENTE') >= 0;
+    });
+    if (proportional) {
+      // Si existe una linea proporcional, la retencion pertenece a ella.
+      // Esto tambien corrige una linea RET residual creada por una simulacion
+      // anterior: no debe competir ni duplicar la retencion de Cuota Parte.
+      retentionPlacementLineByCoverage[key] = txt(proportional.lineId);
+      return;
+    }
+    const explicitRetention = cessions.find(function (cession) {
+      const line = up(cession.lineId);
+      return line === 'RET' || line.indexOf('RETEN') >= 0;
+    });
+    if (explicitRetention) retentionPlacementLineByCoverage[key] = txt(explicitRetention.lineId);
+  });
   const synthetic = [];
   Object.keys(capacityByCoverage).forEach(function (key) {
     const capacity = capacityByCoverage[key];
@@ -329,7 +363,7 @@ if (useSuretyContractCapacity) {
       next.id = 0;
       next.lineId = lineId;
       // Una linea RET sintetica representa el saldo final de retencion cuando
-      // la poliza solo tiene RET implícita dentro de Cuota Parte. Debe partir
+      // la poliza no tiene una linea proporcional donde conservarla. Debe partir
       // del saldo vigente para que no se convierta en movimiento completo.
       // Caso funcional: si un aumento rebasa el limite proporcional, el
       // incremento debe ir a FAC. El saldo RET existente no es movimiento;
@@ -360,7 +394,13 @@ if (useSuretyContractCapacity) {
       next.proportionRe = 0;
       synthetic.push(next);
     };
-    if (!hasLine('RET') && (Math.abs(Number(capacity.msret || 0)) >= 0.01 || Math.abs(Number(capacity.mpret || 0)) >= 0.01)) addLine('RET');
+    const retentionOwnerLine = retentionPlacementLineByCoverage[key];
+    const hasProportionalRetentionOwner = retentionOwnerLine
+      && (up(retentionOwnerLine) === 'CP' || up(retentionOwnerLine).indexOf('CUOTA') >= 0
+        || up(retentionOwnerLine).indexOf('QUOTA') >= 0 || up(retentionOwnerLine) === 'EX1'
+        || up(retentionOwnerLine).indexOf('EXCEDENTE') >= 0);
+    if (!hasLine('RET') && !hasProportionalRetentionOwner
+      && (Math.abs(Number(capacity.msret || 0)) >= 0.01 || Math.abs(Number(capacity.mpret || 0)) >= 0.01)) addLine('RET');
     if (!hasLine('FAC') && (Math.abs(Number(capacity.msfp || 0)) >= 0.01 || Math.abs(Number(capacity.mpfp || 0)) >= 0.01)) addLine('FAC');
   });
   synthetic.forEach(function (cession) { base.push(cession); });
@@ -446,8 +486,13 @@ for (let i = 0; i < base.length; i++) {
   let pRe = Number(c.proportionRe || 0);
   const capacity = capacityByCoverage[Number(c.contractId) + '|' + code];
   const capacityLine = up(line);
+  const proportionalLine = capacityLine === 'CP' || capacityLine.indexOf('CUOTA') >= 0
+    || capacityLine.indexOf('QUOTA') >= 0 || capacityLine === 'EX1'
+    || capacityLine.indexOf('EXCEDENTE') >= 0;
+  const retentionOwnerLine = retentionPlacementLineByCoverage[Number(c.contractId) + '|' + code];
+  const isRetentionOwner = proportionalLine && txt(retentionOwnerLine) === line;
   const capacityAllocation = !!capacity && (capacityLine === 'RET' || capacityLine.indexOf('RETEN') >= 0
-    || capacityLine === 'CP' || capacityLine.indexOf('CUOTA') >= 0 || capacityLine.indexOf('QUOTA') >= 0
+    || proportionalLine
     || capacityLine === 'FAC' || capacityLine.indexOf('FACULT') >= 0);
   const isCpexCcv = up(contractCodeById[Number(c.contractId)]) === 'CPEXCV';
   const premiumBase = Number(c.premium || 0);
@@ -492,11 +537,14 @@ for (let i = 0; i < base.length; i++) {
   let finalSumCedant = money(sv * pCed);
   let finalSumRe = money(sv * pRe);
   let finalCommission = commission;
+  let obsoleteRetentionLine = false;
   if (capacityAllocation) {
     const isRetention = capacityLine === 'RET' || capacityLine.indexOf('RETEN') >= 0;
     const isFacultative = capacityLine === 'FAC' || capacityLine.indexOf('FACULT') >= 0;
-    const targetSumCedant = isRetention ? Number(capacity.msret || 0) : 0;
-    const targetPremiumCedant = isRetention ? Number(capacity.mpret || 0) : 0;
+    obsoleteRetentionLine = isRetention && !!retentionOwnerLine && !isRetentionOwner;
+    const ownsRetention = isRetentionOwner || (isRetention && !obsoleteRetentionLine);
+    const targetSumCedant = ownsRetention ? Number(capacity.msret || 0) : 0;
+    const targetPremiumCedant = ownsRetention ? Number(capacity.mpret || 0) : 0;
     const targetSumRe = isRetention ? 0 : (isFacultative ? Number(capacity.msfp || 0) : Number(capacity.mscp || 0));
     const targetPremiumRe = isRetention ? 0 : (isFacultative ? Number(capacity.mpfp || 0) : Number(capacity.mpcp || 0));
     const targetCommission = isFacultative ? Number(capacity.mcfp || 0) : (isRetention ? 0 : Number(capacity.mccp || 0));
@@ -508,6 +556,14 @@ for (let i = 0; i < base.length; i++) {
     finalRe = money(targetPremiumRe);
     finalSumCedant = counts ? money(targetSumCedant) : 0;
     finalSumRe = counts ? money(targetSumRe) : 0;
+    if (obsoleteRetentionLine) {
+      // La fila RET residual se anula en el snapshot; la ejecución la retira
+      // y conserva la retención dentro de la línea proporcional propietaria.
+      finalCedant = 0;
+      finalRe = 0;
+      finalSumCedant = 0;
+      finalSumRe = 0;
+    }
     finalCommission = money(targetCommission);
     cedant = money(finalCedant - currentCedant);
     re = money(finalRe - currentRe);
@@ -543,6 +599,7 @@ for (let i = 0; i < base.length; i++) {
     retentionOnlyLoadingPremium: retentionOnlyLoadingPremium,
     facultativeMovementOnly: routesMovementToFacultative,
     contractCapacityAllocation: capacityAllocation,
+    remove: obsoleteRetentionLine,
     receivesFacultativeMovement: receivesFacultativeMovement,
     premiumCedantMovement: routesMovementToFacultative ? Number(facultativeMovement.premiumCedant || 0) : cedant,
     premiumReMovement: routesMovementToFacultative ? Number(facultativeMovement.premiumRe || 0) : re,

@@ -31,6 +31,92 @@ var orderSql = sortColumns[sortField]
   : 'poliza ASC, fechaEmision ASC, id ASC';
 var exportar = ctx.exportar === true || String(ctx.exportar) === 'true';
 
+// La suma asegurada del bordero debe seguir la misma regla del bordero
+// principal: las coberturas dependientes pueden repetir la suma tecnica de la
+// principal, pero solo las filas marcadas como isCoverage='Si' se acumulan.
+// Las primas no usan esta marca porque cada cobertura puede tener una prima
+// propia.
+function normCfg(value) {
+  return String(value === null || value === undefined ? '' : value).trim().toUpperCase();
+}
+function sqlCfg(value) {
+  return String(value === null || value === undefined ? '' : value).split("'").join("''");
+}
+var cfgCoberturaReaseguro = [
+  { lob: 96, name: 'cfgCoberturaProductoReaTecnicos' },
+  { lob: 20, name: 'cfgCoberturaProductoReaVidaColectivo' },
+  { lob: 31, name: 'cfgCoberturaProductoReaVida' },
+  { lob: 71, name: 'cfgCoberturaProductoReaVidaIndividual' },
+  { lob: 52, name: 'cfgCoberturaProductoReaRiesgosVarios' },
+  { lob: 1, name: 'cfgCoberturaProductoRea' },
+  { lob: 6, name: 'cfgCoberturaProductoReaAuto' },
+  { lob: 81, name: 'cfgCoberturaProductoReaFianza' },
+  { lob: 82, name: 'cfgCoberturaProductoReaFianza' },
+  { lob: 83, name: 'cfgCoberturaProductoReaFianza' },
+  { lob: 84, name: 'cfgCoberturaProductoReaFianza' }
+];
+var cfgNames = [];
+for (var ni = 0; ni < cfgCoberturaReaseguro.length; ni++) {
+  if (cfgNames.indexOf(cfgCoberturaReaseguro[ni].name) < 0) cfgNames.push(cfgCoberturaReaseguro[ni].name);
+}
+var cfgSqlNames = cfgNames.map(function (name) { return "'" + sqlCfg(name) + "'"; }).join(',');
+doCmd({
+  cmd: 'DoQuery',
+  data: {
+    sql: 'SELECT [name] AS configName, [data] AS configData FROM [Table] WHERE [name] IN (' + cfgSqlNames + ')',
+    timeout: 300
+  }
+});
+if (!DoQuery || !DoQuery.ok) {
+  throw 'No fue posible leer la configuración de coberturas de reaseguro: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'sin detalle');
+}
+var configByName = {};
+var configRecords = DoQuery.outData || [];
+for (var cr = 0; cr < configRecords.length; cr++) {
+  var configRecord = configRecords[cr] || {};
+  var configName = configRecord.configName || configRecord.ConfigName || configRecord.name || configRecord.Name;
+  var configData = configRecord.configData || configRecord.ConfigData || configRecord.data || configRecord.Data;
+  if (configName) configByName[String(configName)] = configData;
+}
+var coveragesThatSum = {};
+for (var ci = 0; ci < cfgCoberturaReaseguro.length; ci++) {
+  var cfgMap = cfgCoberturaReaseguro[ci];
+  if (!Object.prototype.hasOwnProperty.call(configByName, cfgMap.name)) {
+    throw 'No se encontró la configuración ' + cfgMap.name + ' en [Table].';
+  }
+  var cfgRows = configByName[cfgMap.name] || [];
+  if (typeof cfgRows === 'string') {
+    try { cfgRows = JSON.parse(cfgRows); } catch (e) { throw 'La configuración ' + cfgMap.name + ' no contiene JSON válido.'; }
+  }
+  if (!Array.isArray(cfgRows) || cfgRows.length < 1) {
+    throw 'La configuración ' + cfgMap.name + ' no tiene el formato de tabla esperado.';
+  }
+  var cfgHeaders = cfgRows[0] || [];
+  function cfgIndex(name, fallback) {
+    for (var h = 0; h < cfgHeaders.length; h++) {
+      if (normCfg(cfgHeaders[h]) === normCfg(name)) return h;
+    }
+    return fallback;
+  }
+  var ixLob = cfgIndex('lobCode', 0), ixProduct = cfgIndex('productCode', 1);
+  var ixCoverage = cfgIndex('coverageCode', 3), ixIncluded = cfgIndex('isCoverage', 5);
+  for (var ri = 1; ri < cfgRows.length; ri++) {
+    var cfgRow = cfgRows[ri] || [];
+    if (normCfg(cfgRow[ixLob]) !== normCfg(cfgMap.lob) || normCfg(cfgRow[ixIncluded]) !== 'SI') continue;
+    var cfgKey = [normCfg(cfgMap.lob), normCfg(cfgRow[ixProduct]), normCfg(cfgRow[ixCoverage])].join('|');
+    if (cfgKey !== '||') coveragesThatSum[cfgKey] = true;
+  }
+}
+var sumCoverageParts = [];
+for (var coverageKey in coveragesThatSum) {
+  if (!Object.prototype.hasOwnProperty.call(coveragesThatSum, coverageKey)) continue;
+  var coverageParts = coverageKey.split('|');
+  sumCoverageParts.push("(UPPER(LTRIM(RTRIM(ISNULL(c.LoB,''))))='" + sqlCfg(coverageParts[0]) + "'"
+    + " AND UPPER(LTRIM(RTRIM(ISNULL(lp.productCode,''))))='" + sqlCfg(coverageParts[1]) + "'"
+    + " AND UPPER(LTRIM(RTRIM(ISNULL(c.coverageCode,''))))='" + sqlCfg(coverageParts[2]) + "')");
+}
+var sumCoveragePredicate = sumCoverageParts.length ? '(' + sumCoverageParts.join(' OR ') + ')' : '1=0';
+
 function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 }
@@ -62,6 +148,7 @@ var sql = "\nWITH scope AS (\n"
   + " SELECT c.id AS cessionId, c.lifePolicyId, c.contractId, c.coverageId, c.lineId, c.LoB,\n"
   + "        COALESCE(c.changeId,orphanCancellation.changeId) AS changeId, c.anniversaryId, c.premiumType, c.[start] AS cessionStart, c.[end] AS cessionEnd,\n"
   + "        c.contactId AS insuredId, c.holderName, c.coSumInsured, c.coPremium,\n"
+  + "        CASE WHEN " + sumCoveragePredicate + " THEN 1 ELSE 0 END AS sumaIncluida,\n"
   + "        p.id AS partId, p.contactId AS reinsurerId, p.brokerId, p.name AS participantName, p.split,\n"
   + "        ISNULL(p.sumInsured, 0) AS sumInsured, ISNULL(p.premium, 0) AS premium,\n"
   + "        ISNULL(p.commission, 0) AS commission, ISNULL(p.tax, 0) AS tax,\n"
@@ -99,11 +186,11 @@ var sql = "\nWITH scope AS (\n"
   + " FROM src s\n"
   + "), delta AS (\n"
   + " SELECT o.*,\n"
-  + "   CASE WHEN o.premiumType='CANCELLATION' OR (o.changeId IS NOT NULL AND o.sumInsured<0) THEN o.sumInsured ELSE o.sumInsured-o.prevSum END AS dSum,\n"
+  + "   CASE WHEN o.sumaIncluida=1 THEN CASE WHEN o.premiumType='CANCELLATION' OR (o.changeId IS NOT NULL AND o.sumInsured<0) THEN o.sumInsured ELSE o.sumInsured-o.prevSum END ELSE 0 END AS dSum,\n"
   + "   CASE WHEN o.premiumType='CANCELLATION' OR (o.changeId IS NOT NULL AND o.sumInsured<0) THEN o.premium ELSE o.premium-o.prevPremium END AS dPremium,\n"
   + "   CASE WHEN o.premiumType='CANCELLATION' OR (o.changeId IS NOT NULL AND o.sumInsured<0) THEN o.commission ELSE o.commission-o.prevCommission END AS dCommission,\n"
   + "   CASE WHEN o.premiumType='CANCELLATION' OR (o.changeId IS NOT NULL AND o.sumInsured<0) THEN o.tax ELSE o.tax-o.prevTax END AS dTax,\n"
-  + "   (ISNULL(o.coSumInsured,0)-o.prevCoSum) * ISNULL(o.split,0)/100.0 AS dCoSum,\n"
+  + "   CASE WHEN o.sumaIncluida=1 THEN (ISNULL(o.coSumInsured,0)-o.prevCoSum) * ISNULL(o.split,0)/100.0 ELSE 0 END AS dCoSum,\n"
   + "   (ISNULL(o.coPremium,0)-o.prevCoPremium) * ISNULL(o.split,0)/100.0 AS dCoPremium\n"
   + " FROM ord o\n"
   + "), grouped AS (\n"

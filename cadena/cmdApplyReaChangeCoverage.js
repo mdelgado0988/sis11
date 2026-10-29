@@ -734,6 +734,12 @@ const finalCessions = positiveBaseCessions.map(function (source) {
   result.overwritten = 0;
   result.changeId = changeId;
   return result;
+}).filter(function (cession) {
+  const requested = rowsByKey[keyOf(cession)];
+  // Una fila RET residual puede venir de una simulacion anterior. La vista
+  // la marca como remove cuando existe Cuota Parte/Excedente; aqui solo se
+  // respeta esa instruccion del snapshot, sin recalcular importes.
+  return !(requested && requested.remove === true);
 });
 
 // Una fotografia final nunca puede contener retencion o cesion negativas.

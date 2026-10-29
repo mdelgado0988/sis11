@@ -54,6 +54,18 @@
       }} />;
   };
 
+  // Las sumas de cobertura se capturan en moneda: no se permiten mas de dos
+  // decimales, incluso cuando el usuario pega un valor con mayor precision.
+  const parseSumInput = function (value) {
+    const raw = String(value == null ? '' : value).replace(/,/g, '');
+    if (raw === '' || raw === '-') return raw;
+    const match = /^(-?)(\d*)(?:\.(\d*))?/.exec(raw);
+    if (!match) return '';
+    const integer = match[2] || '0';
+    const decimals = match[3] === undefined ? '' : match[3].slice(0, 2);
+    return match[1] + integer + (match[3] === undefined ? '' : '.' + decimals);
+  };
+
   const [policyId, setPolicyId] = useState(0);
 
   // AXX-2420 / GLOBUAT-270: consulta de reaseguro (vigente, por movimiento, historial). Solo lectura.
@@ -299,6 +311,34 @@
     return line;
   }
 
+  function isObsoleteRetentionGroup(group) {
+    if (!usesSuretyContractCapacity() || normalizedReinsuranceLine(group && group.lineId) !== 'RETENCION') return false;
+    const rows = group && Array.isArray(group.rows) ? group.rows : [];
+    if (!rows.length) return false;
+    if (rows.every(function (row) { return row.remove === true; })) return true;
+
+    // En una disminucion la simulacion puede omitir `remove` en el RET
+    // residual. Si todos sus importes finales son cero y solo conserva
+    // movimientos negativos, ya no representa retencion vigente; la
+    // retencion final debe quedar en la linea proporcional propietaria.
+    const hasAmount = function (item, names) {
+      return names.some(function (name) {
+        return Math.abs(Number(item && item[name]) || 0) > 0.01;
+      });
+    };
+    const hasFinalBalance = rows.some(function (row) {
+      return hasAmount(row, ['sumInsuredCedant', 'premiumCedant', 'sumInsuredRe', 'premiumRe']);
+    }) || (group.participants || []).some(function (participant) {
+      return hasAmount(participant, ['sumInsured', 'premium']);
+    });
+    const hasNegativeMovement = rows.some(function (row) {
+      return ['sumInsuredCedantMovement', 'premiumCedantMovement'].some(function (name) {
+        return (Number(row && row[name]) || 0) < -0.01;
+      });
+    });
+    return !hasFinalBalance && hasNegativeMovement;
+  }
+
   function contractHasFacultativeTransition(contract) {
     const hasCurrentFacultative = (baseCessions || []).some(function (cession) {
       if (String(cession.contractId) !== String(contract && contract.contractId)) return false;
@@ -341,9 +381,11 @@
 
   function isRetentionOwner(group, groups) {
     const line = normalizedReinsuranceLine(group && group.lineId);
+    if (isObsoleteRetentionGroup(group)) return false;
     if (line === 'RETENCION') return true;
     const sameContract = (groups || []).filter(function (candidate) {
-      return String(candidate.contractId) === String(group && group.contractId);
+      return String(candidate.contractId) === String(group && group.contractId)
+        && !isObsoleteRetentionGroup(candidate);
     });
     if (sameContract.some(function (candidate) { return normalizedReinsuranceLine(candidate.lineId) === 'RETENCION'; })) return false;
     if (line === 'CUOTA PARTE') return true;
@@ -949,11 +991,10 @@
       const groupName = t('Contrato') + ' ' + group.contractId + ' ' + t('linea') + ' ' + group.lineId;
       const rows = group.rows || [];
       const placementRows = rows.filter(function (row) {
-        // Las coberturas dependientes pueden conservar una suma tecnica de la
-        // fianza, aun sin prima ni participacion de suma propia. No forman
-        // parte de la colocacion que debe completar el 100%.
+        // Cada cobertura tiene su propia suma final. `counts` solo se usa para
+        // el movimiento sintetico y no debe excluir 312/314 del saldo final.
         return Math.abs(finalCoveragePremium(group, row)) > 0.01
-          || (row.counts === true && Math.abs(finalCoverageSum(group, row)) > 0.01);
+          || Math.abs(finalCoverageSum(group, row)) > 0.01;
       });
 
       placementRows.forEach(function (row) {
@@ -973,9 +1014,9 @@
             sum: 0,
             placement: 0,
             expectedPremium: finalCoveragePremium(group, row),
-            expectedSum: row.counts ? finalCoverageSum(group, row) : 0,
+            expectedSum: finalCoverageSum(group, row),
             coinsurancePremium: money(finalCoveragePremium(group, row) * coinsurancePercentage() / 100),
-            coinsuranceSum: row.counts ? money(finalCoverageSum(group, row) * coinsurancePercentage() / 100) : 0
+            coinsuranceSum: money(finalCoverageSum(group, row) * coinsurancePercentage() / 100)
           };
         }
         const totals = group.totals || {};
@@ -991,9 +1032,7 @@
           : numberFrom(row, ['proportionRe']);
         coverageDistribution[code].placement += retention + ceded;
         coverageDistribution[code].premium += numberFrom(row, ['premiumCedant']) + numberFrom(row, ['premiumRe']);
-        if (row.counts) {
-          coverageDistribution[code].sum += numberFrom(row, ['sumInsuredCedant']) + numberFrom(row, ['sumInsuredRe']);
-        }
+        coverageDistribution[code].sum += numberFrom(row, ['sumInsuredCedant']) + numberFrom(row, ['sumInsuredRe']);
       });
 
       const contract = (contractRows || []).find(function (item) {
@@ -1456,7 +1495,7 @@
         next[key] = { difference: null, final: null };
         return next;
       }
-      const amount = Number(value);
+      const amount = money(Number(value));
       if (!Number.isFinite(amount)) return current;
       next[key] = field === 'difference'
         ? { difference: amount, final: money(Number(currentSum || 0) + amount) }
@@ -1831,10 +1870,19 @@
       if (!Number.isFinite(numeric)) return null;
       return Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
     };
-    const sourceCed = rows.map(function (row) { return toPercentage(row.proportionCed); })
-      .find(function (value) { return value !== null; });
-    const sourceRe = rows.map(function (row) { return toPercentage(row.proportionRe); })
-      .find(function (value) { return value !== null; });
+    const firstNonZero = function (values) {
+      return values.find(function (value) {
+        return value !== null && Math.abs(value) > 0.000001;
+      });
+    };
+    const cedValues = rows.map(function (row) { return toPercentage(row.proportionCed); });
+    const reValues = rows.map(function (row) { return toPercentage(row.proportionRe); });
+    // Las coberturas dependientes pueden traer cero en la colocacion de suma.
+    // No deben ocultar la proporcion de la cobertura principal de la linea.
+    const sourceCed = firstNonZero(cedValues) !== undefined
+      ? firstNonZero(cedValues) : cedValues.find(function (value) { return value !== null; });
+    const sourceRe = firstNonZero(reValues) !== undefined
+      ? firstNonZero(reValues) : reValues.find(function (value) { return value !== null; });
     const hasSourceCed = sourceCed !== null && sourceCed !== undefined;
     const hasSourceRe = sourceRe !== null && sourceRe !== undefined;
     if (hasSourceCed || hasSourceRe) {
@@ -1923,11 +1971,11 @@
         // como referencia. Solo su linea propietaria puede contabilizarlos.
         row.premiumCedant = retentionOwner ? money(sourcePremium * premiumCedantRate + movedCedantPremium) : 0;
         row.premiumRe = money(sourcePremium * premiumReRate + movedRePremium);
-        // Solo las coberturas configuradas para sumar al contrato aportan a
-        // la suma asegurada de reaseguro. Las demas pueden tener prima, pero
-        // repetirian la misma suma de la fianza en cada linea.
-        row.sumInsuredCedant = row.counts && retentionOwner ? money(sourceSum * sumCedantRate + movedCedantSum) : 0;
-        row.sumInsuredRe = row.counts ? money(sourceSum * sumReRate + movedReSum) : 0;
+        // `counts` solo define si la cobertura aporta suma al movimiento
+        // sintetico. No debe borrar la suma propia de una cobertura en el
+        // saldo final: 312 y 314 tambien deben conservar su distribucion.
+        row.sumInsuredCedant = retentionOwner ? money(sourceSum * sumCedantRate + movedCedantSum) : 0;
+        row.sumInsuredRe = money(sourceSum * sumReRate + movedReSum);
         row.commission = money(row.premiumRe * commissionRate);
         row.tax = money(row.premiumRe * taxRate);
         // Las proporciones de Cession representan la colocacion de suma.
@@ -1960,6 +2008,49 @@
     return group;
   }
 
+  function normalizeSuretyFinalCoverageSums(groups) {
+    if (!usesSuretyContractCapacity()) return;
+    (groups || []).forEach(function (group) {
+      // La cobertura principal es la referencia de capacidad de la linea.
+      // Las filas dependientes pueden llegar con la suma bruta completa en
+      // cada linea, aunque su prima ya venga distribuida correctamente.
+      const reference = (group.rows || []).find(function (row) {
+        return row.counts === true && Math.abs(finalCoverageSum(group, row)) > 0.01;
+      }) || (group.rows || []).find(function (row) {
+        return Math.abs(finalCoverageSum(group, row)) > 0.01;
+      });
+      if (!reference) return;
+
+      const referenceFinalSum = finalCoverageDistributionSum(group, reference);
+      if (Math.abs(referenceFinalSum) <= 0.01) return;
+      const referenceCedant = numberFrom(reference, ['sumInsuredCedant']);
+      const referenceReinsured = numberFrom(reference, ['sumInsuredRe']);
+
+      (group.rows || []).forEach(function (row) {
+        const finalSum = finalCoverageDistributionSum(group, row);
+        if (Math.abs(finalSum) <= 0.01) return;
+
+        // cmdConfiguracionReaseguroPorSuma puede devolver la suma de una
+        // cobertura dependiente en cero o con la suma bruta completa porque
+        // `counts` es falso. Para el saldo final, cada linea debe conservar
+        // la misma capacidad absoluta de la cobertura principal. Si la suma
+        // final de la dependiente cambia, se escala contra su suma bruta.
+        if (row !== reference && row.counts === false) {
+          const scale = finalSum / referenceFinalSum;
+          row.sumInsuredCedant = money(referenceCedant * scale);
+          row.sumInsuredRe = money(referenceReinsured * scale);
+        }
+
+        const distributedSum = Math.abs(numberFrom(row, ['sumInsuredCedant']))
+          + Math.abs(numberFrom(row, ['sumInsuredRe']));
+        if (distributedSum > 0.01) {
+          row.proportionCed = placementProportion(numberFrom(row, ['sumInsuredCedant']) / finalSum * 100);
+          row.proportionRe = placementProportion(numberFrom(row, ['sumInsuredRe']) / finalSum * 100);
+        }
+      });
+    });
+  }
+
   function reconcileFacultativeFinalRounding(groups) {
     const byCoverage = {};
     (groups || []).forEach(function (group) {
@@ -1970,7 +2061,7 @@
         if (!byCoverage[key]) {
           byCoverage[key] = {
             expectedPremium: finalCoverageDistributionPremium(group, row),
-            expectedSum: row.counts ? finalCoverageDistributionSum(group, row) : 0,
+            expectedSum: finalCoverageDistributionSum(group, row),
             rows: []
           };
         }
@@ -2638,21 +2729,33 @@
           response: o
         }, null, 2));
         (o.contracts || []).forEach(function (group) { hydrateFinalDistribution(group, o.contracts || []); });
+        normalizeSuretyFinalCoverageSums(o.contracts || []);
         reconcileFacultativeFinalRounding(o.contracts || []);
         // Diagnostico de origen: permite identificar si la suma mostrada en
         // Retencion viene del payload, de Cuota Parte o de la linea FAC.
+        const debugContracts = [];
+        (o.contracts || []).forEach(function (group) {
+          if (!debugContracts.some(function (item) {
+            return String(item.contractId) === String(group.contractId);
+          })) debugContracts.push(group);
+        });
         const movementSourceDebug = {
           policyId: policyId,
-          contracts: (o.contracts || []).map(function (contract) {
-            const groups = o.contracts || [];
-            const retentionGroup = groups.find(function (group) {
+          contracts: debugContracts.map(function (contract) {
+            const groups = (o.contracts || []).filter(function (candidate) {
+              return String(candidate.contractId) === String(contract.contractId);
+            });
+            const activeGroups = groups.filter(function (group) {
+              return !isObsoleteRetentionGroup(group);
+            });
+            const retentionGroup = activeGroups.find(function (group) {
               return String(group.contractId) === String(contract.contractId)
                 && normalizedReinsuranceLine(group.lineId) === 'RETENCION';
-            }) || groups.find(function (group) {
+            }) || activeGroups.find(function (group) {
               return String(group.contractId) === String(contract.contractId)
                 && normalizedReinsuranceLine(group.lineId) === 'CUOTA PARTE';
             });
-            const facultativeGroup = groups.find(function (group) {
+            const facultativeGroup = activeGroups.find(function (group) {
               return String(group.contractId) === String(contract.contractId)
                 && normalizedReinsuranceLine(group.lineId) === 'FAC';
             });
@@ -2680,7 +2783,8 @@
                     premiumCedantMovement: row.premiumCedantMovement,
                     premiumReMovement: row.premiumReMovement,
                     premiumCedant: row.premiumCedant,
-                    premiumRe: row.premiumRe
+                    premiumRe: row.premiumRe,
+                    remove: row.remove === true
                   };
                 })
               };
@@ -2856,12 +2960,24 @@
         // No deduplicar `premiumMovement` en el snapshot: la vista sintetica
         // deduplica solo para mostrar el movimiento una vez, pero el comando
         // necesita la variacion por fila para persistir CP/FAC correctamente.
+        // El simulador solo informa finalGross* en algunas filas de capacidad
+        // y puede devolver null en las demas. El snapshot siempre debe llevar
+        // un importe final numerico por cobertura y linea.
+        const snapshotFinalPremium = row.remove === true ? 0
+          : (row.finalGrossPremium !== undefined && row.finalGrossPremium !== null
+            ? money(row.finalGrossPremium)
+            : finalCoveragePremium(group, row));
+        const snapshotFinalSum = row.remove === true ? 0
+          : (row.finalGrossSum !== undefined && row.finalGrossSum !== null
+            ? money(row.finalGrossSum)
+            : finalCoverageSum(group, row));
         reinsuranceSnapshot.distribution.push({
           contractId: group.contractId, lineId: group.lineId, coverageCode: row.coverageCode,
           premiumMovement: row.premiumMovement, sumInsuredMovement: row.sumInsuredMovement,
           sourcePremiumMovement: row.sourcePremiumMovement, sourceSumInsuredMovement: row.sourceSumInsuredMovement,
-          finalGrossPremium: row.finalGrossPremium === undefined ? row.finalPremium : row.finalGrossPremium,
-          finalGrossSum: row.finalGrossSum === undefined ? row.finalSum : row.finalGrossSum,
+          finalGrossPremium: snapshotFinalPremium,
+          finalGrossSum: snapshotFinalSum,
+          remove: row.remove === true,
           premiumCedant: row.premiumCedant, sumInsuredCedant: row.sumInsuredCedant,
           premiumRe: row.premiumRe, sumInsuredRe: row.sumInsuredRe,
           commission: row.commission, tax: row.tax,
@@ -3523,9 +3639,18 @@
       }, { sum: 0, premium: 0, sumRet: 0, premiumRet: 0, sumCed: 0, premiumCed: 0, commission: 0, tax: 0 });
     };
     const groupsByLine = {};
-    (contract.groups || []).forEach(function (group) { groupsByLine[normalizeLine(group.lineId)] = group; });
+    (contract.groups || []).forEach(function (group) {
+      if (isObsoleteRetentionGroup(group)) return;
+      groupsByLine[normalizeLine(group.lineId)] = group;
+    });
+    const hasObsoleteRetentionGroup = (contract.groups || []).some(function (group) {
+      return isObsoleteRetentionGroup(group);
+    });
     const baseByLine = {};
-    (baseCessions || []).filter(function (row) { return String(row.contractId) === String(contract.contractId); }).forEach(function (row) {
+    (baseCessions || []).filter(function (row) {
+      if (String(row.contractId) !== String(contract.contractId)) return false;
+      return !(hasObsoleteRetentionGroup && normalizeLine(row.lineId) === 'RETENCION');
+    }).forEach(function (row) {
       const key = normalizeLine(row.lineId);
       if (!baseByLine[key]) baseByLine[key] = [];
       baseByLine[key].push(row);
@@ -3573,17 +3698,34 @@
       const retentionPercentage = configuredRet === null ? inferredRet : configuredRet;
       const cededPercentage = configuredCed === null ? inferredCed : configuredCed;
       const routesMovementToFacultative = g && hasFacultativeMovementOnly(g);
+      // En fianzas las coberturas dependientes conservan su suma individual
+      // para validar y persistir, pero no deben volver a sumarse en el
+      // resumen de la linea. La suma visual se toma de la cobertura principal
+      // (`counts === true`); la prima si se acumula por cobertura.
+      const capacitySummaryRow = usesSuretyContractCapacity() && g
+        ? ((g.rows || []).find(function (row) {
+          return row.contractCapacityAllocation === true && row.counts === true;
+        }) || (g.rows || []).find(function (row) {
+          return row.contractCapacityAllocation === true;
+        }))
+        : null;
+      const summarySumCedant = capacitySummaryRow
+        ? numberFrom(capacitySummaryRow, ['sumInsuredCedant'])
+        : numberFrom(totals, ['sumCedant']);
+      const summarySumRe = capacitySummaryRow
+        ? numberFrom(capacitySummaryRow, ['sumInsuredRe'])
+        : numberFrom(totals, ['sumRe']);
       const finalPremiumRet = isRetention
         ? (routesMovementToFacultative ? numberFrom(totals, ['cedant']) : groupTotalPremium * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100)
         : 0;
       const finalSumRet = isRetention
-        ? (routesMovementToFacultative ? numberFrom(totals, ['sumCedant']) : groupTotalSum * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100)
+        ? (routesMovementToFacultative ? summarySumCedant : groupTotalSum * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100)
         : 0;
       const finalPremiumCed = isCededLine
         ? (routesMovementToFacultative ? numberFrom(totals, ['re']) : groupTotalPremium * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100)
         : 0;
       const finalSumCed = isCededLine
-        ? (routesMovementToFacultative ? numberFrom(totals, ['sumRe']) : groupTotalSum * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100)
+        ? (routesMovementToFacultative ? summarySumRe : groupTotalSum * reinsuranceBaseFactorForContract(contract) * cededPercentage / 100)
         : 0;
       const manualSumField = isRetention ? 'manualRetentionSum' : 'manualCededSum';
       const manualPremiumField = isRetention ? 'manualRetentionPremium' : 'manualCededPremium';
@@ -4117,9 +4259,9 @@
                             const selector = isAutoPolicy() && autoSumSelectors[txt(row.code)];
                             if (selector) return <span>-</span>;
                             const input = coverageInputs[txt(row.code)] || {};
-                            return <InputNumber id={'numDiferencia-' + row.code} step={1000} style={{ width: 140 }} value={input.difference}
+                            return <InputNumber id={'numDiferencia-' + row.code} precision={2} step={0.01} style={{ width: 140 }} value={input.difference}
                               formatter={function (v) { return v === undefined || v === null || v === '' ? '' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
-                              parser={function (v) { return String(v || '').replace(/,/g, ''); }}
+                              parser={parseSumInput}
                               onChange={function (v) { updateCoverageInput(row.code, 'difference', v, row.limit); }} />;
                           } },
                         { title: t('Nueva suma final'), key: 'final', width: 160,
@@ -4127,9 +4269,9 @@
                             const selector = isAutoPolicy() && autoSumSelectors[txt(row.code)];
                             if (selector) return <span>{t('Calculada según opción')}</span>;
                             const input = coverageInputs[txt(row.code)] || {};
-                            return <InputNumber id={'numSumaFinal-' + row.code} step={1000} style={{ width: 140 }} value={input.final}
+                            return <InputNumber id={'numSumaFinal-' + row.code} precision={2} step={0.01} style={{ width: 140 }} value={input.final}
                               formatter={function (v) { return v === undefined || v === null || v === '' ? '' : String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }}
-                              parser={function (v) { return String(v || '').replace(/,/g, ''); }}
+                              parser={parseSumInput}
                               onChange={function (v) { updateCoverageInput(row.code, 'final', v, row.limit); }} />;
                           } },
                         { title: t('Opción de suma'), key: 'autoOption', width: 220,
