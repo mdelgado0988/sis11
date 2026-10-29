@@ -552,6 +552,7 @@ for (let i = 0; i < base.length; i++) {
     const currentRe = Number(c.premiumRe || 0);
     const currentSumCedant = Number(c.sumInsuredCedant || 0);
     const currentSumRe = Number(c.sumInsuredRe || 0);
+    const currentCommission = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
     finalCedant = money(targetPremiumCedant);
     finalRe = money(targetPremiumRe);
     finalSumCedant = counts ? money(targetSumCedant) : 0;
@@ -564,10 +565,23 @@ for (let i = 0; i < base.length; i++) {
       finalSumCedant = 0;
       finalSumRe = 0;
     }
-    finalCommission = money(targetCommission);
+    // Si la variacion completa va a FAC, el saldo final se construye sobre la
+    // cesion vigente mas el movimiento que ya fue asignado por la simulacion.
+    // No se debe volver a usar la prima objetivo de capacidad: esa cifra puede
+    // redistribuir un recargo/descuento entre CP/RET aunque la grilla sintetica
+    // indique que todo el movimiento corresponde a FAC.
+    if (routesMovementToFacultative && !obsoleteRetentionLine) {
+      finalCedant = money(currentCedant + Number(facultativeMovement.premiumCedant || 0));
+      finalRe = money(currentRe + Number(facultativeMovement.premiumRe || 0));
+      finalSumCedant = money(currentSumCedant + Number(facultativeMovement.sumInsuredCedant || 0));
+      finalSumRe = money(currentSumRe + Number(facultativeMovement.sumInsuredRe || 0));
+      finalCommission = money(currentCommission + Number(facultativeMovement.premiumRe || 0) * commissionRate);
+    } else {
+      finalCommission = money(targetCommission);
+    }
     cedant = money(finalCedant - currentCedant);
     re = money(finalRe - currentRe);
-    commission = money(finalCommission - Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0);
+    commission = money(finalCommission - currentCommission);
     lineDv = money(cedant + re);
     linePv = lineDv;
     lineSv = money(finalSumCedant + finalSumRe - currentSumCedant - currentSumRe);

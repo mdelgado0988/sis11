@@ -301,6 +301,53 @@
     });
   }
 
+  function hasPureFacultativePlacement(rows) {
+    const codes = Array.from(new Set((rows || []).map(function (row) {
+      return String(row && row.code || '');
+    }).filter(Boolean)));
+    if (!codes.length) return false;
+
+    return codes.every(function (code) {
+      const cessions = (baseCessions || []).filter(function (cession) {
+        return String(cession.coverageCode || cession.coverageId || '') === code;
+      });
+      const facultative = cessions.filter(function (cession) {
+        return normalizedReinsuranceLine(cession.lineId) === 'FAC';
+      });
+      const other = cessions.filter(function (cession) {
+        return normalizedReinsuranceLine(cession.lineId) !== 'FAC';
+      });
+      const facultativePremium = facultative.reduce(function (total, cession) {
+        return total + Math.abs(numberFrom(cession, ['premiumRe']));
+      }, 0);
+      const facultativeSum = facultative.reduce(function (total, cession) {
+        return total + Math.abs(Number(cession.sumInsuredRe || 0));
+      }, 0);
+      const proportionalSum = other.reduce(function (total, cession) {
+        return total + Math.abs(Number(cession.sumInsuredCedant || 0))
+          + Math.abs(Number(cession.sumInsuredRe || 0));
+      }, 0);
+      const affected = (rows || []).find(function (row) {
+        return String(row && row.code || '') === code;
+      }) || {};
+      const finalSum = Number(affected.finalSum || 0);
+      const finalPremium = Number(affected.finalPremium || 0);
+      const proportionalPremium = other.reduce(function (total, cession) {
+        return total + Math.abs(Number(cession.premiumCedant || 0))
+          + Math.abs(Number(cession.premiumRe || 0));
+      }, 0);
+      // A policy can retain historical CP/RET balances while the current
+      // movement is FAC-only. Use the contract-capacity boundary, not the
+      // total final placement, to identify that case.
+      const sumIsFacultative = facultativeSum > 0.01
+        && finalSum > proportionalSum + 0.01;
+      const premiumIsFacultative = finalSum <= 0.01
+        && facultativePremium > 0.01 && proportionalPremium <= 0.01
+        && finalPremium > 0.01;
+      return facultative.length > 0 && (sumIsFacultative || premiumIsFacultative);
+    });
+  }
+
   function normalizedReinsuranceLine(lineId) {
     const line = txt(lineId).toUpperCase();
     if (line === 'RET' || line.indexOf('RETEN') >= 0) return 'RETENCION';
@@ -2711,7 +2758,11 @@
       // El limite configurado sustituye la regla de "FAC ya existente" solo
       // para los ramos de Fianza indicados.
       suretyContractCapacity: usesSuretyContractCapacity(),
-      facultativeMovementOnly: !usesSuretyContractCapacity()
+      // En fianzas, si la cobertura ya esta colocada 100% en FAC, el
+      // recargo/descuento debe permanecer en FAC. La capacidad contractual
+      // sigue calculandose para construir el saldo final, pero no debe
+      // redistribuir ese movimiento sobre RET/CP.
+      facultativeMovementOnly: !usesSuretyContractCapacity() || hasPureFacultativePlacement(rows)
     };
     exe('ExeChain', {
       chain: 'cmdSimReaChangeCoverage',
