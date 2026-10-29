@@ -4513,19 +4513,49 @@ function getCoaseguroGlobalBase() {
   }, { sumInsured: 0, premium: 0 });
 }
 
+function getCoaseguroVigenteBase() {
+  const vigentes = (coCessions || []).filter(row =>
+    row && row.parentCoCession == null &&
+    (row.overwritten === undefined || row.overwritten === false || Number(row.overwritten) === 0)
+  );
+
+  // En un endoso, las coberturas pueden conservar la prima anterior mientras
+  // las cesiones vigentes ya contienen la prima final. Tomar el gross de una
+  // cesion vigente evita mostrar la prima anterior en la distribucion.
+  const source = vigentes.find(row => row.sumInsured != null || row.premium != null);
+  if (source) {
+    return {
+      sumInsured: coaseguroNumero(source.sumInsured),
+      premium: coaseguroNumero(source.premium)
+    };
+  }
+
+  return getCoaseguroGlobalBase();
+}
+
+function getCoaseguroVigenteTotales() {
+  const base = getCoaseguroVigenteBase();
+  return {
+    ...base,
+    sumInsuredCeded: (coCessions || []).reduce((total, row) =>
+      total + coaseguroNumero(row.sumInsuredCeded), 0),
+    premiumCeded: (coCessions || []).reduce((total, row) =>
+      total + coaseguroNumero(row.premiumCeded), 0)
+  };
+}
+
 function sincronizarControlesCoaseguro() {
-  const base = getCoaseguroGlobalBase();
-  const percentage = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.percentage), 0);
+  const vigente = getCoaseguroVigenteTotales();
   const commission = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.commission), 0);
   const tax = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.tax), 0);
-  const premiumCeded = coCessions.reduce((sum, row) => sum + coaseguroNumero(row.premiumCeded), 0);
+  const premiumCeded = vigente.premiumCeded;
   const commissionRate = premiumCeded ? commission * 100 / premiumCeded : 0;
   const taxRate = premiumCeded ? tax * 100 / premiumCeded : 0;
   // El coaseguro no es una línea del porcentaje del contrato de reaseguro.
   // Se muestran sus importes informativos, pero su porcentaje no se acumula al 100%.
   $("#pco").val("");
-  $("#msco").val(coaseguroFormato(base.sumInsured * percentage / 100));
-  $("#mpco").val(coaseguroFormato(base.premium * percentage / 100));
+  $("#msco").val(coaseguroFormato(vigente.sumInsuredCeded));
+  $("#mpco").val(coaseguroFormato(vigente.premiumCeded));
   $("#pcco").val(formatearNumero(commissionRate));
   $("#mcco").val(coaseguroFormato(commission));
   $("#pico").val(formatearNumero(taxRate));
@@ -4550,7 +4580,7 @@ function renderCoaseguradores() {
     leader: row.leader === true || Number(row.leader) === 1
   }));
 
-  const base = getCoaseguroGlobalBase();
+  const base = getCoaseguroVigenteBase();
   const distributed = coaseguradoresData.reduce((sum, row) => sum + row.percentage, 0);
   const companyPercentage = Math.max(0, 100 - distributed);
   const placedSum = coaseguradoresData.reduce((sum, row) => sum + row.sumInsured, 0);

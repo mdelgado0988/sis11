@@ -35,6 +35,31 @@
         '84':'cfgCoberturaProductoReaFianza'
     };
     const reinsuranceConfigTable = lob => reinsuranceConfigTableByLob[String(lob || '')] || 'cfgCoberturaProductoRea';
+    // GLOB-LOADING-COINSURANCE: el movimiento de recargo/descuento se reparte
+    // proporcionalmente entre compania y coaseguro. El saldo historico de la
+    // compania ya viene neto de coaseguro; solo el movimiento recibe el factor.
+    const getCoinsuranceSplit = function(cessionRows, baseRows, contractId){
+        const rows = cessionRows || [];
+        const directPercentage = rows.reduce(function(total, row){
+            return total + Number(row.percentage || 0);
+        }, 0);
+        const scopedBaseRows = (baseRows || []).filter(function(row){
+            return contractId === undefined || String(row.contractId || '') === String(contractId || '');
+        });
+        const grossPremium = scopedBaseRows.reduce(function(total, row){
+            return total + Math.abs(Number(row.premium || 0));
+        }, 0);
+        const coinsurancePremium = scopedBaseRows.reduce(function(total, row){
+            return total + Math.abs(Number(row.coPremium || row.coCovPremium || 0));
+        }, 0);
+        const percentage = Math.max(0, Math.min(100, directPercentage || (grossPremium
+            ? coinsurancePremium / grossPremium * 100 : 0)));
+        return {
+            percentage: percentage,
+            coinsuranceFactor: percentage / 100,
+            companyFactor: (100 - percentage) / 100
+        };
+    };
     /**
      * @function AppProvider
      * @version 1.0.0
@@ -518,13 +543,8 @@
                 group.commission += Number(cession.comissionCedant || 0);
                 group.tax += Number(cession.tax || 0);
             });
-            const directCoinsurancePercentage = (coinsuranceCessions || []).reduce(function(total, row){
-                return total + Number(row.percentage || 0);
-            }, 0);
-            const grossPremium = configuredReinsuranceCessions().reduce(function(total, row){ return total + Math.abs(Number(row.premium || 0)); }, 0);
-            const coinsurancePremium = configuredReinsuranceCessions().reduce(function(total, row){ return total + Math.abs(Number(row.coPremium || row.coCovPremium || 0)); }, 0);
-            const coinsurancePercentage = Math.max(0, Math.min(100, directCoinsurancePercentage || (grossPremium ? coinsurancePremium / grossPremium * 100 : 0)));
-            const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
+            const coinsuranceSplit = getCoinsuranceSplit(coinsuranceCessions, configuredReinsuranceCessions());
+            const reinsuranceFactor = coinsuranceSplit.companyFactor;
             return Object.keys(groups).map(function(key){
                 const group = groups[key];
                 ['premium','sumInsured','premiumCedant','sumInsuredCedant','premiumRe','sumInsuredRe','commission','tax'].forEach(function(field){
@@ -707,6 +727,31 @@
             });
             return source;
         };
+        function publishReinsuranceCalculationLog(simulation, inputRows){
+            const diagnostic = {
+                stage: 'AFTER_REINSURANCE_CALCULATION',
+                view: 'LoadingEndorsementManager',
+                policyId: Number(policyId || 0),
+                movementType: 'LOADING',
+                input: {
+                    rows: inputRows || [],
+                    coverages: coverages || []
+                },
+                source: {
+                    baseCessions: baseCessions || [],
+                    coinsuranceCessions: coinsuranceCessions || []
+                },
+                groupedDistribution: simulation && simulation.contracts || [],
+                finalReinsuranceSnapshot: buildReinsuranceSnapshot(simulation)
+            };
+            if(typeof window !== 'undefined'){
+                window.__loadingEndorsementReinsuranceCalculationLog = diagnostic;
+            }
+            if(typeof console !== 'undefined' && console.log){
+                console.log('[LoadingEndorsementManager] reinsurance calculation detail', diagnostic);
+            }
+            return diagnostic;
+        }
         async function calculateReinsurance(){
             if(!baseCessions.length){
                 setReinsuranceSimulation({ contracts:[] });
@@ -730,6 +775,11 @@
                 if(Array.isArray(simulation)) simulation = simulation[0] || {};
                 simulation = mergeReinsuranceContracts(simulation);
                 simulation = restoreSimulationParticipants(simulation);
+                // Diagnostic only: keep the complete calculation input, grouped
+                // rows, coverages, acceptors and the final snapshot together so
+                // co-insurance/loading discrepancies can be copied and reviewed
+                // without changing the values used by the endorsement.
+                publishReinsuranceCalculationLog(simulation, rows);
                 setReinsuranceSimulation(simulation);
                 setReinsuranceDraft(JSON.parse(JSON.stringify(simulation)));
                 setActiveWorkspaceTab('loadings');
@@ -1262,9 +1312,9 @@
             message.success('La distribución de aceptantes fue guardada correctamente.');
             return true;
         }
-        function buildReinsuranceSnapshot(){
+        function buildReinsuranceSnapshot(sourceOverride){
             const round = function(value){ return Number(Number(value || 0).toFixed(2)); };
-            const source = reinsuranceDraft || reinsuranceSimulation || {};
+            const source = sourceOverride || reinsuranceDraft || reinsuranceSimulation || {};
             const snapshot = {
                 state: 'FINAL',
                 distribution: [], participants: [], coinsurance: [],
@@ -1275,6 +1325,12 @@
                 const rows = group.rows || [];
                 const manual = group.manualDistribution || [];
                 const isCpexCcv = String(group.contractCode || '').trim().toUpperCase() === 'CPEXCV';
+                const coinsuranceSplit = getCoinsuranceSplit(coinsuranceCessions, baseCessions, group.contractId);
+                // La simulacion reporta el movimiento bruto. Con coaseguro
+                // proporcional, solo la participacion de la compania entra en
+                // sus filas; el coaseguro se calcula por separado. Sin
+                // coaseguro el factor es 1 para conservar la conducta previa.
+                const companyMovementFactor = coinsuranceSplit.companyFactor;
                 const quota = manual.find(function(line){ return line.key === 'quota'; });
                 const retention = manual.find(function(line){ return line.key === 'retention'; });
                 const sourceRows = (baseCessions || []).filter(function(cession){
@@ -1321,6 +1377,10 @@
                 const tax = quota ? Number(quota.tax || 0) : rows.reduce(function(total, row){ return total + Number(row.tax || 0); }, 0);
                 rows.forEach(function(row){
                     const hasManual = !!quota;
+                    const movementFactor = hasManual ? 1 : companyMovementFactor;
+                    const companyMovementValue = function(value){
+                        return Number(value || 0) * movementFactor;
+                    };
                     const sourceRow = sourceForRow(row);
                     const sourcePremium = Number(sourceRow.premium || 0);
                     const sourceSum = Number(sourceRow.sumInsured || 0);
@@ -1348,12 +1408,12 @@
                     const sumShare = totalFinalSum > 0.01 ? finalSumWeight / totalFinalSum : 0;
                     const targetPremiumRe = hasManual ? round(cededPremium * premiumShare) : null;
                     const targetSumRe = hasManual ? round(cededSum * sumShare) : null;
-                    const finalPremiumRe = hasManual ? round(targetPremiumRe) : round(sourcePremiumRe + Number(row.premiumRe || 0));
-                    const finalPremiumCedant = hasManual ? round(finalPremium - targetPremiumRe) : round(Number(sourceRow.premiumCedant || 0) + Number(row.premiumCedant || 0));
-                    const finalSumRe = hasManual ? round(targetSumRe) : round(sourceSumRe + Number(row.sumInsuredRe || 0));
-                    const finalSumCedant = hasManual ? round(finalSum - targetSumRe) : round(Number(sourceRow.sumInsuredCedant || 0) + Number(row.sumInsuredCedant || 0));
-                    const finalCommission = hasManual ? round(commission * (Math.abs(cededPremium) > 0.01 ? Math.abs(targetPremiumRe) / Math.abs(cededPremium) : 0)) : round(Number(sourceRow.comissionCedant || 0) + Number(row.commission || 0));
-                    const finalTax = hasManual ? round(tax * (Math.abs(cededPremium) > 0.01 ? Math.abs(targetPremiumRe) / Math.abs(cededPremium) : 0)) : round(Number(sourceRow.tax || 0) + Number(row.tax || 0));
+                    const finalPremiumRe = hasManual ? round(targetPremiumRe) : round(sourcePremiumRe + companyMovementValue(row.premiumRe));
+                    const finalPremiumCedant = hasManual ? round(finalPremium - targetPremiumRe) : round(Number(sourceRow.premiumCedant || 0) + companyMovementValue(row.premiumCedant));
+                    const finalSumRe = hasManual ? round(targetSumRe) : round(sourceSumRe + companyMovementValue(row.sumInsuredRe));
+                    const finalSumCedant = hasManual ? round(finalSum - targetSumRe) : round(Number(sourceRow.sumInsuredCedant || 0) + companyMovementValue(row.sumInsuredCedant));
+                    const finalCommission = hasManual ? round(commission * (Math.abs(cededPremium) > 0.01 ? Math.abs(targetPremiumRe) / Math.abs(cededPremium) : 0)) : round(Number(sourceRow.comissionCedant || 0) + companyMovementValue(row.commission));
+                    const finalTax = hasManual ? round(tax * (Math.abs(cededPremium) > 0.01 ? Math.abs(targetPremiumRe) / Math.abs(cededPremium) : 0)) : round(Number(sourceRow.tax || 0) + companyMovementValue(row.tax));
                     const premiumRe = round(finalPremiumRe - sourcePremiumRe);
                     const premiumCedant = round(finalPremiumCedant - Number(sourceRow.premiumCedant || 0));
                     const sumRe = round(finalSumRe - sourceSumRe);
@@ -1415,7 +1475,13 @@
             });
             const finalCoinsuranceBase = (coverages || []).reduce(function(total, coverage){
                 const loading = (coverage.Loadings || []).filter(function(item){ return !item.toRemove; });
-                total.sum += Number(coverage.limit || coverage.sumInsured || 0);
+                // GLOB-LOADING-COINSURANCE: igual que frmDistribucionReaseguro,
+                // la suma del coaseguro solo usa coberturas configuradas como
+                // isCoverage; las coberturas dependientes no vuelven a sumar
+                // el mismo limite. La prima se conserva por cobertura.
+                if(isReinsuranceCoverage(coverage)){
+                    total.sum += Number(coverage.limit || coverage.sumInsured || 0);
+                }
                 total.premium += Number(coverage.basePremium || 0) * (1 + getTotalLoading(loading) / 100);
                 return total;
             }, { sum:0, premium:0 });
@@ -1923,11 +1989,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 const rows = group.rows || [];
                  const key = String(group.contractId || '') + '|';
                 const policyTotals = policyContracts[key] || { sumInsured:0, sumInsuredCedant:0, sumInsuredRe:0, premium:0, premiumCedant:0, premiumRe:0, commission:0, tax:0 };
-                const directCoinsurancePercentage = (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0);
-                const grossPremiumForContract = (baseCessions || []).filter(function(row){ return String(row.contractId || '') === String(group.contractId || ''); }).reduce(function(total, row){ return total + Math.abs(Number(row.premium || 0)); }, 0);
-                const coinsurancePremiumForContract = (baseCessions || []).filter(function(row){ return String(row.contractId || '') === String(group.contractId || ''); }).reduce(function(total, row){ return total + Math.abs(Number(row.coPremium || row.coCovPremium || 0)); }, 0);
-                const coinsurancePercentage = Math.max(0, Math.min(100, directCoinsurancePercentage || (grossPremiumForContract ? coinsurancePremiumForContract / grossPremiumForContract * 100 : 0)));
-                const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
+                const coinsuranceSplit = getCoinsuranceSplit(coinsuranceCessions, baseCessions, group.contractId);
+                const reinsuranceFactor = coinsuranceSplit.companyFactor;
                 const manualDistribution = group.manualDistribution || [];
                 const manualCededLines = manualDistribution.filter(function(line){
                     return ['retention', 'nonTechnical', 'coinsurance'].indexOf(line.key) < 0;
@@ -2141,8 +2204,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         const policyBaseSum = Object.keys(policyLineSum).reduce(function(total, key){
             return total + policyLineSum[key];
         }, 0);
-        const coinsurancePercentage = Math.max(0, Math.min(100, (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0)));
-        const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
+        const coinsuranceSplit = getCoinsuranceSplit(coinsuranceCessions);
+        const coinsurancePercentage = coinsuranceSplit.percentage;
+        const reinsuranceFactor = coinsuranceSplit.companyFactor;
         const coinsuranceRate = function(field){
             const totals = (coinsuranceCessions || []).reduce(function(result, row){
                 const premium = Number(row.premiumCeded || row.premium || 0);
@@ -2298,7 +2362,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         </>;
     }
     function ReinsuranceDistributionEditor({ contractCode, data, savedLines, policyRows, coinsuranceCessions, isReinsuranceCoverage, groupKey, onSave, onOpenReinsurers }){
-        const coinsurancePercentage = Math.max(0, Math.min(100, (coinsuranceCessions || []).reduce(function(total, row){ return total + Number(row.percentage || 0); }, 0)));
+        const coinsuranceSplit = getCoinsuranceSplit(coinsuranceCessions, policyRows, undefined);
+        const coinsurancePercentage = coinsuranceSplit.percentage;
         const coinsuranceRate = function(field){
             const totals = (coinsuranceCessions || []).reduce(function(result, row){
                 const premium = Number(row.premiumCeded || row.premium || 0);
@@ -2308,18 +2373,36 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             }, { premium:0, value:0 });
             return totals.premium ? totals.value / totals.premium : 0;
         };
-        const reinsuranceFactor = (100 - coinsurancePercentage) / 100;
+        const reinsuranceFactor = coinsuranceSplit.companyFactor;
         const finalPolicyBalance = function(source, policySource){
-            const policy = (policySource && policySource.length ? policySource : source || []).reduce(function(total, row){
-                total.sum += Number(row.sumInsured || 0);
-                total.premium += Number(row.premium || 0);
-                return total;
-            }, { sum:0, premium:0 });
-            const endorsement = (source || []).reduce(function(total, row){
-                total.sum += Number(row.sumInsuredMovement || 0);
-                total.premium += Number(row.premiumMovement || 0);
-                return total;
-            }, { sum:0, premium:0 });
+            const aggregateCoverageValues = function(rows, sumField, premiumField, includeSum){
+                const seen = {};
+                return (rows || []).reduce(function(total, row){
+                    // Las filas CP/FAC pueden repetir la misma cobertura bruta.
+                    // La base bruta debe contarla una sola vez para no calcular
+                    // el coaseguro sobre una suma duplicada.
+                    const key = String(row.coverageCode || row.coverageId || row.code || row.cover || row.id || '');
+                    if(seen[key]) return total;
+                    seen[key] = true;
+                    // GLOB-LOADING-COINSURANCE: la suma del coaseguro debe
+                    // seguir la misma regla de frmDistribucionReaseguro y usar
+                    // solo coberturas configuradas como isCoverage. Las primas
+                    // se conservan por cobertura, aunque sea dependiente.
+                    if(!includeSum || includeSum(row)) total.sum += Number(row[sumField] || 0);
+                    total.premium += Number(row[premiumField] || 0);
+                    return total;
+                }, { sum:0, premium:0 });
+            };
+            const includeCoverageSum = function(row){
+                return isReinsuranceCoverage(row);
+            };
+            const policy = aggregateCoverageValues(
+                policySource && policySource.length ? policySource : source || [],
+                'sumInsured', 'premium', includeCoverageSum
+            );
+            const endorsement = aggregateCoverageValues(
+                source || [], 'sumInsuredMovement', 'premiumMovement', includeCoverageSum
+            );
             return { sum:policy.sum + endorsement.sum, premium:policy.premium + endorsement.premium };
         };
         const buildLines = function(source, policySource, storedLines){
@@ -2514,9 +2597,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 const line = lineTotals[kind] || lineTotals.quota;
                 // Retention is stored inside each cession, usually on the
                 // Cuota Parte row, not necessarily as a separate lineId.
-                const amounts = isMovement
+                const rawAmounts = isMovement
                     ? movementAmounts(row)
                     : { cedantPremium:Number(row.premiumCedant || 0), rePremium:Number(row.premiumRe || 0), cedantSum:Number(row.sumInsuredCedant || 0), reSum:Number(row.sumInsuredRe || 0) };
+                // Las filas de poliza ya contienen el saldo neto de la compania.
+                // Solo el movimiento se divide; aplicar el factor a ambos
+                // reduciria dos veces el saldo existente.
+                const amounts = isMovement
+                    ? {
+                        cedantPremium:rawAmounts.cedantPremium * reinsuranceFactor,
+                        rePremium:rawAmounts.rePremium * reinsuranceFactor,
+                        cedantSum:rawAmounts.cedantSum * reinsuranceFactor,
+                        reSum:rawAmounts.reSum * reinsuranceFactor,
+                        commission:rawAmounts.commission * reinsuranceFactor,
+                        tax:rawAmounts.tax * reinsuranceFactor
+                    }
+                    : rawAmounts;
                 const sumKey = (isMovement ? 'movement|' : 'policy|')
                     + String(row.coverageCode || row.coverageId || row.code || row.cover || '') + '|' + kind;
                 const includeSum = !hasCoverageRows || (isReinsuranceCoverage(row) && !countedSumRows[sumKey]);
@@ -2537,10 +2633,13 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const distributedPremium = Object.keys(lineTotals).reduce(function(total, key){ return total + lineTotals[key].premium; }, 0);
             const distributedSum = Object.keys(lineTotals).reduce(function(total, key){ return total + lineTotals[key].sum; }, 0);
             const hasLineDistribution = distributedPremium !== 0 || distributedSum !== 0;
-            const grossBalance = hasLineDistribution
+            const companyBalance = hasLineDistribution
                 ? { sum:distributedSum, premium:distributedPremium }
-                : finalPolicyBalance(source, policySource);
-            const finalBalance = { sum:grossBalance.sum * reinsuranceFactor, premium:grossBalance.premium * reinsuranceFactor };
+                : { sum:0, premium:0 };
+            const grossBalance = finalPolicyBalance(source, policySource);
+            // grossBalance incluye el coaseguro; companyBalance ya es neto de
+            // coaseguro y no debe volver a multiplicarse por el factor.
+            const finalBalance = companyBalance;
             const lineName = source && source[0] && (source[0].contractName || source[0].lineName || source[0].lineId) || 'Cuota Parte';
             const isCpexCcv = String(contractCode || '').trim().toUpperCase() === 'CPEXCV';
             const lineDefinition = function(key, label, canViewReinsurers){
@@ -2559,12 +2658,12 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                     percentage:useStoredPercentages ? Number(storedPercentageValues[key]) : sumPercentage,
                     premiumPercentage:useStoredPercentages ? Number(storedPercentageValues[key]) : premiumPercentage,
                     percentageBasis:isCpexCcv ? 'sum' : 'both',
-                    sum:Number((line.sum * reinsuranceFactor).toFixed(2)),
-                    premium:Number((line.premium * reinsuranceFactor).toFixed(2)),
+                    sum:Number(Number(line.sum || 0).toFixed(2)),
+                    premium:Number(Number(line.premium || 0).toFixed(2)),
                     commissionPct:line.premium ? line.commission / line.premium * 100 : 0,
-                    commission:Number((line.commission * reinsuranceFactor).toFixed(2)),
+                    commission:Number(Number(line.commission || 0).toFixed(2)),
                     taxPct:line.premium ? line.tax / line.premium * 100 : 0,
-                    tax:Number((line.tax * reinsuranceFactor).toFixed(2)), balance:0,
+                    tax:Number(Number(line.tax || 0).toFixed(2)), balance:0,
                     canViewReinsurers:canViewReinsurers
                 };
             };
@@ -2613,7 +2712,13 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         };
         const [lines, setLines] = useState(function(){ return buildLines(data, policyRows, savedLines); });
         useEffect(function(){ setLines(buildLines(data, policyRows, savedLines)); }, [data, policyRows, savedLines]);
-        const grossMovement = finalPolicyBalance(data, policyRows);
+        const grossMovement = (data || []).reduce(function(total, row){
+            total.sum += Number(row.sumInsuredMovement || row.sumMovement || 0);
+            total.premium += Number(row.premiumMovement || 0);
+            return total;
+        }, { sum:0, premium:0 });
+        // Las ediciones manuales usan la misma participacion proporcional de la
+        // compania que el snapshot; el coaseguro permanece separado.
         const movement = { sum:grossMovement.sum * reinsuranceFactor, premium:grossMovement.premium * reinsuranceFactor };
         const editLine = function(key, field, raw){
             const value = Number(String(raw == null ? '' : raw).replace(/,/g, ''));

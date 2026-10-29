@@ -148,24 +148,48 @@ if (!isFinite(durationDays) || durationDays <= 0) {
 const direction = deltaDays > 0 ? 'EXTENSION' : 'REDUCCION';
 const oldPremium = Number(target.premium == null ? Number(target.basePremium || 0) + Number(target.extraPremium || 0) : target.premium);
 if (!isFinite(oldPremium) || oldPremium < 0) throw '@La prima vigente de la cobertura es invalida';
-const rawDelta = money(oldPremium / durationDays * deltaDays);
+// Una cobertura con loading tiene dos componentes. Si la prima bruta se
+// prorratea dentro de basePremium, ChangeCoverage vuelve a sumar el loading.
+// Se prorratean base y extra por separado para que el snapshot cotizado sea
+// consistente con la prima que finalmente se persiste.
+const configuredBasePremium = Number(target.basePremium);
+const configuredExtraPremium = Number(target.extraPremium);
+const hasBasePremium = isFinite(configuredBasePremium) && configuredBasePremium >= 0;
+const oldBasePremium = hasBasePremium
+  ? configuredBasePremium
+  : Math.max(0, oldPremium - (isFinite(configuredExtraPremium) ? configuredExtraPremium : 0));
+const oldExtraPremium = isFinite(configuredExtraPremium)
+  ? configuredExtraPremium
+  : oldPremium - oldBasePremium;
+const baseDelta = money(oldBasePremium / durationDays * deltaDays);
+const extraDelta = money(oldExtraPremium / durationDays * deltaDays);
+const proratedBasePremium = money(oldBasePremium + baseDelta);
+const proratedExtraPremium = money(oldExtraPremium + extraDelta);
 // 🔴 Los ajustes manuales entran en la prima de la cobertura ANTES de cotizar. Si se aplican
 // sólo a la presentacion, el motor nativo calcula impuesto y total sin ellos y la ejecucion
 // los pierde: es lo que reprobo la primera ronda de pruebas (defectos 1 y CA15).
 const adjust = money(surcharge - discount);
-const proratedPremium = money(oldPremium + rawDelta);
-const newPremium = money(proratedPremium + adjust);
+const newBasePremium = money(proratedBasePremium + adjust);
+const loadingRate = Number(target.loading);
+const loadingMatchesExtra = isFinite(loadingRate)
+  && Math.abs(oldExtraPremium - money(oldBasePremium * loadingRate / 100)) <= 0.01;
+const newExtraPremium = loadingMatchesExtra
+  ? money(newBasePremium * loadingRate / 100)
+  : proratedExtraPremium;
+const proratedPremium = money(proratedBasePremium + proratedExtraPremium);
+const newPremium = money(newBasePremium + newExtraPremium);
 if (newPremium < 0) throw '@El ajuste dejaria la prima de la cobertura en negativo';
 
 target.end = iso(newEnd);
 target.premium = newPremium;
-target.basePremium = money(Number(target.basePremium == null ? oldPremium : target.basePremium) + rawDelta + adjust);
+target.basePremium = newBasePremium;
+target.extraPremium = newExtraPremium;
 
 const rows = [{
   code: selCode, name: target.name, reason: 'SELECTED',
   oldStart: iso(start), newStart: iso(start), oldEnd: iso(oldEnd), newEnd: iso(newEnd),
-  oldPremium: money(oldPremium), newPremium: newPremium, variation: money(rawDelta + adjust),
-  proratedVariation: rawDelta, deltaDays: deltaDays
+  oldPremium: money(oldPremium), newPremium: newPremium, variation: money(newPremium - oldPremium),
+  proratedVariation: money(proratedPremium - oldPremium), deltaDays: deltaDays
 }];
 
 // En CAR, ramo 96, la cobertura 20 es la principal de mantenimiento aunque
@@ -284,12 +308,34 @@ doCmd({ cmd: 'ChangeCoverage', data: quoteData });
 if (!ChangeCoverage.ok) throw '@El motor de calculo nativo rechazo la cotizacion: ' + ChangeCoverage.msg;
 const quoted = ChangeCoverage.outData;
 const bill = quoted.Bill || {};
-const diff = quoted.BillDiff || {};
 
 // la cotizacion nativa devuelve las coberturas con sus fechas ORIGINALES: se reinyectan las calculadas
 const quotedCovs = JSON.parse(quoted.jNewCoverages || '[]');
 for (let i = 0; i < quotedCovs.length; i++) {
   const q = quotedCovs[i];
+  let snapshot = null;
+  for (let s = 0; s < jNew.length; s++) {
+    if (txt(jNew[s].code) === txt(q.code)) { snapshot = jNew[s]; break; }
+  }
+  if (snapshot) {
+    const snapshotPremium = money(snapshot.premium);
+    const nativePremium = money(q.premium);
+    const snapshotHasLoading = Math.abs(Number(snapshot.loading || 0)) > 0.0000001
+      || Math.abs(Number(snapshot.extraPremium || 0)) > 0.01;
+    const nativeDroppedLoading = snapshotHasLoading
+      && Math.abs(Number(q.loading || 0)) <= 0.0000001
+      && Math.abs(Number(q.extraPremium || 0)) <= 0.01;
+    // ChangeCoverage puede devolver el loading como 0 aunque el snapshot de
+    // entrada ya contenga la prima final. En ese caso, el snapshot calculado
+    // por esta cadena es la fuente autorizada para la vista y la ejecucion.
+    if (nativeDroppedLoading || Math.abs(nativePremium - snapshotPremium) > 0.01) {
+      q.basePremium = snapshot.basePremium;
+      q.extraPremium = snapshot.extraPremium;
+      q.premium = snapshot.premium;
+      q.loading = snapshot.loading;
+      q.loadingInsuredSum = snapshot.loadingInsuredSum;
+    }
+  }
   for (let k = 0; k < rows.length; k++) {
     if (txt(q.code) !== rows[k].code) continue;
     q.start = rows[k].newStart;
@@ -302,11 +348,26 @@ const prevPremium = money(policy.annualPremium);
 const prevTax = money(policy.tax);
 const prevFee = money(policy.fee);
 const prevTotal = money(policy.annualTotal);
-// El Bill nativo YA lleva los ajustes dentro, porque viajaron en la prima de la cobertura.
-const finalPremium = money(bill.anualPremium == null ? bill.annualPremium : bill.anualPremium);
-const finalTax = money(bill.tax);
+// La cotizacion nativa puede devolver un Bill sin loading aunque jNew ya lo
+// haya calculado. La facturacion debe usar la suma del snapshot final que se
+// enviara, no la cobertura mutilada que devolvio el motor.
+const finalPremium = money(quotedCovs.reduce(function (sum, coverage) {
+  return sum + Number(coverage.premium || 0);
+}, 0));
+const nativePremium = money(bill.anualPremium == null ? bill.annualPremium : bill.anualPremium);
+const nativeTaxRate = nativePremium === 0 ? 0 : Number(bill.tax || 0) / nativePremium;
+const finalTax = money(finalPremium * nativeTaxRate);
 const finalFee = money(bill.fee);
-const finalTotal = money(bill.annualTotal == null ? bill.anualTotal : bill.annualTotal);
+const finalTotal = money(finalPremium + finalTax + finalFee);
+bill.coverages = finalPremium;
+bill.surcharges = 0;
+bill.discounts = 0;
+bill.anualPremium = finalPremium;
+bill.annualPremium = finalPremium;
+bill.tax = finalTax;
+bill.anualTotal = finalTotal;
+bill.annualTotal = finalTotal;
+bill.installment = finalTotal;
 // La columna «calculado» es el mismo movimiento SIN los ajustes manuales; se deriva con la tasa
 // efectiva de la propia cotizacion, y reproduce exactamente la cotizacion sin ajustes.
 const taxRate = finalPremium === 0 ? 0 : finalTax / finalPremium;
@@ -358,10 +419,10 @@ return {
     total: { before: prevTotal, calculated: calcTotal, after: finalTotal },
     consistent: money(calcPremium + adjust + finalFee + finalTax) === finalTotal,
     movement: {
-      premium: money(diff.annualPremium),
-      tax: money(diff.tax),
-      fee: money(diff.fee),
-      total: money(diff.annualTotal),
+      premium: money(finalPremium - prevPremium),
+      tax: money(finalTax - prevTax),
+      fee: money(finalFee - prevFee),
+      total: money(finalTotal - prevTotal),
       prorated: money(detail.coveragesCost)
     },
     currency: policy.currency,

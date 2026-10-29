@@ -536,13 +536,47 @@
     return errors;
   }
 
-  function logReinsurancePersistedState(contracts, stage) {
+  function logReinsurancePersistedState(contracts, stage, coinsuranceOverride) {
     if (typeof console === 'undefined' || !console.log) return;
     const rows = [];
     const participants = [];
+    const sourceAmount = function (primary, fallback) {
+      return primary === null || primary === undefined || primary === '' ? fallback : primary;
+    };
+    const sourceCoinsurance = coinsuranceOverride || coinsuranceCessions || [];
+    const finalBase = finalCoinsuranceBase();
+    const finalCoinsuranceRate = function (field) {
+      const totals = sourceCoinsurance.reduce(function (result, cession) {
+        result.premium += coinsuranceNumber(sourceAmount(cession.premiumCeded, cession.premium));
+        result.value += coinsuranceNumber(cession[field]);
+        return result;
+      }, { premium: 0, value: 0 });
+      return totals.premium ? totals.value / totals.premium : 0;
+    };
+    const commissionRate = finalCoinsuranceRate('commission');
+    const taxRate = finalCoinsuranceRate('tax');
+    const coinsurance = sourceCoinsurance.map(function (cession) {
+      const percentage = placementPercentage(cession.percentage);
+      const premiumCeded = money(finalBase.premium * percentage / 100);
+      const sumInsuredCeded = money(finalBase.sum * percentage / 100);
+      return {
+        id: Number(cession.id || 0),
+        contactId: Number(cession.contactId || 0),
+        percentage: percentage,
+        // La base es la prima/suma final del endoso, no la fotografia anterior.
+        sumInsured: money(finalBase.sum),
+        premium: money(finalBase.premium),
+        sumInsuredCeded: sumInsuredCeded,
+        premiumCeded: premiumCeded,
+        commission: money(premiumCeded * commissionRate),
+        tax: money(premiumCeded * taxRate)
+      };
+    });
+    const contractSummaries = [];
     (contracts || []).forEach(function (group) {
+      const contractRows = [];
       (group.rows || []).forEach(function (row) {
-        rows.push({
+        const detail = {
           contractId: group.contractId,
           lineId: group.lineId,
           coverageCode: row.coverageCode,
@@ -560,10 +594,13 @@
           tax: money(row.tax),
           pctCedant: row.proportionCed,
           pctRe: row.proportionRe
-        });
+        };
+        rows.push(detail);
+        contractRows.push(detail);
       });
+      const contractParticipants = [];
       (group.participants || []).forEach(function (participant) {
-        participants.push({
+        const detail = {
           contractId: group.contractId,
           lineId: group.lineId,
           coverageCode: participantCoverageCode(group, participant),
@@ -573,16 +610,42 @@
           sumInsured: money(participant.sumInsured),
           commission: money(participant.commission),
           tax: money(participant.tax)
-        });
+        };
+        participants.push(detail);
+        contractParticipants.push(detail);
+      });
+      contractSummaries.push({
+        contractId: group.contractId,
+        lineId: group.lineId,
+        totals: group.totals || {},
+        distribution: contractRows,
+        participants: contractParticipants
       });
     });
-    console.log('[ChangeCoverageSuretyEndorsement] reinsurance-persisted-state', {
+    // Payload unico y copiable para validar el estado que la vista calcula
+    // antes de persistirlo, incluyendo coaseguro, coberturas y aceptantes.
+    const diagnosticPayload = {
       stage: stage,
       policyId: policyId,
+      coinsurancePercentage: coinsurance.reduce(function (sum, row) {
+        return sum + coinsuranceNumber(row.percentage);
+      }, 0),
+      coinsuranceBase: {
+        sumInsured: money(finalBase.sum),
+        premium: money(finalBase.premium),
+        commissionRate: commissionRate,
+        taxRate: taxRate
+      },
+      coinsurance: coinsurance,
+      contracts: contractSummaries,
+      distribution: rows,
+      participants: participants,
       rowCount: rows.length,
       participantCount: participants.length
-    });
+    };
+    console.log('[ChangeCoverageSuretyEndorsement] reinsurance-persisted-state', diagnosticPayload);
     if (console.table) console.table(rows);
+    if (coinsurance.length && console.table) console.table(coinsurance);
     if (participants.length && console.table) console.table(participants);
   }
 
@@ -1109,7 +1172,9 @@
     if (!id) { return; }
     setLoading(true);
     setError(null);
-    exe('RepoLifePolicy', { operation: 'GET', filter: 'id=' + id, include: ['Coverages', 'Product'], size: 1 })
+    // Igual que ProceedOrderEndorsement, la vista debe cargar los recargos y
+    // descuentos vigentes para conservarlos al enviar el nuevo snapshot.
+    exe('RepoLifePolicy', { operation: 'GET', filter: 'id=' + id, include: ['Coverages', 'Coverages.Loadings', 'Product'], size: 1 })
       .then(function (r) {
         if (!r || !r.ok || !r.outData || !r.outData.length) {
           setLoading(false); setError(t('No se encontro la poliza') + ' ' + id); return null;
@@ -1868,6 +1933,25 @@
       throw new Error(t('El cálculo no devolvió coberturas nuevas'));
     }
 
+    // El cálculo puede devolver Loadings vacio aunque la poliza ya tenga
+    // recargos/descuentos. No permitimos que esa respuesta borre la
+    // configuracion vigente: ChangeCoverage debe enviarla como ProceedOrder.
+    const currentCoverages = (policy && Array.isArray(policy.Coverages)) ? policy.Coverages : [];
+    coverages = coverages.map(function (coverage) {
+      const current = currentCoverages.find(function (item) {
+        return txt(item && item.code) === txt(coverage && coverage.code);
+      });
+      const currentLoadings = current && (current.Loadings || current.loadings);
+      const calculatedLoadings = coverage && (coverage.Loadings || coverage.loadings);
+      if (Array.isArray(currentLoadings) && currentLoadings.length
+        && (!Array.isArray(calculatedLoadings) || !calculatedLoadings.length)) {
+        return Object.assign({}, coverage, {
+          Loadings: JSON.parse(JSON.stringify(currentLoadings))
+        });
+      }
+      return coverage;
+    });
+
     const rowsByCode = {};
     (result.rows || []).forEach(function (row) { rowsByCode[txt(row.code)] = row; });
     // El recargo/descuento pertenece únicamente a la cobertura seleccionada.
@@ -1880,21 +1964,23 @@
       const selected = code === txt(covCode);
       const share = selected ? adjustmentToAllocate : 0;
       if (selected) {
-        // ChangeCoverage calcula la facturacion usando basePremium. No se
-        // debe retirar el ajuste de ese campo, porque el motor ignoraria
-        // extraPremium y registraria una prima sin recargo/descuento.
+        // cmdCalcChangeCoverageSurety ya incorporo el recargo/descuento en la
+        // cotizacion nativa. No volver a sumarlo aqui: hacerlo sobre
+        // extraPremium duplicaria el ajuste y desalinearia la prima persistida
+        // frente al snapshot de reaseguro.
         coverage.basePremium = money(coverage.basePremium);
-        coverage.extraPremium = money(Number(coverage.extraPremium || 0) + share);
+        coverage.extraPremium = money(coverage.extraPremium);
         coverage.premium = money(coverage.premium);
       }
       allocated = money(allocated + share);
 
       const row = rowsByCode[code];
       if (row) {
-        const commandPremium = selected && row.newPremium !== undefined
-          ? money(row.newPremium)
-          : money(coverage.premium);
         const nativePremium = money(coverage.premium);
+        // jNewCoverages es la fuente que se envia y persiste. Usamos siempre
+        // su prima nativa para que la grilla, la facturacion y el snapshot
+        // no puedan divergir por una variacion manual de la vista.
+        const commandPremium = nativePremium;
         if (selected) coverage.premium = commandPremium;
         row.newPremium = commandPremium;
         row.adjustedPremium = commandPremium;
@@ -1904,26 +1990,25 @@
 
     const finalPremium = money(coverages.reduce(function (sum, coverage) { return sum + Number(coverage.premium || 0); }, 0));
     const beforePremium = Number(result.billing && result.billing.premium ? result.billing.premium.before : 0);
-    const commandMovementPremium = money((result.rows || []).reduce(function (sum, row) {
-      return sum + Number(row.variation || 0);
-    }, 0));
-    const commandFinalPremium = money(beforePremium + commandMovementPremium);
+    // La facturacion debe salir de la misma fuente que se persiste: la suma
+    // de las primas nativas de jNewCoverages, con o sin loading.
+    const billingFinalPremium = finalPremium;
     const nativeFinalPremium = Number(result.billing && result.billing.premium ? result.billing.premium.after : 0);
     const nativeFinalTax = Number(result.billing && result.billing.tax ? result.billing.tax.after : 0);
     const nativeTaxRate = nativeFinalPremium ? nativeFinalTax / nativeFinalPremium : 0;
-    const finalTax = money(commandFinalPremium * nativeTaxRate);
+    const finalTax = money(billingFinalPremium * nativeTaxRate);
     const finalFee = money(result.billing && result.billing.fee ? result.billing.fee.after : 0);
-    const finalTotal = money(commandFinalPremium + finalTax + finalFee);
-    const calculatedPremium = money(commandFinalPremium - adjustment);
+    const finalTotal = money(billingFinalPremium + finalTax + finalFee);
+    const calculatedPremium = money(billingFinalPremium - adjustment);
     const calculatedTax = money(calculatedPremium * nativeTaxRate);
     if (result.billing && result.billing.premium) {
       result.billing.premium.calculated = calculatedPremium;
-      result.billing.premium.after = commandFinalPremium;
+      result.billing.premium.after = billingFinalPremium;
       result.billing.tax.calculated = calculatedTax;
       result.billing.tax.after = finalTax;
       result.billing.total.calculated = money(calculatedPremium + calculatedTax + finalFee);
       result.billing.total.after = finalTotal;
-      result.billing.movement.premium = money(commandFinalPremium - beforePremium);
+      result.billing.movement.premium = money(billingFinalPremium - beforePremium);
       result.billing.movement.tax = money(finalTax - Number(result.billing.tax.before || 0));
       result.billing.movement.total = money(finalTotal - Number(result.billing.total.before || 0));
     }
@@ -2034,7 +2119,7 @@
         if (o && o.length !== undefined && !o.contracts) o = o[0];
         (o.contracts || []).forEach(function (group) { hydrateFinalDistribution(group, o.contracts || []); });
         reconcileInitialCoverageRounding(o.contracts || []);
-        logReinsurancePersistedState(o.contracts, 'AFTER_CALCULATION');
+        logReinsurancePersistedState(o.contracts, 'AFTER_CALCULATION', o.coinsurance || coinsuranceCessions);
         const contactIds = [];
         (o.contracts || []).forEach(function (group) {
           (group.participants || []).forEach(function (participant) {
@@ -2158,6 +2243,14 @@
     const newCoverages = oldCoverages.map(function (coverage) {
       const calculated = finalCoverages.find(function (item) { return txt(item.code) === txt(coverage.code); });
       const next = Object.assign({}, coverage, calculated || {});
+      const currentLoadings = coverage && (coverage.Loadings || coverage.loadings);
+      const calculatedLoadings = calculated && (calculated.Loadings || calculated.loadings);
+      // No se debe perder el loading vigente solo porque la respuesta del
+      // calculo no lo repita. El snapshot enviado debe conservarlo intacto.
+      if (Array.isArray(currentLoadings) && currentLoadings.length
+        && (!Array.isArray(calculatedLoadings) || !calculatedLoadings.length)) {
+        next.Loadings = JSON.parse(JSON.stringify(currentLoadings));
+      }
       if (next.start) next.start = dateAtNoon(next.start);
       if (next.end) next.end = dateAtNoon(next.end);
       return next;

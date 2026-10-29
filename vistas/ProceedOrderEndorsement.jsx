@@ -1242,6 +1242,10 @@
     const number = Number(value || 0);
     return Number.isFinite(number) ? number : 0;
   };
+  const reinsuranceSourceNumber = (primary, fallback) => {
+    const value = primary === null || primary === undefined || primary === '' ? fallback : primary;
+    return reinsuranceNumber(value);
+  };
   const moneyValue = (value) => Number(reinsuranceNumber(value).toFixed(2));
   const finalCoinsuranceBase = function () {
     let quotedCoverages = [];
@@ -1260,7 +1264,7 @@
   };
   const coinsuranceRate = function (snapshot, field) {
     const totals = (snapshot && snapshot.coinsurance || []).reduce((result, row) => {
-      result.premium += reinsuranceNumber(row.premiumCeded || row.premium);
+      result.premium += reinsuranceSourceNumber(row.premiumCeded, row.premium);
       result.value += reinsuranceNumber(row[field]);
       return result;
     }, { premium: 0, value: 0 });
@@ -1268,10 +1272,17 @@
   };
   const buildCoinsuranceRows = function (snapshot) {
     const base = finalCoinsuranceBase();
+    // PROCEEDORDER must preserve the active co-insurance amounts. The
+    // endorsement does not change the premium, so recalculating these rows
+    // from the final coverage base could replace the vigente values with a
+    // rounded or already-adjusted amount.
+    const preserveSourceAmounts = Boolean(snapshot && snapshot._coinsuranceReinsurancePrepared);
     const rows = (snapshot && snapshot.coinsurance || []).map((cession, index) => {
       const percentage = reinsuranceNumber(cession.percentage);
-      const premium = moneyValue(base.premium * percentage / 100);
-      const sourcePremium = reinsuranceNumber(cession.premiumCeded || cession.premium);
+      const sourcePremium = reinsuranceSourceNumber(cession.premiumCeded, cession.premium);
+      const sourceSum = reinsuranceSourceNumber(cession.sumInsuredCeded, cession.sumInsured);
+      const premium = preserveSourceAmounts ? moneyValue(sourcePremium) : moneyValue(base.premium * percentage / 100);
+      const sumInsured = preserveSourceAmounts ? moneyValue(sourceSum) : moneyValue(base.sum * percentage / 100);
       return {
         key: cession.id || String(cession.contactId || '') + '-' + String(index),
         id: Number(cession.id || 0),
@@ -1279,12 +1290,16 @@
         name: cession.contactName || reinsuranceContactNames[String(cession.contactId)] || String(cession.contactId || '-'),
         leader: cession.leader === true || Number(cession.leader) === 1,
         percentage: percentage,
-        sumInsured: moneyValue(base.sum * percentage / 100),
+        sumInsured: sumInsured,
         premium: premium,
-        sumInsuredCeded: moneyValue(base.sum * percentage / 100),
+        sumInsuredCeded: sumInsured,
         premiumCeded: premium,
-        commission: sourcePremium ? moneyValue(premium * reinsuranceNumber(cession.commission) / sourcePremium) : 0,
-        tax: sourcePremium ? moneyValue(premium * reinsuranceNumber(cession.tax) / sourcePremium) : 0
+        commission: preserveSourceAmounts
+          ? moneyValue(cession.commission)
+          : (sourcePremium ? moneyValue(premium * reinsuranceNumber(cession.commission) / sourcePremium) : 0),
+        tax: preserveSourceAmounts
+          ? moneyValue(cession.tax)
+          : (sourcePremium ? moneyValue(premium * reinsuranceNumber(cession.tax) / sourcePremium) : 0)
       };
     });
     const placedPercentage = rows.reduce((sum, row) => sum + row.percentage, 0);
@@ -1305,16 +1320,46 @@
     const next = JSON.parse(JSON.stringify(snapshot));
     const percentage = coinsurancePercentage(next);
     const reinsuranceFactor = (100 - percentage) / 100;
-    if (!next._coinsuranceReinsurancePrepared) {
+    if (percentage > 0) {
+      // The active cessions already represent the company's reinsurance
+      // share. Do not multiply them by (100 - co-insurance) again: that would
+      // reduce the reinsurance a second time and create a missing amount.
+      const grossByContract = {};
+      (next.distribution || []).forEach((row) => {
+        const key = String(row.contractId || '');
+        if (!grossByContract[key]) grossByContract[key] = { sum: 0, premium: 0 };
+        const configuredForSum = !reinsuranceCoverageConfig[String(row.coverageCode)]
+          || reinsuranceCoverageConfig[String(row.coverageCode)].isCoverage !== false;
+        if (configuredForSum) {
+          grossByContract[key].sum += reinsuranceNumber(row.sumInsuredCedant) + reinsuranceNumber(row.sumInsuredRe);
+        }
+        grossByContract[key].premium += reinsuranceNumber(row.premiumCedant) + reinsuranceNumber(row.premiumRe);
+      });
+      // Use the final coverage base as the authoritative total when there is
+      // only one contract. Dependent coverages are excluded from sum totals,
+      // and the base avoids losing a cent through inverse percentage math.
+      const contractKeys = Object.keys(grossByContract);
+      if (contractKeys.length === 1) {
+        const base = finalCoinsuranceBase();
+        grossByContract[contractKeys[0]] = {
+          sum: moneyValue(base.sum),
+          premium: moneyValue(base.premium)
+        };
+      } else if (reinsuranceFactor > 0) {
+        Object.keys(grossByContract).forEach((key) => {
+          grossByContract[key].sum = moneyValue(grossByContract[key].sum / reinsuranceFactor);
+          grossByContract[key].premium = moneyValue(grossByContract[key].premium / reinsuranceFactor);
+        });
+      }
+      next._coinsuranceGrossByContract = grossByContract;
+      next._coinsuranceReinsurancePrepared = true;
+    } else if (!next._coinsuranceReinsurancePrepared) {
       const grossByContract = {};
       (next.distribution || []).forEach((row) => {
         const key = String(row.contractId || '');
         if (!grossByContract[key]) grossByContract[key] = { sum: 0, premium: 0 };
         grossByContract[key].sum += reinsuranceNumber(row.sumInsuredCedant) + reinsuranceNumber(row.sumInsuredRe);
         grossByContract[key].premium += reinsuranceNumber(row.premiumCedant) + reinsuranceNumber(row.premiumRe);
-        ['sumInsuredCedant', 'sumInsuredRe', 'premiumCedant', 'premiumRe', 'commission', 'tax'].forEach((field) => {
-          row[field] = moneyValue(reinsuranceNumber(row[field]) * reinsuranceFactor);
-        });
       });
       next._coinsuranceGrossByContract = grossByContract;
       next._coinsuranceReinsurancePrepared = true;
