@@ -44,6 +44,34 @@ function stamp(v, label) {
   return t;
 }
 
+const yearsFromCoverageDays = function (days) {
+  const duration = Number(days);
+  if (!Number.isInteger(duration) || duration <= 0) return 0;
+  if (duration % 365 === 0) return duration / 365;
+  if (duration % 366 === 0) return duration / 366;
+  return 0;
+};
+
+const addCoverageDuration = function (timestamp, days) {
+  const duration = Number(days);
+  if (!isFinite(timestamp) || !Number.isFinite(duration)) return NaN;
+  const years = yearsFromCoverageDays(duration);
+  if (!years) return timestamp + duration * day;
+
+  // GLOBUAT-392: 365/366 y sus multiplos representan anos calendario.
+  // El valor configurado de dias se conserva; solo cambia el calculo de fecha.
+  const result = new Date(timestamp);
+  const originalMonth = result.getUTCMonth();
+  const originalDay = result.getUTCDate();
+  result.setUTCFullYear(result.getUTCFullYear() + years);
+
+  // Evita que un aniversario del 29/02 se desplace a marzo en un ano no bisiesto.
+  if (originalMonth === 1 && originalDay === 29 && result.getUTCMonth() !== 1) {
+    result.setUTCMonth(1, 28);
+  }
+  return result.getTime();
+};
+
 // ---------- barrido del residuo fiscal que dejaron cotizaciones anteriores ----------
 const staleFilter = 'lifePolicyId=' + policyId + " AND action='ChangeCoverage' AND changeId IS NULL AND disabled=1";
 // lectura por proyeccion: un Repo GET deja la fila trackeada y el DELETE posterior no puede adjuntarla
@@ -158,8 +186,10 @@ if ((coverageCfg[selCode] && coverageCfg[selCode].principal === '-1') || selecte
     // Every configured dependent coverage follows the new end of the
     // principal coverage, regardless of its previous start date. Its own
     // duration is preserved when calculating the new end.
+    // GLOBUAT-392: durations that are multiples of 365/366 are evaluated as
+    // calendar years, avoiding a leap-day offset while retaining the value in days.
     c.start = iso(newEnd);
-    c.end = iso(newEnd + (pe - ps));
+    c.end = iso(addCoverageDuration(newEnd, (pe - ps) / day));
     rows.push({
       code: code, name: c.name, reason: 'DEPENDENT',
       oldStart: iso(ps), newStart: c.start, oldEnd: iso(pe), newEnd: c.end,

@@ -1037,7 +1037,9 @@ function recalcularVigenciasFianza($container = $("#tab2")) {
             const config = configByCode[normalizedCode];
             const principal = String(config?.coverageCodeDep ?? config?.coberturaPrincipal ?? "").trim();
             const $duration = getField($row, "duración");
-            const duration = Number($duration.val()) || 0;
+            // Las duraciones se muestran con separador de miles (por ejemplo,
+            // 1,095); usar el parser evita que Number("1,095") produzca NaN.
+            const duration = parseNumericInputValue($duration.val()) || 0;
             const $start = getField($row, "f. inicial");
             const $end = getField($row, "f. final");
 
@@ -1802,7 +1804,32 @@ function sumarDias(fechaStr, dias) {
     const fecha = partes ? new Date(Number(partes[1]), Number(partes[2]) - 1, Number(partes[3])) : new Date(fechaStr);
     if (isNaN(fecha)) return "";
 
-    fecha.setDate(fecha.getDate() + Number(dias));
+    const duracion = Number(dias);
+    const esDuracionEntera = Number.isInteger(duracion) && duracion > 0;
+    const anios = esDuracionEntera
+        ? (duracion % 365 === 0
+            ? duracion / 365
+            : (duracion % 366 === 0 ? duracion / 366 : 0))
+        : 0;
+
+    // GLOBUAT-392: Las configuraciones de fianzas usan 365/366 y sus multiplos como una
+    // cantidad de años, no como dias fijos. Esto evita que un 29 de febrero
+    // desplace un año contractual. El valor de dias configurado no cambia; solo
+    // se ajusta el calculo de fechas. Las duraciones que no cumplen ese criterio
+    // conservan la interpretacion original de dias exactos.
+    if (anios > 0) {
+        const mesOriginal = fecha.getMonth();
+        const diaOriginal = fecha.getDate();
+        fecha.setFullYear(fecha.getFullYear() + anios);
+
+        // Date normaliza 29/02 a marzo cuando el año destino no es bisiesto;
+        // para una fecha aniversario se conserva el ultimo dia de febrero.
+        if (mesOriginal === 1 && diaOriginal === 29 && fecha.getMonth() !== 1) {
+            fecha.setMonth(1, 28);
+        }
+    } else {
+        fecha.setDate(fecha.getDate() + duracion);
+    }
     return formatearFecha(fecha); // yyyy-MM-dd para los controles de fecha
 }
 

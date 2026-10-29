@@ -839,18 +839,48 @@ function getCoverageDuration(item) {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+function yearsFromCoverageDuration(duration) {
+  const value = Number(duration);
+  if (!Number.isInteger(value) || value <= 0) return 0;
+  if (value % 365 === 0) return value / 365;
+  if (value % 366 === 0) return value / 366;
+  return 0;
+}
+
+function addCoverageDuration(date, duration) {
+  const years = yearsFromCoverageDuration(duration);
+  if (!years) {
+    date.setDate(date.getDate() + Number(duration));
+    return date;
+  }
+
+  // GLOBUAT-392: 365/366 y sus multiplos representan anos calendario.
+  // El valor configurado de dias se conserva; solo cambia el calculo de fecha.
+  const originalMonth = date.getMonth();
+  const originalDay = date.getDate();
+  date.setFullYear(date.getFullYear() + years);
+
+  // Evita que un aniversario del 29/02 se desplace a marzo en un ano no bisiesto.
+  if (originalMonth === 1 && originalDay === 29 && date.getMonth() !== 1) {
+    date.setMonth(1, 28);
+  }
+  return date;
+}
+
 function getTariffCoverageDates(item) {
   const start = parseFechaUTCMedioDia(item?.["FINICIAL"]);
   const configuredEnd = parseFechaUTCMedioDia(item?.["FFINAL"]);
   const duration = getCoverageDuration(item);
 
-  // Duracion Dias is the tariff source of truth. Old policies can contain an
-  // obsolete final date in hiddenCobtar, which otherwise shortens proration.
+  // GLOBUAT-392: Duracion Dias is the tariff source of truth. Multiples of
+  // 365/366 use calendar years to avoid leap-year shifts; other durations
+  // remain exact days. Old policies can contain an obsolete final date in
+  // hiddenCobtar, which otherwise shortens proration.
   if (start && duration > 0) {
     const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(start);
     if (match) {
       const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-      date.setDate(date.getDate() + duration);
+      addCoverageDuration(date, duration);
       return { start: start, end: formatDateAtNoon(date) };
     }
   }

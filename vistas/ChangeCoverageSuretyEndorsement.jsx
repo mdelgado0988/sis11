@@ -9,6 +9,8 @@
  *   cmdSimReaChangeCoverageSuretyAxx299 pestania 2 (reaseguro del movimiento, en memoria)
  *   ChangeCoverage / GotoStep / ExeChangeCoverage  ejecucion del endoso y workflow
  *   cmdApplyReaChangeCoverage                           Cession y CessionPart por changeId
+ * GLOBUAT-392: las coberturas dependientes conservan sus dias configurados;
+ * multiplos de 365/366 se calculan como anos calendario en cmdCalcChangeCoverageSurety.
  */
 () => {
   const Tabs = A.Tabs;

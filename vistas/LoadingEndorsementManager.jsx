@@ -2237,7 +2237,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             <Table className='lem-grid lem-rea-distribution' size='small' pagination={false} rowKey='key' dataSource={rows}
                 summary={function(){ return <Table.Summary.Row className='lem-rea-totals'>
                     <Table.Summary.Cell index={0}>Totales</Table.Summary.Cell>
-                    <Table.Summary.Cell index={1} align='right'>{renderNumber(totals.percentage)}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} align='right'>{renderPercentage(totals.percentage)}</Table.Summary.Cell>
                     <Table.Summary.Cell index={2} align='right'>{renderNumber(totals.sum)}</Table.Summary.Cell>
                     <Table.Summary.Cell index={3} align='right'>{renderNumber(totals.premium)}</Table.Summary.Cell>
                     <Table.Summary.Cell index={4}></Table.Summary.Cell>
@@ -2252,9 +2252,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 <Column title='Porcentaje (%)' dataIndex='percentage' align='right' render={renderPercentage} />
                 <Column title='Suma' dataIndex='sum' align='right' render={renderNumber} />
                 <Column title='Prima' dataIndex='premium' align='right' render={renderNumber} />
-                <Column title='Pct. Comisión' dataIndex='commissionPct' align='right' render={renderNumber} />
+                <Column title='Pct. Comisión' dataIndex='commissionPct' align='right' render={renderPercentage} />
                 <Column title='Comisión' dataIndex='commission' align='right' render={renderNumber} />
-                <Column title='Pct. Impuesto' dataIndex='taxPct' align='right' render={renderNumber} />
+                <Column title='Pct. Impuesto' dataIndex='taxPct' align='right' render={renderPercentage} />
                 <Column title='Impuesto' dataIndex='tax' align='right' render={renderNumber} />
                 <Column title='Saldo Rea.' dataIndex='balance' align='right' render={renderNumber} />
             </Table>
@@ -2264,7 +2264,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                     locale={{ emptyText:'La línea seleccionada no tiene aceptantes cedidos.' }}>
                     <Column title='Corredor de reaseguro' dataIndex='brokerName' render={function(value, row){ return value || row.brokerId || '—'; }} />
                     <Column title='Reasegurador' dataIndex='contactName' render={function(value, row){ return value || row.name || row.contactId || '—'; }} />
-                    <Column title='Participación %' dataIndex='split' align='right' render={function(value){ return renderNumber(value); }} />
+                    <Column title='Participación %' dataIndex='split' align='right' render={renderPercentage} />
                     <Column title='Suma cedida' dataIndex='sumInsured' align='right' render={renderNumber} />
                     <Column title='Prima cedida' dataIndex='premium' align='right' render={renderNumber} />
                     <Column title='Comisión' dataIndex='commission' align='right' render={renderNumber} />
@@ -2466,10 +2466,10 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             const number = Number(value);
             if(!Number.isFinite(number)) return '';
             const isPercentage = name === 'percentage' || name === 'commissionPct' || name === 'taxPct';
-            const percentageDigits = name === 'percentage' ? percentageDecimals(number) : 4;
+            const percentageDigits = isPercentage ? percentageDecimals(number) : 0;
             return number.toLocaleString('en-US', {
                 useGrouping:true,
-                minimumFractionDigits:isPercentage ? 0 : 2,
+                minimumFractionDigits:isPercentage ? percentageDigits : 2,
                 maximumFractionDigits:isPercentage ? percentageDigits : 2
             });
         };
@@ -2486,7 +2486,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             <Table className='lem-grid lem-rea-distribution' size='small' pagination={false} rowKey={function(row,index){ return String(row.coverageCode || row.code || '') + '|' + index; }} dataSource={rows}
                 summary={function(){ return <Table.Summary.Row className='lem-rea-totals'>
                     <Table.Summary.Cell index={0}>Totales</Table.Summary.Cell>
-                    <Table.Summary.Cell index={1} align='right'>{renderNumber(totals.percentage)}</Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} align='right'>{renderPercentage(totals.percentage)}</Table.Summary.Cell>
                     <Table.Summary.Cell index={2} align='right'>{renderNumber(totals.sumInsured)}</Table.Summary.Cell>
                     <Table.Summary.Cell index={3} align='right'>{renderNumber(totals.premium)}</Table.Summary.Cell>
                     <Table.Summary.Cell index={4}></Table.Summary.Cell>
@@ -2621,7 +2621,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         const participantColumns = [
             { title:'Corredor de reaseguro', dataIndex:'brokerDescription' },
             { title:'Reasegurador', dataIndex:'contactDescription' },
-            { title:'Participación %', dataIndex:'split', align:'right', render:function(value){ return Number(value || 0).toFixed(4) + '%'; } },
+            { title:'Participación %', dataIndex:'split', align:'right', render:renderPercentage },
             { title:'Suma cedida', dataIndex:'sumInsured', align:'right', render:renderNumber },
             { title:'Prima cedida', dataIndex:'premium', align:'right', render:renderNumber },
             { title:'Comisión', dataIndex:'commission', align:'right', render:renderNumber },
@@ -2641,10 +2641,10 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             { title:'Suma movimiento', dataIndex:'sumInsuredMovement', align:'right', width:130, render:function(value, row){ return renderNumber(value || row.sumMovement || 0); } },
             { title:'Movimiento', dataIndex:'premiumMovement', align:'right', width:120, render:function(value){ return signedNumber(value); } },
             { title:'Base prorrateada', dataIndex:'proratedMovement', align:'right', width:140, render:function(value){ return signedNumber(value); } },
-            { title:'Pct. Retención', dataIndex:'proportionCed', align:'right', width:120, render:function(value){ return (Number(value || 0) * 100).toFixed(2) + '%'; } },
+            { title:'Pct. Retención', dataIndex:'proportionCed', align:'right', width:120, render:renderRatioPercentage },
             { title:'Suma retención', dataIndex:'sumInsuredCedant', align:'right', width:130, render:renderNumber },
             { title:'Prima retención', dataIndex:'premiumCedant', align:'right', width:130, render:renderNumber },
-            { title:'Pct. Cedido', dataIndex:'proportionRe', align:'right', width:110, render:function(value){ return (Number(value || 0) * 100).toFixed(2) + '%'; } },
+            { title:'Pct. Cedido', dataIndex:'proportionRe', align:'right', width:110, render:renderRatioPercentage },
             { title:'Suma cedida', dataIndex:'sumInsuredRe', align:'right', width:130, render:renderNumber },
             { title:'Prima cedida', dataIndex:'premiumRe', align:'right', width:130, render:renderNumber },
             { title:'Comisión', dataIndex:'commission', align:'right', width:120, render:renderNumber },
@@ -3136,9 +3136,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         return renderText(<span className={state}>{text}</span>, record)
     }
     function percentageDecimals(value){
-        const numeric = Number(value || 0);
-        if(!Number.isFinite(numeric)) return 2;
-        return Math.abs(numeric - Number(numeric.toFixed(2))) < 0.0000001 ? 2 : 8;
+        // Keep percentage presentation consistent with the other reinsurance views.
+        return 10;
     }
     function renderPercentage(value, record){
         const numeric = Number(value || 0);
@@ -3150,6 +3149,9 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
         });
         const state = safeValue > 0 ? 'lem-positive' : (safeValue < 0 ? 'lem-negative' : 'lem-zero');
         return renderText(<span className={state}>{text}</span>, record);
+    }
+    function renderRatioPercentage(value, record){
+        return renderPercentage(Number(value || 0) * 100, record);
     }
     function roundDisplayedPercentages(rows){
         const eligible = (rows || []).filter(function(row){ return !row.isCoinsurance; });
@@ -3175,7 +3177,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             if(totalPremium > 0) return amountFor(row, 'premium') / totalPremium * 100;
             return Number(row.percentage || 0);
         });
-        for(let decimals = 2; decimals <= 8; decimals += 1){
+        for(let decimals = 2; decimals <= 10; decimals += 1){
             const rounded = raw.map(function(value){ return Number(value.toFixed(decimals)); });
             const total = rounded.reduce(function(sum, value){ return sum + value; }, 0);
             const residual = Number((100 - total).toFixed(decimals));
