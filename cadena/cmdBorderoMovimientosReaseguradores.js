@@ -35,87 +35,9 @@ var exportar = ctx.exportar === true || String(ctx.exportar) === 'true';
 // principal: las coberturas dependientes pueden repetir la suma tecnica de la
 // principal, pero solo las filas marcadas como isCoverage='Si' se acumulan.
 // Las primas no usan esta marca porque cada cobertura puede tener una prima
-// propia.
-function normCfg(value) {
-  return String(value === null || value === undefined ? '' : value).trim().toUpperCase();
-}
-function sqlCfg(value) {
-  return String(value === null || value === undefined ? '' : value).split("'").join("''");
-}
-var cfgCoberturaReaseguro = [
-  { lob: 96, name: 'cfgCoberturaProductoReaTecnicos' },
-  { lob: 20, name: 'cfgCoberturaProductoReaVidaColectivo' },
-  { lob: 31, name: 'cfgCoberturaProductoReaVida' },
-  { lob: 71, name: 'cfgCoberturaProductoReaVidaIndividual' },
-  { lob: 52, name: 'cfgCoberturaProductoReaRiesgosVarios' },
-  { lob: 1, name: 'cfgCoberturaProductoRea' },
-  { lob: 6, name: 'cfgCoberturaProductoReaAuto' },
-  { lob: 81, name: 'cfgCoberturaProductoReaFianza' },
-  { lob: 82, name: 'cfgCoberturaProductoReaFianza' },
-  { lob: 83, name: 'cfgCoberturaProductoReaFianza' },
-  { lob: 84, name: 'cfgCoberturaProductoReaFianza' }
-];
-var cfgNames = [];
-for (var ni = 0; ni < cfgCoberturaReaseguro.length; ni++) {
-  if (cfgNames.indexOf(cfgCoberturaReaseguro[ni].name) < 0) cfgNames.push(cfgCoberturaReaseguro[ni].name);
-}
-var cfgSqlNames = cfgNames.map(function (name) { return "'" + sqlCfg(name) + "'"; }).join(',');
-doCmd({
-  cmd: 'DoQuery',
-  data: {
-    sql: 'SELECT [name] AS configName, [data] AS configData FROM [Table] WHERE [name] IN (' + cfgSqlNames + ')',
-    timeout: 300
-  }
-});
-if (!DoQuery || !DoQuery.ok) {
-  throw 'No fue posible leer la configuración de coberturas de reaseguro: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'sin detalle');
-}
-var configByName = {};
-var configRecords = DoQuery.outData || [];
-for (var cr = 0; cr < configRecords.length; cr++) {
-  var configRecord = configRecords[cr] || {};
-  var configName = configRecord.configName || configRecord.ConfigName || configRecord.name || configRecord.Name;
-  var configData = configRecord.configData || configRecord.ConfigData || configRecord.data || configRecord.Data;
-  if (configName) configByName[String(configName)] = configData;
-}
-var coveragesThatSum = {};
-for (var ci = 0; ci < cfgCoberturaReaseguro.length; ci++) {
-  var cfgMap = cfgCoberturaReaseguro[ci];
-  if (!Object.prototype.hasOwnProperty.call(configByName, cfgMap.name)) {
-    throw 'No se encontró la configuración ' + cfgMap.name + ' en [Table].';
-  }
-  var cfgRows = configByName[cfgMap.name] || [];
-  if (typeof cfgRows === 'string') {
-    try { cfgRows = JSON.parse(cfgRows); } catch (e) { throw 'La configuración ' + cfgMap.name + ' no contiene JSON válido.'; }
-  }
-  if (!Array.isArray(cfgRows) || cfgRows.length < 1) {
-    throw 'La configuración ' + cfgMap.name + ' no tiene el formato de tabla esperado.';
-  }
-  var cfgHeaders = cfgRows[0] || [];
-  function cfgIndex(name, fallback) {
-    for (var h = 0; h < cfgHeaders.length; h++) {
-      if (normCfg(cfgHeaders[h]) === normCfg(name)) return h;
-    }
-    return fallback;
-  }
-  var ixLob = cfgIndex('lobCode', 0), ixProduct = cfgIndex('productCode', 1);
-  var ixCoverage = cfgIndex('coverageCode', 3), ixIncluded = cfgIndex('isCoverage', 5);
-  for (var ri = 1; ri < cfgRows.length; ri++) {
-    var cfgRow = cfgRows[ri] || [];
-    if (normCfg(cfgRow[ixLob]) !== normCfg(cfgMap.lob) || normCfg(cfgRow[ixIncluded]) !== 'SI') continue;
-    var cfgKey = [normCfg(cfgMap.lob), normCfg(cfgRow[ixProduct]), normCfg(cfgRow[ixCoverage])].join('|');
-    if (cfgKey !== '||') coveragesThatSum[cfgKey] = true;
-  }
-}
-var sumCoverageParts = [];
-for (var coverageKey in coveragesThatSum) {
-  if (!Object.prototype.hasOwnProperty.call(coveragesThatSum, coverageKey)) continue;
-  var coverageParts = coverageKey.split('|');
-  sumCoverageParts.push("(UPPER(LTRIM(RTRIM(ISNULL(c.LoB,''))))='" + sqlCfg(coverageParts[0]) + "'"
-    + " AND UPPER(LTRIM(RTRIM(ISNULL(lp.productCode,''))))='" + sqlCfg(coverageParts[1]) + "'"
-    + " AND UPPER(LTRIM(RTRIM(ISNULL(c.coverageCode,''))))='" + sqlCfg(coverageParts[2]) + "')");
-}
-var sumCoveragePredicate = sumCoverageParts.length ? '(' + sumCoverageParts.join(' OR ') + ')' : '1=0';
+// propia. La configuracion se lee dentro del mismo DoQuery que obtiene el
+// bordero; asi no se reutiliza una conexion entre dos consultas consecutivas.
+var cfgSqlNames = "'cfgCoberturaProductoReaTecnicos','cfgCoberturaProductoReaVidaColectivo','cfgCoberturaProductoReaVida','cfgCoberturaProductoReaVidaIndividual','cfgCoberturaProductoReaRiesgosVarios','cfgCoberturaProductoRea','cfgCoberturaProductoReaAuto','cfgCoberturaProductoReaFianza'";
 
 function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
@@ -125,6 +47,7 @@ if (!ramos.length && !poliza) throw 'Debe seleccionar al menos un Ramo o indicar
 function quote(value) { return String(value === null || value === undefined ? '' : value).split("'").join("''"); }
 var lobIn = ramos.map(function (value) { return "'" + quote(value) + "'"; }).join(',');
 var lobFilter = ramos.length ? ' AND c.LoB IN (' + lobIn + ')' : '';
+var cfgLobFilter = ramos.length ? ' AND cfgRow.lobCode IN (' + lobIn + ')' : '';
 var policyFilter = poliza ? " AND lp.code LIKE '%" + quote(poliza) + "%'" : '';
 var fromTo = "'" + quote(fdesde) + "' AND '" + quote(fhasta) + "'";
 function fechaPanamaSql(campo) {
@@ -138,7 +61,16 @@ var movementPeriodSql = "((c.changeId IS NOT NULL AND EXISTS (SELECT 1 FROM Chan
 
 /* El orden se conserva por la generación de cesión. Al particionar por aceptante
    se obtiene la diferencia real de cada reasegurador, no un saldo repetido. */
-var sql = "\nWITH scope AS (\n"
+var sql = "\nWITH CoverageConfig AS (\n"
+  + " SELECT DISTINCT UPPER(LTRIM(RTRIM(ISNULL(cfgRow.lobCode,'')))) AS lobCode,\n"
+  + "   UPPER(LTRIM(RTRIM(ISNULL(cfgRow.productCode,'')))) AS productCode,\n"
+  + "   UPPER(LTRIM(RTRIM(ISNULL(cfgRow.coverageCode,'')))) AS coverageCode\n"
+  + " FROM [Table] cfg\n"
+  + " CROSS APPLY OPENJSON(CASE WHEN ISJSON(cfg.data)=1 THEN cfg.data ELSE N'[]' END)\n"
+  + " WITH (lobCode varchar(50) '$[0]', productCode varchar(100) '$[1]', coverageCode varchar(50) '$[3]', isCoverage varchar(20) '$[5]') cfgRow\n"
+  + " WHERE cfg.[name] IN (" + cfgSqlNames + ")" + cfgLobFilter + "\n"
+  + "   AND UPPER(LTRIM(RTRIM(ISNULL(cfgRow.isCoverage,''))))='SI'\n"
+  + "), scope AS (\n"
   + " SELECT DISTINCT c.lifePolicyId\n"
   + " FROM Cession c\n"
   + " INNER JOIN LifePolicy lp ON lp.id=c.lifePolicyId\n"
@@ -148,7 +80,7 @@ var sql = "\nWITH scope AS (\n"
   + " SELECT c.id AS cessionId, c.lifePolicyId, c.contractId, c.coverageId, c.lineId, c.LoB,\n"
   + "        COALESCE(c.changeId,orphanCancellation.changeId) AS changeId, c.anniversaryId, c.premiumType, c.[start] AS cessionStart, c.[end] AS cessionEnd,\n"
   + "        c.contactId AS insuredId, c.holderName, c.coSumInsured, c.coPremium,\n"
-  + "        CASE WHEN " + sumCoveragePredicate + " THEN 1 ELSE 0 END AS sumaIncluida,\n"
+  + "        CASE WHEN cfg.coverageCode IS NULL THEN 0 ELSE 1 END AS sumaIncluida,\n"
   + "        p.id AS partId, p.contactId AS reinsurerId, p.brokerId, p.name AS participantName, p.split,\n"
   + "        ISNULL(p.sumInsured, 0) AS sumInsured, ISNULL(p.premium, 0) AS premium,\n"
   + "        ISNULL(p.commission, 0) AS commission, ISNULL(p.tax, 0) AS tax,\n"
@@ -156,6 +88,9 @@ var sql = "\nWITH scope AS (\n"
   + " FROM Cession c\n"
   + " INNER JOIN CessionPart p ON p.cessionId = c.id\n"
   + " INNER JOIN LifePolicy lp ON lp.id = c.lifePolicyId\n"
+  + " LEFT JOIN CoverageConfig cfg ON cfg.lobCode=UPPER(LTRIM(RTRIM(ISNULL(c.LoB,''))))\n"
+  + "   AND cfg.productCode=UPPER(LTRIM(RTRIM(ISNULL(lp.productCode,''))))\n"
+  + "   AND cfg.coverageCode=UPPER(LTRIM(RTRIM(ISNULL(c.coverageCode,''))))\n"
   + " OUTER APPLY (\n"
   + "   /* Las cancelaciones legacy se enlazan al primer endoso de cancelacion\n"
   + "      ejecutado despues de la ultima cesion vinculada de la poliza. */\n"
