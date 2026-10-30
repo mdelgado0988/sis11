@@ -616,8 +616,13 @@ for (let i = 0; i < base.length; i++) {
     const currentCommission = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
     finalCedant = money(targetPremiumCedant);
     finalRe = money(targetPremiumRe);
-    finalSumCedant = counts ? money(targetSumCedant) : 0;
-    finalSumRe = counts ? money(targetSumRe) : 0;
+    // Las coberturas dependientes no participan en la suma tecnica del
+    // contrato, pero si conservan su cesion final individual. Si se ponen en
+    // cero aqui, al restar la cesion vigente se generan movimientos negativos
+    // artificiales (por ejemplo -300,000) y la vista sintetica los interpreta
+    // como parte del movimiento del endoso.
+    finalSumCedant = counts ? money(targetSumCedant) : currentSumCedant;
+    finalSumRe = counts ? money(targetSumRe) : currentSumRe;
     if (obsoleteRetentionLine) {
       // La fila RET residual se anula en el snapshot; la ejecución la retira
       // y conserva la retención dentro de la línea proporcional propietaria.
@@ -645,9 +650,13 @@ for (let i = 0; i < base.length; i++) {
     commission = money(finalCommission - currentCommission);
     lineDv = money(cedant + re);
     linePv = lineDv;
-    lineSv = money(finalSumCedant + finalSumRe - currentSumCedant - currentSumRe);
+    lineSv = counts
+      ? money(finalSumCedant + finalSumRe - currentSumCedant - currentSumRe)
+      : 0;
     sourcePremiumMovement = money(Number(finalPremium[code] || 0) - Number(c.premium || 0));
-    sourceSumInsuredMovement = money(Number(finalSum[code] || 0) - Number(c.sumInsured || 0));
+    sourceSumInsuredMovement = counts
+      ? money(Number(finalSum[code] || 0) - Number(c.sumInsured || 0))
+      : 0;
     // Las coberturas que no participan de la suma del contrato conservan una
     // suma tecnica, pero su colocacion se valida exclusivamente por prima.
     const placementUsesSum = counts === true && Number(finalSum[code] || 0) !== 0;

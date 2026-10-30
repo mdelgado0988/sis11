@@ -1296,9 +1296,22 @@
       const rows = getDistributionRows(contract);
       const distributedSum = rows.reduce(function (sum, row) { return sum + Number(row.sum || 0); }, 0);
       const distributedPremium = rows.reduce(function (sum, row) { return sum + Number(row.premium || 0); }, 0);
-      const distributedPercentage = rows.filter(function (row) { return !row.isCoinsurance; }).reduce(function (sum, row) {
+      const capacityPlacementRows = (sim.contracts || []).filter(function (group) {
+        return String(group.contractId) === String(contract.contractId);
+      }).reduce(function (result, group) {
+        return result.concat((group.rows || []).filter(function (row) {
+          return row.contractCapacityAllocation === true && row.counts !== false;
+        }));
+      }, []);
+      const capacityPlacementIsBalanced = capacityPlacementRows.length > 0
+        && capacityPlacementRows.every(function (row) {
+          return Math.abs((Number(row.proportionCed || 0) + Number(row.proportionRe || 0)) - 1) <= 0.01;
+        });
+      const distributedPercentage = capacityPlacementIsBalanced
+        ? 100
+        : rows.filter(function (row) { return !row.isCoinsurance; }).reduce(function (sum, row) {
         return sum + Number(row.percentage || 0);
-      }, 0);
+        }, 0);
       if (Math.abs(distributedPercentage - 100) > 0.01) {
         errors.push(t('Contrato') + ' ' + contract.contractId + ': ' + t('la distribución debe sumar 100%.'));
       }
@@ -2673,6 +2686,13 @@
         const fromDate = effective > covStart ? effective : covStart;
         const remainingDays = Math.max(0, Math.round((utc(covEnd) - utc(fromDate)) / 86400000));
         const prorate = Math.min(1, remainingDays / durationDays);
+        // Las coberturas pueden tener vigencias de varios años. La referencia
+        // del aniversario es anual, mientras que coverage.premium representa
+        // la prima total del periodo contratado. Usar ambas escalas mezcladas
+        // convierte un aumento en una variacion negativa artificial.
+        const referencePeriodYearsRaw = moment(covEnd).diff(moment(covStart), 'years', true);
+        const referencePeriodYears = Number.isFinite(referencePeriodYearsRaw) && referencePeriodYearsRaw > 0
+          ? referencePeriodYearsRaw : durationDays / 365;
         const oldPremium = money(change.coverage.premium === null || change.coverage.premium === undefined
           ? Number(change.coverage.basePremium || 0) + Number(change.coverage.extraPremium || 0)
           : change.coverage.premium);
@@ -2740,6 +2760,27 @@
         if (Number.isFinite(tariffAnnualPremium) && !activeLoadings.length) {
           annualNewPremium = tariffAnnualPremium;
         }
+        if (hasAnnualReference) {
+          annualOldPremium = money(annualOldPremium * referencePeriodYears);
+          annualNewPremium = money(annualNewPremium * referencePeriodYears);
+          if (annualNewBasePremium !== null) annualNewBasePremium = money(annualNewBasePremium * referencePeriodYears);
+          if (annualNewExtraPremium !== null) annualNewExtraPremium = money(annualNewExtraPremium * referencePeriodYears);
+        }
+        // Una extension previa puede dejar una prima total del periodo
+        // distinta a la referencia del aniversario. En ese caso, usar la
+        // referencia para el aumento y la prima vigente para la disminucion
+        // rompe la reversibilidad. Para coberturas sin recargos, la prima
+        // vigente del periodo pasa a ser la base proporcional de ambos
+        // movimientos; las coberturas normales conservan la ruta anterior.
+        const usesCurrentPeriodBaseline = hasAnnualReference
+          && !activeLoadings.length
+          && Math.abs(oldPremium - annualOldPremium) > 0.009
+          && oldPremium > 0
+          && change.oldSum > 0;
+        if (usesCurrentPeriodBaseline) {
+          annualOldPremium = oldPremium;
+          annualNewPremium = money(oldPremium * change.newSum / change.oldSum);
+        }
         const proportionalPremium = annualNewPremium;
         const share = i === 0 ? adjustment : 0;
         // GLOB-CHANGE-SUM-REVERSIBLE: despues de un aumento/reduccion previo,
@@ -2749,9 +2790,9 @@
         // una poliza que aun conserva su prima original se mantiene la ruta
         // historica, evitando cambiar el resultado de los primeros endosos.
         const annualReferenceTotalPremium = activeLoadings.length
-          ? money(annualLoadingComponents.base
-            + recalculateLoadingPremium(change.coverage, annualLoadingComponents.base, stableAnnualSum))
-          : stableAnnualPremium;
+          ? money((annualLoadingComponents.base
+            + recalculateLoadingPremium(change.coverage, annualLoadingComponents.base, stableAnnualSum)) * referencePeriodYears)
+          : money(stableAnnualPremium * referencePeriodYears);
         const currentPremiumHasPriorAdjustment = hasAnnualReference
           && Math.abs(oldPremium - annualOldPremium) > 0.009;
         const movementBasePremium = currentPremiumHasPriorAdjustment
@@ -2818,6 +2859,7 @@
             proportionalPremium: proportionalPremium,
             annualReferenceTotalPremium: annualReferenceTotalPremium,
             currentPremiumHasPriorAdjustment: currentPremiumHasPriorAdjustment,
+            usesCurrentPeriodBaseline: usesCurrentPeriodBaseline,
             movementBasePremium: movementBasePremium,
             movementAnnualBasePremium: movementAnnualBasePremium,
             rawDelta: rawDelta,
@@ -4123,10 +4165,37 @@
       const configuredCed = g && totals.distributionPercentageRe !== undefined
         ? Number(totals.distributionPercentageRe)
         : null;
-      const inferredRet = groupTotalPremium ? base.premiumRet / groupTotalPremium * 100 : 0;
-      const inferredCed = groupTotalPremium ? base.premiumCed / groupTotalPremium * 100 : 0;
-      const retentionPercentage = configuredRet === null ? inferredRet : configuredRet;
-      const cededPercentage = configuredCed === null ? inferredCed : configuredCed;
+      // En fianzas, las filas de capacidad traen el estado final por
+      // cobertura. No inferir el porcentaje contra `contract.movement`, ya
+      // que ese valor es solo la variacion del endoso y la base contiene el
+      // saldo completo de varias coberturas.
+      const capacityRows = g ? (g.rows || []).filter(function (row) {
+        return row.contractCapacityAllocation === true;
+      }) : [];
+      const capacityAmounts = capacityRows.reduce(function (total, row) {
+        total.sumRet += Math.abs(Number(row.sumInsuredCedant || 0));
+        total.sumCed += Math.abs(Number(row.sumInsuredRe || 0));
+        total.premiumRet += Math.abs(Number(row.premiumCedant || 0));
+        total.premiumCed += Math.abs(Number(row.premiumRe || 0));
+        return total;
+      }, { sumRet: 0, sumCed: 0, premiumRet: 0, premiumCed: 0 });
+      const capacityAmountsByBasis = capacityAmounts.sumRet + capacityAmounts.sumCed > 0
+        ? { ret: capacityAmounts.sumRet, ced: capacityAmounts.sumCed }
+        : { ret: capacityAmounts.premiumRet, ced: capacityAmounts.premiumCed };
+      const capacityTotal = capacityAmountsByBasis.ret + capacityAmountsByBasis.ced;
+      const inferredRet = capacityTotal > 0
+        ? capacityAmountsByBasis.ret / capacityTotal * 100
+        : (groupTotalPremium ? base.premiumRet / groupTotalPremium * 100 : 0);
+      const inferredCed = capacityTotal > 0
+        ? capacityAmountsByBasis.ced / capacityTotal * 100
+        : (groupTotalPremium ? base.premiumCed / groupTotalPremium * 100 : 0);
+      const protectedPlacement = g && (g.rows || []).reduce(function (result, row) {
+        return result || row.protectedPlacement || null;
+      }, null);
+      const retentionPercentage = protectedPlacement === 'RETENCION'
+        ? 100 : (configuredRet === null ? inferredRet : configuredRet);
+      const cededPercentage = protectedPlacement === 'RETENCION'
+        ? 0 : (configuredCed === null ? inferredCed : configuredCed);
       const routesMovementToFacultative = g && hasFacultativeMovementOnly(g);
       // En fianzas las coberturas dependientes conservan su suma individual
       // para validar y persistir, pero no deben volver a sumarse en el
@@ -4267,8 +4336,30 @@
         });
         const useDirectFacultativeMovement = group && (hasDirectFacultativeMovement(group)
           || (hasFacultativeMovementOnly(group) && contractHasFacultativeTransition(contract)));
+        const usesCapacityMovement = group && !useDirectFacultativeMovement
+          && (group.rows || []).some(function (item) {
+            return item.contractCapacityAllocation === true;
+          });
+        const capacityMovement = usesCapacityMovement
+          ? (group.rows || []).reduce(function (total, item) {
+            // La suma solo considera coberturas tecnicas. La prima, en
+            // cambio, incluye tambien las coberturas dependientes porque
+            // forman parte de la variacion total del endoso.
+            if (item.counts !== false) {
+              total.sum += row.isRetention
+                ? numberFrom(item, ['sumInsuredCedantMovement'])
+                : numberFrom(item, ['sumInsuredReMovement']);
+            }
+            total.premium += row.isRetention
+              ? numberFrom(item, ['premiumCedantMovement'])
+              : numberFrom(item, ['premiumReMovement']);
+            return total;
+          }, { sum: 0, premium: 0 })
+          : null;
         const movement = row.isCoinsurance
           ? (hasDirectFacultativeMovementInContract ? movementTotals : deduplicatedMovementTotals)
+          : (usesCapacityMovement
+            ? capacityMovement
           : (useDirectFacultativeMovement
             ? (group && group.rows || []).reduce(function (total, item) {
           // La suma asegurada del movimiento solo considera las coberturas
@@ -4284,10 +4375,10 @@
             }, { sum: 0, premium: 0 })
             : (hasDirectFacultativeMovementInContract
               ? syntheticMovementForGroup(group)
-              : deduplicatedMovementTotals));
+              : deduplicatedMovementTotals)));
         const factor = row.isCoinsurance
           ? coinsurancePercentageForContract(contract) / 100
-          : (useDirectFacultativeMovement
+          : (usesCapacityMovement || useDirectFacultativeMovement
             ? 1
             : reinsuranceBaseFactorForContract(contract) * Number(row.percentage || 0) / 100);
         const premium = money(movement.premium * factor);
