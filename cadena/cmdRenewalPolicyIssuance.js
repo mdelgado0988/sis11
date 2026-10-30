@@ -5,12 +5,19 @@
  * @author Michael Delgado
  * @email michael.delgado@axxis-systems.com
  * @created 2026/07/21
- * @version 1.0
+ * @version 1.2
+ * @changed 2026/10/26 MSN-000101: IssuePolicy sends renewalIssuance:true, which the VALIDATE RENEW ISSUE POLICY
+ *          interceptor requires to issue a renewal (policy with originalPolicyId).
+ * @changed 2026/10/30 MSN-000121: the check "already issued" and the issuance run under a per-policy ChainLock.
+ *          The event bus can run the same batch row twice at once; both runs passed the activeDate check and the
+ *          renewal was issued twice (documents and the "Renovación ejecutada" event duplicated). The second run now
+ *          waits for the lock, re-reads the policy and skips the issuance (ok, nothing written).
  * @purpose Update the renewal workflow user and issue the policy.
  * @context.row.policyId Policy identifier to issue.
  * @context.row.loteId Renewal batch identifier used to validate the request context.
  * @context.row.userEmail User assigned to the policy workflow process.
- * @behavior The command does not issue a policy when activeDate is already populated.
+ * @behavior The command does not issue a policy when activeDate is already populated, and only one run per policy
+ *           can be between that check and the end of the issuance (ChainLock renewalissue-<policyId>).
  * @note Batch-level duplicate validation is performed before batch creation. This
  *       chain runs inside the active issuance batch and must not block itself.
  */
@@ -38,20 +45,41 @@ try {
     };
   }
 
-  validatePolicyQuotation(policyId);
-  ensurePolicyAccount(policy);
+  // MSN-000121: check-and-issue under a per-policy lock; a concurrent run of the same row waits and then skips
+  const issueLock = acquireIssueLock(policyId);
+  try {
+    const current = loadPolicy(policyId);
+    if (!current) {
+      return {
+        ok: false,
+        msg: `No se encontró la póliza ${policyId}.`
+      };
+    }
 
-  const processId = getPositiveInteger(policy.processId);
-  if (processId <= 0) {
-    return {
-      ok: false,
-      msg: `La póliza ${policyId} no tiene un proceso de workflow válido.`
-    };
+    if (hasActiveDate(current.activeDate)) {
+      return {
+        ok: true,
+        msg: `La póliza ${policyId} ya fue emitida por otra ejecución simultánea de la misma fila; no se emite de nuevo.`
+      };
+    }
+
+    validatePolicyQuotation(policyId);
+    ensurePolicyAccount(current);
+
+    const processId = getPositiveInteger(current.processId);
+    if (processId <= 0) {
+      return {
+        ok: false,
+        msg: `La póliza ${policyId} no tiene un proceso de workflow válido.`
+      };
+    }
+
+    updateProcessUser(processId, userEmail);
+    issuePolicy(policyId);
+    updateIssuanceEventUser(policyId, userEmail);
+  } finally {
+    releaseIssueLock(issueLock);
   }
-
-  updateProcessUser(processId, userEmail);
-  issuePolicy(policyId);
-  updateIssuanceEventUser(policyId, userEmail);
 
   return {
     ok: true,
@@ -267,7 +295,8 @@ function issuePolicy(policyId) {
     cmd: "IssuePolicy",
     data: {
       policyId: policyId,
-      state: "ACTIVE"
+      state: "ACTIVE",
+      renewalIssuance: true // MSN-000101: renewal batch issuance, checked by VALIDATE RENEW ISSUE POLICY
     }
   });
 
@@ -305,6 +334,47 @@ function updateIssuanceEventUser(policyId, userEmail) {
       ? DoQuery.msg
       : `No fue posible actualizar el usuario del evento de emisión de la póliza ${policyId}.`);
   }
+}
+
+// MSN-000121: one issuance per renewal policy at a time. Another run holding the lock means the same row is being
+// issued right now: wait for it (up to ~3 minutes) instead of failing, so that run's result is the one that counts.
+function acquireIssueLock(policyId) {
+  const key = `renewalissue-${policyId}`;
+  for (let attempt = 1; attempt <= 180; attempt++) {
+    doCmd({ cmd: "ChainLock", data: { operation: "LOCK", key: key, ttl: 600 } });
+    const response = typeof ChainLock === "undefined" ? null : ChainLock;
+    if (response && response.ok && response.outData && response.outData.token) {
+      return { key: key, token: response.outData.token };
+    }
+
+    if (!response || !response.outData || response.outData.locked !== false) {
+      throw new Error(
+        response && response.msg
+          ? `No fue posible bloquear la emisión de la póliza ${policyId}: ${response.msg}`
+          : `No fue posible bloquear la emisión de la póliza ${policyId}.`
+      );
+    }
+
+    waitOneSecond();
+  }
+
+  throw new Error(`La póliza ${policyId} se está emitiendo en otro proceso. Reintente en unos minutos.`);
+}
+
+function releaseIssueLock(lock) {
+  if (!lock || !lock.token) {
+    return;
+  }
+
+  try {
+    doCmd({ cmd: "ChainLock", data: { operation: "UNLOCK", key: lock.key, token: lock.token } });
+  } catch (error) {
+    // the lock expires on its own after its ttl
+  }
+}
+
+function waitOneSecond() {
+  doCmd({ cmd: "DoQuery", data: { sql: "WAITFOR DELAY '00:00:01'; SELECT 1 AS waited;" } });
 }
 
 function hasActiveDate(value) {
