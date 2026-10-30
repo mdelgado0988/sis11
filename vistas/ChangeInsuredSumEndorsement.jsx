@@ -115,6 +115,122 @@
   const [reinsuranceConfirmed, setReinsuranceConfirmed] = useState(false);
 
   const money = function (v) { return Number(Number(v || 0).toFixed(2)); };
+  // GLOB-LOADING-CHANGE-SUM: los recargos/descuentos pueden llegar como
+  // Coverages.Loadings o como los campos directos loading/loadingInsuredSum.
+  // Ambos formatos representan el mismo componente vigente y deben activar
+  // la misma regla para no caer en la proporcion de la prima total.
+  const activeCoverageLoadings = function (coverage) {
+    const explicit = coverage && (coverage.Loadings || coverage.loadings);
+    if (Array.isArray(explicit) && explicit.length) {
+      return explicit.filter(function (loading) {
+        return !loading.toRemove && Math.abs(Number(loading.loading || 0)) > 0.0000001;
+      });
+    }
+    const directRate = Number(coverage && coverage.loading);
+    if (Number.isFinite(directRate) && directRate !== 0) {
+      return [{
+        loading: directRate,
+        insuredSumBased: coverage.loadingInsuredSum,
+        perMille: coverage.perMille
+      }];
+    }
+    return [];
+  };
+  const parseSnapshotObject = function (value) {
+    if (value && typeof value === 'object') return value;
+    if (!value) return {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  };
+  const finiteNumberOrNull = function (value) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  const firstFiniteNumber = function (values) {
+    for (let i = 0; i < values.length; i++) {
+      const number = finiteNumberOrNull(values[i]);
+      if (number !== null) return number;
+    }
+    return null;
+  };
+  // GLOB-CHANGE-SUM-ANNIVERSARY-BASE: la suma/prima de referencia debe salir
+  // del aniversario original, no de una cobertura que ya pudo ser modificada
+  // por endosos anteriores. Esto mantiene simetricos aumento y disminucion.
+  const getOriginalAnniversary = function (anniversaries) {
+    const rows = Array.isArray(anniversaries) ? anniversaries : [];
+    return rows
+      .filter(function (row) { return row && row.jSnapshot; })
+      .slice()
+      .sort(function (left, right) {
+        const yearDifference = Number(left.contractYear || 0) - Number(right.contractYear || 0);
+        if (yearDifference !== 0) return yearDifference;
+        return Number(left.id || 0) - Number(right.id || 0);
+      })[0] || null;
+  };
+  const getAnniversaryCoverageReference = function (anniversary, coverageCode) {
+    if (!anniversary) return { sum: null, premium: null, basePremium: null, source: 'CURRENT_COVERAGE_FIELDS' };
+    const snapshot = parseSnapshotObject(anniversary.jSnapshot);
+    let coverages = snapshot.Coverages || snapshot.coverages || [];
+    if (!Array.isArray(coverages)) coverages = parseSnapshotObject(coverages);
+    const coverage = Array.isArray(coverages)
+      ? coverages.find(function (item) { return txt(item && item.code) === txt(coverageCode); })
+      : null;
+    if (!coverage) return { sum: null, premium: null, basePremium: null, source: 'CURRENT_COVERAGE_FIELDS' };
+    return {
+      sum: firstFiniteNumber([coverage.limit, coverage.sumInsured, coverage.startLimit]),
+      premium: firstFiniteNumber([coverage.premium, coverage.startPremium, coverage.basePremium, coverage.startBasePremium]),
+      basePremium: firstFiniteNumber([coverage.basePremium, coverage.startBasePremium, coverage.premium, coverage.startPremium]),
+      source: 'ORIGINAL_ANNIVERSARY'
+    };
+  };
+  const loadingAnnualComponents = function (coverage, fallbackPremium, reference) {
+    const currentBase = Number(coverage && coverage.basePremium);
+    const currentExtra = Number(coverage && coverage.extraPremium);
+    const startBase = reference && reference.basePremium !== null
+      ? Number(reference.basePremium)
+      : Number(coverage && coverage.startBasePremium);
+    const startPremium = reference && reference.premium !== null
+      ? Number(reference.premium)
+      : Number(coverage && coverage.startPremium);
+    const annualBase = Number.isFinite(startBase) ? startBase
+      : (Number.isFinite(currentBase) ? currentBase : Number(fallbackPremium || 0));
+    const annualTotal = Number.isFinite(startPremium) ? startPremium
+      : annualBase + (Number.isFinite(currentExtra) ? currentExtra : 0);
+    return {
+      base: money(annualBase),
+      extra: money(annualTotal - annualBase)
+    };
+  };
+  // GLOB-LOADING-CHANGE-SUM: al cambiar la suma, el extraPremium vigente
+  // debe recalcularse sobre la nueva base. Reutilizamos la semantica del
+  // loading (prima, suma asegurada o por millar) y no acumulamos el valor
+  // anterior, evitando que jNewCoverages viaje con una prima inconsistente.
+  const recalculateLoadingPremium = function (coverage, basePremium, insuredSumOverride) {
+    const loadings = activeCoverageLoadings(coverage);
+    if (!loadings.length) return money(coverage && coverage.extraPremium);
+    const insuredSum = Number(
+      insuredSumOverride === undefined
+        ? (coverage.limit === undefined ? coverage.sumInsured : coverage.limit)
+        : insuredSumOverride
+    ) || 0;
+    const base = Number(basePremium) || 0;
+    return money(loadings.reduce(function (total, loading) {
+      const rate = Number(loading.loading || 0);
+      const insuredSumBased = loading.insuredSumBased === true
+        || Number(loading.insuredSumBased) === 1
+        || coverage.loadingInsuredSum === true
+        || Number(coverage.loadingInsuredSum) === 1;
+      const perMille = loading.perMille === true || Number(loading.perMille) === 1;
+      const divisor = perMille ? 1000 : 100;
+      const calculationBase = insuredSumBased ? insuredSum : base;
+      return total + calculationBase * rate / divisor;
+    }, 0));
+  };
   // Los porcentajes se muestran con 10 decimales y se conservan como
   // proporciones con 12 decimales, igual que en el cambio de vigencia.
   const placementPercentage = function (v) { return Number(Number(v || 0).toFixed(10)); };
@@ -1269,7 +1385,10 @@
     if (!id) { return; }
     setLoading(true);
     setError(null);
-    exe('RepoLifePolicy', { operation: 'GET', filter: 'id=' + id, include: ['Coverages', 'Product'], size: 1 })
+    // GLOB-LOADING-CHANGE-SUM: el snapshot enviado a ChangeCoverage debe
+    // incluir los recargos/descuentos vigentes. Sin Coverages.Loadings, el
+    // comando recalcula desde basePremium y puede perder ese componente.
+    exe('RepoLifePolicy', { operation: 'GET', filter: 'id=' + id, include: ['Coverages', 'Coverages.Loadings', 'Product', 'Anniversaries'], size: 1 })
       .then(function (r) {
         if (!r || !r.ok || !r.outData || !r.outData.length) {
           setLoading(false); setError(t('No se encontro la poliza') + ' ' + id); return null;
@@ -2439,6 +2558,7 @@
     if (policyStart && effective < policyStart) { setError(t('La fecha efectiva no puede ser anterior al inicio de la póliza') + ' (' + policyStart + ')'); return; }
     const policyEnd = day10(policy && policy.end);
     if (policyEnd && effective > policyEnd) { setError(t('La fecha efectiva no puede ser posterior al fin de la póliza') + ' (' + policyEnd + ')'); return; }
+    const originalAnniversary = getOriginalAnniversary(policy && (policy.Anniversaries || policy.anniversaries));
 
     const calculationVersion = ++requestVersion.calculation;
     // Invalida tambien cualquier simulacion iniciada con el calculo anterior.
@@ -2470,7 +2590,6 @@
         const direct = directChangesByCode[txt(coverage.code)];
         if (direct) {
           coverage.limit = direct.newSum;
-          coverage.startLimit = direct.newSum;
         }
       });
       const tariffResponse = await exe('ExeChain', {
@@ -2495,6 +2614,16 @@
       if (!Array.isArray(tariffRows)) {
         throw new Error(t('La cotización de ') + ramoLabel() + t(' no devolvió las coberturas calculadas'));
       }
+      const tariffPremiumByCode = {};
+      tariffRows.forEach(function (tariffRow) {
+        // La cadena devuelve la prima anual correspondiente a la suma nueva.
+        // Solo se usa cuando la fila pertenece a la tarifa aplicable; si no
+        // existe, conservamos el calculo historico como fallback.
+        if (!tariffRow || (!isAutoPolicy() && tariffRow.tariffApplied !== true)) return;
+        const code = txt(tariffRow.code);
+        const premium = Number(tariffRow.premium);
+        if (code && Number.isFinite(premium)) tariffPremiumByCode[code] = money(premium);
+      });
       tariffRows.forEach(function (tariffRow) {
         // Fianzas marca explícitamente la tarifa aplicada. Auto devuelve la
         // cobertura ya calculada sin esa marca, por lo que no debe descartarse.
@@ -2524,6 +2653,7 @@
       });
 
       const provisionalRows = [];
+      const calculationDebugRows = [];
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
         const target = newCoverages.find(function (coverage) { return txt(coverage.code) === change.code; });
@@ -2538,18 +2668,155 @@
         const oldPremium = money(change.coverage.premium === null || change.coverage.premium === undefined
           ? Number(change.coverage.basePremium || 0) + Number(change.coverage.extraPremium || 0)
           : change.coverage.premium);
-        const proportionalPremium = money(oldPremium * change.newSum / change.oldSum);
-        const rawDelta = money((proportionalPremium - oldPremium) * prorate);
+        const anniversaryReference = getAnniversaryCoverageReference(originalAnniversary, change.code);
+        const referenceAnnualPremium = anniversaryReference.premium !== null
+          ? anniversaryReference.premium
+          : finiteNumberOrNull(change.coverage.startPremium);
+        const referenceAnnualBase = anniversaryReference.basePremium !== null
+          ? anniversaryReference.basePremium
+          : finiteNumberOrNull(change.coverage.startBasePremium);
+        const referenceAnnualSum = anniversaryReference.sum !== null
+          ? anniversaryReference.sum
+          : finiteNumberOrNull(change.coverage.startLimit);
+        const stableAnnualPremium = referenceAnnualPremium !== null
+          ? referenceAnnualPremium
+          : (referenceAnnualBase !== null ? referenceAnnualBase : oldPremium);
+        const stableAnnualSum = referenceAnnualSum !== null && referenceAnnualSum > 0
+          ? referenceAnnualSum
+          : change.oldSum;
+        const activeLoadings = activeCoverageLoadings(change.coverage);
+        const annualLoadingComponents = loadingAnnualComponents(change.coverage, oldPremium, anniversaryReference);
+        const hasAnnualReference = stableAnnualSum > 0
+          && (referenceAnnualPremium !== null || referenceAnnualBase !== null);
+        // GLOB-CHANGE-SUM-PRORATION: para un cambio de suma, la prima anual
+        // se obtiene desde la referencia del aniversario. Los loadings
+        // vigentes se recalculan sobre esa base y la suma correspondiente;
+        // no se reutiliza una prima que pudo venir prorrateada por un endoso
+        // anterior. Esto mantiene simetricos un aumento y una disminucion
+        // de la misma suma/fecha.
+        let annualOldPremium = stableAnnualSum > 0
+          ? money(stableAnnualPremium * change.oldSum / stableAnnualSum)
+          : oldPremium;
+        let annualNewPremium = change.oldSum > 0
+          ? money(annualOldPremium * change.newSum / change.oldSum)
+          : 0;
+        let annualNewBasePremium = null;
+        let annualNewExtraPremium = null;
+        if (activeLoadings.length) {
+          const annualBaseReference = annualLoadingComponents.base;
+          const annualOldBasePremium = stableAnnualSum > 0
+            ? money(annualBaseReference * change.oldSum / stableAnnualSum)
+            : money(annualBaseReference);
+          annualOldPremium = money(annualOldBasePremium
+            + recalculateLoadingPremium(change.coverage, annualOldBasePremium, change.oldSum));
+          annualNewBasePremium = stableAnnualSum > 0
+            ? money(annualBaseReference * change.newSum / stableAnnualSum)
+            : money(annualBaseReference);
+          // The loading is an independent component. Recalculate it using
+          // the new sum instead of scaling the already-prorated total.
+          annualNewExtraPremium = recalculateLoadingPremium(
+            Object.assign({}, change.coverage, { limit: change.newSum }),
+            annualNewBasePremium,
+            change.newSum
+          );
+          annualNewPremium = money(annualNewBasePremium + annualNewExtraPremium);
+        }
+        // GLOB-CHANGE-SUM-DEPENDENT-PREMIUM: las coberturas dependientes
+        // pueden venir en la respuesta de tarifa, pero si su prima vigente
+        // era cero no deben crear prima por el solo hecho de cambiar la suma
+        // de la cobertura principal. La tarifa nueva solo aplica a la fila
+        // seleccionada; las dependientes conservan el calculo historico.
+        const tariffAnnualPremium = change.derivedByTariff || hasAnnualReference
+          ? undefined
+          : tariffPremiumByCode[change.code];
+        if (Number.isFinite(tariffAnnualPremium) && !activeLoadings.length) {
+          annualNewPremium = tariffAnnualPremium;
+        }
+        const proportionalPremium = annualNewPremium;
         const share = i === 0 ? adjustment : 0;
-        const proratedPremium = money(oldPremium + rawDelta);
+        // GLOB-CHANGE-SUM-REVERSIBLE: despues de un aumento/reduccion previo,
+        // `oldPremium` puede ser la prima efectiva ya prorrateada del endoso
+        // anterior. En ese caso no debe usarse como base otra vez; la nueva
+        // prima se reconstruye desde el aniversario y la suma objetivo. Para
+        // una poliza que aun conserva su prima original se mantiene la ruta
+        // historica, evitando cambiar el resultado de los primeros endosos.
+        const annualReferenceTotalPremium = activeLoadings.length
+          ? money(annualLoadingComponents.base
+            + recalculateLoadingPremium(change.coverage, annualLoadingComponents.base, stableAnnualSum))
+          : stableAnnualPremium;
+        const currentPremiumHasPriorAdjustment = hasAnnualReference
+          && Math.abs(oldPremium - annualOldPremium) > 0.009;
+        const movementBasePremium = currentPremiumHasPriorAdjustment
+          ? annualReferenceTotalPremium
+          : oldPremium;
+        const movementAnnualBasePremium = currentPremiumHasPriorAdjustment
+          ? annualReferenceTotalPremium
+          : annualOldPremium;
+        const proratedPremium = money(movementBasePremium
+          + (annualNewPremium - movementAnnualBasePremium) * prorate);
+        const rawDelta = money(proratedPremium - oldPremium);
         const newPremium = money(proratedPremium + share);
         if (newPremium < 0) throw new Error(t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + change.code + ')');
         target.limit = change.newSum;
-        target.startLimit = change.newSum;
         target.start = change.coverage.start;
         target.end = change.coverage.end;
-        target.premium = newPremium;
-        target.basePremium = money(Number(target.basePremium === null || target.basePremium === undefined ? oldPremium : target.basePremium) + rawDelta + share);
+        if (activeLoadings.length) {
+          // ChangeCoverage calcula la variacion de la fecha efectiva. Si le
+          // enviamos aqui el movimiento ya prorrateado, vuelve a prorratearlo
+          // y el aumento/reduccion equivalente deja de ser reversible.
+          target.basePremium = annualNewBasePremium;
+          target.extraPremium = annualNewExtraPremium;
+          target.premium = annualNewPremium;
+          // El ajuste manual es un importe del movimiento. Se mantiene en
+          // la ruta anterior para no cambiar su tratamiento al cotizar.
+          if (Math.abs(share) > 0.009) {
+            target.basePremium = money(target.basePremium + share);
+            target.premium = money(target.basePremium + target.extraPremium);
+          }
+        } else {
+          target.premium = newPremium;
+          target.basePremium = money(Number(target.basePremium === null || target.basePremium === undefined ? oldPremium : target.basePremium) + rawDelta + share);
+        }
+        calculationDebugRows.push({
+          code: change.code,
+          oldSum: change.oldSum,
+          newSum: change.newSum,
+          oldPremium: oldPremium,
+          currentCoverage: {
+            premium: change.coverage && change.coverage.premium,
+            basePremium: change.coverage && change.coverage.basePremium,
+            extraPremium: change.coverage && change.coverage.extraPremium,
+            startPremium: change.coverage && change.coverage.startPremium,
+            startBasePremium: change.coverage && change.coverage.startBasePremium,
+            startLimit: change.coverage && change.coverage.startLimit,
+            loadings: change.coverage && (change.coverage.Loadings || change.coverage.loadings || [])
+          },
+          reference: {
+            annualPremium: stableAnnualPremium,
+            annualSum: stableAnnualSum,
+            hasAnnualReference: hasAnnualReference,
+            source: anniversaryReference.source,
+            anniversaryId: originalAnniversary && originalAnniversary.id
+          },
+          activeLoadings: activeLoadings,
+          days: {
+            remaining: remainingDays,
+            duration: durationDays,
+            prorate: prorate
+          },
+          calculation: {
+            annualOldPremium: annualOldPremium,
+            annualNewPremium: annualNewPremium,
+            proportionalPremium: proportionalPremium,
+            annualReferenceTotalPremium: annualReferenceTotalPremium,
+            currentPremiumHasPriorAdjustment: currentPremiumHasPriorAdjustment,
+            movementBasePremium: movementBasePremium,
+            movementAnnualBasePremium: movementAnnualBasePremium,
+            rawDelta: rawDelta,
+            adjustment: share,
+            calculatedNewPremium: newPremium
+          }
+        });
         provisionalRows.push({
           code: change.code, name: target.name, reason: 'SELECTED', oldSum: change.oldSum, newSum: change.newSum,
           sumInsuredMovement: money(change.newSum - change.oldSum), oldStart: change.coverage.start, newStart: change.coverage.start,
@@ -2589,18 +2856,75 @@
       const quotedByCode = {};
       quotedCovs.forEach(function (coverage) { quotedByCode[txt(coverage.code)] = coverage; });
       quotedCovs = oldCoverages.map(function (coverage) {
-        return Object.assign({}, coverage, quotedByCode[txt(coverage.code)] || {});
+        const quotedCoverage = quotedByCode[txt(coverage.code)] || {};
+        const merged = Object.assign({}, coverage, quotedCoverage);
+        const currentLoadings = coverage && (coverage.Loadings || coverage.loadings);
+        const quotedLoadings = quotedCoverage && (quotedCoverage.Loadings || quotedCoverage.loadings);
+        // Algunas cotizaciones nativas devuelven la cobertura sin sus
+        // Loadings. Conservamos los vigentes para que el mismo snapshot
+        // llegue al endoso y la prima no cambie por omitirlos.
+        if (Array.isArray(currentLoadings) && currentLoadings.length
+          && (!Array.isArray(quotedLoadings) || !quotedLoadings.length)) {
+          merged.Loadings = JSON.parse(JSON.stringify(currentLoadings));
+        }
+        return merged;
       });
       for (let i = 0; i < quotedCovs.length; i++) {
         const changed = changes.find(function (item) { return item.code === txt(quotedCovs[i].code); });
         if (changed) {
           quotedCovs[i].limit = changed.newSum;
-          quotedCovs[i].startLimit = changed.newSum;
           quotedCovs[i].start = changed.coverage.start;
           quotedCovs[i].end = changed.coverage.end;
+          // GLOB-CHANGE-SUM-ANNIVERSARY-BASE: la ejecucion necesita la suma
+          // y prima base del aniversario para que un aumento y su reduccion
+          // equivalente sean simetricos. Solo cambia `limit`; nunca se
+          // reemplazan los campos originales `startLimit`/`startBasePremium`.
+          if (changed.coverage.startLimit !== undefined && changed.coverage.startLimit !== null) {
+            quotedCovs[i].startLimit = changed.coverage.startLimit;
+          }
+          if (changed.coverage.startBasePremium !== undefined && changed.coverage.startBasePremium !== null) {
+            quotedCovs[i].startBasePremium = changed.coverage.startBasePremium;
+          }
+          if (changed.coverage.startPremium !== undefined && changed.coverage.startPremium !== null) {
+            quotedCovs[i].startPremium = changed.coverage.startPremium;
+          }
+          const anniversaryReference = getAnniversaryCoverageReference(originalAnniversary, changed.code);
+          // GLOB-CHANGE-SUM-ANNIVERSARY-BASE: el snapshot que se envia al
+          // comando conserva la referencia original por cobertura. La vista
+          // calcula y el comando persiste; no se vuelve a inventar una base
+          // usando la suma/prima de un endoso posterior.
+          if (anniversaryReference.sum !== null) quotedCovs[i].startLimit = anniversaryReference.sum;
+          if (anniversaryReference.basePremium !== null) quotedCovs[i].startBasePremium = anniversaryReference.basePremium;
+          if (anniversaryReference.premium !== null) quotedCovs[i].startPremium = anniversaryReference.premium;
         }
       }
       quoted.jNewCoverages = JSON.stringify(quotedCovs);
+
+      // GLOB-CHANGE-SUM-DIAGNOSTIC: conserva una fotografía copiable del
+      // cálculo previo y de la cotización nativa para diagnosticar diferencias
+      // sin modificar ni persistir el resultado del endoso.
+      console.log('[ChangeInsuredSumEndorsement] calculation-debug ' + JSON.stringify({
+        policyId: policyId,
+        effectiveDate: effective,
+        movement: {
+          oldCoverages: oldCoverages,
+          requestedChanges: changes.map(function (change) {
+            return {
+              code: change.code,
+              oldSum: change.oldSum,
+              newSum: change.newSum
+            };
+          }),
+          provisionalRows: calculationDebugRows,
+          jOldCoverages: oldCoverages,
+          jNewCoveragesBeforeNativeQuote: newCoverages
+        },
+        nativeQuote: {
+          bill: quoted.Bill || {},
+          billDiff: quoted.BillDiff || {},
+          jNewCoverages: quotedCovs
+        }
+      }, null, 2));
 
       const prevPremium = money(policy.anualPremium === null || policy.anualPremium === undefined ? policy.annualPremium : policy.anualPremium);
       const prevTax = money(policy.tax);
@@ -2626,6 +2950,21 @@
           row.newPremium = money(quotedCoverage.premium);
           row.adjustedPremium = row.newPremium;
           row.variation = money(row.newPremium - row.oldPremium);
+
+          // GLOB-LOADING-CHANGE-SUM: la cotización nativa es la fuente de
+          // verdad para la prima final porque puede incluir Loadings. Las
+          // columnas informativas de prima proporcional/prorrateada deben
+          // reconciliarse contra ese resultado, sin modificar el snapshot
+          // enviado al comando ni el reaseguro que se persiste.
+          const nativePremiumBeforeAdjustment = money(row.newPremium - Number(row.adjustment || 0));
+          if (row.prorate > 0 && row.prorate < 1) {
+            row.proportionalPremium = money(row.oldPremium
+              + (nativePremiumBeforeAdjustment - row.oldPremium) / row.prorate);
+          } else {
+            row.proportionalPremium = nativePremiumBeforeAdjustment;
+          }
+          row.proratedPremium = nativePremiumBeforeAdjustment;
+          row.proratedVariation = money(nativePremiumBeforeAdjustment - row.oldPremium);
         }
         row.prorated = proratedCosts[row.code] || 0;
         return row;
