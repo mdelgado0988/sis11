@@ -104,6 +104,55 @@ for (let i = 0; i < live.length; i++) {
 const base = [];
 for (const k in seen) { if (seen.hasOwnProperty(k)) base.push(seen[k]); }
 
+// GLOB-1201: una colocacion vigente 100% RET o 100% FAC es una decision
+// explicita de la poliza. La configuracion de capacidad de fianzas no debe
+// convertirla silenciosamente en una distribucion RET/CP/FAC distinta.
+// Se identifica por cobertura porque una misma poliza puede mezclar reglas.
+const protectedPlacementByCoverage = {};
+const baseByCoverageForProtection = {};
+base.forEach(function (cession) {
+  const key = txt(cession.contractId) + '|' + txt(cession.coverageCode);
+  if (!baseByCoverageForProtection[key]) baseByCoverageForProtection[key] = [];
+  baseByCoverageForProtection[key].push(cession);
+});
+Object.keys(baseByCoverageForProtection).forEach(function (key) {
+  const cessions = baseByCoverageForProtection[key];
+  const active = cessions.filter(function (cession) {
+    return Math.abs(Number(cession.proportionCed || 0)) > 0.000001
+      || Math.abs(Number(cession.proportionRe || 0)) > 0.000001
+      || Math.abs(Number(cession.sumInsuredCedant || 0)) > 0.01
+      || Math.abs(Number(cession.sumInsuredRe || 0)) > 0.01
+      || Math.abs(Number(cession.premiumCedant || 0)) > 0.01
+      || Math.abs(Number(cession.premiumRe || 0)) > 0.01;
+  });
+  if (!active.length) return;
+  const isFacultative = function (cession) {
+    const line = up(cession.lineId);
+    return line === 'FAC' || line.indexOf('FACULT') >= 0;
+  };
+  const isRetention = function (cession) {
+    const line = up(cession.lineId);
+    return line === 'RET' || line.indexOf('RETEN') >= 0
+      || line === 'CP' || line.indexOf('CUOTA') >= 0 || line.indexOf('QUOTA') >= 0;
+  };
+  const allRetention = active.every(function (cession) {
+    return !isFacultative(cession)
+      && Number(cession.proportionCed || 0) >= 0.999999
+      && Number(cession.proportionRe || 0) <= 0.000001;
+  }) && active.some(isRetention);
+  const allFacultative = active.some(function (cession) {
+    return isFacultative(cession)
+      && Number(cession.proportionRe || 0) >= 0.999999
+      && Number(cession.proportionCed || 0) <= 0.000001;
+  }) && active.every(function (cession) {
+    return isFacultative(cession)
+      || (Number(cession.proportionCed || 0) <= 0.000001
+        && Number(cession.proportionRe || 0) <= 0.000001);
+  });
+  if (allRetention) protectedPlacementByCoverage[key] = 'RETENCION';
+  else if (allFacultative) protectedPlacementByCoverage[key] = 'FAC';
+});
+
 // La regla se determina por contrato y cobertura. Asi un facultativo de otra
 // cobertura no altera la colocacion proporcional de la cobertura endosada.
 const facultativeLineByCoverage = {};
@@ -343,6 +392,10 @@ if (useSuretyContractCapacity) {
   });
   const synthetic = [];
   Object.keys(capacityByCoverage).forEach(function (key) {
+    // Si la colocacion vigente esta protegida, no crear lineas sinteticas de
+    // capacidad: hacerlo volveria a introducir RET/CP/FAC contra la regla
+    // explicita 100% RET o 100% FAC de la poliza.
+    if (protectedPlacementByCoverage[key]) return;
     const capacity = capacityByCoverage[key];
     const tokens = key.split('|');
     const contractId = Number(tokens[0]);
@@ -491,7 +544,8 @@ for (let i = 0; i < base.length; i++) {
     || capacityLine.indexOf('EXCEDENTE') >= 0;
   const retentionOwnerLine = retentionPlacementLineByCoverage[Number(c.contractId) + '|' + code];
   const isRetentionOwner = proportionalLine && txt(retentionOwnerLine) === line;
-  const capacityAllocation = !!capacity && (capacityLine === 'RET' || capacityLine.indexOf('RETEN') >= 0
+  const protectedPlacement = protectedPlacementByCoverage[Number(c.contractId) + '|' + code];
+  const capacityAllocation = !protectedPlacement && !!capacity && (capacityLine === 'RET' || capacityLine.indexOf('RETEN') >= 0
     || proportionalLine
     || capacityLine === 'FAC' || capacityLine.indexOf('FACULT') >= 0);
   const isCpexCcv = up(contractCodeById[Number(c.contractId)]) === 'CPEXCV';
@@ -618,6 +672,7 @@ for (let i = 0; i < base.length; i++) {
     proportionRe: retentionOnlyLoadingPremium ? 0 : pRe,
     riskPremiumFactor: retentionOnlyLoadingPremium ? 1 : riskPremiumFactor,
     retentionOnlyLoadingPremium: retentionOnlyLoadingPremium,
+    protectedPlacement: protectedPlacement || null,
     facultativeMovementOnly: routesMovementToFacultative,
     contractCapacityAllocation: capacityAllocation,
     remove: obsoleteRetentionLine,

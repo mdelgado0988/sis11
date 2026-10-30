@@ -1237,8 +1237,16 @@
         return String(item.groupKey) === String(group.contractId) + '-' + String(group.lineId);
       }) : null;
       const isRetentionGroup = normalizedReinsuranceLine(group.lineId) === 'RETENCION';
-      const cededPremium = isRetentionGroup ? 0 : (lineTotal ? Number(lineTotal.premium || 0) : sumField(rows, ['premiumRe']));
-      const cededSum = isRetentionGroup ? 0 : (lineTotal ? Number(lineTotal.sum || 0) : sumField(rows, ['sumInsuredRe']));
+      const isProtectedRetention = rows.some(function (row) {
+        return row.protectedPlacement === 'RETENCION';
+      });
+      // Una cobertura protegida 100% RET puede viajar dentro de un grupo
+      // visual CUOTA PARTE. En ese caso no existe monto cedido ni deben
+      // exigirse aceptantes para la linea visual.
+      const cededPremium = isRetentionGroup || isProtectedRetention
+        ? 0 : (lineTotal ? Number(lineTotal.premium || 0) : sumField(rows, ['premiumRe']));
+      const cededSum = isRetentionGroup || isProtectedRetention
+        ? 0 : (lineTotal ? Number(lineTotal.sum || 0) : sumField(rows, ['sumInsuredRe']));
       const participants = getLineParticipants(group, lineTotal);
       if (cededPremium > 0.01 || cededSum > 0.01) {
         if (!participants.length) {

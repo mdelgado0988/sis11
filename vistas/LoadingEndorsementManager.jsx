@@ -3467,7 +3467,7 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             }
         }
         const roundedRate = Number(safeValue.toFixed(2));
-        return Math.abs(safeValue - roundedRate) <= 0.0001 ? roundedRate : safeValue;
+        return Math.abs(safeValue - roundedRate) <= 0.01 ? roundedRate : safeValue;
     }
     function renderPercentage(value, record){
         const numeric = Number(value || 0);
