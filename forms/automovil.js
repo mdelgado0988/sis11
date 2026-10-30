@@ -212,6 +212,8 @@ function prepareTabContainer() {
       return;
     }
 
+    $form.addClass('automovil-form');
+
     if ($("#customSectionTabs").length) {
       return;
     }
@@ -476,6 +478,31 @@ function inyectarEstilosAntdCobtar() {
                 box-sizing: border-box;
                 background: #fff;
             }
+            .automovil-form input:not([type="checkbox"]):not([type="radio"]),
+            .automovil-form select,
+            .automovil-form textarea {
+                border: 1px solid #b8c4d1 !important;
+                border-radius: 6px;
+                transition: border-color 0.2s, box-shadow 0.2s;
+            }
+            .automovil-form input:not([type="checkbox"]):not([type="radio"]):hover,
+            .automovil-form select:hover,
+            .automovil-form textarea:hover {
+                border-color: #8da9c2 !important;
+            }
+            .automovil-form input:not([type="checkbox"]):not([type="radio"]):focus,
+            .automovil-form select:focus,
+            .automovil-form textarea:focus {
+                border-color: #1677ff !important;
+                box-shadow: 0 0 0 2px rgba(22,119,255,0.2);
+                outline: none;
+            }
+            .automovil-form input:not([type="checkbox"]):not([type="radio"]):disabled,
+            .automovil-form select:disabled,
+            .automovil-form textarea:disabled {
+                border-color: #b8c4d1 !important;
+                background: #f5f5f5;
+            }
             #tabTarifas .readonly-style {
                 background-color: #f5f5f5 !important;
                 color: #666 !important;
@@ -555,8 +582,22 @@ async function loadPolicy() {
         (isNaN(v = Number((v || '').toString().replace(/[,\s]/g, ''))) ? 0 : v)
         .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
-        $("#txtSA").prop("readonly", true);
-        $("#txtSA").val(policy?.insuredSum || '0');
+        const $txtSA = $("#txtSA");
+        const currentSA = String($txtSA.val() ?? '').trim();
+        const currentSANormalized = currentSA.replace(/[\s,]/g, '');
+        const currentSAIsEmptyOrZero = currentSA === '' ||
+            (currentSANormalized !== '' && Number(currentSANormalized) === 0);
+
+        // Solo cargar la suma de la póliza la primera vez. Si el campo ya
+        // contiene un valor distinto de vacío o cero, se debe respetar.
+        if (currentSAIsEmptyOrZero) {
+            $txtSA.val(policy?.insuredSum || '0');
+        }
+
+        // La suma es editable mientras la póliza no esté emitida. Al emitirse,
+        // bloquearCamposPolizaEmitida() la deja bloqueada junto con el resto.
+        const polizaEmitida = esPolizaEmitidaCoberturas();
+        $txtSA.prop('disabled', polizaEmitida).prop('readonly', polizaEmitida);
         
     } catch (error) {
         console.error(error);

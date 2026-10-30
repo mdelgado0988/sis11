@@ -29,6 +29,8 @@ const DEFAULT_OFFSET = -5;
 const DEFAULT_STAGE = { code: "1", name: "NOTIFICADO" };
 const DEFAULT_HOUR = 8;
 const MOTOR_LOB = "6";
+const DESGRAVAMEN_LOB = "20";
+const DESGRAVAMEN_PRODUCT = "vid-desemp";
 const DETAIL_SECTION = "Detalle del Siniestro";
 const EXTRA_SECTION = "InformacionResumenDelReclamo";
 const CLAIMANT_TYPES = ["Afectado", "Asegurado", "Tercera Persona"];
@@ -103,14 +105,14 @@ try {
   // 5. Coberturas elegibles: todas las de la póliza (como la vista) o sólo las de cober15/cober39 con valor
   const coverages = policy ? eligibleCoverages(policy, r) : [];
 
-  // 6. Numeración: sin el contador de Main.claimCode el sistema guardaría el reclamo SIN número.
-  if (policy) checkClaimCounters(policy.productCode);
-
-  // 7. Duplicado: misma póliza, misma fecha y hora de ocurrencia y mismo evento asegurado
-  if (policy && occurrence && event && errors.length === 0) {
-    const dup = findClaim(policy.id, occurrence.stamp16, event.insured.code);
-    if (dup) errors.push(`Ya existe el reclamo ${dup.code || dup.id} (id ${dup.id}) en la póliza ${policy.code} con la misma fecha y hora de ocurrencia (${show(occurrence.date)} ${occurrence.hhmm}) y el mismo evento asegurado ${event.insured.code}.`);
+  // 6. Desgravamen: una póliza no puede tener otro reclamo del mismo asegurado
+  //    en cualquiera de las mismas coberturas. Esta regla sólo aplica a vid-desemp.
+  if (policy && isDesgravamen(policy) && coverages.length && errors.length === 0) {
+    checkDesgravamenDuplicates(policy, coverages);
   }
+
+  // 7. Numeración: sin el contador de Main.claimCode el sistema guardaría el reclamo SIN número.
+  if (policy) checkClaimCounters(policy.productCode);
 
   if (errors.length) fail(errors.join(" | "));
 
@@ -495,6 +497,28 @@ function buildCustomForms(values) {
 function findClaim(policyId, stamp16, eventCode) {
   const rows = query(`SELECT TOP 1 id, code FROM Claim WHERE lifePolicyId=${Number(policyId)} AND CONVERT(varchar(16), occurrence, 126)='${sql(stamp16)}' AND ISNULL(insuredEvent,'')=N'${sql(eventCode)}' ORDER BY id DESC`);
   return rows.length ? rows[0] : null;
+}
+
+function isDesgravamen(policy) {
+  return codeKey(policy.lob) === codeKey(DESGRAVAMEN_LOB) && norm(policy.productCode) === norm(DESGRAVAMEN_PRODUCT);
+}
+
+// Unicidad de Desgravamen: misma póliza + mismo asegurado + misma cobertura.
+// En el genérico el asegurado es el claimerId que se resuelve desde la póliza.
+function checkDesgravamenDuplicates(policy, coverages) {
+  const rows = query(`SELECT id, code, claimerId, elegibleCoverages FROM Claim WHERE lifePolicyId=${Number(policy.id)} AND claimerId=${Number(policy.claimerId)}`);
+  const requested = coverages.map(c => Number(c.id)).filter(Number.isSafeInteger);
+  rows.forEach(claim => {
+    const existing = String(claim.elegibleCoverages || "").split(",")
+      .map(v => Number(String(v).trim())).filter(Number.isSafeInteger);
+    const overlap = requested.filter(id => existing.indexOf(id) !== -1);
+    if (!overlap.length) return;
+    const codes = overlap.map(id => {
+      const coverage = coverages.find(c => Number(c.id) === id);
+      return coverage ? String(coverage.code).trim() : String(id);
+    });
+    errors.push(`Ya existe el reclamo ${claim.code || claim.id} (id ${claim.id}) de la póliza ${policy.code} para el asegurado ${policy.claimerId} en la cobertura(s) ${codes.join(", ")}.`);
+  });
 }
 
 function checkClaimCounters(productCode) {
