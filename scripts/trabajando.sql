@@ -15,8 +15,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 83
-and t.cplan = 'PROP - GA' 
+where t.cramo = 96
+--and t.cplan = 'ANTICIPO' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -24,7 +24,7 @@ AND tf.etiqueta <> 'La emisión de esta póliza supera los 6 años.'
 ORDER BY 1,2,3,4,5
 GO
 
-declare @ramoXY int = 71
+declare @ramoXY int = 96
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -160,10 +160,10 @@ select r.cramo lob, CASE WHEN r.cramo = 81 THEN CONCAT(r.cramo, r.cplan) ELSE r.
 	(rtrim(r.xdescripcion)) xdescripcion, r.xformula1 CoverageCode, r.xdpto, r.iestado, mc.xdescripcion_l cob
 from marepteccia r
 LEFT JOIN macoberturas mc on mc.cramo = r.cramo and mc.ccobertura = r.xformula1
-where r.cramo in (81)
-and (r.xnombrep not like '%endoso%')
+where r.cramo in (84)
+--and (r.xnombrep not like '%endoso%')
 --AND xdpto <> 'SINIESTROS'
-AND r.xdpto = 'EMISION'
+--AND r.xdpto = 'EMISION'
 AND r.xnombrep NOT IN ('oferta_automovil','recibo','REPORTE_AUTOMOVIL_MARCA_MODELO')
 order by 1,2
 
@@ -236,12 +236,12 @@ GROUP BY RTRIM(pl.xplan), RTRIM(pl.cplan);
 select cramo, ccausa, xcausa from macausasin where cramo = 6
 
 
-declare @cuenta varchar(9) = '130.01.01.02.00.20.04.00.000'
+declare @cuenta varchar(9) = '530.01.01.02.00.11.00.00.000'
 select * 
 from SisGlobal_AG01..catalogonic
 where cdgocont like '%'+@cuenta+'%'
 and tipocuen = '2'
-AND desccont like '%varios%'
+AND desccont like '%auto%'
 
 select ccobertura, xdescripcion_l from macoberturas where cramo = 6
 and ccobertura in ('101','12','14','20','21')

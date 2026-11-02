@@ -1,0 +1,78 @@
+<form method="post" action="inteligencia_negocios.aspx" id="ctl00">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="
+__VIEWSTATE" value="" />
+</div>
+<div>
+	<table cellspacing="0" rules="all" border="1" style="border-collapse:collapse;">
+		<caption>
+			GESTOR DE REPORTES
+		<Tr><Th>Compa&#241;ia: ASEGURADORA GLOBAL</Tr></Th><Tr><Th>Fecha de Exportaci&#243;n: 02/11/2026 3:59:54 p.m.</Tr></Th><Tr><Th>Exportado Por: ADMINISTRADOR SISTEMAS</Tr></Th><Tr><Th>Modulo: GESTOR DE REPORTES|RESULTREPORT</Tr></Th></caption><tr align="left" style="background-color:LightCoral;">
+			<th scope="col">Id</th><th scope="col">Ramo</th><th scope="col">cnpoliza</th><th scope="col">ccorredorSeg</th><th scope="col">Corredor</th><th scope="col">Asegurado</th><th scope="col">Prima suscrita</th><th scope="col">Prima Cobrada</th>
+		</tr><tr>
+			<td>1</td><td>Automovil</td><td>AU-GL-050269-0         </td><td>1410654</td><td>PANAMA ESTATE INSURANCE SERVICES, INC.</td><td>VERGARA VERGARA RAFAEL DE JESUS</td><td>628.39</td><td>60.55</td>
+		</tr><tr>
+			<td>2</td><td>Automovil</td><td>AU-GL-050503-0         </td><td>1080158</td><td>ARCO SEGUROS, S.A.</td><td>CANO RAMOS BLADIMIR</td><td>483.70</td><td>46.61</td>
+		</tr><tr>
+			<td>3</td><td>Automovil</td><td>AU-GL-054216-0         </td><td>1100705</td><td>D.R. ASESORES DE SEGUROS,S.A.</td><td>HERAZO GONZALEZ SARA NEYED</td><td>384.51</td><td>40.75</td>
+		</tr><tr>
+			<td>4</td><td>Automovil</td><td>AU-GL-057971-0         </td><td>1320145</td><td>BARRIA FUENTES de GUERRERO ARELYS DELFILIA</td><td>TORRES ESPINOSA SARIELY NAZABETH</td><td>655.59</td><td>190.00</td>
+		</tr><tr>
+			<td>5</td><td>Automovil</td><td>AU-GL-063186-0         </td><td>1100705</td><td>D.R. ASESORES DE SEGUROS,S.A.</td><td>AGUILAR DIAZ ROMULO</td><td>517.00</td><td>49.82</td>
+		</tr><tr>
+			<td>6</td><td>Automovil</td><td>AU-GLB-082731-0        </td><td>1388746</td><td>SEGUROS GENERALES, S.A.</td><td>EL ZOHBI EL ZOHBI WAEL ALI</td><td>507.44</td><td>48.89</td>
+		</tr><tr>
+			<td>7</td><td>Automovil</td><td>AU-GLC-069992-0        </td><td>1072504</td><td>GRUPO DE SEGUROS TEMPUS</td><td>CERCE&#209;O GUTIERREZ ARASELIS</td><td>481.80</td><td>51.10</td>
+		</tr><tr>
+			<td>8</td><td>Automovil</td><td>AU-GLC-074258-0        </td><td>1333041</td><td>QUINTERO CASTILLO TANIA ELIZABETH</td><td>QUINTERO CASTILLO SERGIO LAZARO</td><td>37.56</td><td>49.43</td>
+		</tr><tr>
+			<td>9</td><td>Automovil</td><td>AU-GLC-076585-0        </td><td>1485176</td><td>SEGUROS INFINITY S.A.</td><td>RODRIGUEZ SALDA&#209;A CARLOS JOEL</td><td>551.08</td><td>53.10</td>
+		</tr><tr>
+			<td>10</td><td>Automovil</td><td>AU-GLC-076873-0        </td><td>1485300</td><td>CORPORACION LATINOAMERICANA DE SEGUROS S.A.</td><td>CACERES MENDEZ NADIA PRISCILA</td><td>703.01</td><td>74.51</td>
+		</tr><tr>
+			<td>11</td><td>Automovil</td><td>AU-GLC-084050-0        </td><td>1487055</td><td>JIMFOR, S.A.</td><td>DIAZ DE LA CRUZ ANTONIO</td><td>557.81</td><td>53.75</td>
+		</tr><tr>
+			<td>12</td><td>Automovil</td><td>AU-GLC-084393-0        </td><td>1507699</td><td>DE LA ESPRIELLA Y ASOCIADOS, S.A</td><td>DE LA ESPRIELLA GOTI RENAULT IDELMARO</td><td>682.85</td><td>65.00</td>
+		</tr><tr>
+			<td>13</td><td>Automovil</td><td>AU-GLC-087238-0        </td><td>1388746</td><td>SEGUROS GENERALES, S.A.</td><td>CASTILLO CABALLERO JACKELINE NAYARI</td><td>628.55</td><td>66.63</td>
+		</tr><tr>
+			<td>14</td><td>Automovil</td><td>AU-GLC-087945-0        </td><td>1072851</td><td>L.R. DUCRUET E HIJOS, S.A.</td><td>QUIEL VARGAS LISSETH MARIEL</td><td>341.29</td><td>16.44</td>
+		</tr><tr>
+			<td>15</td><td>Automovil</td><td>AU-GLC-090235-0        </td><td>1388746</td><td>SEGUROS GENERALES, S.A.</td><td>MENESES SAENZ REINALDO</td><td>635.88</td><td>61.28</td>
+		</tr><tr>
+			<td>16</td><td>Automovil</td><td>AU-GLC-091596-0        </td><td>1329871</td><td>QUIEL TIJERINO ADNAN MAURICIO</td><td>ROMERO ESCOBAR KARIN ABDUL</td><td>620.99</td><td>65.82</td>
+		</tr><tr>
+			<td>17</td><td>Automovil</td><td>AU-LECLNI-082399-0     </td><td>1072223</td><td>PANAMERICAN NETWORK SERVICES, S.A.</td><td>MADECARO, S. A.</td><td>530.28</td><td>46.84</td>
+		</tr><tr>
+			<td>18</td><td>Automovil</td><td>AU-LECLNI-093890-0     </td><td>1390678</td><td>CORRETAJES DEL PAIS, S.A.</td><td>SALTOS DEL  FRANCOLI, S.A.</td><td>721.18</td><td>76.44</td>
+		</tr><tr>
+			<td>19</td><td>Automovil</td><td>AU-LEGL-082697-0       </td><td>846719</td><td>VENTAS, SERVICIOS Y ADMINISTRACION, S.A.</td><td>ICAZA GONZALEZ RUIZ &amp; ALEMAN</td><td>1033.71</td><td>99.63</td>
+		</tr><tr>
+			<td>20</td><td>Automovil</td><td>AU-LENI-071864-0       </td><td>1072223</td><td>PANAMERICAN NETWORK SERVICES, S.A.</td><td>MADECARO, S. A.</td><td>537.50</td><td>47.48</td>
+		</tr><tr>
+			<td>21</td><td>Automovil</td><td>AU-LENI-075882-0       </td><td>1072223</td><td>PANAMERICAN NETWORK SERVICES, S.A.</td><td>MADECARO, S. A.</td><td>580.70</td><td>51.29</td>
+		</tr><tr>
+			<td>22</td><td>Automovil</td><td>AU-LENI-085187-0       </td><td>1072223</td><td>PANAMERICAN NETWORK SERVICES, S.A.</td><td>MADECARO, S. A.</td><td>643.50</td><td>56.84</td>
+		</tr><tr>
+			<td>23</td><td>Automovil</td><td>AU-LENI-088715-0       </td><td>1378125</td><td>AFTA INSURANCE SERVICES. S.A.</td><td>INVERSIONES MARGO, S.A.</td><td>687.20</td><td>60.70</td>
+		</tr><tr>
+			<td>24</td><td>Automovil</td><td>AU-LENI-090168-0       </td><td>1528816</td><td>PASQUEL CASTILLERO JAVIER ENRIQUE</td><td>LA PACORA GROUP, S.A.</td><td>750.07</td><td>66.26</td>
+		</tr><tr>
+			<td>25</td><td>Automovil</td><td>AU-LENI-090597-0       </td><td>1528816</td><td>PASQUEL CASTILLERO JAVIER ENRIQUE</td><td>LA PACORA GROUP, S.A.</td><td>810.05</td><td>67.50</td>
+		</tr><tr>
+			<td>26</td><td>Automovil</td><td>AU-NICO1-066903-0      </td><td>1381795</td><td>UNISEGUROS. S.A.</td><td>GONZALEZ DE GRACIA EVELYN</td><td>490.64</td><td>43.34</td>
+		</tr><tr>
+			<td>27</td><td>Automovil</td><td>AU-NICO1-38309-0       </td><td>1080158</td><td>ARCO SEGUROS, S.A.</td><td>MORENO LEON JORGE RICARDO</td><td>448.10</td><td>39.58</td>
+		</tr><tr>
+			<td>28</td><td>Automovil</td><td>AU-NICO1-47610-0       </td><td>1378125</td><td>AFTA INSURANCE SERVICES. S.A.</td><td>QUIJADA RUIZ MARINA ISABEL</td><td>178.82</td><td>37.91</td>
+		</tr><tr>
+			<td>29</td><td>Automovil</td><td>AU-NICO2-082541-0      </td><td>1388746</td><td>SEGUROS GENERALES, S.A.</td><td>SANCHEZ DILLON ALEXIS JAVIER</td><td>421.05</td><td>37.19</td>
+		</tr><tr>
+			<td>30</td><td>Automovil</td><td>AU-NICO2-49179-0       </td><td>1071910</td><td>SEGUMATICO, S.A.</td><td>MELO ASPRILLA NELKYS ISBETH</td><td>407.83</td><td>36.03</td>
+		</tr><tr>
+			<td>31</td><td>Automovil</td><td>AU-NICO2-58609-0       </td><td>1485036</td><td>MINT GROUP, S.A.</td><td>HERRERA CASTILLO MARLENA MARTINA</td><td>506.83</td><td>44.77</td>
+		</tr><tr>
+			<td>32</td><td>RamosTecnicos</td><td>RT-CAR-001390-0        </td><td>1072851</td><td>L.R. DUCRUET E HIJOS, S.A.</td><td>PRADERAS DEL VALLE DE TANARA, S.A.</td><td>4921.55</td><td>872.67</td>
+		</tr>
+	</table>
+</div></form>

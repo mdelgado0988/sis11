@@ -1,0 +1,274 @@
+<form method="post" action="inteligencia_negocios.aspx" id="ctl00">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="
+__VIEWSTATE" value="" />
+</div>
+<div>
+	<table cellspacing="0" rules="all" border="1" style="border-collapse:collapse;">
+		<caption>
+			GESTOR DE REPORTES
+		<Tr><Th>Compa&#241;ia: ASEGURADORA GLOBAL</Tr></Th><Tr><Th>Fecha de Exportaci&#243;n: 02/11/2026 4:12:22 p.m.</Tr></Th><Tr><Th>Exportado Por: ADMINISTRADOR SISTEMAS</Tr></Th><Tr><Th>Modulo: GESTOR DE REPORTES|RESULTREPORT</Tr></Th></caption><tr align="left" style="background-color:LightCoral;">
+			<th scope="col">Id</th><th scope="col">Codigo Ramo</th><th scope="col">Abreviatura Ramo</th><th scope="col">Ramo</th><th scope="col">Estado Ramo</th><th scope="col">Codigo Plan</th><th scope="col">Abreviatura Plan</th><th scope="col">Plan</th><th scope="col">Estado Plan</th>
+		</tr><tr>
+			<td>1</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>APAM1</td><td>AM1</td><td>Adulto mayor plan 1</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>2</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>APAM2</td><td>AM2</td><td>Adulto mayor plan 2</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>3</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>APFP</td><td>APFP</td><td>AP-FP</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>4</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>EG1</td><td>EG1</td><td>Enfermedades Graves 1</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>5</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>EG2</td><td>EG2</td><td>Enfermedades Graves 2</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>6</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>EG3</td><td>EG3</td><td>Enfermedades Graves 3</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>7</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>EG4</td><td>EG4</td><td>Enfermedades Graves 4</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>8</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>EG5</td><td>EG5</td><td>Enfermedades Graves 5</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>9</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>FERIA</td><td>FERIA</td><td>FERIA AP</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>10</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>PLAN10</td><td>P10</td><td>PLAN 10</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>11</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>PLAN20</td><td>P20</td><td>PLAN 20</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>12</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>PLAN30</td><td>P30</td><td>PLAN 30</td><td>                                                                                                                                                                                                        </td>
+		</tr><tr>
+			<td>13</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>PLAN50</td><td>P50</td><td>PLAN 50</td><td>                                                                                                                                                                                                        </td>
+		</tr><tr>
+			<td>14</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>31_14</td><td>UNICA_CLA</td><td>UNICA CLASICA</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>15</td><td>31</td><td>AP</td><td>Accidentes Personales Individuales</td><td>Vigente</td><td>31_15</td><td>UNICA_PLA</td><td>UNICA PLATINUM</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>16</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>bahia</td><td>BH</td><td>AGENCIA BAHIA MOTOR</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>17</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AGENCIA</td><td>AG</td><td>Agencias</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>18</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>GLA</td><td>GLA</td><td>AUTO GLA</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>19</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>GLB</td><td>GLB</td><td>AUTO GLB</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>20</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>GLC</td><td>GLC</td><td>AUTO GLC</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>21</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>GLD</td><td>GLD</td><td>AUTO GLD</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>22</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>PDP2VEH U$</td><td>GL</td><td>Auto Global</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>23</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>6_22</td><td>AG2</td><td>Auto Global 2</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>24</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>PDP3VEH U$</td><td>CO</td><td>Colaboradores Global</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>25</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>FERIAMS07</td><td>FE</td><td>Feria Motor Show 2007</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>26</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>FERIAMS08</td><td>FE</td><td>Feria Motor Show 2008</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>27</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>6_21</td><td>FE2010</td><td>Feria Motor Show 2010</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>28</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>FNDA</td><td>FN</td><td>FINANCIADA</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>29</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>IL</td><td>IL</td><td>Ilocalizados</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>30</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULECLGLU$</td><td>LECLGL</td><td>Leasing Comercial Liviano Auto Global</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>31</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULECLILU$</td><td>LECLIL</td><td>Leasing Comercial Liviano Ilocalizadas</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>32</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULECLNIU$</td><td>LECLNI</td><td>Leasing Comercial Liviano Nivelados</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>33</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEMEGLU$</td><td>LEMEGL</td><td>Leasing Comercial Mediano Auto Global</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>34</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEMEILU$</td><td>LEMEIL</td><td>Leasing Comercial Mediano Ilocalizadas</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>35</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEMENIU$</td><td>LEMENI</td><td>Leasing Comercial Mediano Nivelados</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>36</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>LEAS-CAS</td><td>LC</td><td>Leasing de Casco</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>37</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>LEAS-RES</td><td>LR</td><td>Leasing de Responsabilidad</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>38</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEGLU$</td><td>LEGL</td><td>Leasing Particular Auto Global</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>39</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEGLA</td><td>LEGL_A</td><td>Leasing Particular Auto Global A</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>40</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEGLB</td><td>LEGL_B</td><td>Leasing Particular Auto Global B</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>41</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEGLC</td><td>LEGL_C</td><td>Leasing Particular Auto Global C</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>42</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEGLD</td><td>LEGL_D</td><td>Leasing Particular Auto Global D</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>43</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULEILU$</td><td>LEIL</td><td>Leasing Particular Ilocalizadas</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>44</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULENIU$</td><td>LENI</td><td>Leasing Particular Niveladas</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>45</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULENIA</td><td>LENIA</td><td>Leasing Particular Niveladas A</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>46</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULENIB</td><td>LENIB</td><td>Leasing Particular Niveladas B</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>47</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULENIC</td><td>LENIC</td><td>Leasing Particular Niveladas C</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>48</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AULENID</td><td>LENID</td><td>Leasing Particular NiveladasD</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>49</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>MOTO</td><td>MT</td><td>Moto</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>50</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>6_23</td><td>NI</td><td>Niveladas</td><td>Anulado                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>51</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>6_24</td><td>NI</td><td>Niveladas</td><td>Anulado                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>52</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>NI</td><td>NI</td><td>Niveladas</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>53</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>NICO1</td><td>NICO1</td><td>NIVELADO CONSUMO 1</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>54</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>NICO2</td><td>NICO2</td><td>NIVELADO CONSUMO 2</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>55</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>NICO3</td><td>NICO3</td><td>NIVELADO CONSUMO 3</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>56</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>NI2011</td><td>NI11</td><td>Nivelado Feria 2011</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>57</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>PT</td><td>PT</td><td>P&#233;rdida Total</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>58</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>NI11</td><td>NI11</td><td>Plan Nivelada Feria 2011</td><td>Anulado                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>59</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>TRANS-LIV</td><td>TL</td><td>PLAN TRANSPORTE LIVIANO</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>60</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>T-LIV-NIV</td><td>LN</td><td>PLAN TRANSPORTE LIVIANO NIVELADO</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>61</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>TRANS-PES</td><td>TP</td><td>PLAN TRANSPORTE PESADO</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>62</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>T-PES-NIV</td><td>PN</td><td>PLAN TRANSPORTE PESADO NIVELADO</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>63</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>RETENCION</td><td>RE</td><td>Retenci&#243;n</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>64</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>OB-EFEC</td><td>OB</td><td>Seguro obligatorio con otros pagos.</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>65</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>OV-VISA</td><td>OV</td><td>Seguro obligatorio con Visa Global Bank</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>66</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>SOAT</td><td>SOAT</td><td>SEGURO OBLIGATORIO SOAT</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>67</td><td>6</td><td>AU     </td><td>Automovil</td><td>Vigente</td><td>AUTRANI$</td><td>TRANI</td><td>Transportistas Nivelado</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>68</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>Basico Vid</td><td>CV</td><td>***NO USAR ESTE PLAN</td><td>                                                                                                                                                                                                        </td>
+		</tr><tr>
+			<td>69</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>20_7</td><td>CV_BW</td><td>Colectivo de Vida 2016-1</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>70</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>20_4</td><td>CR</td><td>CREDITOS</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>71</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>vid-desemp</td><td>CVD</td><td>DESGRAVAMEN (GLOBAL BANK)</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>72</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>GAP</td><td>GAP</td><td>GAP PROGRESO</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>73</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>TAR_PRO2</td><td>TAR_PRO</td><td>Tarjeta de Cr&#233;dito Protegida</td><td>                                                                                                                                                                                                        </td>
+		</tr><tr>
+			<td>74</td><td>20</td><td>CV</td><td>Colectivo de Vida</td><td>Vigente</td><td>20_3</td><td>XL COLECTIVO DE EMPLEADOS</td><td>XL COLECTIVO DE EMPLEADOS</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>75</td><td>81</td><td>FC</td><td>Fianzas de Construcci&#243;n</td><td>Vigente</td><td>FIAGCCAC</td><td>GCOA</td><td>Gar. Cumplimiento Obras Autoridad Canal</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>76</td><td>81</td><td>FC</td><td>Fianzas de Construcci&#243;n</td><td>Vigente</td><td>FIAGCCOG</td><td>GCOG</td><td>Gar. Cumplimiento Obras Gobierno</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>77</td><td>81</td><td>FC</td><td>Fianzas de Construcci&#243;n</td><td>Vigente</td><td>FIAGCCOP</td><td>GCOP</td><td>Gar. Cumplimiento Obras Privado</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>78</td><td>81</td><td>FC</td><td>Fianzas de Construcci&#243;n</td><td>Vigente</td><td>ANTICIPO</td><td>A</td><td>Garant&#237;a Anticipo</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>79</td><td>81</td><td>FC</td><td>Fianzas de Construcci&#243;n</td><td>Vigente</td><td>PAGO</td><td>PA</td><td>Garant&#237;a Pago</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>80</td><td>81</td><td>FC</td><td>Fianzas de Construcci&#243;n</td><td>Vigente</td><td>PROPUESTA</td><td>PR</td><td>Garant&#237;a Propuesta</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>81</td><td>82</td><td>FJ</td><td>Fianzas Judiciales</td><td>Vigente</td><td>JUD_BAS</td><td>FJ</td><td>Judiciales (B&#225;sica)</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>82</td><td>82</td><td>FJ</td><td>Fianzas Judiciales</td><td>Vigente</td><td>JUD_COB</td><td>FJ</td><td>Judiciales (Dep. Cobros)</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>83</td><td>82</td><td>FJ</td><td>Fianzas Judiciales</td><td>Vigente</td><td>JUD_LEG</td><td>FJ</td><td>Judiciales (Dep. Legal)</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>84</td><td>82</td><td>FJ</td><td>Fianzas Judiciales</td><td>Vigente</td><td>JUD_IS</td><td>FJ</td><td>Judiciales (IS)</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>85</td><td>84</td><td>FM</td><td>Fianzas Miscelaneas</td><td>Vigente</td><td>FIAMIS1</td><td>FM</td><td>Miscelaneas (B&#225;sico)</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>86</td><td>84</td><td>FM</td><td>Fianzas Miscelaneas</td><td>Vigente</td><td>84_2</td><td>GB</td><td>Miscelaneas-Global Bank</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>87</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>FCSBAC</td><td>BAC</td><td>Cumplimiento Bienes Autoridad Canal</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>88</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>CBESPECIAL</td><td>CBCE</td><td>CUMPLIMIENTO BIENES- CLIENTES ESPECIALES</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>89</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>FCSBG</td><td>BG</td><td>Cumplimiento Bienes Gobierno</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>90</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>FCSBP</td><td>BP</td><td>Cumplimiento Bienes Privados</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>91</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>ANTICIPO</td><td>AN</td><td>Garantia de Anticipo</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>92</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>PAGO</td><td>PA</td><td>Garantia de Pago</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>93</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>PROPUESTA</td><td>PR</td><td>Garantia de Propuesta</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>94</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>GPESPECIAL</td><td>GPCE</td><td>GARANTIA DE PROPUESTA &#251; CLIENTES ESPECIALES</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>95</td><td>83</td><td>FS</td><td>Fianzas Suministro</td><td>Vigente</td><td>PROP - GA</td><td>PR</td><td>PROPUESTA- Grupo Astor</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>96</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>CAPAC 08</td><td>FE08</td><td>EXPOCAPAC 2008</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>97</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>1_8</td><td>FE09</td><td>FERIA EXPO CAPAC 2009</td><td>Anulado                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>98</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>Basico Inc</td><td>BA</td><td>Incendio B&#225;sico</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>99</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>BPVC</td><td>BPVC</td><td>Incendio BPVC</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>100</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>BPVL</td><td>BPVL</td><td>Incendio BPVL</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>101</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>BPVR</td><td>BPVR</td><td>Incendio BPVR</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>102</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>INC_cont</td><td>CN</td><td>Incendio Contenido</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>103</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>INC_MEJO</td><td>MJ</td><td>Incendio de Mejoras</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>104</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>INC_EDIF</td><td>ED</td><td>Incendio Edificio</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>105</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>INC_Elect</td><td>EE</td><td>Incendio Equipo Electr&#243;nico</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>106</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>INFE2011</td><td>FE2011</td><td>Incendio Feria 2011</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>107</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>IN-FERIAMR</td><td>FE2012</td><td>Incendio Feria 2012</td><td>Anulado                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>108</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>1_9</td><td>GL</td><td>Incendio Global</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>109</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>1_10</td><td>IL</td><td>Incendio Ilocalizada</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>110</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>INC_letr</td><td>LT</td><td>Incendio Letrero</td><td>Suspendido                                                                                                                                                                                              </td>
+		</tr><tr>
+			<td>111</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>MGLOBAL</td><td>MGLOBAL</td><td>MULTIRIESGO GLOBAL</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>112</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>MULTI</td><td>MULTI</td><td>Multiriesgo Residencial</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>113</td><td>1</td><td>IN</td><td>Incendio</td><td>Vigente</td><td>1_17</td><td>MUL-CONT</td><td>Multiriesgo Residencial Full</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>114</td><td>96</td><td>RT</td><td>RamosTecnicos</td><td>Vigente</td><td>CAR</td><td>CAR</td><td>CAR</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>115</td><td>96</td><td>RT</td><td>RamosTecnicos</td><td>Vigente</td><td>EE</td><td>EE</td><td>Equipo Electronico</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>116</td><td>96</td><td>RT</td><td>RamosTecnicos</td><td>Vigente</td><td>MQ</td><td>MQ</td><td>Equipo y maquinaria</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>117</td><td>96</td><td>RT</td><td>RamosTecnicos</td><td>Vigente</td><td>RM</td><td>RM</td><td>Rotura Y Maquinaria</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>118</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>CREDITO</td><td>CR</td><td>Credito</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>119</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>52_8</td><td>CE</td><td>CYBER EDGE</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>120</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>FRAUDE</td><td>FR</td><td>Fraude Tarjetas</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>121</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>52-6</td><td>3D</td><td>Infidelidad de Empleados</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>122</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>52_3</td><td>BBB</td><td>POLIZA BANCARIA</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>123</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>52_4</td><td>RCE</td><td>R.C. Extracontractual</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>124</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>RD</td><td>RD</td><td>RIESGOS DIVERSOS</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>125</td><td>52</td><td>RV</td><td>Riesgos Varios</td><td>Vigente</td><td>52_5</td><td>BON</td><td>SEGURO PARA OFERTA PUBLICA DE VALORES</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>126</td><td>71</td><td>VI     </td><td>Vida Individual</td><td>Vigente</td><td>71_1</td><td>&nbsp;</td><td>Individual</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>127</td><td>71</td><td>VI     </td><td>Vida Individual</td><td>Vigente</td><td>PP1</td><td>PP1</td><td>Producto pr&#233;stamos personales Plan 1</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>128</td><td>71</td><td>VI     </td><td>Vida Individual</td><td>Vigente</td><td>PP2</td><td>PP2</td><td>Producto pr&#233;stamos personales Plan 2</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>129</td><td>71</td><td>VI     </td><td>Vida Individual</td><td>Vigente</td><td>TAR_PRO</td><td>TAR_PRO</td><td>Tarjeta de Cr&#233;dito Protegida</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr><tr>
+			<td>130</td><td>200</td><td>VT</td><td>Vida Temporal</td><td>Vigente</td><td>200_1</td><td>Temp</td><td>Temporal</td><td>Vigente                                                                                                                                                                                                 </td>
+		</tr>
+	</table>
+</div></form>

@@ -58,10 +58,17 @@ for (let i = 0; i < rows.length; i++) {
   sumMovement = money(sumMovement + sv);
 }
 
-doCmd({ cmd: 'RepoLifePolicy', data: { operation: 'GET', filter: 'id=' + policyId, include: ['Coverages'], size: 1 } });
+doCmd({ cmd: 'RepoLifePolicy', data: { operation: 'GET', filter: 'id=' + policyId, include: ['Coverages', 'CoinsuranceCessions'], size: 1 } });
 const policy = (RepoLifePolicy.outData || [])[0];
 if (!policy) throw 'Poliza ' + policyId + ' no encontrada';
 const useSuretyContractCapacity = suretyContractCapacity && suretyLobs[txt(policy.lob)] === true;
+// MSN-000129 (AXX-7058): con coaseguro de poliza (modo distinto de 3) la capacidad de fianzas se evalua y reparte
+// sobre la base neta de coaseguro, como en la emision (contrato CPF y motor: coRetention). Sin esto la simulacion
+// repartia la suma y la prima brutas y la vista sumaba el coaseguro encima (160 % con 60 % de coaseguro).
+const coinsuranceMode = Number(policy.coinsurance || 0) || 0;
+const coinsuranceRetained = policy.coRetention === undefined || policy.coRetention === null ? 100 : Number(policy.coRetention);
+const coinsuranceNetFactor = useSuretyContractCapacity && coinsuranceMode > 0 && coinsuranceMode !== 3
+  && coinsuranceRetained >= 0 && coinsuranceRetained < 100 ? coinsuranceRetained / 100 : 1;
 
 // La marca isCoverage pertenece a una tabla distinta por ramo. Usar siempre
 // la de Fianza deja sin marca las coberturas de Técnicos (por ejemplo CAR).
@@ -242,12 +249,13 @@ if (facultativeMovementOnly) {
     // La capacidad de la reduccion debe usar la misma base que se presenta
     // en la distribucion final. Los importes de Cession se pueden repetir
     // entre lineas complementarias y permitirian reducir FAC bajo cero.
+    // Con coaseguro de poliza esa base y el movimiento son la parte neta.
     const initialPremium = finalPremium[code] === null
       ? null
-      : money(Number(finalPremium[code] || 0) - Number(delta[code] || 0));
+      : money((Number(finalPremium[code] || 0) - Number(delta[code] || 0)) * coinsuranceNetFactor);
     const initialSum = finalSum[code] === null
       ? null
-      : money(Number(finalSum[code] || 0) - Number(sumDelta[code] || 0));
+      : money((Number(finalSum[code] || 0) - Number(sumDelta[code] || 0)) * coinsuranceNetFactor);
     const availableComponent = function (cession, field) {
       const isPremium = field === 'premiumCedant' || field === 'premiumRe';
       const baseValue = isPremium ? initialPremium : initialSum;
@@ -278,10 +286,12 @@ if (facultativeMovementOnly) {
         allocateReduction(tokens, remaining);
       }
     };
-    if (Number(delta[code]) >= 0) addToFirstFacultative('premiumRe', Number(delta[code] || 0));
-    else distributeReduction('premiumRe', delta[code]);
-    if (Number(sumDelta[code]) >= 0) addToFirstFacultative('sumInsuredRe', Number(sumDelta[code] || 0));
-    else distributeReduction('sumInsuredRe', sumDelta[code]);
+    const netDelta = money(Number(delta[code] || 0) * coinsuranceNetFactor);
+    const netSumDelta = money(Number(sumDelta[code] || 0) * coinsuranceNetFactor);
+    if (netDelta >= 0) addToFirstFacultative('premiumRe', netDelta);
+    else distributeReduction('premiumRe', netDelta);
+    if (netSumDelta >= 0) addToFirstFacultative('sumInsuredRe', netSumDelta);
+    else distributeReduction('sumInsuredRe', netSumDelta);
   });
 }
 
@@ -338,7 +348,7 @@ if (useSuretyContractCapacity) {
       };
     }).filter(function (coverage) { return coverage.id > 0; });
     if (!allCoverages.length || !item.coverageId) return;
-    const rea = doCmd({ cmd: 'ExeChain', data: { chain: 'cmdConfiguracionReaseguroPorSuma', context: JSON.stringify({
+    const capacityRequest = {
       CodigoContrato: contractCodeById[item.contractId],
       PolizaId: policyId,
       CoberturaId: item.coverageId,
@@ -346,7 +356,18 @@ if (useSuretyContractCapacity) {
       Suma: Number(finalSum[item.code] || 0),
       Prima: Number(finalPremium[item.code] || 0),
       Coberturas: allCoverages
-    }) } });
+    };
+    if (coinsuranceNetFactor !== 1) {
+      // La cadena netea el coaseguro de cada cobertura con el porcentaje retenido (reparto al centavo de
+      // MSN-000070); Suma y Prima quedan como base neta por si reparte por cobertura.
+      capacityRequest.Suma = money(Number(finalSum[item.code] || 0) * coinsuranceNetFactor);
+      capacityRequest.Prima = money(Number(finalPremium[item.code] || 0) * coinsuranceNetFactor);
+      capacityRequest.SumaCoaseguro = money(Number(finalSum[item.code] || 0) - capacityRequest.Suma);
+      capacityRequest.PrimaCoaseguro = money(Number(finalPremium[item.code] || 0) - capacityRequest.Prima);
+      capacityRequest.ModoCoaseguro = coinsuranceMode;
+      capacityRequest.PorcentajeRetenido = coinsuranceRetained;
+    }
+    const rea = doCmd({ cmd: 'ExeChain', data: { chain: 'cmdConfiguracionReaseguroPorSuma', context: JSON.stringify(capacityRequest) } });
     let result = rea && rea.outData;
     if (typeof result === 'string') result = JSON.parse(result);
     if (Array.isArray(result)) result = result[0];
@@ -660,7 +681,8 @@ for (let i = 0; i < base.length; i++) {
     // Las coberturas que no participan de la suma del contrato conservan una
     // suma tecnica, pero su colocacion se valida exclusivamente por prima.
     const placementUsesSum = counts === true && Number(finalSum[code] || 0) !== 0;
-    const placementBase = placementUsesSum ? Number(finalSum[code] || 0) : Number(finalPremium[code] || 0);
+    // Con coaseguro de poliza la colocacion se mide contra la base neta que se reparte.
+    const placementBase = (placementUsesSum ? Number(finalSum[code] || 0) : Number(finalPremium[code] || 0)) * coinsuranceNetFactor;
     pCed = placementBase ? (placementUsesSum ? finalSumCedant / placementBase : finalCedant / placementBase) : 0;
     pRe = placementBase ? (placementUsesSum ? finalSumRe / placementBase : finalRe / placementBase) : 0;
     nonTechnical = 0;

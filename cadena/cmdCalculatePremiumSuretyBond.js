@@ -334,9 +334,37 @@ function setInsuredObject() {
 
   oaUserData.cobtar = oaUserData.hiddenCobtar ? JSON.parse(oaUserData.hiddenCobtar) : [];  
   oaUserData.cobtar = normalizeArray(oaUserData.cobtar);
+  // MSN-000124 (AXX-7003): tarifas de entrada de las coberturas que incluye la vista 61
+  aplicarCobtarInclusion();
 
 }
 
+
+/*
+  *MSN-000124 (AXX-7003) - Inclusión de coberturas (vista 61 InclusionCobertura)
+  *En el endoso ChangeAddCoverage que manda la vista con jAdditional.endorsementType INCLUSIONCOBERTURA,
+  *jAdditional.cobtar trae las tarifas de entrada de las coberturas que se incluyen, con el mismo formato que
+  *hiddenCobtar (F. Inicial, Duración Días, SA, Porcentajes). El objeto asegurado guardado todavía no las tiene:
+  *se suman a su lectura sólo para esas coberturas, y la cotización y el endoso salen con las fechas, la suma y la
+  *prima de lo que el usuario digitó. Las filas guardadas de las demás coberturas no cambian. Sin ese marcador no hace nada.
+*/
+function aplicarCobtarInclusion() {
+  if (String(action || poliza.action || "").toLowerCase() !== "changeaddcoverage") return;
+  const adicional = parseChangeObject(getChangeData().jAdditional || poliza.jAdditional);
+  if (String(adicional.endorsementType || "") !== "INCLUSIONCOBERTURA") return;
+  let filas = adicional.cobtar;
+  if (typeof filas === "string") {
+    try { filas = JSON.parse(filas); } catch (errorFilas) { return; }
+  }
+  if (!Array.isArray(filas) || !filas.length) return;
+  const nuevas = normalizeArray(filas.filter(fila => fila && typeof fila === "object"))
+    .filter(fila => String(fila.COVERAGECODE ?? "").trim() !== "");
+  if (!nuevas.length) return;
+  const codigos = nuevas.map(fila => String(fila.COVERAGECODE).trim());
+  oaUserData.cobtar = (oaUserData.cobtar || [])
+    .filter(fila => codigos.indexOf(String(fila.COVERAGECODE ?? "").trim()) < 0)
+    .concat(nuevas);
+}
 function setResultCoverages() {
   for (let cov of poliza.Coverages) {
     resultCoverages.push({ code: cov.code.toString(), limit: 0, premium: 0, dedutible: 0, description: "" });    

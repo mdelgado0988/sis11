@@ -1,0 +1,30 @@
+<form method="post" action="inteligencia_negocios.aspx" id="ctl00">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="
+__VIEWSTATE" value="" />
+</div>
+<div>
+	<table cellspacing="0" rules="all" border="1" style="border-collapse:collapse;">
+		<caption>
+			GESTOR DE REPORTES
+		<Tr><Th>Compa&#241;ia: ASEGURADORA GLOBAL</Tr></Th><Tr><Th>Fecha de Exportaci&#243;n: 02/11/2026 3:54:58 p.m.</Tr></Th><Tr><Th>Exportado Por: ADMINISTRADOR SISTEMAS</Tr></Th><Tr><Th>Modulo: GESTOR DE REPORTES|RESULTREPORT</Tr></Th></caption><tr align="left" style="background-color:LightCoral;">
+			<th scope="col">Id</th><th scope="col">A&#241;o_Mes_Solicitud</th><th scope="col">N_Solicitud</th><th scope="col">Id_Personal</th><th scope="col">Id_Asegurado</th><th scope="col">Beneficiario</th><th scope="col">Id_Transaccion</th><th scope="col">Tipo_Movimiento</th><th scope="col">Concepto</th><th scope="col">F_Impresion</th><th scope="col">E_Solicitud</th><th scope="col">Monto_Pago</th><th scope="col">Monto_Retenido</th><th scope="col">Monto_Impuesto</th><th scope="col">Monto_Deducible</th><th scope="col">Monto_Cheque</th><th scope="col">Poliza</th><th scope="col">N_Siniestro</th><th scope="col">Id_Cuenta_Banco</th><th scope="col">Numero_Cheque</th><th scope="col">Cuenta_Banco_Descripcion</th><th scope="col">N_Comprobante</th><th scope="col">F_Ingreso</th>
+		</tr><tr>
+			<td>1</td><td>202512</td><td>125815</td><td>08-0464-00938</td><td>1078847</td><td>NAGAKANE RODRIGUEZ FRANCISCO JAVIER</td><td>11</td><td>CK</td><td>PAGO TOTAL Y DEFINITIVO AL ASEGURADO EN CONCEPTO DE LA REPARACI&#211;N DEL AUTO: H. ACCENT; P. AZ6500; R-AU-37951; MENOS DEDUCIBLE</td><td>03/12/2025</td><td>A</td><td>1463.1000</td><td>0.0000</td><td>0.0000</td><td>272.5000</td><td>1190.6000</td><td>AU-GL-051946-0</td><td>37951</td><td>01101222053</td><td>99999</td><td>01101222053</td><td>1874</td><td>20251201  </td>
+		</tr><tr>
+			<td>2</td><td>202512</td><td>125830</td><td>02-0086-02470</td><td>1563214</td><td>OSES MARIA ELEIZA</td><td>11</td><td>CK</td><td>PAGO TOTAL Y DEFINTIVO AL AFECTADO EN CONCEPTO DE LA REPARACION DEL AUTO T. YARIS; P. CG1401; R-AU-43898; ASEG: JOSE HENAO.</td><td>02/12/2025</td><td>A</td><td>325.6800</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>325.6800</td><td>AU-GLB-093438-0</td><td>43898</td><td>01101222053</td><td>26034</td><td>01101222053</td><td>383</td><td>20251201  </td>
+		</tr><tr>
+			<td>3</td><td>202512</td><td>125832</td><td>20240000000</td><td>1073976</td><td>TRANSPORTE MASIVO DE PANAMA, S.A.</td><td>11</td><td>CK</td><td>PAGO TOTAL Y DEFINITIVO AL AFECTADO EN CONCEPTO DE LA REPARACION DEL BUS VOLVO; P. MB0690; R-AU-44023; ASEG: EMMA BATISTA.</td><td>02/12/2025</td><td>A</td><td>175.5500</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>175.5500</td><td>AU-NICO1-71701-0</td><td>44023</td><td>01101222053</td><td>26035</td><td>01101222053</td><td>384</td><td>20251201  </td>
+		</tr><tr>
+			<td>4</td><td>202512</td><td>125851</td><td>000023-000579-0019</td><td>1030337</td><td>ASOCIACION PANAME&#209;A DE ASEGURADORES</td><td>781</td><td>CK</td><td>PAGO DE CUOTA DEL MES DE DICIEMBRE 2025 A ASOCIACION PANAME&#209;A DE ASEGURADORES</td><td>03/12/2025</td><td>A</td><td>1200.0000</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>1200.0000</td><td>&nbsp;</td><td>0</td><td>01101222053</td><td>99999</td><td>01101222053</td><td>1875</td><td>20251202  </td>
+		</tr><tr>
+			<td>5</td><td>202512</td><td>125852</td><td>0691461-0001-466461</td><td>1430456</td><td>AXXIS SYSTEMS S A</td><td>804</td><td>CK</td><td>ACH-PAGO DE FACT. 0050 CONTRATO DE MANTENIMIENTO SIS Y CONTRATO  OUTSORCING PERSONAL - DICIEMBRE 2025 A AXXIS SYSTEMS S A</td><td>03/12/2025</td><td>A</td><td>7433.3700</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>7433.3700</td><td>&nbsp;</td><td>0</td><td>01101222053</td><td>99999</td><td>01101222053</td><td>1876</td><td>20251202  </td>
+		</tr><tr>
+			<td>6</td><td>202512</td><td>125853</td><td>2664581-0001-842655</td><td>1383482</td><td>SOFISTIC S.A.</td><td>804</td><td>CK</td><td>PAGO DE FACT. No. 699 POR MANTENIMIENTO DE PAGINA WEB ASEGURADORA GLOBAL - DICIEMBRE 2025 A SOFISTIC S.A.</td><td>03/12/2025</td><td>A</td><td>393.3000</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>393.3000</td><td>&nbsp;</td><td>0</td><td>01101222053</td><td>99999</td><td>01101222053</td><td>1877</td><td>20251202  </td>
+		</tr><tr>
+			<td>7</td><td>202512</td><td>125854</td><td>0432117-0454805</td><td>1024111</td><td>ASEGURADORA GLOBAL, S.A.</td><td>815</td><td>CK</td><td>PAGO DE PROMOCI&#211;N - PRIMA GRATIS P&#211;LIZAS EG (442.15) &amp; GL (13757.79) AL 01 DE DICIEMBRE 2025 SEG&#218;N CORREO ADJUNTO A ASEGURADORA GLOBAL, S.A.</td><td>02/12/2025</td><td>A</td><td>14199.9400</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>14199.9400</td><td>&nbsp;</td><td>0</td><td>01101222053</td><td>99999</td><td>01101222053</td><td>387</td><td>20251202  </td>
+		</tr><tr>
+			<td>8</td><td>202512</td><td>125855</td><td>0000008-0001-013621</td><td>971676</td><td>TESORO NACIONAL (454805-1-432117)</td><td>982</td><td>CK</td><td>PAGO DE IMPUESTO - RETENCI&#211;N DEL 50% DEL ITBMS CORRESPONDIENTE AL MES DE NOVIEMBRE 2025 A TESORO NACIONAL (454805-1-432117)</td><td>03/12/2025</td><td>A</td><td>5266.8100</td><td>0.0000</td><td>0.0000</td><td>0.0000</td><td>5266.8100</td><td>&nbsp;</td><td>0</td><td>01101222053</td><td>26036</td><td>01101222053</td><td>1863</td><td>20251202  </td>
+		</tr>
+	</table>
+</div></form>

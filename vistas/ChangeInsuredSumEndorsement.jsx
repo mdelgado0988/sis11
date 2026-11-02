@@ -1153,7 +1153,9 @@
   }
 
   function closeEnough(left, right) {
-    return Math.abs(money(left) - money(right)) <= 0.01;
+    // Tolerancia de un centavo, comparada en centavos enteros: la resta binaria
+    // de dos importes que difieren justo un centavo da 0.0100000016 y fallaba.
+    return Math.abs(Math.round(money(left) * 100) - Math.round(money(right) * 100)) <= 1;
   }
 
   function percentageCloseTo100(value) {
@@ -4199,20 +4201,20 @@
       const routesMovementToFacultative = g && hasFacultativeMovementOnly(g);
       // En fianzas las coberturas dependientes conservan su suma individual
       // para validar y persistir, pero no deben volver a sumarse en el
-      // resumen de la linea. La suma visual se toma de la cobertura principal
-      // (`counts === true`); la prima si se acumula por cobertura.
-      const capacitySummaryRow = usesSuretyContractCapacity() && g
-        ? ((g.rows || []).find(function (row) {
-          return row.contractCapacityAllocation === true && row.counts === true;
-        }) || (g.rows || []).find(function (row) {
-          return row.contractCapacityAllocation === true;
-        }))
-        : null;
-      const summarySumCedant = capacitySummaryRow
-        ? numberFrom(capacitySummaryRow, ['sumInsuredCedant'])
+      // resumen de la linea. La suma visual se toma de las coberturas que
+      // suman al contrato (`counts === true`, por ejemplo 303 y 313, igual que
+      // la suma del contrato); la prima si se acumula por cobertura.
+      const countedCapacityRows = capacityRows.filter(function (row) {
+        return row.counts === true;
+      });
+      const capacitySummaryRows = usesSuretyContractCapacity() && g
+        ? (countedCapacityRows.length ? countedCapacityRows : capacityRows.slice(0, 1))
+        : [];
+      const summarySumCedant = capacitySummaryRows.length
+        ? capacitySummaryRows.reduce(function (sum, row) { return sum + numberFrom(row, ['sumInsuredCedant']); }, 0)
         : numberFrom(totals, ['sumCedant']);
-      const summarySumRe = capacitySummaryRow
-        ? numberFrom(capacitySummaryRow, ['sumInsuredRe'])
+      const summarySumRe = capacitySummaryRows.length
+        ? capacitySummaryRows.reduce(function (sum, row) { return sum + numberFrom(row, ['sumInsuredRe']); }, 0)
         : numberFrom(totals, ['sumRe']);
       const finalPremiumRet = isRetention
         ? (routesMovementToFacultative ? numberFrom(totals, ['cedant']) : groupTotalPremium * reinsuranceBaseFactorForContract(contract) * retentionPercentage / 100)
