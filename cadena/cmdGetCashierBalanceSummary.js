@@ -6,8 +6,8 @@
  * @author Michael Delgado
  * @created 2026/09/21
  * @version 1.0
- * @purpose Return the cashier income summary with a consistent deposit sign
- * and normalized available balance.
+ * @purpose Preserve native signed cashier amounts and deposits;
+ * expose the pending balance as amount + deposit.
  * @context: { workspaceId: number }
  */
 
@@ -53,15 +53,15 @@ try {
 function normalizeRow(row, index) {
   const source = row && typeof row === 'object' ? row : {};
   const amount = toNumber(source.amount);
-  const deposit = Math.abs(toNumber(source.deposit));
+  const deposit = toNumber(source.deposit);
   const cashFund = toNumber(source.cashFund);
-  const availableBalance = Math.max(0, Math.abs(amount) - deposit + cashFund);
+  const availableBalance = amount + deposit;
 
   return {
     ...source,
     code: text(source.code) || `balance-${index}`,
     amount: amount,
-    deposit: deposit === 0 ? 0 : -deposit,
+    deposit: deposit,
     cashFund: cashFund,
     dif: availableBalance,
     difference: availableBalance,

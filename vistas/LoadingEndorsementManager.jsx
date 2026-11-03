@@ -3415,8 +3415,8 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
 
     function validateDiscountPercentage(value) {
         const percentage = Number(value);
-        if (Number.isFinite(percentage) && percentage <= -100) {
-            throw new Error('El descuento total no puede ser mayor o igual al 100%.');
+        if (Number.isFinite(percentage) && percentage < -100) {
+            throw new Error('El descuento total no puede ser mayor al 100%.');
         }
     }
 

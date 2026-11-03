@@ -254,7 +254,6 @@
   const [depositVisible, setDepositVisible] = React.useState(false);
   const [depositSubmitting, setDepositSubmitting] = React.useState(false);
   const [depositForm] = Form.useForm();
-  const [depositExpectedAmount, setDepositExpectedAmount] = React.useState(0);
   const [uniqueDeposit, setUniqueDeposit] = React.useState(true);
   const [newIncomeForm] = Form.useForm();
   const [activeTab, setActiveTab] = React.useState('cash-desks');
@@ -5509,22 +5508,11 @@
       && getTrimmedString(item && item.currency).toUpperCase() === selectedCurrency
     );
 
-    if (!row) return 0;
-
-    const amount = Math.abs(getAuditNumber(row.amount));
-    const deposit = Math.abs(getAuditNumber(row.deposit));
-    const cashFund = getAuditNumber(row.assignedFund);
-
-    // The summary can return the movement amount with either accounting sign.
-    // A deposit always reduces the amount available for a new deposit.
-    return Math.max(0, amount - deposit + cashFund);
+    return getBalanceAvailableAmount(row);
   }
 
   function getBalanceAvailableAmount(row) {
-    const amount = Math.abs(getAuditNumber(row && row.amount));
-    const deposit = Math.abs(getAuditNumber(row && row.deposit));
-    const cashFund = getAuditNumber(row && row.assignedFund);
-    return Math.max(0, amount - deposit + cashFund);
+    return getAuditNumber(row && row.amount) + getAuditNumber(row && row.deposit);
   }
 
   function getUniqueDepositRows(currency) {
@@ -5537,11 +5525,27 @@
         paymentMethod: getTrimmedString(row && (row.paymentMethodCode || row.paymentMethod))
       }))
       .filter(item => getTrimmedString(item.row && item.row.currency).toUpperCase() === selectedCurrency)
-      .filter(item => item.amount > 0 && item.paymentMethod);
+      .filter(item => item.amount !== 0 && item.paymentMethod);
   }
 
   function getUniqueDepositExpectedAmount(currency) {
     return getUniqueDepositRows(currency).reduce((total, item) => total + item.amount, 0);
+  }
+
+  function getDepositPaymentMethodOptions() {
+    const options = [];
+    balanceRows.forEach(row => {
+      const code = getTrimmedString(row && (row.paymentMethodCode || row.paymentMethod));
+      if (!code || getBalanceAvailableAmount(row) === 0
+        || options.some(option => option.value.toUpperCase() === code.toUpperCase())) return;
+      const method = allPaymentMethodOptions.find(option =>
+        getTrimmedString(option && option.value).toUpperCase() === code.toUpperCase());
+      options.push({
+        value: code,
+        label: (method && method.label) || getTrimmedString(row && row.paymentMethod) || code
+      });
+    });
+    return options;
   }
 
   function openNewDepositModal() {
@@ -5560,7 +5564,6 @@
       reference: ''
     });
     setUniqueDeposit(true);
-    setDepositExpectedAmount(expectedAmount);
     setDepositVisible(true);
   }
 
@@ -5570,7 +5573,6 @@
       ? getUniqueDepositExpectedAmount(allValues && allValues.currency)
       : getDepositExpectedAmount(allValues && allValues.paymentMethod, allValues && allValues.currency);
     const depositedAmount = getAuditNumber(allValues && allValues.amount);
-    setDepositExpectedAmount(expectedAmount);
     depositForm.setFieldsValue({
       expectedAmount: expectedAmount,
       difference: expectedAmount - depositedAmount
@@ -5601,7 +5603,6 @@
       ? getUniqueDepositExpectedAmount(currency)
       : getDepositExpectedAmount(paymentMethod, currency);
     const depositedAmount = getAuditNumber(depositForm.getFieldValue('amount'));
-    setDepositExpectedAmount(expectedAmount);
     depositForm.setFieldsValue({
       uniqueDeposit: checked,
       paymentMethod: checked ? undefined : paymentMethod,
@@ -5614,7 +5615,6 @@
     if (depositSubmitting) return;
     setDepositVisible(false);
     depositForm.resetFields();
-    setDepositExpectedAmount(0);
   }
 
   async function createDeposit(values) {
@@ -5622,7 +5622,8 @@
     setDepositSubmitting(true);
 
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
-    const amount = getAuditNumber(values && values.amount);
+    const enteredAmount = values && values.amount;
+    const amount = Number(enteredAmount);
     const isUniqueDeposit = values && values.uniqueDeposit !== false;
 
     if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
@@ -5631,8 +5632,9 @@
       return;
     }
 
-    if (amount <= 0) {
-      message.warning(t('Enter a deposited amount greater than zero.'));
+    if (enteredAmount === undefined || enteredAmount === null || enteredAmount === ''
+      || !Number.isFinite(amount)) {
+      message.warning(t('Enter the deposited amount.'));
       setDepositSubmitting(false);
       return;
     }
@@ -5647,12 +5649,34 @@
       setDepositSubmitting(false);
       return;
     }
-    if (expectedAmount <= 0) {
+    const depositRows = isUniqueDeposit
+      ? getUniqueDepositRows(currency)
+      : [{
+        row: null,
+        amount: expectedAmount,
+        paymentMethod: paymentMethod
+      }];
+    if (depositRows.length === 0 || (!isUniqueDeposit && expectedAmount === 0)) {
       message.warning(t('There is no available balance for the selected deposit.'));
       setDepositSubmitting(false);
       return;
     }
-    if (amount > expectedAmount + 0.01) {
+
+    const isFullDeposit = Math.abs(amount - expectedAmount) < 1e-8;
+    const hasMixedSigns = depositRows.some(row => row.amount > 0)
+      && depositRows.some(row => row.amount < 0);
+    // Mixed-sign partial allocations have no defined accounting allocation rule.
+    if (isUniqueDeposit && hasMixedSigns && !isFullDeposit) {
+      message.warning(t('Hay saldos de signos distintos. Use el saldo completo o deposite por método de pago.'));
+      setDepositSubmitting(false);
+      return;
+    }
+    if (!isFullDeposit && (amount === 0 || Math.sign(amount) !== Math.sign(expectedAmount))) {
+      message.warning(t('El importe debe tener el mismo signo que el saldo disponible y no puede ser cero.'));
+      setDepositSubmitting(false);
+      return;
+    }
+    if (!isFullDeposit && Math.abs(amount) > Math.abs(expectedAmount)) {
       message.warning(t('The deposited amount cannot exceed the expected amount.'));
       setDepositSubmitting(false);
       return;
@@ -5667,29 +5691,18 @@
 
       const incomeType = getTrimmedString(values && values.incomeType);
       const concept = getTrimmedString(values && values.reference);
-      const depositRows = isUniqueDeposit
-        ? getUniqueDepositRows(currency)
-        : [{
-          row: null,
-          amount: expectedAmount,
-          paymentMethod: paymentMethod
-        }];
-
-      if (depositRows.length === 0) {
-        message.warning(t('There are no balances available for the selected currency.'));
-        setDepositSubmitting(false);
-        return;
-      }
 
       let remainingAmount = amount;
       const responses = [];
 
       for (const depositRow of depositRows) {
-        if (remainingAmount <= 0) break;
+        if (!isFullDeposit && Math.abs(remainingAmount) < 1e-8) break;
 
-        const rowAmount = isUniqueDeposit ? depositRow.amount : expectedAmount;
-        const depositAmount = Math.min(remainingAmount, rowAmount);
-        if (depositAmount <= 0) continue;
+        const rowAmount = depositRow.amount;
+        const depositAmount = isFullDeposit
+          ? rowAmount
+          : Math.sign(rowAmount) * Math.min(Math.abs(remainingAmount), Math.abs(rowAmount));
+        if (depositAmount === 0) continue;
 
         const response = await exe('DepositCashierPayments', {
           workspaceId: workspaceId,
@@ -5712,7 +5725,7 @@
         remainingAmount -= depositAmount;
       }
 
-      if (remainingAmount > 0.01) {
+      if (Math.abs(remainingAmount) >= 1e-8) {
         throw new Error(t('The deposited amount could not be fully distributed among the available balances.'));
       }
 
@@ -5841,16 +5854,14 @@
     const values = { cash: 0, cheque: 0, card: 0, other: 0 };
     let total = 0;
     let deposits = 0;
-    let cashFund = 0;
     let currency = 'USD';
 
     (Array.isArray(summary) ? summary : []).forEach(row => {
-      const amount = Math.abs(getAuditNumber(row && row.amount));
+      const amount = getAuditNumber(row && row.amount);
       const method = getTrimmedString(row && (row.paymentMethodName || row.paymentMethod)).toUpperCase();
       currency = getTrimmedString(row && row.currency) || currency;
       total += amount;
-      deposits -= Math.abs(getAuditNumber(row && row.deposit));
-      cashFund += getAuditNumber(row && row.cashFund);
+      deposits += getAuditNumber(row && row.deposit);
 
       if (method.indexOf('EFECT') >= 0 || method === 'EFE') values.cash += amount;
       else if (method.indexOf('CHEQ') >= 0 || method === 'CHE') values.cheque += amount;
@@ -5867,9 +5878,7 @@
       deposits: deposits,
       netIncome: total + deposits,
       endBalance: (Array.isArray(summary) ? summary : [])
-        .reduce((balance, row) => balance + getAuditNumber(row && (row.availableBalance !== undefined
-          ? row.availableBalance
-          : row.difference !== undefined ? row.difference : row.dif)), 0),
+        .reduce((balance, row) => balance + getBalanceAvailableAmount(row), 0),
       currency: currency
     };
   }
@@ -10387,7 +10396,7 @@
                   showSearch
                   optionFilterProp="label"
                   placeholder={t('Payment method')}
-                  options={paymentMethodOptions}
+                  options={getDepositPaymentMethodOptions()}
                 />
               </Form.Item>
             )}
@@ -10411,8 +10420,6 @@
               rules={[{ required: true, message: t('Enter the deposited amount.') }]}
             >
               <InputNumber
-                min={0}
-                max={depositExpectedAmount}
                 precision={2}
                 style={{ width: '100%' }}
                 onChange={updateDepositDifference}

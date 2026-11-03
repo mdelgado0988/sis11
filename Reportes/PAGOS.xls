@@ -1,0 +1,28 @@
+<form method="post" action="inteligencia_negocios.aspx" id="ctl00">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="
+__VIEWSTATE" value="" />
+</div>
+<div>
+	<table cellspacing="0" rules="all" border="1" style="border-collapse:collapse;">
+		<caption>
+			GESTOR DE REPORTES
+		<Tr><Th>Compa&#241;ia: ASEGURADORA GLOBAL</Tr></Th><Tr><Th>Fecha de Exportaci&#243;n: 03/11/2026 8:47:30 a.m.</Tr></Th><Tr><Th>Exportado Por: ADMINISTRADOR SISTEMAS</Tr></Th><Tr><Th>Modulo: GESTOR DE REPORTES|RESULTREPORT</Tr></Th></caption><tr align="left" style="background-color:LightCoral;">
+			<th scope="col">Id</th><th scope="col">Tipo</th><th scope="col">Siniestro</th><th scope="col">Solicitud</th><th scope="col">Pago</th><th scope="col">Monto del cheque</th><th scope="col">Cobertura</th><th scope="col">Fingreso</th><th scope="col">Poliza</th>
+		</tr><tr>
+			<td>1</td><td>PAGO</td><td>46246</td><td>125097</td><td>607.4000</td><td>607.4000</td><td>Da&#241;os a la Propiedad Ajena</td><td>01/11/2025</td><td>AU-GLC-086619-0</td>
+		</tr><tr>
+			<td>2</td><td>PAGO</td><td>45899</td><td>125098</td><td>453.3200</td><td>190.5800</td><td>Colisi&#243;n</td><td>01/11/2025</td><td>AU-GLB-084949-0</td>
+		</tr><tr>
+			<td>3</td><td>PAGO</td><td>44984</td><td>125099</td><td>5564.0000</td><td>5564.0000</td><td>Da&#241;os a la Propiedad Ajena</td><td>01/11/2025</td><td>AU-GLB-091847-0</td>
+		</tr><tr>
+			<td>4</td><td>PAGO</td><td>45827</td><td>125100</td><td>2859.7800</td><td>1985.6700</td><td>Colisi&#243;n</td><td>01/11/2025</td><td>AU-NI-069598-0</td>
+		</tr><tr>
+			<td>5</td><td>PAGO</td><td>44329</td><td>125101</td><td>686.2300</td><td>686.2300</td><td>Da&#241;os a la Propiedad Ajena</td><td>01/11/2025</td><td>AU-OB-095418-0</td>
+		</tr><tr>
+			<td>6</td><td>PAGO</td><td>46127</td><td>125102</td><td>603.8200</td><td>603.8200</td><td>Da&#241;os a la Propiedad Ajena</td><td>01/11/2025</td><td>AU-GLC-094095-0</td>
+		</tr><tr>
+			<td>7</td><td>PAGO</td><td>45562</td><td>125103</td><td>600.1400</td><td>171.2300</td><td>Colisi&#243;n</td><td>01/11/2025</td><td>AU-GLC-074273-0</td>
+		</tr>
+	</table>
+</div></form>

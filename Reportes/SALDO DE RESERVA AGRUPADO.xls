@@ -1,0 +1,378 @@
+<form method="post" action="inteligencia_negocios.aspx" id="ctl00">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="
+__VIEWSTATE" value="" />
+</div>
+<div>
+	<table cellspacing="0" rules="all" border="1" style="border-collapse:collapse;">
+		<caption>
+			GESTOR DE REPORTES
+		<Tr><Th>Compa&#241;ia: ASEGURADORA GLOBAL</Tr></Th><Tr><Th>Fecha de Exportaci&#243;n: 03/11/2026 8:22:00 a.m.</Tr></Th><Tr><Th>Exportado Por: ADMINISTRADOR SISTEMAS</Tr></Th><Tr><Th>Modulo: GESTOR DE REPORTES|RESULTREPORT</Tr></Th></caption><tr align="left" style="background-color:LightCoral;">
+			<th scope="col">NroSiniestro</th><th scope="col">Ramo</th><th scope="col">FechaSiniestro</th><th scope="col">NroPoliza</th><th scope="col">Estado</th><th scope="col">DesCobertura</th><th scope="col">Asegurado</th><th scope="col">codcobertura</th><th scope="col">SaldoReservaPago</th><th scope="col">SaldoReservaGastos</th>
+		</tr><tr>
+			<td>1675</td><td>Incendio</td><td>08/07/2010 12:00:00 a.m.</td><td>IN-CN-003193-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>2801.7600</td>
+		</tr><tr>
+			<td>2530</td><td>Incendio</td><td>18/03/2011 12:00:00 a.m.</td><td>IN-GL-004751-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CENTENO GUERRERO JULIO MANUEL</td><td>1</td><td>0.0000</td><td>269.4700</td>
+		</tr><tr>
+			<td>2531</td><td>Incendio</td><td>11/04/2011 12:00:00 a.m.</td><td>IN-CN-005720-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>224.2500</td>
+		</tr><tr>
+			<td>2532</td><td>Incendio</td><td>06/01/2011 12:00:00 a.m.</td><td>IN-CN-005733-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>211.2500</td>
+		</tr><tr>
+			<td>2533</td><td>Incendio</td><td>14/04/2011 12:00:00 a.m.</td><td>IN-IL-003842-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ALAMEDDIN GOZAINE AHSAN</td><td>1</td><td>0.0000</td><td>1075.0700</td>
+		</tr><tr>
+			<td>2766</td><td>Incendio</td><td>25/07/2011 12:00:00 a.m.</td><td>IN-GL-004531-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>DE GRACIA SANCHEZ CESAR AUGUSTO</td><td>3</td><td>0.0000</td><td>290.7500</td>
+		</tr><tr>
+			<td>3050</td><td>Incendio</td><td>06/05/2011 12:00:00 a.m.</td><td>IN-GL-006688-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>RICARDO   PE&#165;A BRAVO</td><td>1</td><td>0.0000</td><td>345.7500</td>
+		</tr><tr>
+			<td>3058</td><td>Incendio</td><td>07/06/2011 12:00:00 a.m.</td><td>IN-BA-003721-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CEDE&#209;O VERGARA LYDA ARGELIS</td><td>1</td><td>0.0000</td><td>305.7500</td>
+		</tr><tr>
+			<td>3531</td><td>Incendio</td><td>23/11/2011 12:00:00 a.m.</td><td>IN-ED-008066-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>171.2000</td>
+		</tr><tr>
+			<td>4137</td><td>Incendio</td><td>18/05/2012 12:00:00 a.m.</td><td>IN-CN-008146-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>235.2500</td>
+		</tr><tr>
+			<td>4244</td><td>Incendio</td><td>23/07/2012 12:00:00 a.m.</td><td>IN-GL-005952-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ARTEAGA ZAMORA NITZA MARIA</td><td>1</td><td>0.0000</td><td>197.6000</td>
+		</tr><tr>
+			<td>4245</td><td>Incendio</td><td>19/05/2012 12:00:00 a.m.</td><td>IN-CN-008109-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>225.2500</td>
+		</tr><tr>
+			<td>4246</td><td>Incendio</td><td>30/05/2012 12:00:00 a.m.</td><td>IN-CN-008109-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>225.2500</td>
+		</tr><tr>
+			<td>4984</td><td>Incendio</td><td>15/02/2013 12:00:00 a.m.</td><td>IN-GL-009695-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GONZALEZ BEATRIZ</td><td>1</td><td>0.0000</td><td>605.5900</td>
+		</tr><tr>
+			<td>5038</td><td>Incendio</td><td>13/02/2013 12:00:00 a.m.</td><td>IN-GL-005430-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>PROPIEDADES LOCALES, S. A.</td><td>1</td><td>0.0000</td><td>4040.7200</td>
+		</tr><tr>
+			<td>5039</td><td>Incendio</td><td>13/02/2013 12:00:00 a.m.</td><td>IN-GL-005429-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>PROPIEDADES LOCALES, S. A.</td><td>1</td><td>0.0000</td><td>513.2000</td>
+		</tr><tr>
+			<td>5040</td><td>Incendio</td><td>13/02/2013 12:00:00 a.m.</td><td>IN-GL-005433-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>PROPIEDADES LOCALES, S. A.</td><td>1</td><td>0.0000</td><td>629.1900</td>
+		</tr><tr>
+			<td>5055</td><td>Incendio</td><td>24/10/2012 12:00:00 a.m.</td><td>IN-CN-008133-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>235.2500</td>
+		</tr><tr>
+			<td>5056</td><td>Incendio</td><td>17/10/2012 12:00:00 a.m.</td><td>IN-CN-008133-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>252.2500</td>
+		</tr><tr>
+			<td>5059</td><td>Incendio</td><td>26/11/2012 12:00:00 a.m.</td><td>IN-CN-010073-0</td><td>FINALIZADO</td><td>Equipo Electr&#243;nico</td><td>GLOBAL BANK CORPORATION</td><td>233</td><td>0.0000</td><td>9128.9300</td>
+		</tr><tr>
+			<td>6208</td><td>Incendio</td><td>16/02/2014 12:00:00 a.m.</td><td>IN-CN-013267-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>192.2500</td>
+		</tr><tr>
+			<td>6297</td><td>Incendio</td><td>20/03/2014 12:00:00 a.m.</td><td>IN-GL-007697-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DORA ISABEL AROSEMENA BEITIA</td><td>1</td><td>0.0000</td><td>1592.5000</td>
+		</tr><tr>
+			<td>6396</td><td>Incendio</td><td>29/09/2013 12:00:00 a.m.</td><td>IN-CN-010069-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>169.4000</td>
+		</tr><tr>
+			<td>7717</td><td>Incendio</td><td>30/11/2014 12:00:00 a.m.</td><td>IN-GL-009155-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CAVALLI RUEDA JENNIFER MARITZA</td><td>1</td><td>0.0000</td><td>512.7500</td>
+		</tr><tr>
+			<td>7718</td><td>Incendio</td><td>15/12/2014 12:00:00 a.m.</td><td>IN-MULTI-016010-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ACOSTA PAZ ELIZABETH</td><td>1</td><td>0.0000</td><td>277.2500</td>
+		</tr><tr>
+			<td>7721</td><td>Incendio</td><td>21/12/2014 12:00:00 a.m.</td><td>IN-GL-011676-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>HERNANDEZ CASTILLO MARGARITA</td><td>3</td><td>0.0000</td><td>232.3500</td>
+		</tr><tr>
+			<td>7723</td><td>Incendio</td><td>25/12/2014 12:00:00 a.m.</td><td>IN-GL-012883-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>MAUAD BRETT ALFREDO NAGIB</td><td>1</td><td>0.0000</td><td>663.0600</td>
+		</tr><tr>
+			<td>7735</td><td>Incendio</td><td>08/02/2015 12:00:00 a.m.</td><td>IN-GL-009367-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DE GRACIA RAMOS YARISEL YULISSA</td><td>1</td><td>0.0000</td><td>1085.8900</td>
+		</tr><tr>
+			<td>7926</td><td>Incendio</td><td>22/09/2014 12:00:00 a.m.</td><td>IN-CN-013236-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>443.6500</td>
+		</tr><tr>
+			<td>7990</td><td>Incendio</td><td>03/02/2015 12:00:00 a.m.</td><td>IN-GL-017612-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>373.7500</td>
+		</tr><tr>
+			<td>8435</td><td>Incendio</td><td>12/06/2015 12:00:00 a.m.</td><td>IN-FE08-016032-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>VELARDE MORA ADA MELINA</td><td>1</td><td>0.0000</td><td>275.2500</td>
+		</tr><tr>
+			<td>9124</td><td>Incendio</td><td>10/09/2015 12:00:00 a.m.</td><td>IN-GL-005324-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CABALLERO CASTILLO SOL INDIRA</td><td>1</td><td>0.0000</td><td>335.7500</td>
+		</tr><tr>
+			<td>9382</td><td>Incendio</td><td>02/11/2015 12:00:00 a.m.</td><td>IN-CN-016429-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>282.2500</td>
+		</tr><tr>
+			<td>9533</td><td>Incendio</td><td>16/11/2015 12:00:00 a.m.</td><td>IN-CN-019230-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>285.1300</td>
+		</tr><tr>
+			<td>10101</td><td>Incendio</td><td>05/12/2015 12:00:00 a.m.</td><td>IN-CN-019278-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>308.2500</td>
+		</tr><tr>
+			<td>10138</td><td>Incendio</td><td>22/03/2016 12:00:00 a.m.</td><td>IN-CN-019230-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>264.2500</td>
+		</tr><tr>
+			<td>10334</td><td>Incendio</td><td>14/07/2016 12:00:00 a.m.</td><td>IN-GL-003732-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>RIVAS SANTOS DAYANA DEL CARMEN</td><td>1</td><td>0.0000</td><td>1039.8500</td>
+		</tr><tr>
+			<td>10339</td><td>Incendio</td><td>04/02/2016 12:00:00 a.m.</td><td>IN-CN-019300-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>348.7500</td>
+		</tr><tr>
+			<td>10430</td><td>Incendio</td><td>18/11/2015 12:00:00 a.m.</td><td>IN-MULTI-015431-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SOLANO GAMMIE LISANDRO CARLOS</td><td>1</td><td>0.0000</td><td>273.9200</td>
+		</tr><tr>
+			<td>11333</td><td>Incendio</td><td>14/07/2016 12:00:00 a.m.</td><td>IN-GL-015273-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>RIVAS SANTOS DAYANA DEL CARMEN</td><td>1</td><td>0.0000</td><td>546.9700</td>
+		</tr><tr>
+			<td>12299</td><td>Incendio</td><td>16/12/2016 12:00:00 a.m.</td><td>IN-GL-011981-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JARIWALA JARIWALA DIPAKKUMAR SHASHIKANT</td><td>1</td><td>0.0000</td><td>428.1300</td>
+		</tr><tr>
+			<td>12385</td><td>Incendio</td><td>05/09/2016 12:00:00 a.m.</td><td>IN-GL-016693-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>PAZ MOSQUERA HAZEL EUGENIA</td><td>1</td><td>0.0000</td><td>345.7500</td>
+		</tr><tr>
+			<td>12386</td><td>Incendio</td><td>27/11/2016 12:00:00 a.m.</td><td>IN-GL-013986-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CHEN LAM XINER</td><td>1</td><td>0.0000</td><td>273.9200</td>
+		</tr><tr>
+			<td>12615</td><td>Incendio</td><td>22/01/2017 12:00:00 a.m.</td><td>IN-GL-017678-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DE LEON AGUILA ALBERTO ALEJANDRO</td><td>1</td><td>0.0000</td><td>290.9500</td>
+		</tr><tr>
+			<td>13088</td><td>Incendio</td><td>26/12/2016 12:00:00 a.m.</td><td>IN-GL-007943-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CRUZ SOLIS MARTHIN ADANN</td><td>1</td><td>0.0000</td><td>337.7500</td>
+		</tr><tr>
+			<td>13312</td><td>Incendio</td><td>13/04/2017 12:00:00 a.m.</td><td>IN-ED-022042-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>288.9500</td>
+		</tr><tr>
+			<td>13561</td><td>Incendio</td><td>27/04/2017 12:00:00 a.m.</td><td>IN-GL-022876-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SANCHEZ MENDOZA NORMA YARELYS</td><td>1</td><td>0.0000</td><td>4669.4800</td>
+		</tr><tr>
+			<td>14301</td><td>Incendio</td><td>26/06/2017 12:00:00 a.m.</td><td>IN-GL-023539-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>358.7500</td>
+		</tr><tr>
+			<td>15028</td><td>Incendio</td><td>14/09/2017 12:00:00 a.m.</td><td>IN-GL-008765-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ESPINO SOLIS EIMYS DEL ROSARIO</td><td>1</td><td>0.0000</td><td>404.1300</td>
+		</tr><tr>
+			<td>15038</td><td>Incendio</td><td>06/10/2017 12:00:00 a.m.</td><td>IN-GL-017679-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>TEJADA CEDE&#209;O IRIS VERONICA</td><td>1</td><td>0.0000</td><td>2211.5000</td>
+		</tr><tr>
+			<td>16894</td><td>Incendio</td><td>07/03/2018 12:00:00 a.m.</td><td>IN-GL-007361-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>ROVIRA LEZCANO XENIA MARILUS</td><td>3</td><td>0.0000</td><td>292.9500</td>
+		</tr><tr>
+			<td>16895</td><td>Incendio</td><td>21/04/2018 12:00:00 a.m.</td><td>IN-GL-012864-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JARAMILLO VASQUEZ ROBERTO CARLOS</td><td>1</td><td>0.0000</td><td>214.0000</td>
+		</tr><tr>
+			<td>17824</td><td>Incendio</td><td>06/10/2017 12:00:00 a.m.</td><td>IN-GL-026097-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>TEJADA CEDE&#209;O IRIS VERONICA</td><td>1</td><td>0.0000</td><td>2539.8300</td>
+		</tr><tr>
+			<td>17987</td><td>Incendio</td><td>02/08/2018 12:00:00 a.m.</td><td>IN-GL-006833-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>RAMOS MOLINA FRANCISCO JAVIER</td><td>1</td><td>0.0000</td><td>980.8600</td>
+		</tr><tr>
+			<td>18094</td><td>Incendio</td><td>28/04/2018 12:00:00 a.m.</td><td>IN-GL-021985-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>NU&#209;EZ ARAUZ FRANKLIN</td><td>1</td><td>0.0000</td><td>439.1600</td>
+		</tr><tr>
+			<td>18404</td><td>Incendio</td><td>27/04/2018 12:00:00 a.m.</td><td>IN-ED-024521-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>297.9500</td>
+		</tr><tr>
+			<td>18668</td><td>Incendio</td><td>06/11/2018 12:00:00 a.m.</td><td>IN-GL-014812-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GEORGE PEREZ ANALICIA DEL CARMEN</td><td>3</td><td>0.0000</td><td>1602.7000</td>
+		</tr><tr>
+			<td>18669</td><td>Incendio</td><td>18/11/2018 12:00:00 a.m.</td><td>IN-GL-026724-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>VELASQUEZ CASTILLO SOL EMPERATRIZ</td><td>1</td><td>0.0000</td><td>654.7000</td>
+		</tr><tr>
+			<td>18806</td><td>Incendio</td><td>21/11/2018 12:00:00 a.m.</td><td>IN-GL-005770-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>QUIROS CUETO SHEILA ISABEL</td><td>3</td><td>0.0000</td><td>430.5100</td>
+		</tr><tr>
+			<td>18901</td><td>Incendio</td><td>07/12/2018 12:00:00 a.m.</td><td>IN-GL-005917-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>MU&#209;OZ PINEDA ERIKA MARLENE</td><td>3</td><td>0.0000</td><td>937.9300</td>
+		</tr><tr>
+			<td>18979</td><td>Incendio</td><td>02/12/2018 12:00:00 a.m.</td><td>IN-GL-021847-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CHOY BARRIA RITA DEL CARMEN</td><td>3</td><td>0.0000</td><td>725.0000</td>
+		</tr><tr>
+			<td>19489</td><td>Incendio</td><td>01/11/2018 12:00:00 a.m.</td><td>IN-GL-026202-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>BARRAGAN PARDO DE GARCIA CRISTINA MARIA</td><td>3</td><td>0.0000</td><td>303.9500</td>
+		</tr><tr>
+			<td>19705</td><td>Incendio</td><td>10/02/2019 12:00:00 a.m.</td><td>IN-BPVL-027424-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DAVILA MURILLO JAIME ARIEL</td><td>1</td><td>0.0000</td><td>2532.9300</td>
+		</tr><tr>
+			<td>19719</td><td>Incendio</td><td>25/11/2018 12:00:00 a.m.</td><td>IN-GL-024118-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>RAED W. M. MUTAIR</td><td>1</td><td>0.0000</td><td>2388.4800</td>
+		</tr><tr>
+			<td>19770</td><td>Incendio</td><td>25/02/2019 12:00:00 a.m.</td><td>IN-BPVL-029778-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n - Contenido</td><td>CARLOS ENRIQUE MOSQUERA THOMPSON</td><td>256</td><td>0.0000</td><td>380.2200</td>
+		</tr><tr>
+			<td>19849</td><td>Incendio</td><td>04/03/2019 12:00:00 a.m.</td><td>IN-GL-005642-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>TROETSCH SAVAL CARLOS ENRIQUE</td><td>1</td><td>0.0000</td><td>4258.4000</td>
+		</tr><tr>
+			<td>20421</td><td>Incendio</td><td>26/04/2019 12:00:00 a.m.</td><td>IN-MULTI-024311-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DELGADO MENDOZA EZEQUIEL</td><td>1</td><td>0.0000</td><td>160.5000</td>
+		</tr><tr>
+			<td>20750</td><td>Incendio</td><td>31/05/2019 12:00:00 a.m.</td><td>IN-GL-020108-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GARIBALDI GONDOLA YAHAIRA</td><td>1</td><td>0.0000</td><td>453.0500</td>
+		</tr><tr>
+			<td>20834</td><td>Incendio</td><td>06/06/2019 12:00:00 a.m.</td><td>IN-BPVL-037176-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>DAVID ALEXIS MANRIQUE GUILLERMO</td><td>3</td><td>0.0000</td><td>303.9500</td>
+		</tr><tr>
+			<td>21047</td><td>Incendio</td><td>17/04/2019 12:00:00 a.m.</td><td>IN-GL-017038-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ORTEGA ZEBALLOS SACRAMENTO AGUSTIN</td><td>3</td><td>0.0000</td><td>633.0500</td>
+		</tr><tr>
+			<td>21116</td><td>Incendio</td><td>01/07/2019 12:00:00 a.m.</td><td>IN-BPVL-034399-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GARCIA LOPEZ EXXELYN NILEXY</td><td>3</td><td>0.0000</td><td>345.7500</td>
+		</tr><tr>
+			<td>21327</td><td>Incendio</td><td>24/12/2018 12:00:00 a.m.</td><td>IN-GL-026678-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CAMARENA TORRES GEIDY MERCEDES</td><td>1</td><td>0.0000</td><td>345.7500</td>
+		</tr><tr>
+			<td>21497</td><td>Incendio</td><td>20/08/2019 12:00:00 a.m.</td><td>IN-GL-021532-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>FERGUSON JAEN ANTONIO LUIS</td><td>3</td><td>0.0000</td><td>302.9500</td>
+		</tr><tr>
+			<td>22026</td><td>Incendio</td><td>12/08/2019 12:00:00 a.m.</td><td>IN-GL-023658-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SANCHEZ GOMEZ JORGE ABDIEL</td><td>1</td><td>0.0000</td><td>521.2500</td>
+		</tr><tr>
+			<td>22074</td><td>Incendio</td><td>15/10/2019 12:00:00 a.m.</td><td>IN-GL-023105-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SUGAR SANCHEZ PAOLA ESTHER</td><td>1</td><td>0.0000</td><td>3784.8500</td>
+		</tr><tr>
+			<td>22167</td><td>Incendio</td><td>16/10/2019 12:00:00 a.m.</td><td>IN-GL-023164-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>MARTINEZ CEDE&#209;O DE VILLAR MARIA CRISTINA</td><td>3</td><td>0.0000</td><td>392.2000</td>
+		</tr><tr>
+			<td>22187</td><td>Incendio</td><td>22/10/2019 12:00:00 a.m.</td><td>IN-GL-018658-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ORTEGA CORIAT RICARDO JACOBO</td><td>1</td><td>0.0000</td><td>470.4500</td>
+		</tr><tr>
+			<td>22499</td><td>Incendio</td><td>10/10/2019 12:00:00 a.m.</td><td>IN-BPVL-034924-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>RUSSO ROS JUAN RICARDO</td><td>3</td><td>0.0000</td><td>1236.2100</td>
+		</tr><tr>
+			<td>23664</td><td>Incendio</td><td>10/02/2020 12:00:00 a.m.</td><td>IN-GL-038834-0</td><td>NOTIFICADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>REYES SALAZAR LUIS</td><td>1</td><td>0.0000</td><td>566.7500</td>
+		</tr><tr>
+			<td>23995</td><td>Incendio</td><td>13/04/2020 12:00:00 a.m.</td><td>IN-GL-020003-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>CASTILLO OTHON KARLA TAMARA</td><td>3</td><td>0.0000</td><td>348.7500</td>
+		</tr><tr>
+			<td>23996</td><td>Incendio</td><td>22/04/2020 12:00:00 a.m.</td><td>IN-IL-039500-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>ROSELIZ   BOLIVAR   DE RANGEL</td><td>3</td><td>0.0000</td><td>349.7500</td>
+		</tr><tr>
+			<td>24455</td><td>Incendio</td><td>21/07/2020 12:00:00 a.m.</td><td>IN-ED-039687-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n - Contenido</td><td>GLOBAL BANK CORPORATION</td><td>256</td><td>0.0000</td><td>316.9500</td>
+		</tr><tr>
+			<td>24575</td><td>Incendio</td><td>24/07/2020 12:00:00 a.m.</td><td>IN-BPVL-035919-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>ROSAURA  DELGADO SANTOS</td><td>3</td><td>0.0000</td><td>515.2500</td>
+		</tr><tr>
+			<td>25372</td><td>Incendio</td><td>01/11/2020 12:00:00 a.m.</td><td>IN-GL-008745-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JARAMILLO JULIO ALFONSO</td><td>1</td><td>0.0000</td><td>1502.1100</td>
+		</tr><tr>
+			<td>25956</td><td>Incendio</td><td>23/11/2020 12:00:00 a.m.</td><td>IN-MULTI-038782-0</td><td>FINALIZADO</td><td>Terremoto/Da&#241;os por Agua/Vendaval</td><td>CORREA GOMEZ ANDRES</td><td>253</td><td>0.0000</td><td>622.7100</td>
+		</tr><tr>
+			<td>26756</td><td>Incendio</td><td>03/02/2021 12:00:00 a.m.</td><td>IN-BPVL-036112-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SALDA&#209;A GONZALEZ MARCOS ANTONIO</td><td>1</td><td>0.0000</td><td>369.7500</td>
+		</tr><tr>
+			<td>27007</td><td>Incendio</td><td>10/12/2020 12:00:00 a.m.</td><td>IN-MGLOBAL-041708-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ARANGO HERRERA MARISIN</td><td>1</td><td>0.0000</td><td>1067.2100</td>
+		</tr><tr>
+			<td>27021</td><td>Incendio</td><td>16/02/2021 12:00:00 a.m.</td><td>IN-MULTI-025405-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>BATISTA HERNANDEZ JUAN CARLOS</td><td>1</td><td>0.0000</td><td>379.7500</td>
+		</tr><tr>
+			<td>27597</td><td>Incendio</td><td>15/04/2021 12:00:00 a.m.</td><td>IN-GL-012422-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>TEJADA CAMPOS EDWIN FRANCISCO</td><td>3</td><td>0.0000</td><td>326.9500</td>
+		</tr><tr>
+			<td>27598</td><td>Incendio</td><td>21/04/2021 12:00:00 a.m.</td><td>IN-GL-025206-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>MORENO BLANCO ZURIDAI IBETH</td><td>3</td><td>0.0000</td><td>365.7500</td>
+		</tr><tr>
+			<td>27955</td><td>Incendio</td><td>22/05/2021 12:00:00 a.m.</td><td>IN-IL-041142-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SIMPSON MC NALLY ANGELICA CARLOTA</td><td>1</td><td>0.0000</td><td>356.7500</td>
+		</tr><tr>
+			<td>27960</td><td>Incendio</td><td>25/05/2021 12:00:00 a.m.</td><td>IN-BPVL-030525-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>NIETO CORTES MIRNA AMARILIS</td><td>3</td><td>0.0000</td><td>537.6000</td>
+		</tr><tr>
+			<td>28038</td><td>Incendio</td><td>06/06/2021 12:00:00 a.m.</td><td>IN-GL-037739-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>DARISNETH YURIELA DONOSO BATISTA</td><td>3</td><td>0.0000</td><td>416.5000</td>
+		</tr><tr>
+			<td>28113</td><td>Incendio</td><td>21/06/2021 12:00:00 a.m.</td><td>IN-GL-013322-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>WEN YU FENG</td><td>3</td><td>0.0000</td><td>982.0700</td>
+		</tr><tr>
+			<td>28205</td><td>Incendio</td><td>13/06/2021 12:00:00 a.m.</td><td>IN-GL-005917-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>MU&#209;OZ PINEDA ERIKA MARLENE</td><td>3</td><td>0.0000</td><td>578.2400</td>
+		</tr><tr>
+			<td>28441</td><td>Incendio</td><td>04/08/2021 12:00:00 a.m.</td><td>IN-BPVL-027449-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>LILIA ELIZABETH MIRANDA VIQUEZ</td><td>1</td><td>0.0000</td><td>321.9500</td>
+		</tr><tr>
+			<td>29194</td><td>Incendio</td><td>04/10/2021 12:00:00 a.m.</td><td>IN-MULTI-022398-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JOSE DEL CARMEN VALDEZ GONZALEZ</td><td>1</td><td>0.0000</td><td>364.7500</td>
+		</tr><tr>
+			<td>29309</td><td>Incendio</td><td>20/10/2021 12:00:00 a.m.</td><td>IN-BPVL-036869-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ECHEVERRIA BELIZ ALEXIA DEL CARMEN</td><td>1</td><td>0.0000</td><td>364.7500</td>
+		</tr><tr>
+			<td>29310</td><td>Incendio</td><td>23/10/2021 12:00:00 a.m.</td><td>IN-BPVL-033182-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>YONIS ALBERTO RUIZ MONRROY</td><td>1</td><td>0.0000</td><td>364.7500</td>
+		</tr><tr>
+			<td>29365</td><td>Incendio</td><td>25/10/2021 12:00:00 a.m.</td><td>IN-GL-010697-0</td><td>NOTIFICADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SUIRA ARAUZ NILVA ROSARIO</td><td>1</td><td>0.0000</td><td>365.7500</td>
+		</tr><tr>
+			<td>30259</td><td>Incendio</td><td>01/01/2022 12:00:00 a.m.</td><td>IN-BPVL-035183-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>HAROLD RADAMES GOMEZ ATENCIO</td><td>1</td><td>0.0000</td><td>434.9100</td>
+		</tr><tr>
+			<td>30629</td><td>Incendio</td><td>17/02/2022 12:00:00 a.m.</td><td>IN-GL-010419-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>OLMEDO DE LEON ARGELIS</td><td>1</td><td>0.0000</td><td>315.9500</td>
+		</tr><tr>
+			<td>30731</td><td>Incendio</td><td>13/11/2021 12:00:00 a.m.</td><td>IN-ED-041396-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>311.9500</td>
+		</tr><tr>
+			<td>30865</td><td>Incendio</td><td>15/03/2022 12:00:00 a.m.</td><td>IN-GL-013322-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>WEN YU FENG</td><td>3</td><td>0.0000</td><td>890.0600</td>
+		</tr><tr>
+			<td>30999</td><td>Incendio</td><td>11/01/2022 12:00:00 a.m.</td><td>IN-BPVL-034143-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DYLIANN GABRIELA SANTANA DOMINGUEZ</td><td>1</td><td>0.0000</td><td>371.7500</td>
+		</tr><tr>
+			<td>31401</td><td>Incendio</td><td>10/05/2022 12:00:00 a.m.</td><td>IN-BPVL-029597-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>AGUILAR QUINTERO JUAN CARLOS</td><td>1</td><td>0.0000</td><td>436.7800</td>
+		</tr><tr>
+			<td>31702</td><td>Incendio</td><td>16/05/2022 12:00:00 a.m.</td><td>IN-BPVL-036883-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>VANESSA YUSELIS GUTIERREZ GUERRA</td><td>3</td><td>0.0000</td><td>336.0000</td>
+		</tr><tr>
+			<td>31912</td><td>Incendio</td><td>15/06/2022 12:00:00 a.m.</td><td>IN-BPVL-031151-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CORAL ALVARADO JUAN CARLOS</td><td>1</td><td>0.0000</td><td>333.4800</td>
+		</tr><tr>
+			<td>31914</td><td>Incendio</td><td>24/06/2022 12:00:00 a.m.</td><td>IN-GL-012225-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>MENDOZA BENAVIDES ROBERTO</td><td>1</td><td>0.0000</td><td>323.9500</td>
+		</tr><tr>
+			<td>31915</td><td>Incendio</td><td>29/06/2022 12:00:00 a.m.</td><td>IN-MGLOBAL-043371-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GREEN CASTILLO HUBERT</td><td>251</td><td>0.0000</td><td>36524.2100</td>
+		</tr><tr>
+			<td>31923</td><td>Incendio</td><td>27/06/2022 12:00:00 a.m.</td><td>IN-BPVL-033868-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>RODRIGUEZ MONTERO ARIEL OMAR</td><td>3</td><td>0.0000</td><td>678.2400</td>
+		</tr><tr>
+			<td>31927</td><td>Incendio</td><td>27/06/2022 12:00:00 a.m.</td><td>IN-GL-009709-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>HOWELL GORDON AMARELYS ESTHER</td><td>3</td><td>0.0000</td><td>626.9500</td>
+		</tr><tr>
+			<td>31974</td><td>Incendio</td><td>27/06/2022 12:00:00 a.m.</td><td>IN-BPVL-033927-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>CABALLERO GONZALEZ DORIS ENITH</td><td>3</td><td>0.0000</td><td>435.7500</td>
+		</tr><tr>
+			<td>32135</td><td>Incendio</td><td>20/07/2022 12:00:00 a.m.</td><td>IN-GL-015048-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GABAY RAFAEL</td><td>3</td><td>0.0000</td><td>313.9500</td>
+		</tr><tr>
+			<td>32340</td><td>Incendio</td><td>20/07/2022 12:00:00 a.m.</td><td>IN-GL-018781-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>LELLI NOEMI GRICELDA</td><td>3</td><td>0.0000</td><td>319.9500</td>
+		</tr><tr>
+			<td>32521</td><td>Incendio</td><td>01/04/2022 12:00:00 a.m.</td><td>IN-GL-010246-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GONZALEZ BELKYS ELIZABETH</td><td>3</td><td>0.0000</td><td>312.9500</td>
+		</tr><tr>
+			<td>32524</td><td>Incendio</td><td>05/04/2022 12:00:00 a.m.</td><td>IN-MGLOBAL-043089-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ALVAREZ MONTANO BERLY YASMALIA</td><td>1</td><td>0.0000</td><td>325.9500</td>
+		</tr><tr>
+			<td>32568</td><td>Incendio</td><td>24/08/2022 12:00:00 a.m.</td><td>IN-GL-013531-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>GONZALEZ FRANCO CASILDA</td><td>3</td><td>0.0000</td><td>381.7300</td>
+		</tr><tr>
+			<td>33034</td><td>Incendio</td><td>18/08/2022 12:00:00 a.m.</td><td>IN-GL-018661-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GUERRA R. ANAGRETHEL DEL CARMEN</td><td>1</td><td>0.0000</td><td>320.0000</td>
+		</tr><tr>
+			<td>33035</td><td>Incendio</td><td>09/10/2022 12:00:00 a.m.</td><td>IN-GL-043549-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>JIMENEZ NAVAS EHYMAR EUCLIDES</td><td>3</td><td>0.0000</td><td>365.7500</td>
+		</tr><tr>
+			<td>33126</td><td>Incendio</td><td>12/10/2022 12:00:00 a.m.</td><td>IN-GL-025133-0</td><td>NOTIFICADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>DELUCCHI GUSTAVO ABEL</td><td>3</td><td>0.0000</td><td>387.0200</td>
+		</tr><tr>
+			<td>33156</td><td>Incendio</td><td>19/10/2022 12:00:00 a.m.</td><td>IN-ED-043190-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>314.9500</td>
+		</tr><tr>
+			<td>33214</td><td>Incendio</td><td>24/10/2022 12:00:00 a.m.</td><td>IN-BPVL-030224-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n - Contenido</td><td>JOEL FERNANDO SUAREZ MORALES</td><td>256</td><td>0.0000</td><td>311.9500</td>
+		</tr><tr>
+			<td>33299</td><td>Incendio</td><td>01/11/2022 12:00:00 a.m.</td><td>IN-GL-017748-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DE LEON DUBOIS ERNESTO ENRIQUE</td><td>1</td><td>0.0000</td><td>366.0000</td>
+		</tr><tr>
+			<td>33621</td><td>Incendio</td><td>23/11/2022 12:00:00 a.m.</td><td>IN-GL-024864-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JULIO BENITEZ LUIS ALBERTO</td><td>1</td><td>0.0000</td><td>329.0000</td>
+		</tr><tr>
+			<td>35001</td><td>Incendio</td><td>14/03/2023 12:00:00 a.m.</td><td>IN-GL-023918-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>FERRON PEREZ OSCAR ELOY</td><td>1</td><td>0.0000</td><td>1171.1500</td>
+		</tr><tr>
+			<td>35088</td><td>Incendio</td><td>27/06/2022 12:00:00 a.m.</td><td>IN-GL-008902-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>DIAZ RIVERA FAUSTINO</td><td>3</td><td>0.0000</td><td>1257.0600</td>
+		</tr><tr>
+			<td>35620</td><td>Incendio</td><td>10/05/2023 12:00:00 a.m.</td><td>IN-GL-043338-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>FLORES CEDE&#209;O KAROLAYNS GIBELIS</td><td>3</td><td>0.0000</td><td>356.7500</td>
+		</tr><tr>
+			<td>35621</td><td>Incendio</td><td>10/05/2023 12:00:00 a.m.</td><td>IN-GL-044098-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>SANTO FONSECA EYLIN YIRINA</td><td>3</td><td>0.0000</td><td>354.7500</td>
+		</tr><tr>
+			<td>35622</td><td>Incendio</td><td>10/05/2023 12:00:00 a.m.</td><td>IN-GL-042614-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>BECA MURILLO SHALYMAR CHARISMA</td><td>3</td><td>0.0000</td><td>350.7500</td>
+		</tr><tr>
+			<td>35913</td><td>Incendio</td><td>04/06/2023 12:00:00 a.m.</td><td>IN-BPVL-039501-0</td><td>NOTIFICADO</td><td>Incendio/Rayo/Explosi&#243;n - Contenido</td><td>GINIVA ODANETH MOSQUERA RODRIGUEZ</td><td>256</td><td>0.0000</td><td>350.7500</td>
+		</tr><tr>
+			<td>35916</td><td>Incendio</td><td>29/05/2023 12:00:00 a.m.</td><td>IN-BPVL-032944-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>LYDA GISELA PLOCHE MU&#165;OZ</td><td>1</td><td>0.0000</td><td>314.6500</td>
+		</tr><tr>
+			<td>35918</td><td>Incendio</td><td>04/06/2023 12:00:00 a.m.</td><td>IN-BPVL-028174-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>DIDIEL ABDIEL FERNANDEZ CABALLERO</td><td>3</td><td>0.0000</td><td>312.9500</td>
+		</tr><tr>
+			<td>36202</td><td>Incendio</td><td>13/06/2023 12:00:00 a.m.</td><td>IN-GL-018138-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ROOK STEWART AMETH ANEL</td><td>1</td><td>0.0000</td><td>330.0000</td>
+		</tr><tr>
+			<td>36203</td><td>Incendio</td><td>25/06/2023 12:00:00 a.m.</td><td>IN-MULTI-020413-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>HERRERA MAGALLON IVETTE DEL CARMEN</td><td>255</td><td>0.0000</td><td>355.7500</td>
+		</tr><tr>
+			<td>36278</td><td>Incendio</td><td>27/06/2023 12:00:00 a.m.</td><td>IN-GL-012439-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>JIMENEZ QUINTERO JESSICA JUDITH</td><td>3</td><td>0.0000</td><td>321.6500</td>
+		</tr><tr>
+			<td>36717</td><td>Incendio</td><td>04/08/2023 12:00:00 a.m.</td><td>IN-GL-045627-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>VISTA HERMOSA INVERTIONS, INC.</td><td>1</td><td>0.0000</td><td>312.9500</td>
+		</tr><tr>
+			<td>36967</td><td>Incendio</td><td>24/08/2023 12:00:00 a.m.</td><td>IN-ED-045376-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>356.7500</td>
+		</tr><tr>
+			<td>36999</td><td>Incendio</td><td>27/08/2023 12:00:00 a.m.</td><td>IN-CN-023388-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>PROGRESO AFPC, S.A.</td><td>3</td><td>0.0000</td><td>313.9500</td>
+		</tr><tr>
+			<td>37313</td><td>Incendio</td><td>20/09/2023 12:00:00 a.m.</td><td>IN-GL-038560-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>VASQUEZ ALBENIS</td><td>3</td><td>0.0000</td><td>355.7500</td>
+		</tr><tr>
+			<td>37314</td><td>Incendio</td><td>20/09/2023 12:00:00 a.m.</td><td>IN-MULTI-013006-0</td><td>FINALIZADO</td><td>Terremoto/Da&#241;os por Agua/Vendaval</td><td>GUTIERREZ CORONADO BRENDA ESPERANZA</td><td>253</td><td>0.0000</td><td>360.7500</td>
+		</tr><tr>
+			<td>37465</td><td>Incendio</td><td>24/09/2023 12:00:00 a.m.</td><td>IN-ED-045395-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>3</td><td>0.0000</td><td>354.7500</td>
+		</tr><tr>
+			<td>37579</td><td>Incendio</td><td>10/10/2023 12:00:00 a.m.</td><td>IN-MULTI-016306-0</td><td>NOTIFICADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>QUINTERO GUTIERREZ ALEYKA INDIRA</td><td>1</td><td>0.0000</td><td>320.6500</td>
+		</tr><tr>
+			<td>37725</td><td>Incendio</td><td>09/09/2023 12:00:00 a.m.</td><td>IN-MULTI-026655-0</td><td>FINALIZADO</td><td>Terremoto/Da&#241;os por Agua/Vendaval</td><td>REYES SESSUMS DAYSELGIS LOREINE</td><td>253</td><td>0.0000</td><td>340.6900</td>
+		</tr><tr>
+			<td>37990</td><td>Incendio</td><td>23/11/2023 12:00:00 a.m.</td><td>IN-BPVL-042749-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n - Contenido</td><td>TYPALDOS WATTS RICAURTE</td><td>256</td><td>0.0000</td><td>516.9000</td>
+		</tr><tr>
+			<td>38415</td><td>Incendio</td><td>25/12/2023 12:00:00 a.m.</td><td>IN-GL-009474-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>HAYANS TEJADA ISOLINA MARIA</td><td>1</td><td>0.0000</td><td>356.7500</td>
+		</tr><tr>
+			<td>38565</td><td>Incendio</td><td>14/11/2023 12:00:00 a.m.</td><td>IN-IL-006944-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>QIU QINGMEI</td><td>1</td><td>0.0000</td><td>324.6500</td>
+		</tr><tr>
+			<td>38824</td><td>Incendio</td><td>21/01/2024 12:00:00 a.m.</td><td>IN-GL-023205-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>MARTINEZ GUERRA CESAR AUGUSTO</td><td>1</td><td>0.0000</td><td>989.0400</td>
+		</tr><tr>
+			<td>38825</td><td>Incendio</td><td>23/01/2024 12:00:00 a.m.</td><td>IN-GL-043961-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>PIMENTEL CASTA&#209;EDAS YAMILETH</td><td>3</td><td>0.0000</td><td>315.7500</td>
+		</tr><tr>
+			<td>38880</td><td>Incendio</td><td>25/12/2023 12:00:00 a.m.</td><td>IN-GL-018859-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>MAS LUNA DALVA LINNETTE JUDITH</td><td>1</td><td>0.0000</td><td>320.6500</td>
+		</tr><tr>
+			<td>38949</td><td>Incendio</td><td>06/02/2024 12:00:00 a.m.</td><td>IN-GL-044810-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>SALAZAR MEDINA MARCEL ENRIQUE</td><td>1</td><td>0.0000</td><td>324.0000</td>
+		</tr><tr>
+			<td>39087</td><td>Incendio</td><td>19/02/2024 12:00:00 a.m.</td><td>IN-MUL-CONT-046016-0</td><td>FINALIZADO</td><td>Robo con Forzamiento</td><td>DE GRACIA ESPINOZA ELIO ENAI</td><td>254</td><td>0.0000</td><td>375.0000</td>
+		</tr><tr>
+			<td>39263</td><td>Incendio</td><td>05/03/2024 12:00:00 a.m.</td><td>IN-GL-047390-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DIAZ CORDOBA SUGELYS BEATRIZ</td><td>1</td><td>0.0000</td><td>400.7500</td>
+		</tr><tr>
+			<td>39981</td><td>Incendio</td><td>01/04/2024 12:00:00 a.m.</td><td>IN-ED-047663-0</td><td>RECHAZADO</td><td>Endoso de Valor de Reemplazo-contenido</td><td>GLOBAL BANK CORPORATION</td><td>263</td><td>0.0000</td><td>353.7500</td>
+		</tr><tr>
+			<td>39983</td><td>Incendio</td><td>14/05/2023 12:00:00 a.m.</td><td>IN-MUL-CONT-045878-0</td><td>FINALIZADO</td><td>Robo con Forzamiento</td><td>MONTENEGRO MORENO GLORIENIS ITZEL</td><td>254</td><td>0.0000</td><td>311.0000</td>
+		</tr><tr>
+			<td>40263</td><td>Incendio</td><td>17/08/2023 12:00:00 a.m.</td><td>IN-GL-012189-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>WATSON WENDY JOAN</td><td>1</td><td>0.0000</td><td>315.7500</td>
+		</tr><tr>
+			<td>40642</td><td>Incendio</td><td>27/06/2024 12:00:00 a.m.</td><td>IN-GL-018307-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>FEDEE LEE REINALDO ALBERTO</td><td>1</td><td>0.0000</td><td>397.5000</td>
+		</tr><tr>
+			<td>40857</td><td>Incendio</td><td>01/05/2024 12:00:00 a.m.</td><td>IN-IL-041446-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>330.7500</td>
+		</tr><tr>
+			<td>40919</td><td>Incendio</td><td>05/07/2024 12:00:00 a.m.</td><td>IN-BPVL-029563-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ROMERO RODRIGUEZ INDIRA ESTHER</td><td>1</td><td>0.0000</td><td>377.5000</td>
+		</tr><tr>
+			<td>40920</td><td>Incendio</td><td>23/07/2024 12:00:00 a.m.</td><td>IN-MGLOBAL-040866-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>BHAKTA MAHESHKUMAR JAYPRAKASH</td><td>1</td><td>0.0000</td><td>350.7500</td>
+		</tr><tr>
+			<td>41003</td><td>Incendio</td><td>30/07/2024 12:00:00 a.m.</td><td>IN-GL-047090-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>HUANG WENBIN</td><td>1</td><td>0.0000</td><td>380.7500</td>
+		</tr><tr>
+			<td>41634</td><td>Incendio</td><td>16/09/2024 12:00:00 a.m.</td><td>IN-MULTI-024311-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DELGADO MENDOZA EZEQUIEL</td><td>1</td><td>0.0000</td><td>377.5000</td>
+		</tr><tr>
+			<td>42048</td><td>Incendio</td><td>28/10/2024 12:00:00 a.m.</td><td>IN-GL-007369-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JAIME ENRIQUE RODRIGUEZ NAVAS</td><td>1</td><td>0.0000</td><td>523.2900</td>
+		</tr><tr>
+			<td>42049</td><td>Incendio</td><td>28/10/2024 12:00:00 a.m.</td><td>IN-BPVL-028282-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>VICTOR  JORGE RODRIGUEZ ROSADO</td><td>1</td><td>0.0000</td><td>609.1000</td>
+		</tr><tr>
+			<td>42135</td><td>Incendio</td><td>26/10/2024 12:00:00 a.m.</td><td>IN-GL-016138-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GUERRERO RANGEL ALEX JAVIER</td><td>1</td><td>0.0000</td><td>362.5000</td>
+		</tr><tr>
+			<td>42543</td><td>Incendio</td><td>04/12/2024 12:00:00 a.m.</td><td>IN-BPVL-034387-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>BEQUER SOTO DEL VALLE MANUEL DE JESUS</td><td>3</td><td>0.0000</td><td>330.7500</td>
+		</tr><tr>
+			<td>42817</td><td>Incendio</td><td>01/11/2024 12:00:00 a.m.</td><td>IN-GL-041414-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>370.6100</td>
+		</tr><tr>
+			<td>42840</td><td>Incendio</td><td>10/05/2024 12:00:00 a.m.</td><td>IN-GL-048349-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GLOBAL BANK CORPORATION</td><td>1</td><td>0.0000</td><td>517.3900</td>
+		</tr><tr>
+			<td>43074</td><td>Incendio</td><td>12/12/2024 12:00:00 a.m.</td><td>IN-GL-013853-0</td><td>NOTIFICADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>SANTAMARIA ABREGO JESUS</td><td>3</td><td>0.0000</td><td>339.7500</td>
+		</tr><tr>
+			<td>43269</td><td>Incendio</td><td>14/01/2025 12:00:00 a.m.</td><td>IN-GL-046481-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GEORGE BULGIN EDILBERTO REYNALDO</td><td>1</td><td>0.0000</td><td>357.5000</td>
+		</tr><tr>
+			<td>43270</td><td>Incendio</td><td>06/02/2025 12:00:00 a.m.</td><td>IN-GL-041032-0</td><td>FINALIZADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>ITURRALDE DOMINGUEZ CELINDA DEL CARMEN</td><td>3</td><td>0.0000</td><td>495.9000</td>
+		</tr><tr>
+			<td>44152</td><td>Incendio</td><td>09/04/2025 12:00:00 a.m.</td><td>IN-GL-048039-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>ZHUO LIAO JEAN CARLOS</td><td>1</td><td>0.0000</td><td>362.5000</td>
+		</tr><tr>
+			<td>44153</td><td>Incendio</td><td>29/04/2025 12:00:00 a.m.</td><td>IN-GL-018585-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>JAIME JONATHAN GARCIA DE PAREDES CABALLERO</td><td>1</td><td>0.0000</td><td>330.7500</td>
+		</tr><tr>
+			<td>44271</td><td>Incendio</td><td>05/05/2025 12:00:00 a.m.</td><td>IN-GL-047278-0</td><td>NOTIFICADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>ROSALES ARCIA ANABELIS MARIA</td><td>3</td><td>2000.0000</td><td>335.7500</td>
+		</tr><tr>
+			<td>44574</td><td>Incendio</td><td>19/03/2025 12:00:00 a.m.</td><td>IN-BPVL-031665-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>TU&#209;ON DE ORTEGA JOAQUINA</td><td>1</td><td>0.0000</td><td>366.5000</td>
+		</tr><tr>
+			<td>45211</td><td>Incendio</td><td>18/07/2025 12:00:00 a.m.</td><td>IN-GL-047100-0</td><td>FINALIZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>MORILLO GARRIDO JOMASERY DE JESUS</td><td>1</td><td>0.0000</td><td>1806.9200</td>
+		</tr><tr>
+			<td>46106</td><td>Incendio</td><td>10/02/2025 12:00:00 a.m.</td><td>IN-GL-009151-0</td><td>RECHAZADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>DENG GUANGWEI</td><td>1</td><td>20000.0000</td><td>0.0000</td>
+		</tr><tr>
+			<td>46302</td><td>Incendio</td><td>27/07/2025 12:00:00 a.m.</td><td>IN-GL-044426-0</td><td>NOTIFICADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>MERLO CASTILLO MIRIAM LORENA</td><td>3</td><td>8000.0000</td><td>0.0000</td>
+		</tr><tr>
+			<td>46303</td><td>Incendio</td><td>24/10/2024 12:00:00 a.m.</td><td>IN-GL-026504-0</td><td>NOTIFICADO</td><td>Extensi&#243;n de Cobertura Catastr&#243;fica</td><td>CASTRO RODRIGUEZ FRANCISCO ANTONIO</td><td>3</td><td>12000.0000</td><td>0.0000</td>
+		</tr><tr>
+			<td>46304</td><td>Incendio</td><td>21/10/2024 12:00:00 a.m.</td><td>IN-MULTI-012777-0</td><td>FINALIZADO</td><td>Gasto de Hoteleria</td><td>VERONICA ISABEL RIVERA CEDE&#165;O</td><td>251</td><td>0.0000</td><td>950.0000</td>
+		</tr><tr>
+			<td>46363</td><td>Incendio</td><td>16/10/2025 12:00:00 a.m.</td><td>IN-GL-048347-0</td><td>NOTIFICADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>CALDERON FILOS MEYLIN ENEIDA</td><td>1</td><td>10000.0000</td><td>0.0000</td>
+		</tr><tr>
+			<td>46573</td><td>Incendio</td><td>16/10/2025 12:00:00 a.m.</td><td>IN-IL-043365-0</td><td>NOTIFICADO</td><td>Incendio/Rayo/Explosi&#243;n</td><td>GEORGE MALERVA KAREN ENITH</td><td>1</td><td>15000.0000</td><td>0.0000</td>
+		</tr>
+	</table>
+</div></form>
