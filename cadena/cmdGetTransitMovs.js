@@ -232,12 +232,33 @@ function movementPredicate(alias, input) {
   const parts = [];
   if (input && input.holderId > 0) {
     // Persisted contact on the movement wins; legacy movements retain account-holder lookup.
+    // MSN-000138: an income with no persisted contact on a shared (non-policy) account belongs to the
+    // contact whose account was debited by the same cashier operation (PPXA: same date, cash desk,
+    // income type and reference). Only the filter changes; stored data is read as it is.
     parts.push(`EXISTS (SELECT 1 FROM [Transfer] contactTransfer JOIN [Account] contactAccount ON contactAccount.[id]=${alias}.[accountId]
       OUTER APPLY (SELECT TOP 1 TRY_CONVERT(int,JSON_VALUE(j.[value],'$.userData[0]')) AS contactId
         FROM OPENJSON(CASE WHEN ISJSON(contactTransfer.[jIncomeTypeForm])=1 THEN contactTransfer.[jIncomeTypeForm] ELSE '[]' END) j
         WHERE JSON_VALUE(j.[value],'$.name')='hiddenCodigoCliente') storedContact
       WHERE contactTransfer.[id]=${alias}.[transferId]
-        AND COALESCE(storedContact.contactId,contactAccount.[holderId])=${input.holderId})`);
+        AND (COALESCE(storedContact.contactId,contactAccount.[holderId])=${input.holderId}
+          OR (storedContact.contactId IS NULL
+            AND contactAccount.[lifePolicyId] IS NULL
+            AND ISNULL(contactTransfer.[isExternal],0)=1
+            AND contactTransfer.[amount]>0
+            AND EXISTS (SELECT 1 FROM [Transfer] sourceTransfer JOIN [Account] sourceAccount ON sourceAccount.[id]=sourceTransfer.[destinationAccountId]
+              OUTER APPLY (SELECT TOP 1 TRY_CONVERT(int,JSON_VALUE(sj.[value],'$.userData[0]')) AS contactId
+                FROM OPENJSON(CASE WHEN ISJSON(sourceTransfer.[jIncomeTypeForm])=1 THEN sourceTransfer.[jIncomeTypeForm] ELSE '[]' END) sj
+                WHERE JSON_VALUE(sj.[value],'$.name')='hiddenCodigoCliente') sourceContact
+              WHERE sourceTransfer.[id]<>contactTransfer.[id]
+                AND sourceTransfer.[date]=contactTransfer.[date]
+                AND ISNULL(sourceTransfer.[transferWorkspaceId],0)=ISNULL(contactTransfer.[transferWorkspaceId],0)
+                AND ISNULL(sourceTransfer.[incomeType],'')=ISNULL(contactTransfer.[incomeType],'')
+                AND ISNULL(sourceTransfer.[concept],'')=ISNULL(contactTransfer.[concept],'')
+                AND ISNULL(sourceTransfer.[isExternal],0)=1
+                AND sourceTransfer.[amount]<0
+                AND sourceTransfer.[executed]=1
+                AND sourceTransfer.[status]=1
+                AND COALESCE(sourceContact.contactId,sourceAccount.[holderId])=${input.holderId}))))`);
   }
   parts.push(baseMovementPredicate(alias,input));
   return parts.join(' AND ');

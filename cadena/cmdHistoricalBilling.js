@@ -29,6 +29,8 @@ try {
   const offset = (input.page - 1) * input.size;
   const where = buildFilter(input);
 
+  // MSN-000138: refundTransfers also counts credit taken out of the policy transit account by a transfer
+  // between accounts (PPXA, account transfer, premium paid from transit); refundApplied keeps the cap.
   const dataSql = `
 WITH BillingRows AS (
     SELECT
@@ -113,14 +115,34 @@ WITH BillingRows AS (
         ON cancellationPlanPayments.[lifePolicyId] = lp.[id]
     LEFT JOIN (
         SELECT
-            refundTransfer.[lifePolicyId],
-            SUM(ABS(ISNULL(refundTransfer.[amount], 0))) AS [amount]
-        FROM [Transfer] refundTransfer
-        WHERE refundTransfer.[transactionCode] = N'REFUND'
-          AND refundTransfer.[status] in (1,2)
-          AND refundTransfer.[executed] = 1
-          AND refundTransfer.[reversalDate] IS NULL
-        GROUP BY refundTransfer.[lifePolicyId]
+            refundRows.[lifePolicyId],
+            SUM(refundRows.[amount]) AS [amount]
+        FROM (
+            SELECT
+                refundTransfer.[lifePolicyId],
+                ABS(ISNULL(refundTransfer.[amount], 0)) AS [amount]
+            FROM [Transfer] refundTransfer
+            WHERE refundTransfer.[transactionCode] = N'REFUND'
+              AND refundTransfer.[status] in (1,2)
+              AND refundTransfer.[executed] = 1
+              AND refundTransfer.[reversalDate] IS NULL
+            UNION ALL
+            SELECT
+                transitAccount.[lifePolicyId],
+                ABS(ISNULL(transitMovement.[amount], 0)) AS [amount]
+            FROM [AccountMov] transitMovement
+            INNER JOIN [Account] transitAccount ON transitAccount.[id] = transitMovement.[accountId]
+            INNER JOIN [Transfer] transitTransfer ON transitTransfer.[id] = transitMovement.[transferId]
+            WHERE transitAccount.[type] = N'TRANSIT'
+              AND transitAccount.[lifePolicyId] IS NOT NULL
+              AND transitMovement.[amount] < 0
+              AND ISNULL(transitMovement.[transactionCode], N'') = N'TRANSIT'
+              AND ISNULL(transitTransfer.[transactionCode], N'') NOT IN (N'REFUND', N'PREMIUMPAY')
+              AND transitTransfer.[status] = 1
+              AND transitTransfer.[executed] = 1
+              AND transitTransfer.[reversalDate] IS NULL
+        ) refundRows
+        GROUP BY refundRows.[lifePolicyId]
     ) refundTransfers
         ON refundTransfers.[lifePolicyId] = lp.[id]
     LEFT JOIN (

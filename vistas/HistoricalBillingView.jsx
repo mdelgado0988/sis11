@@ -1789,13 +1789,24 @@
       filter: `[Transfer].[lifePolicyId] = ${policyId} AND [Transfer].[transactionCode] = N'REFUND' AND [Transfer].[status] in (1,2) AND [Transfer].[executed] = 1`,
       noTracking: true
     });
+    // MSN-000138: a transfer between accounts that takes the credit out of the policy transit account
+    // (PPXA, account transfer, premium paid from transit) also counts as applied.
+    const transitTransferRequest = exe('LoadEntities', {
+      entity: 'AccountMov',
+      fields: 'id,accountId,amount,transferId,transactionCode',
+      filter: `accountId IN (SELECT a.id FROM Account a WHERE a.[type] = 'TRANSIT' AND a.lifePolicyId = ${policyId}) AND amount < 0 AND ISNULL(transactionCode, '') = 'TRANSIT' AND transferId IN (SELECT tr.id FROM Transfer tr WHERE tr.[status] = 1 AND tr.executed = 1 AND tr.reversalDate IS NULL AND ISNULL(tr.transactionCode, '') NOT IN ('REFUND', 'PREMIUMPAY'))`,
+      noTracking: true
+    });
 
-    Promise.all([claimPaymentRequest, refundTransferRequest]).then(([claimPaymentResponse, transferResponse]) => {
+    Promise.all([claimPaymentRequest, refundTransferRequest, transitTransferRequest]).then(([claimPaymentResponse, transferResponse, transitResponse]) => {
       if (!claimPaymentResponse || claimPaymentResponse.ok === false) {
         throw new Error(claimPaymentResponse && claimPaymentResponse.msg ? claimPaymentResponse.msg : t('Refunds could not be loaded.'));
       }
       if (!transferResponse || transferResponse.ok === false) {
         throw new Error(transferResponse && transferResponse.msg ? transferResponse.msg : t('Refunds could not be loaded.'));
+      }
+      if (!transitResponse || transitResponse.ok === false) {
+        throw new Error(transitResponse && transitResponse.msg ? transitResponse.msg : t('Refunds could not be loaded.'));
       }
 
       const refundTransfers = getRows(transferResponse)
@@ -1804,12 +1815,18 @@
         .map(item => Number(item && item.id))
         .filter(id => id > 0));
       const transferAmount = refundTransfers.reduce((total, item) => total + Math.abs(firstNumber(item, ['amount'], 0)), 0);
-      const claimPaymentAmount = getRows(claimPaymentResponse)
+      const claimPayments = getRows(claimPaymentResponse)
         .filter(item => Number(item && item.claimId || 0) <= 0 && Number(item && item.transferId || 0) > 0)
-        .filter(item => !refundTransferIds.has(Number(item.transferId)))
+        .filter(item => !refundTransferIds.has(Number(item.transferId)));
+      const claimPaymentAmount = claimPayments
         .reduce((total, item) => total + Math.abs(firstNumber(item, ['total'], 0)), 0);
+      const countedTransferIds = new Set(Array.from(refundTransferIds)
+        .concat(claimPayments.map(item => Number(item.transferId))));
+      const transitTransferAmount = getRows(transitResponse)
+        .filter(item => !countedTransferIds.has(Number(item && item.transferId)))
+        .reduce((total, item) => total + Math.abs(firstNumber(item, ['amount'], 0)), 0);
 
-      return transferAmount + claimPaymentAmount;
+      return transferAmount + claimPaymentAmount + transitTransferAmount;
     }).then(amount => {
       if (!cancelled) setRefundAmount(Number(amount) || 0);
     }).catch(error => {
