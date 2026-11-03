@@ -1379,27 +1379,30 @@ async function loadDataEntities(){
     return;
   }
 
-  await loadConfigCoverages();
+  // Estas cargas solo dependen de la póliza ya recuperada. Ejecutarlas en
+  // paralelo evita que la latencia de cada consulta se acumule en serie.
+  const [, , , , RepoCoverages, , ] = await Promise.all([
+    loadConfigCoverages(),
+    loadCessions(),
+    loadCoCessions(),
+    listarCoaseguradores(),
+    me.exe("LoadEntities", {
+      entity: "LifeCoverage",
+      fields: "id, code, limit, basePremium",
+      filter: `lifePolicyId = ${policyId}`,
+      size: 500,
+      page: 0
+    }),
+    listarAceptantes(),
+    listarCorredoresReaseguro()
+  ]);
 
-  await loadCessions();
-  await loadCoCessions();
-  await listarCoaseguradores();
-
-  const RepoCoverages = await me.exe("LoadEntities", {
-    entity: "LifeCoverage",
-    fields: "id, code, limit, basePremium",
-    filter: `lifePolicyId = ${policyId}`,
-    size: 500,
-    page: 0
-  });
   coverages = Array.isArray(RepoCoverages?.outData)
     ? RepoCoverages.outData
     : Array.isArray(RepoCoverages?.data)
       ? RepoCoverages.data
       : [];
-    
-  await listarAceptantes();
-  await listarCorredoresReaseguro();
+
   sincronizarControlesCoaseguro();
 
   if(coverages.length <= 0)
@@ -4306,6 +4309,7 @@ async function initGridDistribucion() {
 
     if ($hidden.length) {
 
+      showLoading("Cargando distribución de reaseguro...");
       try {
         await loadDataEntities();
       } catch (e) {
@@ -4319,6 +4323,7 @@ async function initGridDistribucion() {
       addParticipantsEvent();
       renderResumen();
       validateState();
+      hideLoading();
 
       console.log("Grid creado correctamente");
       return;

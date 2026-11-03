@@ -12,115 +12,45 @@ let poliza = RepoLifePolicy.outData[0];
 let changeId = _row.changeId;
 //let effectiveDate = _row.effectiveDate;
 
+// Ejecutamos plantilla contable de endoso
+const changeData = getChangeData(changeId);
+if(!changeData) throw "No se encontró el objeto asegurado.";
+
 const definitions = [45,46,47];
-var insuredObject = poliza.InsuredObjects.filter(x=> definitions.includes(x.objectDefinitionId));
+const jInsuredObjects = changeData.jNewInsuredObjects ? JSON.parse(changeData.jNewInsuredObjects) : [];
+var jInsuredObject = jInsuredObjects.filter(x=> definitions.includes(x.objectDefinitionId));
+var insuredObject = jInsuredObject[0].jValues ? JSON.parse(jInsuredObject[0].jValues) : [];
 
-insuredObject = insuredObject.length > 0 ? insuredObject[0] : null;
-if (!insuredObject)
-  	throw "No se encontró el objeto asegurado.";
+if(insuredObject.length == 0) throw "No se encontró el objeto asegurado.";
 
-const sumaAsegurada = parseFloat(insuredObject.userData.txtSA);
+const actualDefinitionId = jInsuredObjects[0].objectDefinitionId;
 
-//Michael Delgado. 2026.04.08. GLOB-180. Que no valide, si está igual que actualice, pero es necesario que continúe a la generación del CD.
-/*if(poliza.insuredSum === sumaAsegurada){
-    return {
-        ok:true,
-        msg: 'Endoso de Cambio de Objeto Asegurado sin cambios de suma asegurada'
-    }
-}*/
+let objectSA = insuredObject.find(x => x.name == "txtSA");
+if(!objectSA) throw "No se encontró el campo de la suma asegurada.";
 
-//Michael Delgado. 2026.04.08. GLOB-180. Esto no es necesario, el mismo endoso puede generar y debe generar los cambios en la póliza (coberturas, etc).
-/*
-let coberturasAnteriores = [];
-let coberturasActual = [];
-let sumAseguradaBasic = 0;
-let prima = 0;
-coberturasAnteriores = JSON.parse(JSON.stringify(poliza.Coverages));
-
-doCmd({
-    cmd: "ExeChain",
-    data:{
-        chain: "cmdGetGeneralIncendio",
-        context: `{poliza:${JSON.stringify(poliza)},action:'QUOTE',extra:null,esEndoso:false}`
-    }
-});
-
-const coberturasTarificadas = ExeChain.outData ? ExeChain.outData : null;
-
-if(!coberturasTarificadas)
-    throw '@No se pudo modificar las coberturas';
-
-for(var indice = 0; indice < poliza.Coverages.length; indice ++){ 
-  	let cobertura = poliza.Coverages[indice];
-    const currentCob = coberturasTarificadas[cobertura.code];
-    if(!currentCob) continue;
-  	cobertura.limit = currentCob.limit;
-  	cobertura.startLimit = currentCob.limit;  	
-  	cobertura.basePremium = currentCob.premium;
-  	cobertura.premium = currentCob.premium;
-  	cobertura.startBasePremium = currentCob.premium;
-  	cobertura.startPremium = currentCob.premium;
-    cobertura.deductible = currentCob.dedutible
-  	coberturasActual.push(cobertura);
-    if(cobertura.basic) sumAseguradaBasic += currentCob.limit;;
-}
-
-doCmd({
-    cmd:"ChangeCoverage",    
-    data:{
-        policyId:poliza.id,
-        jOldCoverages:JSON.stringify(coberturasAnteriores),
-        jNewCoverages:JSON.stringify(coberturasActual),
-        effectiveDate:effectiveDate,
-        operation:"ADD",
-        ignore: 1,
-        noTracking: true
-	}
-});
-
-if(!ChangeCoverage.ok) return ChangeCoverage;
-
-const changeCoverageId = ChangeCoverage.outData.id;
-
-//Se secreo correctamente el endoso ejecutamos accion EXECUTE    
-doCmd({
-    cmd: "ExeChangeCoverage",
-    data: {
-        changeId: changeCoverageId,
-        exeNow: false,
-        operation: "EXECUTE",
-        noTracking: true
-    }
-});
-
-if(!ExeChangeCoverage.ok) return ExeChangeCoverage;
-*/
-
-/*
-var query = "update Change set newCapital = " + sumAseguradaBasic + ", oldCapital = "+ poliza.insuredSum +" where id = " + changeCoverageId;
-doCmd({ "cmd": "DoQuery", "data": { sql: query } });
-*/
+const sumaAsegurada = parseFloat(objectSA.userData[0]);
 
 var query = "update LifePolicy set insuredSum = " + sumaAsegurada + " where id = " + poliza.id;
 doCmd({ "cmd": "DoQuery", "data": { sql: query } });
-
-//Michael Delgado. 2026.04.08. GLOB-180. Debido a que el endoso de cambio de cobertura no es necesario, no es necesario generar otro reporte.
-/*
-//MAD: Creo el documento del cambio según la cadena de reportes
-doCmd({cmd:'ExeChain',data:{chain:'cmdGenertFormatoEmdoso', context: `{ changeId: ${changeCoverageId} }`}});
-*/
-
-// Ejecutamos plantilla contable de endoso
-const changeData = getChangeData(changeId);
 
 //MAD: Si es un endoso informativo de cambio de objeto asegurado, no contabilizo, de lo contrario si.
 if(changeData.Discriminator == "InsuredObjectChange" && changeData.informative)
     return;
 
-doCmd({cmd:'ExeTransactionTemplate',data:{code:'EmisionIncendio', scanContext:{ id: changeId, tipo: 4 }}});
+//Michael Delgado. 2026.04.07. GLOB-625. Redistribución de reaseguro.
+log("Redistribuyendo reaseguro según registro manual");
+doCmd({
+  cmd:'ExeChain',
+  data: {
+      chain: 'cmdRedistribuyeReaseguroEndoso',
+      context: '{ changeId: ' + changeId + ' }'
+  }
+});
+
+doCmd({cmd:'ExeTransactionTemplate',data:{code:'Emision', scanContext:{ id: changeId, tipo: 4 }}});
 
 function getChangeData(changeId) {  
-  doCmd({ cmd: "LoadEntity", data:{ entity: "Change", filter: `id= ${changeId}`, fields:"informative, Discriminator"}});
+  doCmd({ cmd: "LoadEntity", data:{ entity: "Change", filter: `id= ${changeId}`, fields:"informative, Discriminator, jNewInsuredObjects"}});
   const change = LoadEntity.outData;
   return change;
 }

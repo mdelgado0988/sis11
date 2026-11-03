@@ -485,12 +485,15 @@
   const documentCanPreview = blob => String(blob && blob.type || '').split(';')[0].trim().toLowerCase() === 'application/pdf';
   const openPaymentDocument = row => {
     const paymentId = Number(row && row.id);
-    const claimId = Number(row && row.claimId);
+    const claimValue = row && row.claimId;
+    // Sin siniestro (fusión de varios reclamos, solicitud manual o de póliza) el documento se arma solo con la solicitud.
+    const hasClaim = !(claimValue === null || claimValue === undefined || String(claimValue).trim() === '');
+    const claimId = hasClaim ? Number(claimValue) : 0;
     if (!Number.isSafeInteger(paymentId) || paymentId <= 0) {
       setDocumentError('No se pudo verificar el identificador de la solicitud para abrir el documento.');
       return;
     }
-    if (!Number.isSafeInteger(claimId) || claimId <= 0) {
+    if (hasClaim && (!Number.isSafeInteger(claimId) || claimId <= 0)) {
       setDocumentError('No se pudo verificar el siniestro de la solicitud para abrir el documento.');
       return;
     }
@@ -556,38 +559,46 @@
       }
       return result.outData;
     });
+    const generateDocument = () => Promise.resolve().then(() => {
+      if (!current()) throw new Error('document-stale');
+      return exe('ExeChain', {
+        chain: 'cmdGenerateClaimDocument',
+        context: JSON.stringify(hasClaim ? {
+          claimId: claimId,
+          context: { paymentId: paymentId },
+          template: template,
+          reportName: reportName
+        } : {
+          context: { paymentId: paymentId },
+          contextChain: 'cmdContexDocReciboPago',
+          template: template,
+          reportName: reportName
+        })
+      });
+    }).then(result => {
+      if (!current()) throw new Error('document-stale');
+      const generated = result && result.outData && typeof result.outData === 'object' ? result.outData : result;
+      if (!result || result.ok !== true || !generated || generated.ok !== true || !documentUrl(generated.url)) {
+        throw new Error(generated && generated.msg || message(result, 'No se confirmó la generación del documento.'));
+      }
+      return generated;
+    });
     setDocumentOpening(true);
     setDocumentError('');
     setNotice('');
-    return loadClaimDocuments().then(documents => {
+    // Sin siniestro no hay dónde registrar el documento: se genera con los datos actuales de la solicitud y se abre.
+    const opening = !hasClaim ? generateDocument().then(generated => navigate(generated)) : loadClaimDocuments().then(documents => {
       const exactDocuments = documents.filter(exactDocument);
       const existing = exactDocuments.find(document => documentUrl(document.url));
       if (existing) return navigate(existing);
       if (exactDocuments.length) throw new Error('El documento existente no tiene una URL válida.');
-      return Promise.resolve().then(() => {
-        if (!current()) throw new Error('document-stale');
-        return exe('ExeChain', {
-          chain: 'cmdGenerateClaimDocument',
-          context: JSON.stringify({
-            claimId: claimId,
-            context: { paymentId: paymentId },
-            template: template,
-            reportName: reportName
-          })
-        });
-      }).then(result => {
-        if (!current()) throw new Error('document-stale');
-        const generated = result && result.outData && typeof result.outData === 'object' ? result.outData : result;
-        if (!result || result.ok !== true || !generated || generated.ok !== true || !documentUrl(generated.url)) {
-          throw new Error(generated && generated.msg || message(result, 'No se confirmó la generación del documento.'));
-        }
-        return loadClaimDocuments();
-      }).then(documentsAfterGeneration => {
+      return generateDocument().then(() => loadClaimDocuments()).then(documentsAfterGeneration => {
         const generated = documentsAfterGeneration.find(document => exactDocument(document) && documentUrl(document.url));
         if (!generated) throw new Error('El documento se generó, pero no se encontró registrado para abrirlo.');
         return navigate(generated);
       });
-    }).catch(failure => {
+    });
+    return opening.catch(failure => {
       closeUnusedWindow();
       if (current() && (!failure || failure.message !== 'document-stale')) {
         const code = failure && failure.message;
