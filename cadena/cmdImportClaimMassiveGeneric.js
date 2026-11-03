@@ -20,6 +20,10 @@
  *           cdgoPais, cdgociu1, cdgoest1, cober15, cober39}, batchId, simulate? }
  *           simulate:true valida la fila y devuelve el reclamo que se crearía, sin grabar nada.
  * @mission  MSN-000088 (globaluat) — 2026-10-21. Base: cmdImportClaimMassive (MSN-000047) y la cadena 851.
+ * @mission  MSN-000135 (globaluat) — 2026-11-03: referencia del lote en el reclamo. El campo oculto loteCargaMasiva de
+ *           «Detalle del Siniestro» (formulario 371) guarda {loteId, fila, importacionId, importacion}: fila = posición del
+ *           registro en el lote (la numeración de «Ver detalles» de la vista 63). Usa batchId, configId y configName del
+ *           contexto que arma DoBatch; sin lote (ExeChain directo) no hay referencia. La vista 63 lo lee con cmdListBatchClaims.
  */
 
 const TAG = "Reclamo";
@@ -33,6 +37,7 @@ const DESGRAVAMEN_LOB = "20";
 const DESGRAVAMEN_PRODUCT = "vid-desemp";
 const DETAIL_SECTION = "Detalle del Siniestro";
 const EXTRA_SECTION = "InformacionResumenDelReclamo";
+const BATCH_FIELD = "loteCargaMasiva";
 const CLAIMANT_TYPES = ["Afectado", "Asegurado", "Tercera Persona"];
 const FIELDS = ["fSiniestro", "hora", "fNotificacion", "statSin", "usuario", "edadConductor", "lugar",
   "descripcionSiniestro", "culpabilidad", "responsable", "cdgocaus", "cdgosucu", "cdgoramo", "numepoli",
@@ -130,9 +135,10 @@ try {
     edadConductor: driverAge,
     cmbProvincia: geo.state ? String(geo.state.code) : "",
     cmbMunicipio: geo.city ? String(geo.city.code) : "",
-    lugar: r.lugar
+    lugar: r.lugar,
+    loteCargaMasiva: batchReference()
   };
-  const jCustomForms = buildCustomForms(values);
+  const jCustomForms = withBatchField(buildCustomForms(values), values.loteCargaMasiva);
 
   // 9. Reclamo (mismo payload que la vista 48 al crear)
   const notification = notificationDate === occurrence.date ? occurrence.iso : utcIso(notificationDate, 0, 0, offset);
@@ -544,4 +550,64 @@ function translate(message) {
   ];
   const hit = known.find(k => k[0].test(text));
   return hit ? `${hit[1]} (${text})` : text;
+}
+
+// ---------------------------------------------------------------- referencia del lote (MSN-000135)
+
+// Referencia del lote para el campo oculto loteCargaMasiva de «Detalle del Siniestro». Vacía sin lote.
+function batchReference() {
+  const batchId = Number(args.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) return "";
+  const configId = Number(args.configId);
+  const validConfig = Number.isSafeInteger(configId) && configId > 0;
+  return JSON.stringify({
+    loteId: batchId,
+    fila: validConfig ? batchRow(batchId, configId) : null,
+    importacionId: validConfig ? configId : null,
+    importacion: String(args.configName || IMPORT_NAME)
+  });
+}
+
+// Posición (1, 2, …) del registro en el lote, la misma numeración de «Ver detalles»: la fila del lote cuyas celdas son las
+// que recibió esta corrida. Con filas idénticas en el lote, la primera que todavía no tenga reclamo.
+function batchRow(batchId, configId) {
+  const config = query(`SELECT jMappings FROM ImportConfig WHERE id=${configId}`);
+  let mappings = [];
+  try { mappings = JSON.parse(config.length && config[0].jMappings ? String(config[0].jMappings) : "[]"); } catch (e) { mappings = []; }
+  const raw = args.row || {};
+  const conditions = [];
+  (Array.isArray(mappings) ? mappings : []).forEach((mapping, index) => {
+    if (!Array.isArray(mapping) || mapping.length < 3) return;
+    const field = String(mapping[2] || "");
+    if (!field || String(mapping[1] || "").trim() || field.indexOf("[") !== -1) return;
+    const value = raw[field];
+    conditions.push(value === null || value === undefined
+      ? `JSON_VALUE(j.value, '$[${index}]') IS NULL`
+      : `JSON_VALUE(j.value, '$[${index}]') = N'${sql(String(value))}'`);
+  });
+  if (!conditions.length) return null;
+  const candidates = query(`SELECT CAST(j.[key] AS int) + 1 AS fila FROM Batch b CROSS APPLY OPENJSON(CASE WHEN ISJSON(b.jData) = 1 THEN b.jData ELSE '[]' END) j WHERE b.id = ${batchId} AND ${conditions.join(" AND ")} ORDER BY CAST(j.[key] AS int)`)
+    .map(x => Number(x.fila)).filter(Number.isSafeInteger);
+  if (candidates.length <= 1) return candidates.length ? candidates[0] : null;
+  const taken = batchClaimRows(batchId);
+  const free = candidates.filter(f => taken.indexOf(f) === -1);
+  return free.length ? free[0] : candidates[0];
+}
+
+// Filas del lote que ya tienen un reclamo con su referencia.
+function batchClaimRows(batchId) {
+  return query(`SELECT f.val FROM Claim c CROSS APPLY OPENJSON(CASE WHEN ISJSON(c.jCustomForms) = 1 THEN c.jCustomForms ELSE '{}' END) WITH (det nvarchar(max) '$."${DETAIL_SECTION}"') d CROSS APPLY OPENJSON(CASE WHEN ISJSON(d.det) = 1 THEN d.det ELSE '[]' END) WITH (name nvarchar(200) '$.name', val nvarchar(4000) '$.userData[0]') f WHERE c.jCustomForms LIKE N'%${BATCH_FIELD}%' AND f.name = N'${BATCH_FIELD}' AND ISJSON(f.val) = 1 AND JSON_VALUE(f.val, '$.loteId') = '${batchId}'`)
+    .map(x => { try { return Number(JSON.parse(x.val).fila); } catch (e) { return NaN; } })
+    .filter(Number.isSafeInteger);
+}
+
+// Si el formulario de «Detalle del Siniestro» no trae el campo oculto, se agrega igual para no perder la referencia.
+function withBatchField(raw, reference) {
+  if (!reference) return raw;
+  const outer = JSON.parse(raw);
+  const fields = JSON.parse(outer[DETAIL_SECTION] || "[]");
+  if (fields.some(f => f && f.name === BATCH_FIELD)) return raw;
+  fields.push({ type: "hidden", name: BATCH_FIELD, label: "Lote de carga masiva", access: false, userData: [reference] });
+  outer[DETAIL_SECTION] = JSON.stringify(fields);
+  return JSON.stringify(outer);
 }

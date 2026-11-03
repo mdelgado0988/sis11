@@ -1,7 +1,9 @@
 /**
  * @name CargaMasivaDeReclamos
  * @purpose Bulk claim import preparation, batch execution and results for SISOS11.
- * @version 1.0.0
+ * @version 1.1.0
+ * @change  1.1.0 MSN-000135 (2026-11-03): «Número de reclamo» de cada fila en «Ver detalle» y en «Exportar a Excel»,
+ *         leído con cmdListBatchClaims de la referencia loteCargaMasiva que guardan las cadenas de carga en el reclamo.
  */
 () => {
   const Card = A.Card;
@@ -19,6 +21,7 @@
   const Tag = A.Tag;
   const Tooltip = A.Tooltip;
   const Progress = A.Progress;
+  const Input = A.Input;
   const actionPaths = {
     search: 'M909.6 854.6L649.9 594.9A314.3 314.3 0 0 0 712 412c0-166.8-135.2-302-302-302S108 245.2 108 412s135.2 302 302 302a299.5 299.5 0 0 0 182.8-62.1l259.7 259.7a8 8 0 0 0 11.3 0l45.8-45.7a8 8 0 0 0 0-11.3zM410 634c-122.6 0-222-99.4-222-222s99.4-222 222-222 222 99.4 222 222-99.4 222-222 222z',
     upload: 'M472 656h80V344l104 104 56-56-200-200-200 200 56 56 104-104v312zM160 760h704v80H160z',
@@ -38,7 +41,8 @@
     loading: false, loaded: false, current: 1, total: null, hasNext: false, templateLoading: false,
     uploading: false, uploadUncertain: false, notice: '', detailLoading: false, detailError: '', exporting: false,
     selectedBatchId: null, resultsOpen: false,
-    cobis: { open: false, file: null, rows: [], busy: false, exporting: false, complete: false, error: '' }
+    cobis: { open: false, file: null, rows: [], busy: false, exporting: false, complete: false, error: '' },
+    catalogs: { open: false, loading: false, error: '', imports: [], selected: undefined, search: '', rows: [], total: 0, page: 1, size: 10, rowsLoading: false, rowsError: '', meta: null }
   });
   const mountedRef = React.useRef(true);
   const requestRef = React.useRef(0);
@@ -261,6 +265,30 @@
     for (let index = inputWidth; index < width; index++) headers.push('Dato adicional ' + (index - inputWidth + 1));
     return Object.assign({}, batch, { product: product, headers: headers, rows: rows });
   };
+  // Número de reclamo por fila: el reclamo creado por la fila (también si la fila terminó con error), «No Creado» si no se creó,
+  // «Sin referencia» en una fila exitosa de un lote ejecutado antes de que las cargas guardaran la referencia del lote.
+  const withClaimNumbers = (detail, byLine) => Object.assign({}, detail, { rows: detail.rows.map((row) => Object.assign({}, row, {
+    claimNumber: !byLine ? 'No disponible'
+      : byLine[row.line] ? byLine[row.line].join(', ')
+      : row.resultLabel === 'Pendiente' ? ''
+      : row.resultLabel === 'Exitoso' ? 'Sin referencia' : 'No Creado'
+  })) });
+  const claimNumbers = (detail, result) => {
+    if (!result || result.ok === false) throw new Error(result && result.msg || 'No se pudieron consultar los números de reclamo.');
+    const data = result.outData;
+    if (!data || typeof data !== 'object' || data.ok !== true || !Array.isArray(data.claims)) {
+      throw new Error(data && data.msg || 'No se pudieron consultar los números de reclamo.');
+    }
+    const byLine = {};
+    data.claims.forEach((claim) => {
+      const line = Number(claim && claim.fila);
+      if (!Number.isSafeInteger(line) || line <= 0) return;
+      const label = claim.code ? String(claim.code) : 'id ' + claim.claimId;
+      if (!byLine[line]) byLine[line] = [];
+      if (byLine[line].indexOf(label) < 0) byLine[line].push(label);
+    });
+    return withClaimNumbers(detail, byLine);
+  };
   const showDetail = (selected, refresh) => {
     if (!mountedRef.current || uploadBusyRef.current) return Promise.resolve();
     if (!refresh) closeDetail();
@@ -301,8 +329,18 @@
         throw new Error('La respuesta no corresponde al lote seleccionado.');
       }
       const detail = normalizeDetail(batch, entities[0].jData, config.jMappings, config.name);
-      detailRef.current = detail;
-      update({ detail: detail });
+      let lookupError = '';
+      return Promise.resolve().then(() => exe('ExeChain', { chain: 'cmdListBatchClaims', context: JSON.stringify({ batchId: id }) }))
+        .then((result) => claimNumbers(detail, result))
+        .catch((error) => {
+          lookupError = error && error.message || 'No se pudieron consultar los números de reclamo.';
+          return withClaimNumbers(detail, null);
+        })
+        .then((complete) => {
+          if (!active()) return;
+          detailRef.current = complete;
+          update(lookupError ? { detail: complete, detailError: 'Número de reclamo no disponible: ' + lookupError } : { detail: complete });
+        });
     }).catch((error) => {
       if (active()) update({ detailError: error && error.message || 'No se pudo consultar el detalle del lote.' });
     }).then(() => { if (active()) update({ detailLoading: false }); });
@@ -345,7 +383,7 @@
     update({ exporting: true, detailError: '' });
     return ensureXlsx().then((library) => {
       if (!active()) return;
-      const rows = [['Fila', 'Estado', 'Mensaje del proceso'].concat(detail.headers)].concat(detail.rows.map((row) => [String(row.line), row.resultLabel, row.resultMessage].concat(detail.headers.map((_, index) => {
+      const rows = [['Fila', 'Estado', 'Mensaje del proceso', 'Número de reclamo'].concat(detail.headers)].concat(detail.rows.map((row) => [String(row.line), row.resultLabel, row.resultMessage, row.claimNumber == null ? '' : String(row.claimNumber)].concat(detail.headers.map((_, index) => {
         const value = row.values[index];
         return value == null ? '' : String(value);
       }))));
@@ -548,6 +586,93 @@
       return library.writeFile(workbook, 'validacion-numeros-cobis.xlsx', { bookType: 'xlsx', compression: true });
     }).catch((error) => { if (active()) updateCobis({ error: error && error.message || 'No se pudo exportar a Excel.' }); })
       .then(() => { if (active()) { session.exporting = false; updateCobis({ exporting: false }); } });
+  };
+  const catalogsRef = React.useRef({ token: 0, rowsToken: 0, timer: null, open: false, selected: null, search: '', page: 1, size: 10 });
+  const catalogsIdle = { open: false, loading: false, error: '', imports: [], selected: undefined, search: '', rows: [], total: 0, page: 1, size: 10, rowsLoading: false, rowsError: '', meta: null };
+  const updateCatalogs = (values) => {
+    if (mountedRef.current) setState((current) => Object.assign({}, current, { catalogs: Object.assign({}, current.catalogs, values) }));
+  };
+  const catalogResponse = (result, fallback) => {
+    if (!result || result.ok === false) throw new Error(result && result.msg || fallback);
+    const data = result.outData;
+    if (!data || typeof data !== 'object' || data.ok !== true) throw new Error(data && data.msg || fallback);
+    return data;
+  };
+  const clearCatalogTimer = () => {
+    const session = catalogsRef.current;
+    if (session.timer) { window.clearTimeout(session.timer); session.timer = null; }
+  };
+  const resetCatalogs = (open) => {
+    clearCatalogTimer();
+    const session = catalogsRef.current;
+    catalogsRef.current = { token: session.token + 1, rowsToken: session.rowsToken + 1, timer: null, open: open, selected: null, search: '', page: 1, size: 10 };
+    updateCatalogs(Object.assign({}, catalogsIdle, { open: open, loading: open }));
+    return catalogsRef.current;
+  };
+  const openCatalogs = () => {
+    const session = resetCatalogs(true);
+    const token = session.token;
+    const active = () => mountedRef.current && catalogsRef.current === session && session.open && session.token === token;
+    return Promise.resolve().then(() => exe('ExeChain', { chain: 'cmdListCatalogData', context: JSON.stringify({ category: CLAIMS_IMPORT_CATEGORY }) })).then((result) => {
+      if (!active()) return;
+      const data = catalogResponse(result, 'No se pudieron consultar los catálogos.');
+      const imports = (Array.isArray(data.imports) ? data.imports : []).filter((item) => item && Array.isArray(item.catalogs));
+      updateCatalogs({ loading: false, imports: imports, error: imports.some((item) => item.catalogs.length) ? '' : 'Las cargas de esta vista no tienen catálogos registrados.' });
+    }).catch((error) => {
+      if (active()) updateCatalogs({ loading: false, error: error && error.message || 'No se pudieron consultar los catálogos.' });
+    });
+  };
+  const closeCatalogs = () => { resetCatalogs(false); };
+  const loadCatalogRows = () => {
+    clearCatalogTimer();
+    const session = catalogsRef.current;
+    if (!mountedRef.current || !session.open || !session.selected) return Promise.resolve();
+    const token = ++session.rowsToken;
+    const selected = session.selected;
+    const active = () => mountedRef.current && catalogsRef.current === session && session.open && session.rowsToken === token;
+    updateCatalogs({ rowsLoading: true, rowsError: '' });
+    return Promise.resolve().then(() => exe('ExeChain', { chain: 'cmdListCatalogDataDetail', context: JSON.stringify({ category: CLAIMS_IMPORT_CATEGORY,
+      importId: selected.importId, field: selected.field, search: session.search, page: session.page - 1, size: session.size }) })).then((result) => {
+      if (!active()) return;
+      const data = catalogResponse(result, 'No se pudo consultar el catálogo.');
+      const page = Number.isSafeInteger(Number(data.page)) && Number(data.page) >= 0 ? Number(data.page) + 1 : session.page;
+      session.page = page;
+      updateCatalogs({ rowsLoading: false, rows: Array.isArray(data.rows) ? data.rows : [], total: Number(data.total) || 0, page: page, size: Number(data.size) || session.size, meta: data.catalog || null });
+    }).catch((error) => {
+      if (active()) updateCatalogs({ rowsLoading: false, rows: [], total: 0, rowsError: error && error.message || 'No se pudo consultar el catálogo.' });
+    });
+  };
+  const selectCatalog = (value) => {
+    const session = catalogsRef.current;
+    if (!session.open) return;
+    clearCatalogTimer();
+    const parts = String(value || '').split(':');
+    session.selected = parts.length === 2 && Number(parts[0]) > 0 && parts[1] ? { importId: Number(parts[0]), field: parts[1] } : null;
+    session.search = '';
+    session.page = 1;
+    session.rowsToken++;
+    updateCatalogs({ selected: session.selected ? value : undefined, search: '', rows: [], total: 0, page: 1, rowsLoading: false, rowsError: '', meta: null });
+    if (session.selected) loadCatalogRows();
+  };
+  const searchCatalog = (value, immediate) => {
+    const session = catalogsRef.current;
+    if (!session.open) return;
+    session.search = String(value == null ? '' : value).slice(0, 100);
+    session.page = 1;
+    clearCatalogTimer();
+    updateCatalogs({ search: session.search, page: 1 });
+    if (!session.selected) return;
+    if (immediate) { loadCatalogRows(); return; }
+    session.timer = window.setTimeout(() => { session.timer = null; loadCatalogRows(); }, 400);
+  };
+  const pageCatalog = (page, size) => {
+    const session = catalogsRef.current;
+    if (!session.open || !session.selected) return;
+    const nextSize = [10, 20, 50].indexOf(Number(size)) >= 0 ? Number(size) : session.size;
+    session.page = nextSize !== session.size ? 1 : Math.max(1, Number(page) || 1);
+    session.size = nextSize;
+    updateCatalogs({ page: session.page, size: session.size });
+    loadCatalogRows();
   };
   const uploadFile = () => {
     if (!mountedRef.current || uploadBusyRef.current || templateBusyRef.current || uploadUncertainRef.current) return Promise.resolve();
@@ -770,6 +895,7 @@
       requestRef.current++;
       templateRequestRef.current++;
       templateBusyRef.current = false;
+      window.clearTimeout(catalogsRef.current.timer);
     };
   }, []);
   const display = value => value === null || value === undefined || value === '' ? '—' : String(value);
@@ -794,11 +920,25 @@
   const resultColumns = [{ title: 'Fila', dataIndex: 'line', width: 75, fixed: 'left' },
     { title: 'Estado', dataIndex: 'resultLabel', width: 130, render: (_, row) => <Tag color={row.resultColor}>{row.resultLabel}</Tag> },
     { title: 'Mensaje del proceso', dataIndex: 'resultMessage', width: 340,
+      render: (value) => <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{display(value)}</div> },
+    { title: 'Número de reclamo', dataIndex: 'claimNumber', width: 170,
       render: (value) => <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{display(value)}</div> }].concat(
     state.detail ? state.detail.headers.map((title, index) => ({ title: title, key: 'column-' + index, width: 180,
       render: (_, row) => display(row.values[index]) })) : []);
   const selectedConfig = state.configs.find((config) => String(config.id || config.Id) === String(state.product));
   const selectedConfigName = selectedConfig ? selectedConfig.name : '—';
+  const catalogOptions = state.catalogs.imports.filter((item) => item.catalogs.length).map((item) => ({
+    label: item.name,
+    options: item.catalogs.map((catalog) => ({ value: item.id + ':' + catalog.field, label: catalog.name + ' (columna ' + catalog.column + ')' }))
+  }));
+  const selectedCatalogParts = String(state.catalogs.selected || '').split(':');
+  const selectedCatalogImport = state.catalogs.imports.find((item) => String(item.id) === selectedCatalogParts[0]);
+  const selectedCatalog = selectedCatalogImport ? selectedCatalogImport.catalogs.find((catalog) => catalog.field === selectedCatalogParts[1]) : null;
+  const catalogColumns = [{ title: 'Código', dataIndex: 'code', width: 170, render: display },
+    { title: 'Descripción', dataIndex: 'name', render: display }].concat(selectedCatalog && selectedCatalog.parent
+    ? [{ title: selectedCatalog.parent, dataIndex: 'parent', width: 240, render: display }] : []);
+  const catalogEmpty = !state.catalogs.selected ? 'Seleccione un catálogo para ver sus códigos.'
+    : state.catalogs.rowsLoading ? 'Consultando…' : state.catalogs.search ? 'No hay registros que coincidan con la búsqueda.' : 'El catálogo no tiene registros.';
   return (
     <div className="bulk-claims-shell">
       <style>{`
@@ -870,6 +1010,10 @@
         .bulk-claims-summary { margin:8px 0; }
         .bulk-claims-summary .ant-col > div { border:1px solid #cbd5e1; border-radius:6px; padding:8px; background:#f9fbfd; color:#64748b; font-size:12px; }
         .bulk-claims-summary strong { display:block; color:#1e293b; font-size:17px; }
+        .bulk-claims-catalogs-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+        .bulk-claims-catalogs-filters .bulk-claims-catalogs-select { flex:1 1 420px; min-width:0; }
+        .bulk-claims-catalogs-filters .bulk-claims-catalogs-search { flex:1 1 260px; min-width:0; }
+        .bulk-claims-catalogs-grid .ant-table-tbody > tr > td { overflow-wrap:anywhere; }
         @media (max-width:575px) { .bulk-claims-title { font-size:16px; } .bulk-claims-shell .ant-form-item { display:block; } .bulk-claims-shell .ant-form-item-label { width:auto; padding:0 0 3px; } }
       `}</style>
       <Card className="bulk-claims-card" size="small" title={<div className="bulk-claims-title"><span className="bulk-claims-title-mark" aria-hidden="true" />Carga masiva de reclamos</div>}>
@@ -903,6 +1047,7 @@
             <Button className="bulk-claims-action" loading={state.templateLoading} disabled={state.templateLoading || state.uploading} onClick={downloadTemplate}><ActionIcon name="download" />Descargar plantilla</Button>
             <Button type="primary" className="bulk-claims-action bulk-claims-upload" loading={state.uploading} disabled={!state.file || state.uploading || state.templateLoading || state.uploadUncertain} onClick={uploadFile}><ActionIcon name="upload" />Cargar archivo</Button>
             <Button className="bulk-claims-action" onClick={openCobis}><ActionIcon name="search" />Validar números COBIS</Button>
+            <Button className="bulk-claims-action bulk-claims-catalogs-open" onClick={openCatalogs}><ActionIcon name="detail" />Ver Catálogos</Button>
           </div>
           <p className="bulk-claims-hint">Use la plantilla del producto seleccionado. Cargar el archivo crea el lote; la ejecución se realiza por separado.</p>
         </fieldset>
@@ -966,6 +1111,30 @@
           scroll={{ x: 975, y: 360 }} pagination={{ pageSize: 25, showSizeChanger: false, showTotal: total => total + ' resultados' }}
           locale={{ emptyText: state.cobis.complete ? 'No hay resultados.' : 'Cargue el archivo y presione Validar.' }} />
       </Modal>
+      <Modal title="Ver catálogos" visible={state.catalogs.open} width={900} centered footer={null}
+        className="bulk-claims-detail bulk-claims-catalogs" style={{ maxWidth: 'calc(100vw - 32px)' }} onCancel={closeCatalogs} destroyOnClose>
+        {state.catalogs.error && <Alert showIcon type={catalogOptions.length ? 'warning' : 'error'} message={state.catalogs.error} style={{ marginBottom: 12 }} />}
+        <div className="bulk-claims-catalogs-filters">
+          <div className="bulk-claims-catalogs-select">
+            <Select style={{ width: '100%' }} showSearch allowClear placeholder="Seleccione un catálogo" aria-label="Catálogo" optionFilterProp="label"
+              value={state.catalogs.selected} loading={state.catalogs.loading} disabled={state.catalogs.loading || !catalogOptions.length}
+              options={catalogOptions} onChange={selectCatalog} notFoundContent="No hay catálogos" />
+          </div>
+          <div className="bulk-claims-catalogs-search">
+            <Input.Search allowClear maxLength={100} placeholder="Buscar por código o descripción" aria-label="Buscar en el catálogo"
+              value={state.catalogs.search} disabled={!state.catalogs.selected}
+              onChange={(event) => searchCatalog(event.target.value, false)} onSearch={(value) => searchCatalog(value, true)} />
+          </div>
+        </div>
+        {selectedCatalog && <p className="bulk-claims-hint">Carga «{selectedCatalogImport.name}» · columna {selectedCatalog.column}</p>}
+        {state.catalogs.rowsError && <Alert showIcon type="error" message={state.catalogs.rowsError} style={{ marginBottom: 12 }} />}
+        <Table className="bulk-claims-catalogs-grid" size="small" bordered rowKey="key" loading={state.catalogs.rowsLoading}
+          columns={catalogColumns} dataSource={state.catalogs.rows}
+          pagination={{ current: state.catalogs.page, pageSize: state.catalogs.size, total: state.catalogs.total, showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50'], disabled: state.catalogs.rowsLoading, showTotal: (total) => total + ' registros' }}
+          onChange={(pagination) => pageCatalog(pagination.current, pagination.pageSize)}
+          locale={{ emptyText: catalogEmpty }} />
+      </Modal>
       <Drawer title="Ver detalles" visible={state.detailOpen} width={420} className="bulk-claims-detail"
         keyboard={!state.resultsOpen} maskClosable={!state.resultsOpen} onClose={closeDetail}>
         {state.detailError && <Alert showIcon type="error" message={state.detailError} style={{ marginBottom: 16 }} />}
@@ -1014,9 +1183,9 @@
             <Button className="bulk-claims-action bulk-claims-export" loading={state.exporting} disabled={state.exporting} onClick={exportDetail}><ActionIcon name="download" />Exportar a Excel</Button>
           </div>
           <Table size="small" bordered rowKey="key" columns={resultColumns} dataSource={state.detail.rows}
-            scroll={{ x: 545 + state.detail.headers.length * 180, y: 360 }} pagination={{ pageSize: 10, showSizeChanger: false, showTotal: total => total + ' registros' }}
+            scroll={{ x: 715 + state.detail.headers.length * 180, y: 360 }} pagination={{ pageSize: 10, showSizeChanger: false, showTotal: total => total + ' registros' }}
             locale={{ emptyText: 'No hay resultados para mostrar.' }} />
-          <p className="bulk-claims-hint" style={{ marginTop: 12 }}>Fila indica la posición del registro en el lote. Los datos adicionales conservan los valores guardados por el proceso. “—” indica un dato no disponible.</p>
+          <p className="bulk-claims-hint" style={{ marginTop: 12 }}>Fila indica la posición del registro en el lote. Número de reclamo muestra el reclamo creado por la fila, también si la fila terminó con error; «No Creado» si no se creó; «Sin referencia» en lotes ejecutados antes de que el reclamo guardara la referencia del lote. Los datos adicionales conservan los valores guardados por el proceso. “—” indica un dato no disponible.</p>
         </div>}
       </Modal>
     </div>
