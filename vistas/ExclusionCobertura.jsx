@@ -844,6 +844,20 @@
       const movementPremium = hasBill ? num(diff.annualPremium) : money(annualMovement + changedMovement);
       const movementTax = hasBill ? num(diff.tax) : 0;
       const movementTotal = hasBill ? num(diff.annualTotal) : movementPremium + movementTax;
+      // El impuesto de BillDiff es anual. Para la columna "A facturar" debe
+      // seguir la prorrata efectiva del movimiento de primas, incluyendo las
+      // coberturas dependientes recalculadas. Antes se dejaba fijo en cero y
+      // el total prorrateado omitía el impuesto.
+      const annualDependentMovement = changedRows.reduce(function (sum, row) {
+        const factor = num(row.prorate) > 0 ? num(row.prorate) : 1;
+        return sum + num(row.movement) / factor;
+      }, 0);
+      const annualPremiumMovement = annualMovement + annualDependentMovement;
+      const proratedPremiumMovement = proratedMovement + changedMovement;
+      const taxProrate = Math.abs(annualPremiumMovement) > 0.005
+        ? Math.max(0, Math.min(1, Math.abs(proratedPremiumMovement / annualPremiumMovement)))
+        : prorate;
+      const proratedTax = money(movementTax * taxProrate);
       const before = {
         premium: beforePremium,
         tax: beforeTax,
@@ -871,8 +885,8 @@
           // MSN-000139 (T05): la fila Prima muestra la prima del motor sin el ajuste; el ajuste va en su propia fila.
           premium: { before: before.premium, after: money((hasBill ? num(bill.anualPremium) : money(before.premium + movementPremium)) - adjustment), movement: money(movementPremium - adjustment), prorated: money(proratedMovement + changedMovement - adjustment) },
           adjustment: { before: 0, after: adjustment, movement: adjustment, prorated: adjustment },
-          tax: { before: before.tax, after: hasBill ? num(bill.tax) : money(before.tax + movementTax), movement: movementTax, prorated: 0 },
-          total: { before: before.total, after: hasBill ? num(bill.anualTotal) : money(before.total + movementTotal), movement: movementTotal, prorated: money(proratedMovement + changedMovement) }
+          tax: { before: before.tax, after: hasBill ? num(bill.tax) : money(before.tax + movementTax), movement: movementTax, prorated: proratedTax },
+          total: { before: before.total, after: hasBill ? num(bill.anualTotal) : money(before.total + movementTotal), movement: movementTotal, prorated: money(proratedPremiumMovement + proratedTax) }
         },
         stateRows: buildCoverageState(selectedRows, changedRows)
       });
