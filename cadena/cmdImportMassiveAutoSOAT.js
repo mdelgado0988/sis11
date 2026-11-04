@@ -19,6 +19,13 @@
  * @context  { row:{<campos de la importación>}, batchId, configId, configName, simulate? }
  *           simulate:true valida y devuelve la póliza armada sin grabar nada.
  * @mission  MSN-000105 (globaluat) — 2026-10-27. Fuente común de cmdImportMassiveAutoIlocalizada y cmdImportMassiveAutoSOAT.
+ * @mission  MSN-000142 (globaluat) — 2026-11-04: objeto LoteCargaMasiva (definición LOTE_CARGA_MASIVA, formulario
+ *           LoteCargaMasiva) en cada póliza de la carga: lote, archivo, fila, importación, usuario que lanzó la carga y
+ *           fecha. Se lee antes de crear la póliza y se agrega después del objeto asegurado, antes de cotizar. Sin lote
+ *           (ExeChain directo) no se agrega. La vista 64 lo lee con cmdListBatchPolicies.
+ * @mission  MSN-000142 rev.2 (globaluat) — 2026-11-05: usuario que lanzó la carga. La cola de DoBatch corre la fila
+ *           como SUPERVISOR; al terminar, lo que la fila creó pasa al usuario que ejecutó el lote (extra.user o Batch.user),
+ *           como en la renovación (cmdRenewalPolicyIssuance): ver lcuRestoreUser al final.
  */
 
 const CFG = {
@@ -157,6 +164,8 @@ const CFG = {
  ]
 };
 const OBJECT_CODE = "DTAUT";
+const LCM_OBJECT_CODE = "LOTE_CARGA_MASIVA";
+const LCM_IMPORT_NAME = CFG.importName;
 const ISSUE_STEP = "Borrador de Póliza";
 const START_TIME = "T06:01:00";
 const DEFAULT_RECEIPT_TYPE = "1";
@@ -281,10 +290,14 @@ try {
     if (f.name && Object.prototype.hasOwnProperty.call(values, f.name) && values[f.name] !== "") f.userData = [values[f.name]];
   });
 
+  // Lote de carga masiva (MSN-000142): se lee antes de crear la oferta
+  step = "lote de carga masiva";
+  const batchObject = lcmPrepare();
+
   if (simulate) {
     const shown = {};
     Object.keys(entity).forEach(k => { if (k !== "MainInsured" && k !== "Insureds") shown[k] = entity[k]; });
-    return { ok: true, simulate: true, msg: `Fila válida: se emitiría una póliza ${CFG.product} para el ente ${insured.id}.`, policy: shown, insured: insuredName, objectValues: values };
+    return { ok: true, simulate: true, msg: `Fila válida: se emitiría una póliza ${CFG.product} para el ente ${insured.id}.`, policy: shown, insured: insuredName, objectValues: values, lote: batchObject ? batchObject.values : null };
   }
 
   // 3. Oferta, objeto asegurado y flujo de emisión
@@ -297,6 +310,8 @@ try {
   step = "objeto asegurado";
   doCmd({ cmd: "RepoInsuredObject", data: { operation: "ADD", entity: { lifePolicyId: policy.id, objectDefinitionId: definition.id, jValues: JSON.stringify(form) } } });
   if (!RepoInsuredObject.ok) fail(`No se pudo crear el objeto asegurado: ${RepoInsuredObject.msg}`);
+  step = "objeto del lote de carga masiva";
+  lcmAddBatchObject(batchObject, policy.id);
 
   step = "valores por defecto";
   if (policy.processId) advance();
@@ -325,10 +340,12 @@ try {
   const issued = LoadEntity.outData || {};
   if (!issued.active) fail(`La póliza quedó en estado ${issued.entityState || "desconocido"} en lugar de emitida.`);
 
-  return { ok: true, msg: `Póliza ${issued.code} (${CFG.product}) emitida, id ${policy.id}, prima ${premium}.`, policyId: policy.id, code: issued.code, premium };
+  const lcuNote = lcuRestoreUser("LifePolicy", policy.id);
+  return { ok: true, msg: `Póliza ${issued.code} (${CFG.product}) emitida, id ${policy.id}, prima ${premium}.${lcuNote}`, policyId: policy.id, code: issued.code, premium };
 
 } catch (error) {
   const reason = String(error && error.message ? error.message : error).replace(/^@/, "");
+  if (policy && policy.id) lcuRestoreUser("LifePolicy", policy.id);
   let where = "";
   if (policy && policy.id) {
     let policyCode = policy.code || "";
@@ -755,4 +772,131 @@ function zeroByDesign(cov) {
 
 function sqlText(value) {
   return String(value).replace(/'/g, "''");
+}
+
+// ---------------------------------------------------------------- lote de carga masiva (MSN-000142)
+
+// Lo que va al objeto LoteCargaMasiva, leído antes de crear la póliza: la definición con su formulario y los datos del
+// lote. Sin lote (ExeChain directo) devuelve null y la póliza no lleva el objeto.
+function lcmPrepare() {
+  const batchId = Number(args.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) return null;
+  doCmd({ cmd: "RepoObjectDefinition", data: { operation: "GET", filter: `code = '${LCM_OBJECT_CODE}'`, include: ["Form"], noTracking: true } });
+  const definition = (RepoObjectDefinition.outData || [])[0];
+  if (!definition || !definition.Form) throw new Error(`No existe el objeto ${LCM_OBJECT_CODE} o su formulario.`);
+  const batch = lcmQuery(`SELECT name, [user] AS usuario, CONVERT(varchar(10), DATEADD(hour, -5, created), 103) + ' ' + CONVERT(varchar(5), DATEADD(hour, -5, created), 108) AS fecha FROM Batch WHERE id = ${batchId}`)[0] || {};
+  const configId = Number(args.configId);
+  const validConfig = Number.isSafeInteger(configId) && configId > 0;
+  const fila = validConfig ? lcmBatchRow(batchId, configId, definition.id) : null;
+  const extra = args.extra || {};
+  const values = {
+    loteId: String(batchId),
+    archivo: batch.name ? String(batch.name) : "",
+    fila: fila ? String(fila) : "",
+    importacionId: validConfig ? String(configId) : "",
+    importacion: String(args.configName || LCM_IMPORT_NAME),
+    usuario: String(extra.user || batch.usuario || ""),
+    fechaCarga: batch.fecha ? String(batch.fecha) : ""
+  };
+  const form = JSON.parse(definition.Form.json);
+  form.forEach(f => {
+    if (f && f.name && Object.prototype.hasOwnProperty.call(values, f.name) && values[f.name] !== "") f.userData = [values[f.name]];
+  });
+  return { definitionId: definition.id, jValues: JSON.stringify(form), values };
+}
+
+// Agrega a la póliza el objeto armado por lcmPrepare: después del objeto asegurado y antes de cotizar.
+function lcmAddBatchObject(prepared, policyId) {
+  if (!prepared) return;
+  doCmd({ cmd: "RepoInsuredObject", data: { operation: "ADD", entity: { lifePolicyId: policyId, objectDefinitionId: prepared.definitionId, jValues: prepared.jValues } } });
+  if (!RepoInsuredObject.ok) throw new Error(`No se pudo agregar el objeto ${LCM_OBJECT_CODE}: ${RepoInsuredObject.msg}`);
+}
+
+// Posición (1, 2, …) del registro en el lote, la numeración de «Ver detalles»: la fila del lote cuyas celdas son las
+// que recibió esta corrida. Con filas idénticas en el lote, la primera que todavía no tenga póliza con su objeto.
+function lcmBatchRow(batchId, configId, definitionId) {
+  const config = lcmQuery(`SELECT jMappings FROM ImportConfig WHERE id = ${configId}`);
+  let mappings = [];
+  try { mappings = JSON.parse(config.length && config[0].jMappings ? String(config[0].jMappings) : "[]"); } catch (e) { mappings = []; }
+  const raw = args.row || {};
+  const conditions = [];
+  (Array.isArray(mappings) ? mappings : []).forEach((mapping, index) => {
+    if (!Array.isArray(mapping) || mapping.length < 3) return;
+    const field = String(mapping[2] || "");
+    if (!field || String(mapping[1] || "").trim() || field.indexOf("[") !== -1) return;
+    const value = raw[field];
+    conditions.push(value === null || value === undefined
+      ? `JSON_VALUE(j.value, '$[${index}]') IS NULL`
+      : `JSON_VALUE(j.value, '$[${index}]') = N'${lcmSql(value)}'`);
+  });
+  if (!conditions.length) return null;
+  const candidates = lcmQuery(`SELECT CAST(j.[key] AS int) + 1 AS fila FROM Batch b CROSS APPLY OPENJSON(CASE WHEN ISJSON(b.jData) = 1 THEN b.jData ELSE '[]' END) j WHERE b.id = ${batchId} AND ${conditions.join(" AND ")} ORDER BY CAST(j.[key] AS int)`)
+    .map(x => Number(x.fila)).filter(Number.isSafeInteger);
+  if (candidates.length <= 1) return candidates.length ? candidates[0] : null;
+  const taken = lcmBatchPolicyRows(batchId, definitionId);
+  const free = candidates.filter(f => taken.indexOf(f) === -1);
+  return free.length ? free[0] : candidates[0];
+}
+
+// Filas del lote que ya tienen una póliza con su objeto LoteCargaMasiva.
+function lcmBatchPolicyRows(batchId, definitionId) {
+  const field = name => `(SELECT TOP 1 JSON_VALUE(x.value, '$.userData[0]') FROM OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END) x WHERE JSON_VALUE(x.value, '$.name') = '${name}')`;
+  return lcmQuery(`SELECT ${field("fila")} AS fila FROM InsuredObject io WHERE io.objectDefinitionId = ${definitionId} AND ${field("loteId")} = '${batchId}'`)
+    .map(x => Number(x.fila)).filter(Number.isSafeInteger);
+}
+
+function lcmQuery(sql) {
+  doCmd({ cmd: "DoQuery", data: { sql } });
+  if (!DoQuery.ok) throw new Error(DoQuery.msg || "error de consulta");
+  return JSON.parse(JSON.stringify(DoQuery.outData || []));
+}
+
+function lcmSql(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+// ---------------------------------------------------------------------------------------------
+// MSN-000142 rev.2: usuario que lanzó la carga. La cola de DoBatch corre la fila como SUPERVISOR, así que el proceso, sus
+// pasos y los eventos (y en pólizas también el documento fiscal y el asiento) nacen con SUPERVISOR. Como en la renovación
+// (cadena 799), al terminar se pasan al usuario que ejecutó el lote: extra.user o, si falta o es SUPERVISOR, Batch.user.
+// Sólo las marcas que siguen en SUPERVISOR de lo que esta fila creó; AuditLog no se toca. Devuelve "" o el aviso para msg.
+
+function lcuRestoreUser(kind, id) {
+  try {
+    const entityId = Number(id);
+    if (!Number.isSafeInteger(entityId) || entityId <= 0) return "";
+    const user = lcuLauncher();
+    if (!user) return "";
+    const u = user.replace(/'/g, "''");
+    const sql = kind === "Claim"
+      ? `DECLARE @proc int = (SELECT processId FROM Claim WHERE id = ${entityId});
+UPDATE Proceso SET usuario = N'${u}' WHERE id = @proc AND usuario = 'SUPERVISOR';
+UPDATE ProcesoPaso SET [user] = N'${u}' WHERE procesoId = @proc AND [user] = 'SUPERVISOR';
+UPDATE ClaimEvent SET [user] = N'${u}' WHERE claimId = ${entityId} AND [user] = 'SUPERVISOR';`
+      : `DECLARE @proc int = (SELECT processId FROM LifePolicy WHERE id = ${entityId});
+UPDATE Proceso SET usuario = N'${u}' WHERE id = @proc AND usuario = 'SUPERVISOR';
+UPDATE ProcesoPaso SET [user] = N'${u}' WHERE procesoId = @proc AND [user] = 'SUPERVISOR';
+UPDATE PolicyEvent SET [user] = N'${u}' WHERE lifePolicyId = ${entityId} AND [user] = 'SUPERVISOR';
+UPDATE FiscalDocGenerated SET [user] = N'${u}' WHERE policyId = ${entityId} AND [user] = 'SUPERVISOR';
+UPDATE [Transaction] SET [user] = N'${u}' WHERE entity = 'LifePolicy' AND entityId = ${entityId} AND [user] = 'SUPERVISOR';`;
+    doCmd({ cmd: "DoQuery", data: { sql: sql } });
+    if (typeof DoQuery === "undefined" || !DoQuery || DoQuery.ok === false) {
+      return ` No se pudo registrar a ${user} como usuario: ${(DoQuery && DoQuery.msg) || "error"}.`;
+    }
+    return "";
+  } catch (e) {
+    return ` No se pudo registrar el usuario de la carga: ${e && e.message ? e.message : e}.`;
+  }
+}
+
+function lcuLauncher() {
+  const extra = args.extra && typeof args.extra === "object" ? args.extra : {};
+  const own = String(extra.user || "").trim();
+  if (own && own.toUpperCase() !== "SUPERVISOR") return own;
+  const batchId = Number(args.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) return "";
+  doCmd({ cmd: "DoQuery", data: { sql: `SELECT [user] AS usuario FROM Batch WHERE id = ${batchId}` } });
+  const rows = typeof DoQuery !== "undefined" && DoQuery && DoQuery.ok !== false && Array.isArray(DoQuery.outData) ? DoQuery.outData : [];
+  const user = String((rows[0] || {}).usuario || "").trim();
+  return user.toUpperCase() === "SUPERVISOR" ? "" : user;
 }

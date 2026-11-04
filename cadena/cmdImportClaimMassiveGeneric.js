@@ -24,6 +24,9 @@
  *           «Detalle del Siniestro» (formulario 371) guarda {loteId, fila, importacionId, importacion}: fila = posición del
  *           registro en el lote (la numeración de «Ver detalles» de la vista 63). Usa batchId, configId y configName del
  *           contexto que arma DoBatch; sin lote (ExeChain directo) no hay referencia. La vista 63 lo lee con cmdListBatchClaims.
+ * @mission  MSN-000142 rev.2 (globaluat) — 2026-11-05: usuario que lanzó la carga. La cola de DoBatch corre la fila
+ *           como SUPERVISOR; al terminar, lo que la fila creó pasa al usuario que ejecutó el lote (extra.user o Batch.user),
+ *           como en la renovación (cmdRenewalPolicyIssuance): ver lcuRestoreUser al final.
  */
 
 const TAG = "Reclamo";
@@ -178,7 +181,8 @@ try {
   const created = firstRow(RepoClaim.outData) || {};
   const claimId = created.id;
   const claimCode = created.code || claimId;
-  return { ok: true, msg: `Reclamo ${claimCode} creado (id ${claimId}): ${summary}.`, claimId: claimId, code: claimCode };
+  const lcuNote = lcuRestoreUser("Claim", claimId);
+  return { ok: true, msg: `Reclamo ${claimCode} creado (id ${claimId}): ${summary}.${lcuNote}`, claimId: claimId, code: claimCode };
 
 } catch (error) {
   const reason = error && error.message ? error.message : String(error);
@@ -610,4 +614,50 @@ function withBatchField(raw, reference) {
   fields.push({ type: "hidden", name: BATCH_FIELD, label: "Lote de carga masiva", access: false, userData: [reference] });
   outer[DETAIL_SECTION] = JSON.stringify(fields);
   return JSON.stringify(outer);
+}
+
+// ---------------------------------------------------------------------------------------------
+// MSN-000142 rev.2: usuario que lanzó la carga. La cola de DoBatch corre la fila como SUPERVISOR, así que el proceso, sus
+// pasos y los eventos (y en pólizas también el documento fiscal y el asiento) nacen con SUPERVISOR. Como en la renovación
+// (cadena 799), al terminar se pasan al usuario que ejecutó el lote: extra.user o, si falta o es SUPERVISOR, Batch.user.
+// Sólo las marcas que siguen en SUPERVISOR de lo que esta fila creó; AuditLog no se toca. Devuelve "" o el aviso para msg.
+
+function lcuRestoreUser(kind, id) {
+  try {
+    const entityId = Number(id);
+    if (!Number.isSafeInteger(entityId) || entityId <= 0) return "";
+    const user = lcuLauncher();
+    if (!user) return "";
+    const u = user.replace(/'/g, "''");
+    const sql = kind === "Claim"
+      ? `DECLARE @proc int = (SELECT processId FROM Claim WHERE id = ${entityId});
+UPDATE Proceso SET usuario = N'${u}' WHERE id = @proc AND usuario = 'SUPERVISOR';
+UPDATE ProcesoPaso SET [user] = N'${u}' WHERE procesoId = @proc AND [user] = 'SUPERVISOR';
+UPDATE ClaimEvent SET [user] = N'${u}' WHERE claimId = ${entityId} AND [user] = 'SUPERVISOR';`
+      : `DECLARE @proc int = (SELECT processId FROM LifePolicy WHERE id = ${entityId});
+UPDATE Proceso SET usuario = N'${u}' WHERE id = @proc AND usuario = 'SUPERVISOR';
+UPDATE ProcesoPaso SET [user] = N'${u}' WHERE procesoId = @proc AND [user] = 'SUPERVISOR';
+UPDATE PolicyEvent SET [user] = N'${u}' WHERE lifePolicyId = ${entityId} AND [user] = 'SUPERVISOR';
+UPDATE FiscalDocGenerated SET [user] = N'${u}' WHERE policyId = ${entityId} AND [user] = 'SUPERVISOR';
+UPDATE [Transaction] SET [user] = N'${u}' WHERE entity = 'LifePolicy' AND entityId = ${entityId} AND [user] = 'SUPERVISOR';`;
+    doCmd({ cmd: "DoQuery", data: { sql: sql } });
+    if (typeof DoQuery === "undefined" || !DoQuery || DoQuery.ok === false) {
+      return ` No se pudo registrar a ${user} como usuario: ${(DoQuery && DoQuery.msg) || "error"}.`;
+    }
+    return "";
+  } catch (e) {
+    return ` No se pudo registrar el usuario de la carga: ${e && e.message ? e.message : e}.`;
+  }
+}
+
+function lcuLauncher() {
+  const extra = args.extra && typeof args.extra === "object" ? args.extra : {};
+  const own = String(extra.user || "").trim();
+  if (own && own.toUpperCase() !== "SUPERVISOR") return own;
+  const batchId = Number(args.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) return "";
+  doCmd({ cmd: "DoQuery", data: { sql: `SELECT [user] AS usuario FROM Batch WHERE id = ${batchId}` } });
+  const rows = typeof DoQuery !== "undefined" && DoQuery && DoQuery.ok !== false && Array.isArray(DoQuery.outData) ? DoQuery.outData : [];
+  const user = String((rows[0] || {}).usuario || "").trim();
+  return user.toUpperCase() === "SUPERVISOR" ? "" : user;
 }

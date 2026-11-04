@@ -18,6 +18,9 @@
  *           LoteCargaMasiva) en cada póliza de la carga: lote, archivo, fila, importación, usuario que lanzó la carga y
  *           fecha. Se lee antes de crear la póliza y se agrega después del objeto asegurado, antes de cotizar. Sin lote
  *           (ExeChain directo) no se agrega. La vista 64 lo lee con cmdListBatchPolicies.
+ * @mission  MSN-000142 rev.2 (globaluat) — 2026-11-05: usuario que lanzó la carga. La cola de DoBatch corre la fila
+ *           como SUPERVISOR; al terminar, lo que la fila creó pasa al usuario que ejecutó el lote (extra.user o Batch.user),
+ *           como en la renovación (cmdRenewalPolicyIssuance): ver lcuRestoreUser al final.
  */
 
 const PRODUCT_CODE = "UNICA_CLA";
@@ -156,10 +159,12 @@ try {
 
   doCmd({ cmd: "DoQuery", data: { sql: `SELECT COUNT(*) n FROM PayPlan WHERE lifePolicyId = ${policy.id} AND cancellationDate IS NULL` } });
   const installments = ((DoQuery.outData || [])[0] || {}).n;
-  return { ok: true, msg: `Póliza ${issued.code} emitida (id ${policy.id}): frecuencia ${d.periodicity}, ${installments} cuota(s).`, policyId: policy.id, code: issued.code, installments };
+  const lcuNote = lcuRestoreUser("LifePolicy", policy.id);
+  return { ok: true, msg: `Póliza ${issued.code} emitida (id ${policy.id}): frecuencia ${d.periodicity}, ${installments} cuota(s).${lcuNote}`, policyId: policy.id, code: issued.code, installments };
 
 } catch (error) {
   const reason = String(error && error.message ? error.message : error).replace(/^@/, "");
+  if (policy && policy.id) lcuRestoreUser("LifePolicy", policy.id);
   const where = policy && policy.id
     ? `Póliza id ${policy.id}${policy.code ? ` (${policy.code})` : ""} creada pero NO emitida; falló en ${step}. Anúlela o complétela desde Pólizas. `
     : "";
@@ -345,4 +350,50 @@ function lcmQuery(sql) {
 
 function lcmSql(value) {
   return String(value).replace(/'/g, "''");
+}
+
+// ---------------------------------------------------------------------------------------------
+// MSN-000142 rev.2: usuario que lanzó la carga. La cola de DoBatch corre la fila como SUPERVISOR, así que el proceso, sus
+// pasos y los eventos (y en pólizas también el documento fiscal y el asiento) nacen con SUPERVISOR. Como en la renovación
+// (cadena 799), al terminar se pasan al usuario que ejecutó el lote: extra.user o, si falta o es SUPERVISOR, Batch.user.
+// Sólo las marcas que siguen en SUPERVISOR de lo que esta fila creó; AuditLog no se toca. Devuelve "" o el aviso para msg.
+
+function lcuRestoreUser(kind, id) {
+  try {
+    const entityId = Number(id);
+    if (!Number.isSafeInteger(entityId) || entityId <= 0) return "";
+    const user = lcuLauncher();
+    if (!user) return "";
+    const u = user.replace(/'/g, "''");
+    const sql = kind === "Claim"
+      ? `DECLARE @proc int = (SELECT processId FROM Claim WHERE id = ${entityId});
+UPDATE Proceso SET usuario = N'${u}' WHERE id = @proc AND usuario = 'SUPERVISOR';
+UPDATE ProcesoPaso SET [user] = N'${u}' WHERE procesoId = @proc AND [user] = 'SUPERVISOR';
+UPDATE ClaimEvent SET [user] = N'${u}' WHERE claimId = ${entityId} AND [user] = 'SUPERVISOR';`
+      : `DECLARE @proc int = (SELECT processId FROM LifePolicy WHERE id = ${entityId});
+UPDATE Proceso SET usuario = N'${u}' WHERE id = @proc AND usuario = 'SUPERVISOR';
+UPDATE ProcesoPaso SET [user] = N'${u}' WHERE procesoId = @proc AND [user] = 'SUPERVISOR';
+UPDATE PolicyEvent SET [user] = N'${u}' WHERE lifePolicyId = ${entityId} AND [user] = 'SUPERVISOR';
+UPDATE FiscalDocGenerated SET [user] = N'${u}' WHERE policyId = ${entityId} AND [user] = 'SUPERVISOR';
+UPDATE [Transaction] SET [user] = N'${u}' WHERE entity = 'LifePolicy' AND entityId = ${entityId} AND [user] = 'SUPERVISOR';`;
+    doCmd({ cmd: "DoQuery", data: { sql: sql } });
+    if (typeof DoQuery === "undefined" || !DoQuery || DoQuery.ok === false) {
+      return ` No se pudo registrar a ${user} como usuario: ${(DoQuery && DoQuery.msg) || "error"}.`;
+    }
+    return "";
+  } catch (e) {
+    return ` No se pudo registrar el usuario de la carga: ${e && e.message ? e.message : e}.`;
+  }
+}
+
+function lcuLauncher() {
+  const extra = args.extra && typeof args.extra === "object" ? args.extra : {};
+  const own = String(extra.user || "").trim();
+  if (own && own.toUpperCase() !== "SUPERVISOR") return own;
+  const batchId = Number(args.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) return "";
+  doCmd({ cmd: "DoQuery", data: { sql: `SELECT [user] AS usuario FROM Batch WHERE id = ${batchId}` } });
+  const rows = typeof DoQuery !== "undefined" && DoQuery && DoQuery.ok !== false && Array.isArray(DoQuery.outData) ? DoQuery.outData : [];
+  const user = String((rows[0] || {}).usuario || "").trim();
+  return user.toUpperCase() === "SUPERVISOR" ? "" : user;
 }
