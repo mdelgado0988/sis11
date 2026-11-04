@@ -25,6 +25,8 @@ let aceptantesTabEnabled = false;
 let coaseguradoresTabEnabled = false;
 let distributionDirty = false;
 let coCessions = [];
+// true mientras se guarda el coaseguro: bloquea un segundo «Aceptar» o «Eliminar».
+let coaseguroGuardando = false;
 let coaseguradores = [];
 let coaseguradoresData = [];
 let corredoresReaseguro = [];
@@ -4687,8 +4689,13 @@ function renderCoaseguradores() {
   });
   $tab.find(".btn-eliminar-coasegurador").off("click.coaseguro").on("click.coaseguro", async function () {
     if (coaseguroEdicionBloqueada()) return;
+    if (coaseguroOcupado()) return;
     const index = Number($(this).data("index"));
     if (!Number.isInteger(index)) return;
+    coaseguroGuardando = true;
+    $("#btnAgregarCoasegurador, .btn-editar-coasegurador, .btn-eliminar-coasegurador")
+      .prop("disabled", true)
+      .attr("aria-disabled", "true");
     showLoading("Eliminando coasegurador...");
     coaseguradoresData.splice(index, 1);
     coCessions.splice(index, 1);
@@ -4701,6 +4708,8 @@ function renderCoaseguradores() {
     } catch (error) {
       mostrarNotificacion(`No se pudo eliminar el coasegurador: ${error?.msg || error}`, "error");
     } finally {
+      coaseguroGuardando = false;
+      bloquearEdicionCoaseguroSiCorresponde();
       hideLoading();
     }
   });
@@ -4834,18 +4843,24 @@ function abrirModalAgregarCoasegurador(index = null) {
   $(document).off("click.modalAgregarCoasegurador", "#cerrarModalAgregarCoasegurador, #cancelarModalAgregarCoasegurador")
     .on("click.modalAgregarCoasegurador", "#cerrarModalAgregarCoasegurador, #cancelarModalAgregarCoasegurador", cerrarModal);
   $(document).off("keydown.modalAgregarCoasegurador").on("keydown.modalAgregarCoasegurador", event => {
-    if (event.key === "Escape") cerrarModal();
+    if (event.key === "Escape" && !coaseguroGuardando) cerrarModal();
   });
 
   $(document).off("click.modalAgregarCoasegurador", "#aceptarModalAgregarCoasegurador")
     .on("click.modalAgregarCoasegurador", "#aceptarModalAgregarCoasegurador", async function (event) {
       event.preventDefault();
+      // El modal queda por encima del aviso de carga: un doble clic con el sistema
+      // lento ejecutaba este manejador dos veces y registraba dos veces al mismo
+      // coasegurador. Mientras se guarda, un segundo clic no hace nada.
+      if (coaseguroOcupado()) return;
       const contactId = Number($("#modalCoasegurador").val());
       const participante = disponibles.find(item => Number(item.id) === contactId);
       const percentage = coaseguroNumero($("#modalCoaseguradorPorcentaje").val());
       const commissionRate = coaseguroNumero($("#modalCoaseguradorPorcentajeComision").val());
-      const total = coaseguradoresData.reduce((sum, row, rowIndex) => sum + (rowIndex === index ? 0 : coaseguroNumero(row.percentage)), 0) + percentage;
+      // Se valida contra la lista vigente, no contra la que se pintó al abrir el modal.
+      const total = coCessions.reduce((sum, row, rowIndex) => sum + (rowIndex === index ? 0 : coaseguroNumero(row.percentage)), 0) + percentage;
       if (!participante) return mostrarNotificacion("Seleccione un coasegurador.", "warning");
+      if (coaseguradorYaRegistrado(contactId, index)) return mostrarNotificacion(`${coaseguroEscapar(participante.nombre || `Contacto ${contactId}`)} ya está registrado como coasegurador de esta póliza.`, "warning");
       if (percentage <= 0) return mostrarNotificacion("Ingrese un porcentaje de participación mayor que cero.", "warning");
       if (total > 100) return mostrarNotificacion("La suma de porcentajes no puede exceder 100%.", "warning");
 
@@ -4864,6 +4879,9 @@ function abrirModalAgregarCoasegurador(index = null) {
         intermediaryName: String($("#modalCoaseguradorIntermediario").val() || "").trim(),
         brokerCommission: coaseguroMonto(source.brokerCommission || 0)
       };
+      coaseguroGuardando = true;
+      const $botonesModal = $("#aceptarModalAgregarCoasegurador, #cancelarModalAgregarCoasegurador, #cerrarModalAgregarCoasegurador");
+      $botonesModal.prop("disabled", true).attr("aria-disabled", "true");
       const anterior = [...coCessions];
       if (index === null) coCessions.push(nuevo); else coCessions[index] = nuevo;
       sincronizarLiderazgoCoaseguro(contactId, esLider);
@@ -4882,6 +4900,8 @@ function abrirModalAgregarCoasegurador(index = null) {
         coCessions = anterior;
         mostrarNotificacion(`No se pudo guardar el coasegurador: ${error?.msg || error}`, "error");
       } finally {
+        coaseguroGuardando = false;
+        $botonesModal.prop("disabled", false).attr("aria-disabled", "false");
         hideLoading();
       }
     });
@@ -4914,9 +4934,38 @@ async function actualizarCoinsuranceLifePolicy(valor) {
 async function guardarCoaseguradores() {
   try {
     sincronizarLiderazgoCoaseguro();
+    // Un coasegurador no puede quedar registrado dos veces en la póliza.
+    const repetido = coaseguradorRepetido(coCessions);
+    if (repetido) {
+      return { ok: false, msg: `${repetido} está registrado más de una vez; no se guardó el coaseguro.` };
+    }
     const inserts = coCessions.map(row => `INSERT INTO CoCession (lifePolicyId, contactId, sumInsured, premium, sumInsuredCeded, premiumCeded, commission, percentage, created, leader, currency, liquidationId, paidOnCollection, parentCoCession, brokerCommission, tax, changeId, overwritten, allocationId, lifeCoverageId, brokerId) VALUES (${parseInt(policyId, 10)}, ${parseInt(row.contactId, 10)}, ${coaseguroMonto(row.sumInsured)}, ${coaseguroMonto(row.premium)}, ${coaseguroMonto(row.sumInsuredCeded)}, ${coaseguroMonto(row.premiumCeded)}, ${coaseguroMonto(row.commission)}, ${coaseguroPorcentaje(row.percentage)}, GETDATE(), ${row.leader ? 1 : 0}, '${String(row.currency || "USD").replace(/'/g, "''")}', NULL, 0, NULL, 0, ${coaseguroMonto(row.tax)}, NULL, 0, NULL, NULL, NULL);`).join("\n");
-    return await me.exe("DoQuery", { sql: `SET XACT_ABORT ON; BEGIN TRANSACTION; DELETE FROM CoCession WHERE lifePolicyId = ${parseInt(policyId, 10)}; ${inserts} COMMIT TRANSACTION;` });
+    // Control en la base de datos, dentro de la misma transacción: si al terminar
+    // quedara un coasegurador repetido en la póliza, se revierte todo.
+    const controlRepetidos = `IF EXISTS (SELECT contactId FROM CoCession WHERE lifePolicyId = ${parseInt(policyId, 10)} AND parentCoCession IS NULL AND changeId IS NULL AND overwritten = 0 GROUP BY contactId HAVING COUNT(*) > 1) THROW 51000, N'Coasegurador repetido en la póliza: no se guardó el coaseguro.', 1;`;
+    return await me.exe("DoQuery", { sql: `SET XACT_ABORT ON; BEGIN TRANSACTION; DELETE FROM CoCession WHERE lifePolicyId = ${parseInt(policyId, 10)}; ${inserts} ${controlRepetidos} COMMIT TRANSACTION;` });
   } catch (error) {
     return { ok: false, msg: error?.msg || String(error) };
   }
+}
+
+function coaseguroOcupado() {
+  if (!coaseguroGuardando) return false;
+  mostrarNotificacion("Se está guardando el coaseguro; espere a que termine.", "warning");
+  return true;
+}
+
+function coaseguradorYaRegistrado(contactId, indexEditado = null) {
+  return (coCessions || []).some((row, rowIndex) =>
+    rowIndex !== indexEditado && Number(row.contactId) === Number(contactId));
+}
+
+function coaseguradorRepetido(rows) {
+  const vistos = new Set();
+  for (const row of rows || []) {
+    const id = Number(row.contactId);
+    if (vistos.has(id)) return coaseguroEscapar(getCoaseguradorNombre(id) || row.Contact?.name || `Contacto ${id}`);
+    vistos.add(id);
+  }
+  return null;
 }

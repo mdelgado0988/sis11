@@ -61,14 +61,23 @@ try {
         return { ok: true, msg: 'Nada que filtrar', filter };
     }
 
+    const filtroOriginal = filter;
     const rewrite = rewriteLikeClauses(filter);
     filter = rewrite.filter;
 
+    // AXX-7406 / ExeControl #11465: numero SIS (id del contacto) y cedula (cnp) en los buscadores de contactos
+    const sis = addSisIdLookup(filtroOriginal, filter, context?.filtros);
+    filter = sis.filter;
+    const cedula = addCnpLookup(filtroOriginal, filter);
+    filter = cedula.filter;
+
     return {
         ok: true,
-        msg: rewrite.changed ? 'Filtro sobreescrito' : 'Filtro sin cambios',
+        msg: (rewrite.changed || sis.changed || cedula.changed) ? 'Filtro sobreescrito' : 'Filtro sin cambios',
         filter,
-        clauses: rewrite.clauses
+        clauses: rewrite.clauses,
+        sisId: sis.sisId,
+        cnpValues: cedula.values
     };
 } catch (error) {
     return { ok: false, msg: error.toString(), filter };
@@ -284,4 +293,91 @@ function escapeSql(value) {
 
 function unescapeSqlLiteral(value) {
     return String(value ?? '').replace(/''/g, "'");
+}
+
+/**
+ * AXX-7406 / ExeControl #11465 - Busqueda de clientes por numero SIS (id del contacto).
+ * Los buscadores de Contratante, Asegurado y Pagador mandan un numero como cnp LIKE N'%<n>%'.
+ * Se agrega la coincidencia exacta id = <n>, sin quitar la busqueda por cedula ni la de RUC.
+ * En la lista desplegable (size <= 10, primera pagina) el contacto del id va siempre dentro de la pagina:
+ * id = <n> mas los primeros size-1 del resto. Un numero que empieza con 0 es un trozo de cedula, no un id.
+ */
+function addSisIdLookup(original, filtro, datos) {
+    const text = String(filtro || '');
+    const exact = /^\(?\s*cnp\s+LIKE\s+N?'%([1-9]\d{0,8})%'\s*\)?$/i.exec(String(original || '').trim());
+
+    if (!exact) {
+        return { changed: false, sisId: null, filter: text };
+    }
+
+    const sisId = parseInt(exact[1], 10);
+    const size = Number(datos?.size || 0);
+    const page = Number(datos?.page || 0);
+
+    if (size > 0 && size <= 10 && page === 0) {
+        return {
+            changed: true,
+            sisId,
+            filter: `(id = ${sisId} OR id IN (SELECT TOP ${size - 1} cx.id FROM Contact cx WHERE (${text}) AND cx.id <> ${sisId} ORDER BY cx.id))`
+        };
+    }
+
+    return { changed: true, sisId, filter: `(${text} OR id = ${sisId})` };
+}
+
+/**
+ * AXX-7406 / ExeControl #11465 - Busqueda por cedula (cnp) desde el cuadro de nombre.
+ * Si el texto buscado por nombre tiene algun digito, se busca tambien en cnp, completo o en parte.
+ * La cedula panamena escrita sin ceros o sin espacio (8-888-1234, E-8-123, PE-3-45, 8-AV-1-2)
+ * se compara ademas con la forma en que se guarda (08-0888-01234, E -0008-00123, PE-0003-00045, 08-AV-0001-00002).
+ */
+function addCnpLookup(original, filtro) {
+    const text = String(filtro || '');
+    const nameSearch = /^\(?\s*\((?:\s*RTRIM\s*\(\s*ISNULL\s*\(\s*\[?(?:name|middleName|surname1|surname2)\]?\s*,\s*''\s*\)\s*\)\s*(?:\+\s*' '\s*\+)?)+\)\s*like\s+N?'%((?:''|[^'])*)%'\s*\)?$/i.exec(String(original || '').trim());
+
+    if (!nameSearch) {
+        return { changed: false, values: [], filter: text };
+    }
+
+    const value = unescapeSqlLiteral(nameSearch[1]).trim();
+
+    if (!/\d/.test(value)) {
+        return { changed: false, values: [], filter: text };
+    }
+
+    const forms = cedulaForms(value).filter(form => form !== value);
+    const predicates = [`cnp LIKE N'%${escapeSql(value)}%'`].concat(forms.map(form => `cnp = N'${escapeSql(form)}'`));
+
+    return { changed: true, values: [value].concat(forms), filter: `(${text} OR ${predicates.join(' OR ')})` };
+}
+
+function cedulaForms(value) {
+    const text = String(value || '').toUpperCase().replace(/\s+/g, '');
+    const pad = (digits, size) => String(digits).padStart(size, '0');
+    let match = /^(\d{1,2})-(\d{1,4})-(\d{1,5})$/.exec(text);
+
+    if (match) {
+        return [`${pad(match[1], 2)}-${pad(match[2], 4)}-${pad(match[3], 5)}`];
+    }
+
+    match = /^(\d{1,2})-?(AV|PI)-(\d{1,4})-(\d{1,5})$/.exec(text);
+    if (match) {
+        return [`${pad(match[1], 2)}-${match[2]}-${pad(match[3], 4)}-${pad(match[4], 5)}`];
+    }
+
+    match = /^(E|N)-(\d{1,4})-(\d{1,6})$/.exec(text);
+    if (match) {
+        const forms = [`${match[1]} -${pad(match[2], 4)}-${pad(match[3], 6)}`];
+        if (match[3].length <= 5) {
+            forms.unshift(`${match[1]} -${pad(match[2], 4)}-${pad(match[3], 5)}`);
+        }
+        return forms;
+    }
+
+    match = /^PE-(\d{1,4})-(\d{1,5})$/.exec(text);
+    if (match) {
+        return [`PE-${pad(match[1], 4)}-${pad(match[2], 5)}`];
+    }
+
+    return [];
 }

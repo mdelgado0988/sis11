@@ -14,9 +14,15 @@
  * @context  { row:{casegurado, cacreedor, sucursal, frecuenciaPago, formaPago, fdesde, fhasta, sumaAsegurada,
  *           salario, peso, altura, nroPrestamo, tipoPrestamo, cob168, cob168Suma, cob169, cob169Suma}, batchId }
  * @mission  MSN-000027 (global1) — 2026-09-23
+ * @mission  MSN-000142 (globaluat) — 2026-11-04: objeto LoteCargaMasiva (definición LOTE_CARGA_MASIVA, formulario
+ *           LoteCargaMasiva) en cada póliza de la carga: lote, archivo, fila, importación, usuario que lanzó la carga y
+ *           fecha. Se lee antes de crear la póliza y se agrega después del objeto asegurado, antes de cotizar. Sin lote
+ *           (ExeChain directo) no se agrega. La vista 64 lo lee con cmdListBatchPolicies.
  */
 
 const PRODUCT_CODE = "UNICA_CLA";
+const LCM_OBJECT_CODE = "LOTE_CARGA_MASIVA";
+const LCM_IMPORT_NAME = "Carga Masiva UNICA CLASICA";
 const OBJECT_CODE = "DT_ACCIDENTES_V1";
 const ISSUE_STEP = "Borrador de Póliza";
 const FIELDS = ["casegurado", "cacreedor", "sucursal", "frecuenciaPago", "formaPago", "fdesde", "fhasta",
@@ -50,6 +56,10 @@ try {
   const insured = (GetContacts.outData || [])[0];
   if (!insured) fail(`casegurado ${d.insuredId} no existe como contacto.`);
   const insuredName = [insured.name, insured.middleName, insured.surname1, insured.surname2].filter(v => v && String(v).trim()).join(" ");
+
+  // 2b. Lote de carga masiva (MSN-000142): se lee antes de crear la póliza
+  step = "lote de carga masiva";
+  const batchObject = lcmPrepare();
 
   // 3. Póliza
   step = "creación de la póliza";
@@ -116,6 +126,8 @@ try {
   // 4. Objeto asegurado según la configuración del producto
   step = "objeto asegurado";
   addInsuredObject(policy, d, productRow, insured);
+  step = "objeto del lote de carga masiva";
+  lcmAddBatchObject(batchObject, policy.id);
 
   // 5. Flujo: Registro de la oferta -> Valores por Defecto -> Generar cotización
   step = "avance del flujo a cotización";
@@ -252,4 +264,85 @@ function formatAmount(value) {
   const fixed = Number(value).toFixed(2);
   const [integer, decimals] = fixed.split(".");
   return `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${decimals}`;
+}
+
+// ---------------------------------------------------------------- lote de carga masiva (MSN-000142)
+
+// Lo que va al objeto LoteCargaMasiva, leído antes de crear la póliza: la definición con su formulario y los datos del
+// lote. Sin lote (ExeChain directo) devuelve null y la póliza no lleva el objeto.
+function lcmPrepare() {
+  const batchId = Number(args.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) return null;
+  doCmd({ cmd: "RepoObjectDefinition", data: { operation: "GET", filter: `code = '${LCM_OBJECT_CODE}'`, include: ["Form"], noTracking: true } });
+  const definition = (RepoObjectDefinition.outData || [])[0];
+  if (!definition || !definition.Form) throw new Error(`No existe el objeto ${LCM_OBJECT_CODE} o su formulario.`);
+  const batch = lcmQuery(`SELECT name, [user] AS usuario, CONVERT(varchar(10), DATEADD(hour, -5, created), 103) + ' ' + CONVERT(varchar(5), DATEADD(hour, -5, created), 108) AS fecha FROM Batch WHERE id = ${batchId}`)[0] || {};
+  const configId = Number(args.configId);
+  const validConfig = Number.isSafeInteger(configId) && configId > 0;
+  const fila = validConfig ? lcmBatchRow(batchId, configId, definition.id) : null;
+  const extra = args.extra || {};
+  const values = {
+    loteId: String(batchId),
+    archivo: batch.name ? String(batch.name) : "",
+    fila: fila ? String(fila) : "",
+    importacionId: validConfig ? String(configId) : "",
+    importacion: String(args.configName || LCM_IMPORT_NAME),
+    usuario: String(extra.user || batch.usuario || ""),
+    fechaCarga: batch.fecha ? String(batch.fecha) : ""
+  };
+  const form = JSON.parse(definition.Form.json);
+  form.forEach(f => {
+    if (f && f.name && Object.prototype.hasOwnProperty.call(values, f.name) && values[f.name] !== "") f.userData = [values[f.name]];
+  });
+  return { definitionId: definition.id, jValues: JSON.stringify(form), values };
+}
+
+// Agrega a la póliza el objeto armado por lcmPrepare: después del objeto asegurado y antes de cotizar.
+function lcmAddBatchObject(prepared, policyId) {
+  if (!prepared) return;
+  doCmd({ cmd: "RepoInsuredObject", data: { operation: "ADD", entity: { lifePolicyId: policyId, objectDefinitionId: prepared.definitionId, jValues: prepared.jValues } } });
+  if (!RepoInsuredObject.ok) throw new Error(`No se pudo agregar el objeto ${LCM_OBJECT_CODE}: ${RepoInsuredObject.msg}`);
+}
+
+// Posición (1, 2, …) del registro en el lote, la numeración de «Ver detalles»: la fila del lote cuyas celdas son las
+// que recibió esta corrida. Con filas idénticas en el lote, la primera que todavía no tenga póliza con su objeto.
+function lcmBatchRow(batchId, configId, definitionId) {
+  const config = lcmQuery(`SELECT jMappings FROM ImportConfig WHERE id = ${configId}`);
+  let mappings = [];
+  try { mappings = JSON.parse(config.length && config[0].jMappings ? String(config[0].jMappings) : "[]"); } catch (e) { mappings = []; }
+  const raw = args.row || {};
+  const conditions = [];
+  (Array.isArray(mappings) ? mappings : []).forEach((mapping, index) => {
+    if (!Array.isArray(mapping) || mapping.length < 3) return;
+    const field = String(mapping[2] || "");
+    if (!field || String(mapping[1] || "").trim() || field.indexOf("[") !== -1) return;
+    const value = raw[field];
+    conditions.push(value === null || value === undefined
+      ? `JSON_VALUE(j.value, '$[${index}]') IS NULL`
+      : `JSON_VALUE(j.value, '$[${index}]') = N'${lcmSql(value)}'`);
+  });
+  if (!conditions.length) return null;
+  const candidates = lcmQuery(`SELECT CAST(j.[key] AS int) + 1 AS fila FROM Batch b CROSS APPLY OPENJSON(CASE WHEN ISJSON(b.jData) = 1 THEN b.jData ELSE '[]' END) j WHERE b.id = ${batchId} AND ${conditions.join(" AND ")} ORDER BY CAST(j.[key] AS int)`)
+    .map(x => Number(x.fila)).filter(Number.isSafeInteger);
+  if (candidates.length <= 1) return candidates.length ? candidates[0] : null;
+  const taken = lcmBatchPolicyRows(batchId, definitionId);
+  const free = candidates.filter(f => taken.indexOf(f) === -1);
+  return free.length ? free[0] : candidates[0];
+}
+
+// Filas del lote que ya tienen una póliza con su objeto LoteCargaMasiva.
+function lcmBatchPolicyRows(batchId, definitionId) {
+  const field = name => `(SELECT TOP 1 JSON_VALUE(x.value, '$.userData[0]') FROM OPENJSON(CASE WHEN ISJSON(io.jValues) = 1 THEN io.jValues ELSE '[]' END) x WHERE JSON_VALUE(x.value, '$.name') = '${name}')`;
+  return lcmQuery(`SELECT ${field("fila")} AS fila FROM InsuredObject io WHERE io.objectDefinitionId = ${definitionId} AND ${field("loteId")} = '${batchId}'`)
+    .map(x => Number(x.fila)).filter(Number.isSafeInteger);
+}
+
+function lcmQuery(sql) {
+  doCmd({ cmd: "DoQuery", data: { sql } });
+  if (!DoQuery.ok) throw new Error(DoQuery.msg || "error de consulta");
+  return JSON.parse(JSON.stringify(DoQuery.outData || []));
+}
+
+function lcmSql(value) {
+  return String(value).replace(/'/g, "''");
 }

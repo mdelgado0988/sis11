@@ -2,7 +2,10 @@
  * @name CargaMasivaDeEmision
  * @author Cesar Aguilar.
  * @purpose Bulk issuance import preparation, batch execution and results for SISOS11.
- * @version 1.0.0
+ * @version 1.1.0
+ * @change 1.1.0 MSN-000142 (2026-11-04): «Id póliza» y «Código de póliza» de cada fila después de «Mensaje del proceso»,
+ *         en «Ver detalles» y en «Exportar a Excel», leídos con cmdListBatchPolicies del objeto «Lote de carga masiva»
+ *         que las cargas agregan a la póliza.
  */
 () => {
   const Card = A.Card;
@@ -19,6 +22,7 @@
   const Upload = A.Upload;
   const Tag = A.Tag;
   const Progress = A.Progress;
+  const Input = A.Input;
   const actionPaths = {
     search: 'M909.6 854.6L649.9 594.9A314.3 314.3 0 0 0 712 412c0-166.8-135.2-302-302-302S108 245.2 108 412s135.2 302 302 302a299.5 299.5 0 0 0 182.8-62.1l259.7 259.7a8 8 0 0 0 11.3 0l45.8-45.7a8 8 0 0 0 0-11.3zM410 634c-122.6 0-222-99.4-222-222s99.4-222 222-222 222 99.4 222 222-99.4 222-222 222z',
     upload: 'M472 656h80V344l104 104 56-56-200-200-200 200 56 56 104-104v312zM160 760h704v80H160z',
@@ -36,7 +40,8 @@
     product: null, configs: [], configsLoading: false, file: null, rows: [], detail: null, detailOpen: false, error: '',
     loading: false, loaded: false, current: 1, total: null, hasNext: false, templateLoading: false,
     uploading: false, uploadUncertain: false, notice: '', detailLoading: false, detailError: '', exporting: false,
-    selectedBatchId: null, resultsOpen: false
+    selectedBatchId: null, resultsOpen: false,
+    catalogs: { open: false, loading: false, error: '', imports: [], selected: undefined, search: '', rows: [], total: 0, page: 1, size: 10, rowsLoading: false, rowsError: '', meta: null }
   });
   const configsRef = React.useRef([]);
   const configRequestRef = React.useRef(0);
@@ -255,6 +260,37 @@
     for (let index = inputWidth; index < width; index++) headers.push('Dato adicional ' + (index - inputWidth + 1));
     return Object.assign({}, batch, { product: product, headers: headers, rows: rows });
   };
+  // Póliza por fila: la creada por la fila (también si la fila terminó con error), «No creada» si no se creó,
+  // «Sin referencia» en las filas de un lote ejecutado antes de que las cargas guardaran el objeto del lote
+  // (ninguna póliza del lote y alguna fila exitosa).
+  const withPolicies = (detail, byLine) => {
+    const legacy = !!byLine && Object.keys(byLine).length === 0 && detail.rows.some((row) => row.resultLabel === 'Exitoso');
+    return Object.assign({}, detail, { rows: detail.rows.map((row) => {
+      const found = byLine && byLine[row.line];
+      const missing = !byLine ? 'No disponible' : row.resultLabel === 'Pendiente' ? ''
+        : legacy || row.resultLabel === 'Exitoso' ? 'Sin referencia' : 'No creada';
+      return Object.assign({}, row, {
+        policyId: found ? found.map((policy) => policy.id).join(', ') : missing,
+        policyCode: found ? found.map((policy) => policy.code).join(', ') : missing
+      });
+    }) });
+  };
+  const batchPolicies = (detail, result) => {
+    if (!result || result.ok === false) throw new Error(result && result.msg || 'No se pudieron consultar las pólizas del lote.');
+    const data = result.outData;
+    if (!data || typeof data !== 'object' || data.ok !== true || !Array.isArray(data.policies)) {
+      throw new Error(data && data.msg || 'No se pudieron consultar las pólizas del lote.');
+    }
+    const byLine = {};
+    data.policies.forEach((policy) => {
+      const line = Number(policy && policy.fila);
+      const id = Number(policy && policy.policyId);
+      if (!Number.isSafeInteger(line) || line <= 0 || !Number.isSafeInteger(id) || id <= 0) return;
+      if (!byLine[line]) byLine[line] = [];
+      if (!byLine[line].some((item) => item.id === String(id))) byLine[line].push({ id: String(id), code: policy.code ? String(policy.code) : '—' });
+    });
+    return withPolicies(detail, byLine);
+  };
   const showDetail = (selected, refresh) => {
     if (!mountedRef.current || uploadBusyRef.current) return Promise.resolve();
     if (!refresh) closeDetail();
@@ -297,8 +333,18 @@
         throw new Error('La respuesta no corresponde al lote seleccionado.');
       }
       const detail = normalizeDetail(batch, entities[0].jData, config.jMappings, product);
-      detailRef.current = detail;
-      update({ detail: detail, detailError: '' });
+      let lookupError = '';
+      return Promise.resolve().then(() => exe('ExeChain', { chain: 'cmdListBatchPolicies', context: JSON.stringify({ batchId: id }) }))
+        .then((result) => batchPolicies(detail, result))
+        .catch((error) => {
+          lookupError = error && error.message || 'No se pudieron consultar las pólizas del lote.';
+          return withPolicies(detail, null);
+        })
+        .then((complete) => {
+          if (!active()) return;
+          detailRef.current = complete;
+          update({ detail: complete, detailError: lookupError ? 'Póliza no disponible: ' + lookupError : '' });
+        });
     }).catch((error) => {
       if (active()) { detailRef.current = null; update({ detail: null, detailError: error && error.message || 'No se pudo consultar el detalle del lote.' }); }
     }).then(() => { if (active()) update({ detailLoading: false }); });
@@ -346,7 +392,8 @@
       return ensureXlsx();
     }).then((library) => {
       if (!active() || !library) return;
-      const rows = [['Fila', 'Estado', 'Mensaje del proceso'].concat(detail.headers)].concat(detail.rows.map((row) => [String(row.line), row.resultLabel, row.resultMessage].concat(detail.headers.map((header, index) => {
+      const rows = [['Fila', 'Estado', 'Mensaje del proceso', 'Id póliza', 'Código de póliza'].concat(detail.headers)].concat(detail.rows.map((row) => [String(row.line), row.resultLabel, row.resultMessage,
+        row.policyId == null ? '' : String(row.policyId), row.policyCode == null ? '' : String(row.policyCode)].concat(detail.headers.map((header, index) => {
         const value = detailValue(header, row.values[index]);
         return value === '—' ? '' : value;
       }))));
@@ -430,6 +477,93 @@
       rows.push(row);
     }
     return rows;
+  };
+  const catalogsRef = React.useRef({ token: 0, rowsToken: 0, timer: null, open: false, selected: null, search: '', page: 1, size: 10 });
+  const catalogsIdle = { open: false, loading: false, error: '', imports: [], selected: undefined, search: '', rows: [], total: 0, page: 1, size: 10, rowsLoading: false, rowsError: '', meta: null };
+  const updateCatalogs = (values) => {
+    if (mountedRef.current) setState((current) => Object.assign({}, current, { catalogs: Object.assign({}, current.catalogs, values) }));
+  };
+  const catalogResponse = (result, fallback) => {
+    if (!result || result.ok === false) throw new Error(result && result.msg || fallback);
+    const data = result.outData;
+    if (!data || typeof data !== 'object' || data.ok !== true) throw new Error(data && data.msg || fallback);
+    return data;
+  };
+  const clearCatalogTimer = () => {
+    const session = catalogsRef.current;
+    if (session.timer) { window.clearTimeout(session.timer); session.timer = null; }
+  };
+  const resetCatalogs = (open) => {
+    clearCatalogTimer();
+    const session = catalogsRef.current;
+    catalogsRef.current = { token: session.token + 1, rowsToken: session.rowsToken + 1, timer: null, open: open, selected: null, search: '', page: 1, size: 10 };
+    updateCatalogs(Object.assign({}, catalogsIdle, { open: open, loading: open }));
+    return catalogsRef.current;
+  };
+  const openCatalogs = () => {
+    const session = resetCatalogs(true);
+    const token = session.token;
+    const active = () => mountedRef.current && catalogsRef.current === session && session.open && session.token === token;
+    return Promise.resolve().then(() => exe('ExeChain', { chain: 'cmdListCatalogData', context: JSON.stringify({ category: 'EmisionMasiva' }) })).then((result) => {
+      if (!active()) return;
+      const data = catalogResponse(result, 'No se pudieron consultar los catálogos.');
+      const imports = (Array.isArray(data.imports) ? data.imports : []).filter((item) => item && Array.isArray(item.catalogs));
+      updateCatalogs({ loading: false, imports: imports, error: imports.some((item) => item.catalogs.length) ? '' : 'Las cargas de esta vista no tienen catálogos registrados.' });
+    }).catch((error) => {
+      if (active()) updateCatalogs({ loading: false, error: error && error.message || 'No se pudieron consultar los catálogos.' });
+    });
+  };
+  const closeCatalogs = () => { resetCatalogs(false); };
+  const loadCatalogRows = () => {
+    clearCatalogTimer();
+    const session = catalogsRef.current;
+    if (!mountedRef.current || !session.open || !session.selected) return Promise.resolve();
+    const token = ++session.rowsToken;
+    const selected = session.selected;
+    const active = () => mountedRef.current && catalogsRef.current === session && session.open && session.rowsToken === token;
+    updateCatalogs({ rowsLoading: true, rowsError: '' });
+    return Promise.resolve().then(() => exe('ExeChain', { chain: 'cmdListCatalogDataDetail', context: JSON.stringify({ category: 'EmisionMasiva',
+      importId: selected.importId, field: selected.field, search: session.search, page: session.page - 1, size: session.size }) })).then((result) => {
+      if (!active()) return;
+      const data = catalogResponse(result, 'No se pudo consultar el catálogo.');
+      const page = Number.isSafeInteger(Number(data.page)) && Number(data.page) >= 0 ? Number(data.page) + 1 : session.page;
+      session.page = page;
+      updateCatalogs({ rowsLoading: false, rows: Array.isArray(data.rows) ? data.rows : [], total: Number(data.total) || 0, page: page, size: Number(data.size) || session.size, meta: data.catalog || null });
+    }).catch((error) => {
+      if (active()) updateCatalogs({ rowsLoading: false, rows: [], total: 0, rowsError: error && error.message || 'No se pudo consultar el catálogo.' });
+    });
+  };
+  const selectCatalog = (value) => {
+    const session = catalogsRef.current;
+    if (!session.open) return;
+    clearCatalogTimer();
+    const parts = String(value || '').split(':');
+    session.selected = parts.length === 2 && Number(parts[0]) > 0 && parts[1] ? { importId: Number(parts[0]), field: parts[1] } : null;
+    session.search = '';
+    session.page = 1;
+    session.rowsToken++;
+    updateCatalogs({ selected: session.selected ? value : undefined, search: '', rows: [], total: 0, page: 1, rowsLoading: false, rowsError: '', meta: null });
+    if (session.selected) loadCatalogRows();
+  };
+  const searchCatalog = (value, immediate) => {
+    const session = catalogsRef.current;
+    if (!session.open) return;
+    session.search = String(value == null ? '' : value).slice(0, 100);
+    session.page = 1;
+    clearCatalogTimer();
+    updateCatalogs({ search: session.search, page: 1 });
+    if (!session.selected) return;
+    if (immediate) { loadCatalogRows(); return; }
+    session.timer = window.setTimeout(() => { session.timer = null; loadCatalogRows(); }, 400);
+  };
+  const pageCatalog = (page, size) => {
+    const session = catalogsRef.current;
+    if (!session.open || !session.selected) return;
+    const nextSize = [10, 20, 50].indexOf(Number(size)) >= 0 ? Number(size) : session.size;
+    session.page = nextSize !== session.size ? 1 : Math.max(1, Number(page) || 1);
+    session.size = nextSize;
+    updateCatalogs({ page: session.page, size: session.size });
+    loadCatalogRows();
   };
   const uploadFile = () => {
     if (!mountedRef.current || uploadBusyRef.current || templateBusyRef.current || uploadUncertainRef.current) return Promise.resolve();
@@ -656,6 +790,7 @@
       requestRef.current++;
       templateRequestRef.current++;
       templateBusyRef.current = false;
+      window.clearTimeout(catalogsRef.current.timer);
     };
   }, []);
   const configName = (id) => { const config = configsRef.current.find((item) => Number(item.id || item.Id) === Number(id)); return config ? config.name : String(id || ''); };
@@ -692,6 +827,18 @@
     return Number.isNaN(parsed.getTime()) ? display(value) : parsed.toLocaleString('es-NI');
   };
   const h = React.createElement;
+  const catalogOptions = state.catalogs.imports.filter((item) => item.catalogs.length).map((item) => ({
+    label: item.name,
+    options: item.catalogs.map((catalog) => ({ value: item.id + ':' + catalog.field, label: catalog.name + ' (columna ' + catalog.column + ')' }))
+  }));
+  const selectedCatalogParts = String(state.catalogs.selected || '').split(':');
+  const selectedCatalogImport = state.catalogs.imports.find((item) => String(item.id) === selectedCatalogParts[0]);
+  const selectedCatalog = selectedCatalogImport ? selectedCatalogImport.catalogs.find((catalog) => catalog.field === selectedCatalogParts[1]) : null;
+  const catalogColumns = [{ title: 'Código', dataIndex: 'code', width: 170, render: display },
+    { title: 'Descripción', dataIndex: 'name', render: display }].concat(selectedCatalog && selectedCatalog.parent
+    ? [{ title: selectedCatalog.parent, dataIndex: 'parent', width: 240, render: display }] : []);
+  const catalogEmpty = !state.catalogs.selected ? 'Seleccione un catálogo para ver sus códigos.'
+    : state.catalogs.rowsLoading ? 'Consultando…' : state.catalogs.search ? 'No hay registros que coincidan con la búsqueda.' : 'El catálogo no tiene registros.';
   const action = (label, icon, props) => h(Button, Object.assign({ className: 'bulk-issuance-action' }, props), h(ActionIcon, { name: icon }), label);
   const columns = [
     { title: 'Lote', dataIndex: 'id', width: 110 },
@@ -706,12 +853,14 @@
   const resultColumns = [
     { title: 'Fila', dataIndex: 'line', width: 75, fixed: 'left' },
     { title: 'Estado', dataIndex: 'resultLabel', width: 130, render: (_, row) => h(Tag, { color: row.resultColor }, row.resultLabel) },
-    { title: 'Mensaje del proceso', dataIndex: 'resultMessage', width: 340, render: value => h('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, display(value)) }
+    { title: 'Mensaje del proceso', dataIndex: 'resultMessage', width: 340, render: value => h('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, display(value)) },
+    { title: 'Id póliza', dataIndex: 'policyId', width: 110, render: value => h('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, display(value)) },
+    { title: 'Código de póliza', dataIndex: 'policyCode', width: 190, render: value => h('div', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, display(value)) }
   ].concat(state.detail ? state.detail.headers.map((title, index) => ({ title, key: 'field-' + index, width: 180, render: (_, row) => detailValue(title, row.values[index]) })) : []);
   const busy = state.uploading || state.configsLoading;
   const counters = () => h(Row, { gutter: [12, 12], className: 'bulk-issuance-summary' },
     [['Registros', 'records'], ['Exitosos', 'success'], ['Con error', 'error']].map(item =>
-      h(Col, { xs: 24, sm: 8, key: item[1] }, h('div', { className: 'bulk-issuance-summary-' + item[1] }, item[0], h('strong', null, display(state.detail[item[1]])))))
+      h(Col, { xs: 24, sm: 8, key: item[1] }, h('div', null, item[0], h('strong', null, display(state.detail[item[1]])))))
   );
   const counterWarning = () => countersInconsistent(state.detail) && h(Alert, { showIcon: true, type: 'warning', message: 'Contadores inconsistentes', description: 'Los contadores se muestran tal como están registrados en el lote.' });
   const exportButton = () => action('Exportar a Excel', 'download', { className: 'bulk-issuance-action bulk-issuance-export', loading: state.exporting, disabled: state.exporting || state.detailLoading, onClick: exportDetail });
@@ -780,14 +929,12 @@
         .bulk-issuance-detail dt { color:#64748b; font-size:12px; font-weight:500; }
         .bulk-issuance-detail dd { margin:0; overflow-wrap:anywhere; }
         .bulk-issuance-summary { margin:8px 0; }
-        .bulk-issuance-summary .ant-col > div { border:1px solid #8fa8c1; border-radius:6px; padding:8px; background:#f9fbfd; color:#64748b; font-size:12px; text-align:center; }
+        .bulk-issuance-summary .ant-col > div { border:1px solid #8fa8c1; border-radius:6px; padding:8px; background:#f9fbfd; color:#64748b; font-size:12px; }
         .bulk-issuance-summary strong { display:block; color:#1e293b; font-size:17px; }
-        .bulk-issuance-summary .bulk-issuance-summary-records { border-color:#5b8fca; color:#1e5b9e; }
-        .bulk-issuance-summary .bulk-issuance-summary-records strong { color:#1e5b9e; }
-        .bulk-issuance-summary .bulk-issuance-summary-success { border-color:#6ebd62; color:#237804; }
-        .bulk-issuance-summary .bulk-issuance-summary-success strong { color:#237804; }
-        .bulk-issuance-summary .bulk-issuance-summary-error { border-color:#e28b8b; color:#cf1322; }
-        .bulk-issuance-summary .bulk-issuance-summary-error strong { color:#cf1322; }
+        .bulk-issuance-catalogs-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+        .bulk-issuance-catalogs-filters .bulk-issuance-catalogs-select { flex:1 1 420px; min-width:0; }
+        .bulk-issuance-catalogs-filters .bulk-issuance-catalogs-search { flex:1 1 260px; min-width:0; }
+        .bulk-issuance-catalogs-grid .ant-table-tbody > tr > td { overflow-wrap:anywhere; }
         @media (max-width:575px) { .bulk-issuance-title { font-size:16px; } .bulk-issuance-shell .ant-form-item { display:block; } .bulk-issuance-shell .ant-form-item-label { width:auto; padding:0 0 3px; } }
       `),
     h(Card, { className: 'bulk-issuance-card', size: 'small', title: h('div', { className: 'bulk-issuance-title' }, h('span', { className: 'bulk-issuance-title-mark', 'aria-hidden': true }), 'Carga masiva de emisión') },
@@ -822,7 +969,8 @@
         h('div', { className: 'bulk-issuance-toolbar' },
           action('Descargar plantilla', 'download', { loading: state.templateLoading, disabled: !state.product || state.templateLoading || busy, onClick: downloadTemplate }),
           action('Cargar archivo', 'upload', { type: 'primary', className: 'bulk-issuance-action bulk-issuance-upload', loading: state.uploading,
-            disabled: !state.product || !state.file || busy || state.templateLoading || state.uploadUncertain, onClick: uploadFile })
+            disabled: !state.product || !state.file || busy || state.templateLoading || state.uploadUncertain, onClick: uploadFile }),
+          action('Ver Catálogos', 'detail', { className: 'bulk-issuance-action bulk-issuance-catalogs-open', onClick: openCatalogs })
         ),
         h('p', { className: 'bulk-issuance-hint' }, 'Use la plantilla del producto seleccionado. Cargar el archivo crea el lote; la ejecución se realiza por separado.')
       ),
@@ -849,6 +997,30 @@
           h(Button, { size: 'small', disabled: state.loading || busy || !state.hasNext, onClick: () => loadBatches(state.current + 1) }, 'Siguiente')
         )
       )
+    ),
+    h(Modal, { title: 'Ver catálogos', open: state.catalogs.open, visible: state.catalogs.open, width: 900, centered: true, footer: null,
+      className: 'bulk-issuance-detail bulk-issuance-catalogs', style: { maxWidth: 'calc(100vw - 32px)' }, onCancel: closeCatalogs, destroyOnClose: true },
+      state.catalogs.error && h(Alert, { showIcon: true, type: catalogOptions.length ? 'warning' : 'error', message: state.catalogs.error, style: { marginBottom: 12 } }),
+      h('div', { className: 'bulk-issuance-catalogs-filters' },
+        h('div', { className: 'bulk-issuance-catalogs-select' },
+          h(Select, { style: { width: '100%' }, showSearch: true, allowClear: true, placeholder: 'Seleccione un catálogo', 'aria-label': 'Catálogo', optionFilterProp: 'label',
+            value: state.catalogs.selected, loading: state.catalogs.loading, disabled: state.catalogs.loading || !catalogOptions.length,
+            options: catalogOptions, onChange: selectCatalog, notFoundContent: 'No hay catálogos' })
+        ),
+        h('div', { className: 'bulk-issuance-catalogs-search' },
+          h(Input.Search, { allowClear: true, maxLength: 100, placeholder: 'Buscar por código o descripción', 'aria-label': 'Buscar en el catálogo',
+            value: state.catalogs.search, disabled: !state.catalogs.selected,
+            onChange: (event) => searchCatalog(event.target.value, false), onSearch: (value) => searchCatalog(value, true) })
+        )
+      ),
+      selectedCatalog && h('p', { className: 'bulk-issuance-hint' }, 'Carga «' + selectedCatalogImport.name + '» · columna ' + selectedCatalog.column),
+      state.catalogs.rowsError && h(Alert, { showIcon: true, type: 'error', message: state.catalogs.rowsError, style: { marginBottom: 12 } }),
+      h(Table, { className: 'bulk-issuance-catalogs-grid', size: 'small', bordered: true, rowKey: 'key', loading: state.catalogs.rowsLoading,
+        columns: catalogColumns, dataSource: state.catalogs.rows,
+        pagination: { current: state.catalogs.page, pageSize: state.catalogs.size, total: state.catalogs.total, showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50'], disabled: state.catalogs.rowsLoading, showTotal: total => total + ' registros' },
+        onChange: (pagination) => pageCatalog(pagination.current, pagination.pageSize),
+        locale: { emptyText: catalogEmpty } })
     ),
     h(Drawer, { title: 'Ver detalles', open: state.detailOpen, visible: state.detailOpen, width: 420, className: 'bulk-issuance-detail', keyboard: !state.resultsOpen, maskClosable: !state.resultsOpen, onClose: closeDetail },
       state.detailError && h(Alert, { showIcon: true, type: 'error', message: state.detailError, style: { marginBottom: 16 } }),
@@ -882,8 +1054,8 @@
         ),
         h('div', { className: 'bulk-issuance-results-actions' }, action('Cerrar', 'close', { onClick: closeResults }), exportButton()),
         h(Table, { size: 'small', bordered: true, rowKey: 'key', columns: resultColumns, dataSource: state.detail.rows,
-          scroll: { x: 545 + state.detail.headers.length * 180, y: 360 }, pagination: { pageSize: 10, showSizeChanger: false, showTotal: total => total + ' registros' }, locale: { emptyText: 'No hay resultados para mostrar.' } }),
-        h('p', { className: 'bulk-issuance-hint', style: { marginTop: 12 } }, 'Fila indica la posición del registro en el lote. Los datos adicionales conservan los valores guardados por el proceso. “—” indica un dato no disponible.')
+          scroll: { x: 845 + state.detail.headers.length * 180, y: 360 }, pagination: { pageSize: 10, showSizeChanger: false, showTotal: total => total + ' registros' }, locale: { emptyText: 'No hay resultados para mostrar.' } }),
+        h('p', { className: 'bulk-issuance-hint', style: { marginTop: 12 } }, 'Fila indica la posición del registro en el lote. Id póliza y Código de póliza muestran la póliza creada por la fila, también si la fila terminó con error; «No creada» si no se creó; «Sin referencia» en lotes ejecutados antes de que la póliza guardara el lote. Los datos adicionales conservan los valores guardados por el proceso. “—” indica un dato no disponible.')
       )
     )
   );

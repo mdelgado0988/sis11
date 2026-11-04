@@ -5,7 +5,7 @@
  * @author Noel Obando
  * @created 2025-12-26
  * @name cmdEmisionIncendioContext
- * @version 1.2
+ * @version 1.3
  * @purpose Builds accounting context data for fire issuance and endorsements.
  * @param context.id Policy, change or anniversary identifier.
  * @param context.tipo 0: issuance, 1: cancellation, 2: renewal, 3: insured sum change,
@@ -13,6 +13,10 @@
  * @changes 1.2 (MSN-000056) Resolves the accounts of every template line from the table
  *          CuentasEmisionGeneral: the column "<ramo>-<producto>" when it has a value for
  *          the line, otherwise the column of the ramo. Returned as cuenta<Linea> fields.
+ * @changes 1.3 (MSN-000143) Surety cancellations (ramos 81-84) mirror the issuance entry:
+ *          the refunded premium (not the endorsement difference, which counts the premium
+ *          twice when the bond was paid), the issuance tax rule (5 %) and the coinsurance
+ *          share of the cession rows of the cancellation itself. Other ramos are unchanged.
  */
 
 try {
@@ -59,8 +63,13 @@ try {
   const change = findChange(changes, id);
 
   let amounts;
+  // Fianzas: la cancelación se arma como el espejo de la emisión y ya trae su
+  // parte de coaseguro.
+  const isSuretyCancellation = isCancellation && isSurety(policy);
 
-  if (isCancellation) {
+  if (isSuretyCancellation) {
+    amounts = getSuretyCancellationAmounts(policy, change, id);
+  } else if (isCancellation) {
     amounts = getCancellationAmounts(policy, change);
   } else if (isNewOrAnniversary) {
     amounts = getIssuanceOrRenewalAmounts(policy, tipo);
@@ -68,7 +77,9 @@ try {
     amounts = getEndorsementAmounts(policy, change, id, tipo);
   }
 
-  amounts = applyCoinsuranceAccounting(policy, tipo, id, amounts);
+  if (!isSuretyCancellation) {
+    amounts = applyCoinsuranceAccounting(policy, tipo, id, amounts);
+  }
 
   const {
     primaPorCobrar,
@@ -184,6 +195,85 @@ function getCancellationAmounts(policy, change) {
 }
 
 /**
+ * Fianzas (ramos 81 a 84): la cancelación revierte la emisión en la proporción
+ * de la prima que se devuelve. Se calcula como una emisión de esa prima (mismo
+ * impuesto del 5 % y la distribución de coaseguro que anula este endoso) y se le
+ * cambia el signo: una cancelación desde el inicio es el espejo exacto del
+ * asiento de emisión, con el mismo redondeo en cada importe.
+ */
+function getSuretyCancellationAmounts(policy, change, changeId) {
+  const detail = safeJson(change && change.jDetail, {});
+  const refund = getSuretyRefundPremium(detail);
+  const taxRows = asArray(policy.TaxGenerated);
+  const tax = getIssuanceInsuranceTax(policy, refund, taxRows);
+  const issuanceLike = {
+    prima: refund,
+    impuestoPrimasIncendio: tax,
+    gastoPrimaIncendio: getGastoPrima(policy, refund),
+    primaPorCobrar: toDecimal(refund + tax)
+  };
+  const coinsurance = getCancelledCoinsurance(policy.id, changeId, refund);
+  const positive = applyCoinsuranceAccounting(policy, 1, changeId, issuanceLike, coinsurance);
+
+  return {
+    prima: -toNumber(positive.prima),
+    impuestoPrimasIncendio: -toNumber(positive.impuestoPrimasIncendio),
+    gastoPrimaIncendio: -toNumber(positive.gastoPrimaIncendio),
+    primaPorCobrar: -toNumber(positive.primaPorCobrar),
+    coaseguroPorPagar: -toNumber(positive.coaseguroPorPagar),
+    coaseguroPrima: -toNumber(positive.coaseguroPrima),
+    cancelacion: true,
+    renovacion: false,
+    cancellationTax: sumTaxRows(taxRows, true),
+    nonCancellationTax: sumTaxRows(taxRows, false)
+  };
+}
+
+/**
+ * Prima que devuelve la cancelación. Normalmente es la diferencia del endoso
+ * (prima anterior menos la devengada). Cuando la póliza estaba pagada, el
+ * endoso guarda la devolución como prima nueva negativa y la diferencia suma
+ * la prima dos veces: en ese caso la devolución es la prima nueva.
+ */
+function getSuretyRefundPremium(detail) {
+  const hasNewPremium = detail.newCoverages !== undefined && detail.newCoverages !== null;
+  const newPremium = hasNewPremium
+    ? toNumber(detail.newCoverages)
+    : toNumber(detail.oldCoverages) + toNumber(detail.coveragesDif);
+
+  return newPremium < 0
+    ? toDecimal(-newPremium)
+    : toDecimal(-toNumber(detail.coveragesDif));
+}
+
+/**
+ * Coaseguro que anula la cancelación: las cesiones que crea el propio endoso al
+ * ejecutarse (quedan sobrescritas en ese momento, por eso no se filtra por ese
+ * indicador). Si el endoso no creó cesiones, no había coaseguro vigente que
+ * anular. Cada participante devuelve su prima cedida en la misma proporción
+ * que la prima.
+ */
+function getCancelledCoinsurance(policyId, changeId, refund) {
+  const rows = getCoCessions(
+    `lifePolicyId=${policyId} AND parentCoCession IS NULL AND changeId=${changeId}`
+  );
+
+  const premium = rows.reduce((total, row) => {
+    const rowPremium = Math.abs(toNumber(row.premium));
+    const ceded = rowPremium > 0
+      ? Math.abs(toNumber(row.premiumCeded)) * refund / rowPremium
+      : refund * toNumber(row.percentage) / 100;
+    return total + toDecimal(ceded);
+  }, 0);
+
+  return {
+    premium: toDecimal(premium),
+    percentage: rows.reduce((total, row) => total + toNumber(row.percentage), 0),
+    hasCessions: rows.length > 0
+  };
+}
+
+/**
  * Calculates issuance and renewal amounts from coverage premiums and all taxes.
  */
 function getIssuanceOrRenewalAmounts(policy, tipo) {
@@ -230,13 +320,13 @@ function getLatestInsuranceTax(rows) {
   return quotationRows.length > 0 ? toNumber(quotationRows[0].amount) : 0;
 }
 
-function applyCoinsuranceAccounting(policy, tipo, changeId, amounts) {
+function applyCoinsuranceAccounting(policy, tipo, changeId, amounts, distribution) {
   const grossPremium = toDecimal(amounts && amounts.prima);
   if (!policy || grossPremium === 0) {
     return { ...amounts, coaseguroPorPagar: 0, coaseguroPrima: 0 };
   }
 
-  const coinsurance = getCoinsuranceAmounts(policy.id, tipo, changeId, grossPremium);
+  const coinsurance = distribution || getCoinsuranceAmounts(policy.id, tipo, changeId, grossPremium);
   if (!coinsurance.hasCessions || coinsurance.premium === 0) {
     return { ...amounts, coaseguroPorPagar: 0, coaseguroPrima: 0 };
   }
