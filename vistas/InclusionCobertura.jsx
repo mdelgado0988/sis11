@@ -11,6 +11,8 @@
  *   cmdApplyReaChangeCoverage                                cesiones confirmadas por changeId
  *   cmdGenertFormatoEmdoso                                   documento del endoso
  * La informacion especial del endoso viaja en jAdditional del Change (endorsementType INCLUSIONCOBERTURA).
+ * MSN-000124 (AXX-7003): fechas de las coberturas con las funciones actuales del formulario 574 (las mismas de la
+ *   cadena 755, que ahora lee jAdditional.cobtar en la inclusion) y hiddenCobtar con las fechas del endoso registrado.
  */
 () => {
   const Tabs = A.Tabs;
@@ -26,6 +28,7 @@
   const Tooltip = A.Tooltip;
   const Empty = A.Empty;
   const Checkbox = A.Checkbox;
+  const InputNumber = A.InputNumber;
 
   // ------------------------------------------------------------- configuracion por ramo
   // Misma tabla de tarifas de entrada que usa el formulario del objeto asegurado de cada ramo.
@@ -53,6 +56,8 @@
     { lob: 84, table: 'cfgCoberturaProductoReaFianza' }
   ];
   const ENDORSEMENT_TYPE = 'INCLUSIONCOBERTURA';
+  // MSN-000139: ramos de fianzas, donde la tarifa recalcula las coberturas dependientes (312/314) al incluir otra.
+  const SURETY_LOBS = [81, 82, 83, 84];
 
   // ------------------------------------------------------------- utilidades
   const txt = function (v) { return String(v === null || v === undefined ? '' : v).trim(); };
@@ -180,9 +185,18 @@
       return o;
     });
   };
-  // Fechas: mismas funciones que el formulario (sumarDias / formatearFecha) para obtener las mismas fechas.
+  // Fechas: mismas funciones que el formulario 574 OA_FIANZASV3 (sumarDias / formatearFecha) en su version con
+  // AXX-2419 y GLOBUAT-392, que es tambien la regla de la tarificacion (cadena 755): un texto de solo fecha es un dia
+  // calendario local, una fecha-hora del servidor sin zona es UTC, y 365/366 dias o sus multiplos son anios.
+  // MSN-000124 (AXX-7003): la copia anterior leia 'aaaa-mm-dd' como medianoche UTC y en Panama restaba un dia.
   const formatearFecha = function (fecha) {
-    const f = new Date(fecha);
+    let valor = fecha;
+    if (typeof valor === 'string') {
+      const texto = valor.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(texto)) valor = texto + 'Z';
+    }
+    const f = new Date(valor);
     if (isNaN(f)) return '';
     const yyyy = f.getFullYear();
     const mm = String(f.getMonth() + 1).padStart(2, '0');
@@ -191,9 +205,23 @@
   };
   const sumarDias = function (fechaStr, dias) {
     if (!fechaStr || !dias) return '';
-    const fecha = new Date(fechaStr);
+    const texto = String(fechaStr).trim();
+    const partes = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const fecha = partes ? new Date(Number(partes[1]), Number(partes[2]) - 1, Number(partes[3])) : new Date(fechaStr);
     if (isNaN(fecha)) return '';
-    fecha.setDate(fecha.getDate() + Number(dias));
+    const duracion = Number(dias);
+    const anios = Number.isInteger(duracion) && duracion > 0
+      ? (duracion % 365 === 0 ? duracion / 365 : (duracion % 366 === 0 ? duracion / 366 : 0))
+      : 0;
+    if (anios > 0) {
+      const mesOriginal = fecha.getMonth();
+      const diaOriginal = fecha.getDate();
+      fecha.setFullYear(fecha.getFullYear() + anios);
+      // un aniversario del 29/02 en un anio no bisiesto queda en el ultimo dia de febrero
+      if (mesOriginal === 1 && diaOriginal === 29 && fecha.getMonth() !== 1) fecha.setMonth(1, 28);
+    } else {
+      fecha.setDate(fecha.getDate() + duracion);
+    }
     return formatearFecha(fecha);
   };
   const parseCatalog = function (catalog) {
@@ -232,6 +260,9 @@
   const [params, setParams] = useState({});
   const [numericDrafts, setNumericDrafts] = useState({});
   const [effectiveDate, setEffectiveDate] = useState(moment());
+  // MSN-000139: recargo y descuento del endoso (importes), como en la vista 57.
+  const [surcharge, setSurcharge] = useState(0);
+  const [discount, setDiscount] = useState(0);
   const [quote, setQuote] = useState(null);
   const [sim, setSim] = useState(null);
   const [reinsuranceConfirmed, setReinsuranceConfirmed] = useState(false);
@@ -466,6 +497,13 @@
     }
     return '';
   };
+  // MSN-000139: la cobertura suma al contrato de reaseguro si su fila de la tabla de dependencias dice isCoverage = Si;
+  // sin tabla, sin fila o sin esa columna suma, como antes.
+  const countsFor = function (code) {
+    const cfg = depCfg.find(function (x) { return up(x.coverageCode) === up(code); });
+    if (!cfg || cfg.isCoverage === undefined || cfg.isCoverage === null) return true;
+    return up(cfg.isCoverage) === 'SI';
+  };
   const computeDates = function (allParams) {
     const out = {};
     const policyStart = formatearFecha(policy && policy.start);
@@ -556,8 +594,17 @@
     });
   };
 
-  const buildCoverageState = function (addedRows) {
+  const buildCoverageState = function (addedRows, dependents) {
     const current = (policy && policy.Coverages ? policy.Coverages : []).map(function (c) {
+      // MSN-000139: las dependientes recalculadas por la tarifa se muestran con sus valores nuevos
+      const dependent = (dependents || []).find(function (d) { return up(d.code) === up(c.code); });
+      if (dependent) {
+        return {
+          key: 'current-' + txt(c.code), code: txt(c.code), name: txt(c.name || c.commercialName || c.description),
+          limit: dependent.newSum, premium: dependent.newPremium,
+          deductible: num(c.deductible), start: c.start, end: c.end, origin: t('Modificada'), change: t('Recalculada (depende de la inclusión)')
+        };
+      }
       return {
         key: 'current-' + txt(c.code), code: txt(c.code), name: txt(c.name || c.commercialName || c.description),
         limit: num(c.limit || c.sumInsured), premium: num(c.premium || c.annualPremium),
@@ -641,6 +688,133 @@
     };
   };
 
+  // MSN-000139: fecha como dia calendario UTC (misma regla que la vista 57 para la prorrata de las dependientes).
+  const utcDay = function (v) { return Date.parse(day10(v) + 'T00:00:00Z'); };
+  // MSN-000139: respuesta de la cadena de tarifa leida como en la vista 57.
+  const readTariffRows = function (response) {
+    let rows = response ? response.outData : null;
+    if (typeof rows === 'string') {
+      try { rows = JSON.parse(rows); } catch (e) { rows = []; }
+    }
+    if (!Array.isArray(rows) && rows && Array.isArray(rows.data)) rows = rows.data;
+    if (Array.isArray(rows) && rows.length === 1 && Array.isArray(rows[0])) rows = rows[0];
+    return Array.isArray(rows) ? rows : null;
+  };
+  // MSN-000139: enmienda combinada (AmendmentCoverage) que fija suma y prima base de las coberturas indicadas
+  // antes de cotizar. entries: [{code, oldLimit, oldBasePremium, limit, basePremium}].
+  const buildAmendments = function (entries) {
+    if (!entries || !entries.length) return '[]';
+    return JSON.stringify([{
+      type: 'AmendmentCoverage',
+      jOldCoverages: JSON.stringify(entries.map(function (e) { return { code: e.code, limit: e.oldLimit, basePremium: e.oldBasePremium }; })),
+      jNewCoverages: JSON.stringify(entries.map(function (e) { return { code: e.code, limit: e.limit, basePremium: e.basePremium }; }))
+    }]);
+  };
+  // MSN-000139: filas de tarifa de fianzas del ramo y producto de la poliza (la misma tabla y filtro que la cadena 755).
+  async function loadTariffRows() {
+    const response = await exe('GetFullTable', { table: 'tarificacionsis9Fianza' });
+    if (!response || !response.ok) throw new Error(cleanMessage(response) || t('no se pudo leer la tabla tarificacionsis9Fianza'));
+    return mapTable(response.outData).filter(function (x) {
+      return txt(x.cramo) === txt(policy && policy.lob) && up(x.codigoplan) === up(policy && policy.productCode);
+    });
+  }
+  // MSN-000139: coberturas cuya formula de suma o prima usa SUMA<codigo> de una cobertura cambiada (transitivo), sin las
+  // cambiadas. La cadena marca tariffApplied en TODAS las coberturas y hay sumas no fijadas igual (filas con
+  // suma_afianzada; FCSBG/315 con formula "0"): sin este filtro una inclusion dejaria esas coberturas en otra suma o en 0.
+  const formulaDependents = function (tariffRows, changedCodes) {
+    const changed = (changedCodes || []).map(up);
+    const found = [];
+    let added = true;
+    while (added) {
+      added = false;
+      (tariffRows || []).forEach(function (row) {
+        const code = up(row.ccobertura);
+        if (!code || changed.indexOf(code) >= 0 || found.indexOf(code) >= 0) return;
+        const refs = [];
+        const formula = txt(row.sumaasegurada) + ' ' + txt(row.prima);
+        const re = /SUMA(\w+)/g;
+        let m = re.exec(formula);
+        while (m) { refs.push(up(m[1])); m = re.exec(formula); }
+        if (refs.some(function (ref) { return changed.indexOf(ref) >= 0 || found.indexOf(ref) >= 0; })) {
+          found.push(code);
+          added = true;
+        }
+      });
+    }
+    return found;
+  };
+  // MSN-000139: coberturas dependientes. La cadena de tarifa calcula el estado final; las coberturas existentes que
+  // siguen, cuya suma cambia por tarifa y que no son las incluidas, se recalculan con la regla de la vista 57
+  // (prima escalada por la suma y prorrateada por su vigencia restante).
+  async function calcularDependientes(finalCoverages, jAdditionalText, excludedCodes) {
+    if (!policy || SURETY_LOBS.indexOf(num(policy.lob)) < 0) return [];
+    const current = policy.Coverages || [];
+    const excluded = (excludedCodes || []).map(up);
+    const finalCodes = (finalCoverages || []).map(function (c) { return up(c.code); });
+    let rows = null;
+    let dependentCodes = [];
+    try {
+      dependentCodes = formulaDependents(await loadTariffRows(), excludedCodes);
+    } catch (e) {
+      throw new Error(t('No se pudo calcular las coberturas dependientes') + ': ' + String(e && e.message ? e.message : e));
+    }
+    if (!dependentCodes.length) return [];
+    try {
+      const tariffPolicy = JSON.parse(JSON.stringify(policy));
+      delete tariffPolicy.Product;
+      tariffPolicy.action = 'ChangeAddCoverage';
+      tariffPolicy.Coverages = finalCoverages;
+      const coverageSumOverrides = {};
+      current.forEach(function (c) {
+        if (finalCodes.indexOf(up(c.code)) >= 0 && num(c.limit) > 0) coverageSumOverrides[txt(c.code)] = num(c.limit);
+      });
+      const response = await exe('ExeChain', {
+        chain: 'cmdCalculatePremiumSuretyBond',
+        context: JSON.stringify({ poliza: tariffPolicy, action: 'ChangeAddCoverage', extra: { jAdditional: jAdditionalText }, coverageSumOverrides: coverageSumOverrides })
+      });
+      if (!response || response.ok === false) throw new Error(cleanMessage(response) || t('la cadena de tarifa no respondió'));
+      rows = readTariffRows(response);
+      if (!rows) throw new Error(t('la cadena de tarifa no devolvió las coberturas calculadas'));
+    } catch (e) {
+      throw new Error(t('No se pudo calcular las coberturas dependientes') + ': ' + String(e && e.message ? e.message : e));
+    }
+    const effective = effectiveDate.format('YYYY-MM-DD');
+    const out = [];
+    current.forEach(function (c) {
+      const code = up(c.code);
+      if (excluded.indexOf(code) >= 0 || finalCodes.indexOf(code) < 0 || dependentCodes.indexOf(code) < 0) return;
+      const row = rows.find(function (item) { return item && up(item.code) === code; });
+      if (!row || row.tariffApplied !== true) return;
+      const oldSum = num(c.limit);
+      if (!(Math.abs(num(row.limit) - oldSum) > 0.005)) return;
+      const newSum = money(row.limit);
+      const extraPremium = num(c.extraPremium);
+      const oldPremium = money(num(c.basePremium) + extraPremium);
+      const annualNew = oldSum > 0 ? money(oldPremium * newSum / oldSum) : money(row.premium);
+      const start = day10(c.start);
+      const end = day10(c.end);
+      const durationDays = Math.round((utcDay(end) - utcDay(start)) / 864e5);
+      const fromDate = effective > start ? effective : start;
+      const remainingDays = Math.max(0, Math.round((utcDay(end) - utcDay(fromDate)) / 864e5));
+      const prorate = durationDays > 0 ? Math.min(1, remainingDays / durationDays) : 1;
+      const newPremium = money(oldPremium + (annualNew - oldPremium) * prorate);
+      out.push({
+        code: txt(c.code), name: txt(c.name || c.commercialName || c.description), coverageId: Number(c.id || 0),
+        oldSum: oldSum, newSum: newSum, oldPremium: oldPremium, newPremium: newPremium, oldBasePremium: num(c.basePremium),
+        extraPremium: extraPremium, newBasePremium: money(newPremium - extraPremium), prorate: prorate,
+        movement: money(newPremium - oldPremium), sumMovement: money(newSum - oldSum),
+        deductible: num(c.deductible), start: c.start, end: c.end
+      });
+    });
+    return out;
+  }
+  // MSN-000139: recargo y descuento invalidan la cotizacion, la simulacion y la confirmacion del reaseguro.
+  const onAjuste = function (field, value) {
+    const v = value === null || value === undefined ? 0 : Number(value);
+    if (field === 'surcharge') setSurcharge(isFinite(v) ? v : 0); else setDiscount(isFinite(v) ? v : 0);
+    setQuote(null); setSim(null); setReinsuranceConfirmed(false);
+  };
+
   async function cotizar() {
     const errors = validationErrors();
     setShowErrors(true);
@@ -648,10 +822,37 @@
     setQuoting(true); setError(null); setResult(null); setQuote(null); setSim(null); setReinsuranceConfirmed(false);
     try {
       const cobtar = buildCobtar();
-      const payload = Object.assign(buildBasePayload(), { jAdditional: JSON.stringify({ endorsementType: ENDORSEMENT_TYPE, cobtar: cobtar, adendos: buildAdendos() }) });
-      const r = await exe('ChangeAddCoverage', payload);
-      const o = first(r);
+      const jAdditionalQuote = JSON.stringify({ endorsementType: ENDORSEMENT_TYPE, cobtar: cobtar, adendos: buildAdendos() });
+      // MSN-000139: 1) dependientes con la cadena de tarifa sobre el estado final (actuales + incluidas)
+      const finalCoverages = (policy && policy.Coverages ? policy.Coverages : []).concat(selected.map(function (code) {
+        return { code: txt(code), lifePolicyId: Number(policyId) };
+      }));
+      const dependents = await calcularDependientes(finalCoverages, jAdditionalQuote, selected);
+      const dependentEntries = dependents.map(function (d) {
+        return { code: d.code, oldLimit: d.oldSum, oldBasePremium: d.oldBasePremium, limit: d.newSum, basePremium: d.newBasePremium };
+      });
+      // MSN-000139: 2) cotizacion con la enmienda de las dependientes; el recargo/descuento va a la primera incluida
+      const adjustment = money(num(surcharge) - num(discount));
+      const adjustmentCoverageCode = selected.length ? txt(selected[0]) : '';
+      let payload = Object.assign(buildBasePayload(), { jAmendments: buildAmendments(dependentEntries), jAdditional: jAdditionalQuote });
+      let r = await exe('ChangeAddCoverage', payload);
+      let o = first(r);
       if (!r || !r.ok || !o) throw new Error(t('No se pudo cotizar el endoso') + ': ' + cleanMessage(r));
+      if (adjustment !== 0) {
+        // segunda cotizacion: prima base de la portadora sin ajuste (primera cotizacion) + ajuste
+        const carrier = coverageByCode(parseJson(o.jNewCoverages, []) || [], adjustmentCoverageCode);
+        if (!carrier) throw new Error(t('No se pudo cotizar el endoso') + ': ' + t('falta la cobertura') + ' ' + adjustmentCoverageCode);
+        const carrierBase = money(num(carrier.basePremium));
+        const carrierBaseAdjusted = money(carrierBase + adjustment);
+        if (money(carrierBaseAdjusted + num(carrier.extraPremium)) < 0) {
+          throw new Error(t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + adjustmentCoverageCode + ')');
+        }
+        const adjustedEntries = dependentEntries.concat([{ code: txt(carrier.code), oldLimit: num(carrier.limit), oldBasePremium: carrierBase, limit: num(carrier.limit), basePremium: carrierBaseAdjusted }]);
+        payload = Object.assign(buildBasePayload(), { jAmendments: buildAmendments(adjustedEntries), jAdditional: jAdditionalQuote });
+        r = await exe('ChangeAddCoverage', payload);
+        o = first(r);
+        if (!r || !r.ok || !o) throw new Error(t('No se pudo cotizar el endoso') + ': ' + cleanMessage(r));
+      }
       const detail = parseJson(o.jDetail, {}) || {};
       const prorate = Math.max(0, Math.min(1, num(detail.prorate)));
       const newCoverages = parseJson(o.jNewCoverages, []) || [];
@@ -679,17 +880,22 @@
         money(finalBillTotal - currentPlanTotal),
         effectiveDate.format('YYYY-MM-DD') + 'T12:00:00'
       );
+      // MSN-000139: la fila Prima muestra la prima del motor sin el ajuste; el ajuste va en su propia fila
+      const adjustmentProrated = money(adjustment * prorate);
       setQuote({
         raw: o, payload: payload, cobtar: cobtar, prorate: prorate, detail: detail, rows: addedRows, zero: zero,
         jNewPayPlan: calculatedPayPlan,
+        dependents: dependents, surcharge: num(surcharge), discount: num(discount),
+        adjustment: adjustment, adjustmentCoverageCode: adjustmentCoverageCode,
         billing: {
-          premium: { before: before.premium, after: num(bill.anualPremium), movement: num(diff.annualPremium), prorated: num(detail.coveragesCost) },
+          premium: { before: before.premium, after: money(num(bill.anualPremium) - adjustment), movement: money(num(diff.annualPremium) - adjustment), prorated: money(num(detail.coveragesCost) - adjustmentProrated) },
+          adjustment: { before: 0, after: adjustment, movement: adjustment, prorated: adjustmentProrated },
           tax: { before: before.tax, after: num(bill.tax), movement: num(diff.tax), prorated: money(num(detail.changeCost) - num(detail.coveragesCost)) },
           total: { before: before.total, after: num(bill.anualTotal), movement: num(diff.annualTotal), prorated: num(detail.changeCost) }
         },
-        stateRows: buildCoverageState(addedRows)
+        stateRows: buildCoverageState(addedRows, dependents)
       });
-      setSim(simulate(addedRows));
+      setSim(simulate(addedRows, dependents));
     } catch (e) {
       setError(String(e && e.message ? e.message : e));
     } finally {
@@ -700,7 +906,8 @@
   // ------------------------------------------------------------- reaseguro del movimiento
   // La distribucion se muestra sobre el estado final de la poliza: coberturas
   // existentes mas las nuevas del endoso.
-  const finalCoverageRows = function (addedRows) {
+  // MSN-000139: cada fila lleva counts (isCoverage) y las dependientes van con su suma y prima nuevas (changed).
+  const finalCoverageRows = function (addedRows, dependents) {
     const byCode = {};
     (policy && policy.Coverages ? policy.Coverages : []).forEach(function (coverage) {
       const code = up(coverage.code);
@@ -708,8 +915,16 @@
       byCode[code] = {
         code: txt(coverage.code), name: txt(coverage.name || coverage.commercialName || coverage.description),
         limit: num(coverage.limit || coverage.sumInsured), premium: num(coverage.premium || coverage.annualPremium),
-        deductible: num(coverage.deductible), isNew: false
+        deductible: num(coverage.deductible), isNew: false, counts: countsFor(coverage.code)
       };
+    });
+    (dependents || []).forEach(function (dependent) {
+      const code = up(dependent.code);
+      if (!byCode[code]) return;
+      byCode[code] = Object.assign({}, byCode[code], {
+        limit: num(dependent.newSum), premium: num(dependent.newPremium), changed: true,
+        premiumMovement: num(dependent.movement), sumMovement: num(dependent.sumMovement)
+      });
     });
     (addedRows || []).forEach(function (coverage) {
       const code = up(coverage.code);
@@ -717,19 +932,19 @@
       byCode[code] = Object.assign({}, byCode[code] || {}, {
         code: txt(coverage.code), name: txt(coverage.name || coverage.commercialName || coverage.description),
         limit: num(coverage.limit), premium: num(coverage.premium), deductible: num(coverage.deductible), isNew: true,
-        prorated: num(coverage.prorated)
+        prorated: num(coverage.prorated), counts: countsFor(coverage.code)
       });
     });
     return Object.keys(byCode).map(function (code) { return byCode[code]; });
   };
-  const simulate = function (rows) {
+  const simulate = function (rows, dependents) {
     const groups = [];
     baseCessions.forEach(function (c) {
       const key = Number(c.contractId || 0) + '|' + txt(c.lineId);
       if (!groups.some(function (g) { return g.key === key; })) groups.push({ key: key, template: c });
     });
     const out = [];
-    const finalRows = finalCoverageRows(rows);
+    const finalRows = finalCoverageRows(rows, dependents);
     finalRows.forEach(function (cov) {
       groups.forEach(function (g) {
         const tpl = g.template;
@@ -758,8 +973,9 @@
         const propRe = isRetentionLine
           ? 0
           : num(distributionSource.proportionRe !== undefined ? distributionSource.proportionRe : tpl.proportionRe);
-        const movementPremium = cov.isNew ? money(cov.premium) : 0;
-        const prorated = cov.isNew ? money(cov.prorated) : 0;
+        // MSN-000139: las dependientes recalculadas tambien mueven prima (ya prorrateada por su vigencia)
+        const movementPremium = cov.isNew ? money(cov.premium) : (cov.changed ? money(cov.premiumMovement) : 0);
+        const prorated = cov.isNew ? money(cov.prorated) : (cov.changed ? money(cov.premiumMovement) : 0);
         const premiumCedant = money(cov.premium * propCed);
         const premiumRe = money(cov.premium * propRe);
         const sumInsuredCedant = money(cov.limit * propCed);
@@ -779,8 +995,12 @@
         out.push({
           key: g.key + '|' + cov.code, contractId: Number(tpl.contractId || 0), lineId: txt(tpl.lineId),
           coverageCode: cov.code, coverageName: cov.name,
-          counts: true,
-          premiumMovement: movementPremium, prorated: prorated, sumInsuredMovement: cov.isNew ? money(cov.limit) : 0,
+          counts: cov.counts !== false,
+          premiumMovement: movementPremium, prorated: prorated,
+          sumInsuredMovement: cov.counts === false ? 0 : (cov.isNew ? money(cov.limit) : (cov.changed ? money(cov.sumMovement) : 0)),
+          // MSN-000139: movimiento bruto de la suma de la cobertura (cuente o no al contrato): la cadena de cesiones lo
+          // suma a la suma de la cesion vigente, que es siempre la suma completa de la cobertura
+          sourceSumInsuredMovement: cov.isNew ? money(cov.limit) : (cov.changed ? money(cov.sumMovement) : 0),
           finalPremium: money(cov.premium), finalSum: money(cov.limit),
           proportionCed: propCed, proportionRe: propRe,
           premiumCedant: premiumCedant, premiumRe: premiumRe,
@@ -829,14 +1049,15 @@
       if (!byLine[lineKey]) byLine[lineKey] = { contractId: r.contractId, lineId: r.lineId, cededPremium: 0, cededSum: 0, commission: 0, tax: 0, participants: {} };
       const line = byLine[lineKey];
       line.cededPremium += num(r.premiumRe);
-      line.cededSum += num(r.sumInsuredRe);
+      // MSN-000139: la suma de la linea solo cuenta las coberturas que suman al contrato; la prima, todas
+      if (r.counts !== false) line.cededSum += num(r.sumInsuredRe);
       line.commission += num(r.commission);
       line.tax += num(r.tax);
       (r.participants || []).forEach(function (participant) {
         const participantKey = String(participant.contactId || '') + '|' + String(participant.brokerId || '');
         if (!line.participants[participantKey]) line.participants[participantKey] = { split: num(participant.split), sumInsured: 0, premium: 0, commission: 0, tax: 0 };
         const item = line.participants[participantKey];
-        item.sumInsured += num(participant.sumInsured);
+        if (r.counts !== false) item.sumInsured += num(participant.sumInsured);
         item.premium += num(participant.premium);
         item.commission += num(participant.commission);
         item.tax += num(participant.tax);
@@ -903,6 +1124,7 @@
       snapshot.distribution.push({
         contractId: r.contractId, lineId: r.lineId, coverageCode: r.coverageCode,
         premiumMovement: r.premiumMovement, sumInsuredMovement: r.sumInsuredMovement,
+        sourceSumInsuredMovement: r.sourceSumInsuredMovement !== undefined ? r.sourceSumInsuredMovement : r.sumInsuredMovement,
         premiumCedant: r.premiumCedant, sumInsuredCedant: r.sumInsuredCedant,
         premiumRe: r.premiumRe, sumInsuredRe: r.sumInsuredRe,
         commission: r.commission, tax: r.tax, proportionCed: r.proportionCed, proportionRe: r.proportionRe
@@ -942,8 +1164,15 @@
       cobtar: quote.cobtar,
       adendos: buildAdendos(),
       prorate: quote.prorate,
-      premium: quote.billing.premium.movement, tax: quote.billing.tax.movement, total: quote.billing.total.movement,
-      proratedPremium: quote.billing.premium.prorated, proratedTotal: quote.billing.total.prorated,
+      // MSN-000139: premium/proratedPremium siguen siendo los del motor (incluyen el ajuste, que tambien va aparte)
+      premium: money(quote.billing.premium.movement + num(quote.adjustment)), tax: quote.billing.tax.movement, total: quote.billing.total.movement,
+      proratedPremium: money(quote.billing.premium.prorated + num(quote.billing.adjustment && quote.billing.adjustment.prorated)), proratedTotal: quote.billing.total.prorated,
+      // MSN-000139: coberturas dependientes recalculadas y recargo/descuento del endoso
+      dependentCoverages: (quote.dependents || []).map(function (d) {
+        return { code: d.code, oldSum: d.oldSum, newSum: d.newSum, oldPremium: d.oldPremium, newPremium: d.newPremium, prorate: d.prorate };
+      }),
+      surcharge: num(quote.surcharge), discount: num(quote.discount), adjustment: num(quote.adjustment),
+      adjustmentCoverageCode: quote.adjustmentCoverageCode || '',
       reinsuranceSnapshot: snapshot
     };
     const runReinsurance = async function (mode) {
@@ -972,9 +1201,16 @@
         const s = saved.find(function (c) { return up(c.code) === up(r.code); });
         return !s || money(s.premium) !== money(r.premium) || money(s.limit) !== money(r.limit);
       });
-      if (mismatch.length) {
+      // MSN-000139: las dependientes tienen que quedar registradas con la suma y la prima cotizadas
+      const savedAll = parseJson(change.jNewCoverages, []) || [];
+      const dependentMismatch = (quote.dependents || []).filter(function (d) {
+        const s = coverageByCode(savedAll, d.code);
+        return !s || money(s.limit) !== money(d.newSum) || money(num(s.basePremium) + num(s.extraPremium)) !== money(d.newPremium);
+      });
+      if (mismatch.length || dependentMismatch.length) {
         await exe('AbortChange', { changeId: changeId });
-        throw new Error(t('La prima registrada no coincide con la cotizada; el endoso') + ' ' + changeId + ' ' + t('fue anulado. Vuelva a cotizar.'));
+        throw new Error(t('La prima registrada no coincide con la cotizada; el endoso') + ' ' + changeId + ' ' + t('fue anulado. Vuelva a cotizar.')
+          + (dependentMismatch.length ? ' (' + dependentMismatch.map(function (d) { return d.code; }).join(', ') + ')' : ''));
       }
       // 2. aprobacion del circuito
       let processId = Number(change.processId || 0);
@@ -996,6 +1232,20 @@
       const exeResponse = await exe('ExeChangeAddCoverage', { changeId: changeId, exeNow: true, operation: 'EXECUTE', noTracking: true });
       if (!exeResponse || !exeResponse.ok) throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(exeResponse));
       executed = true;
+
+      // MSN-000139: las dependientes recalculadas tienen que haber quedado grabadas por ExeChangeAddCoverage
+      if ((quote.dependents || []).length) {
+        try {
+          const reread = first(await exe('RepoLifePolicy', { operation: 'GET', filter: 'id=' + policyId, include: ['Coverages'], size: 1, page: 0 }));
+          const rereadCoverages = reread && Array.isArray(reread.Coverages) ? reread.Coverages : [];
+          quote.dependents.forEach(function (d) {
+            const cov = coverageByCode(rereadCoverages, d.code);
+            if (!cov || Math.abs(num(cov.limit) - num(d.newSum)) > 0.005 || Math.abs(num(cov.basePremium) + num(cov.extraPremium) - num(d.newPremium)) > 0.005) {
+              failures.push(t('cobertura dependiente') + ' ' + d.code + ': ' + t('no quedó grabada con la suma y prima recalculadas') + ' (' + fmt(d.newSum) + ' / ' + fmt(d.newPremium) + ')');
+            }
+          });
+        } catch (depError) { failures.push(t('coberturas dependientes') + ': ' + String(depError && depError.message ? depError.message : depError)); }
+      }
 
       // 5. Cuotas del endoso. MakePayPlan reconstruye usando solo prima y
       // perdería el impuesto; las cuotas existentes se actualizan con el
@@ -1065,13 +1315,24 @@
         }
         if (quote.cobtar.length) {
           const codes = quote.cobtar.map(function (r) { return up(r.coverageCode); });
+          // MSN-000124 (AXX-7003): F. Inicial / F. Final con las fechas con que quedaron las coberturas del endoso registrado
+          const executedCobtar = quote.cobtar.map(function (row) {
+            const cov = coverageByCode(saved, row.coverageCode);
+            if (!cov) return row;
+            const next = Object.assign({}, row);
+            Object.keys(next).forEach(function (name) {
+              if (fieldIs(name, 'f. inicial') && cov.start) next[name] = formatearFecha(cov.start);
+              if (fieldIs(name, 'f. final') && cov.end) next[name] = formatearFecha(cov.end);
+            });
+            return next;
+          });
           for (let oi = 0; oi < objects.length; oi++) {
             const obj = objects[oi];
             const values = parseJson(obj.jValues, []) || [];
             let hidden = values.find(function (x) { return x && x.name === 'hiddenCobtar'; });
             if (!hidden) { hidden = { type: 'hidden', name: 'hiddenCobtar', access: false, userData: ['[]'] }; values.push(hidden); }
             const current = parseJson(Array.isArray(hidden.userData) ? hidden.userData[0] : hidden.userData, []) || [];
-            const merged = current.filter(function (r) { return codes.indexOf(up(r.coverageCode)) < 0; }).concat(quote.cobtar);
+            const merged = current.filter(function (r) { return codes.indexOf(up(r.coverageCode)) < 0; }).concat(executedCobtar);
             hidden.userData = [JSON.stringify(merged)];
             const sql = "jValues=N'" + JSON.stringify(values).replace(/'/g, "''") + "'";
             const sf = await exe('SetField', { entity: 'InsuredObject', entityId: Number(obj.id), fieldValue: sql, raw: true });
@@ -1181,10 +1442,12 @@
     });
     return Object.keys(groups).map(function (key) {
       const group = groups[key];
-      group.finalSum = money(group.rows.reduce(function (sum, row) { return sum + num(row.finalSum); }, 0));
+      // MSN-000139: las sumas solo con las coberturas que suman al contrato (isCoverage = Si); las primas, todas
+      const counted = group.rows.filter(function (row) { return row.counts !== false; });
+      group.finalSum = money(counted.reduce(function (sum, row) { return sum + num(row.finalSum); }, 0));
       group.finalPremium = money(group.rows.reduce(function (sum, row) { return sum + num(row.finalPremium); }, 0));
-      group.sumInsuredCedant = money(group.rows.reduce(function (sum, row) { return sum + num(row.sumInsuredCedant); }, 0));
-      group.sumInsuredRe = money(group.rows.reduce(function (sum, row) { return sum + num(row.sumInsuredRe); }, 0));
+      group.sumInsuredCedant = money(counted.reduce(function (sum, row) { return sum + num(row.sumInsuredCedant); }, 0));
+      group.sumInsuredRe = money(counted.reduce(function (sum, row) { return sum + num(row.sumInsuredRe); }, 0));
       group.premiumCedant = money(group.rows.reduce(function (sum, row) { return sum + num(row.premiumCedant); }, 0));
       group.premiumRe = money(group.rows.reduce(function (sum, row) { return sum + num(row.premiumRe); }, 0));
       group.commission = money(group.rows.reduce(function (sum, row) { return sum + num(row.commission); }, 0));
@@ -1207,8 +1470,9 @@
   ];
   const contractRows = (function () {
     const grouped = {};
-    const finalRows = finalCoverageRows(quote && quote.rows ? quote.rows : []);
-    const finalSum = money(finalRows.reduce(function (sum, row) { return sum + num(row.limit); }, 0));
+    const finalRows = finalCoverageRows(quote && quote.rows ? quote.rows : [], quote && quote.dependents);
+    // MSN-000139: la suma del contrato solo con las coberturas que suman
+    const finalSum = money(finalRows.filter(function (row) { return row.counts !== false; }).reduce(function (sum, row) { return sum + num(row.limit); }, 0));
     const finalPremium = money(finalRows.reduce(function (sum, row) { return sum + num(row.premium); }, 0));
     reinsuranceGroups.forEach(function (group) {
       const key = String(group.contractId);
@@ -1311,12 +1575,14 @@
              && Number(cession.id || 0) === Number(part.cessionId || 0);
          });
        });
-     targetRows = finalCoverageRows(quote.rows).map(function (coverage) {
+     targetRows = finalCoverageRows(quote.rows, quote.dependents).map(function (coverage) {
        return {
          contractId: line.contractId, lineId: line.lineId, coverageCode: coverage.code,
-          coverageName: coverage.name, premiumMovement: coverage.isNew ? money(coverage.prorated) : 0,
-         prorated: coverage.isNew ? money(coverage.prorated) : 0,
-         sumInsuredMovement: coverage.isNew ? money(coverage.limit) : 0,
+          coverageName: coverage.name, premiumMovement: coverage.isNew ? money(coverage.prorated) : (coverage.changed ? money(coverage.premiumMovement) : 0),
+         prorated: coverage.isNew ? money(coverage.prorated) : (coverage.changed ? money(coverage.premiumMovement) : 0),
+         counts: coverage.counts !== false,
+         sumInsuredMovement: coverage.counts === false ? 0 : (coverage.isNew ? money(coverage.limit) : (coverage.changed ? money(coverage.sumMovement) : 0)),
+         sourceSumInsuredMovement: coverage.isNew ? money(coverage.limit) : (coverage.changed ? money(coverage.sumMovement) : 0),
          finalPremium: money(coverage.premium), finalSum: money(coverage.limit),
          proportionCed: 0, proportionRe: 0, premiumCedant: 0, premiumRe: 0,
          sumInsuredCedant: 0, sumInsuredRe: 0, commission: 0, tax: 0,
@@ -1500,7 +1766,8 @@
       (row.participants || []).forEach(function (participant) {
         const key = String(participant.contactId || '') + '|' + String(participant.brokerId || '');
         if (!grouped[key]) grouped[key] = { key: key, contactId: participant.contactId, brokerId: participant.brokerId, split: num(participant.split), sumInsured: 0, premium: 0, commission: 0, tax: 0 };
-        grouped[key].sumInsured += num(participant.sumInsured);
+        // MSN-000139: la suma de los aceptantes de la linea solo con las coberturas que suman
+        if (row.counts !== false) grouped[key].sumInsured += num(participant.sumInsured);
         grouped[key].premium += num(participant.premium);
         grouped[key].commission += num(participant.commission);
         grouped[key].tax += num(participant.tax);
@@ -1510,8 +1777,10 @@
   };
   const renderCoinsuranceTab = function () {
     const rows = [];
-    const base = finalCoverageRows(quote && quote.rows ? quote.rows : []).reduce(function (total, row) {
-      total.sum += num(row.limit); total.premium += num(row.premium); return total;
+    // MSN-000139: base del coaseguro: suma de las coberturas que suman, prima de todas
+    const base = finalCoverageRows(quote && quote.rows ? quote.rows : [], quote && quote.dependents).reduce(function (total, row) {
+      if (row.counts !== false) total.sum += num(row.limit);
+      total.premium += num(row.premium); return total;
     }, { sum: 0, premium: 0 });
     (coinsuranceCessions || []).forEach(function (cession, index) {
       const percentage = num(cession.percentage);
@@ -1600,6 +1869,139 @@
           }} />
     </div>;
   };
+  // MSN-000139: coberturas dependientes recalculadas por la inclusion
+  const colsDependents = [
+    { title: t('Código'), dataIndex: 'code', width: 80 },
+    { title: t('Cobertura'), dataIndex: 'name' },
+    { title: t('Suma anterior'), dataIndex: 'oldSum', align: 'right', width: 140, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
+    { title: t('Suma nueva'), dataIndex: 'newSum', align: 'right', width: 140, render: function (v) { return <span className="axx-nuevo">{fmt(v)}</span>; } },
+    { title: t('Prima anterior'), dataIndex: 'oldPremium', align: 'right', width: 130, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },
+    { title: t('Prima nueva'), dataIndex: 'newPremium', align: 'right', width: 130, render: function (v) { return <span className="axx-nuevo">{fmt(v)}</span>; } },
+    { title: t('Prorrata'), dataIndex: 'prorate', align: 'right', width: 110, render: function (v) { return num(v).toFixed(6); } },
+    { title: t('Movimiento'), dataIndex: 'movement', align: 'right', width: 130, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } }
+  ];
+  // MSN-000139: Distribucion del Movimiento (solo lectura, diseno de la vista 57): por linea del contrato, estado final
+  // simulado menos la cesion vigente de cada cobertura. Suma: solo coberturas que suman; prima: todas.
+  const currentCessionFor = function (contractId, lineId, coverageCode) {
+    return baseCessions.find(function (cession) {
+      const coverageById = (policy && policy.Coverages ? policy.Coverages : []).find(function (item) {
+        return String(item.id || '') === String(cession.coverageId || '');
+      });
+      const cessionCode = cession.coverageCode || cession.code || (coverageById && coverageById.code);
+      return String(cession.contractId) === String(contractId) && String(cession.lineId) === String(lineId) && up(cessionCode) === up(coverageCode);
+    }) || null;
+  };
+  const movementOfRows = function (contractId, rows, groupLineIds, retention) {
+    const total = { sum: 0, premium: 0 };
+    const sumField = retention ? 'sumInsuredCedant' : 'sumInsuredRe';
+    const premiumField = retention ? 'premiumCedant' : 'premiumRe';
+    const seen = {};
+    (rows || []).forEach(function (row) {
+      const current = currentCessionFor(contractId, row.lineId, row.coverageCode) || {};
+      seen[String(row.lineId) + '|' + up(row.coverageCode)] = true;
+      if (row.counts !== false) total.sum += num(row[sumField]) - num(current[sumField]);
+      total.premium += num(row[premiumField]) - num(current[premiumField]);
+    });
+    // cesiones vigentes sin fila en el estado final (coberturas que salen): aportan su cesion en negativo
+    baseCessions.forEach(function (cession) {
+      if (String(cession.contractId) !== String(contractId) || groupLineIds.indexOf(String(cession.lineId)) < 0) return;
+      const coverageById = (policy && policy.Coverages ? policy.Coverages : []).find(function (item) {
+        return String(item.id || '') === String(cession.coverageId || '');
+      });
+      const code = up(cession.coverageCode || cession.code || (coverageById && coverageById.code));
+      if (seen[String(cession.lineId) + '|' + code]) return;
+      if (countsFor(code)) total.sum -= num(cession[sumField]);
+      total.premium -= num(cession[premiumField]);
+    });
+    return { sum: money(total.sum), premium: money(total.premium) };
+  };
+  const renderMovementDistribution = function (contract) {
+    const rows = (contract.lineRows || []).map(function (line) {
+      const groups = line.retention ? (contract.lines || []) : (line.sourceGroups || []);
+      const lineRowsOfGroups = groups.reduce(function (all, group) { return all.concat(group.rows || []); }, []);
+      const groupLineIds = groups.map(function (group) { return String(group.lineId); });
+      const movement = movementOfRows(contract.contractId, lineRowsOfGroups, groupLineIds, line.retention);
+      const commissionRate = num(line.premium) ? num(line.commission) / num(line.premium) : 0;
+      const taxRate = num(line.premium) ? num(line.tax) / num(line.premium) : 0;
+      const commission = line.retention ? 0 : money(movement.premium * commissionRate);
+      const tax = line.retention ? 0 : money(movement.premium * taxRate);
+      return {
+        key: line.key, groupKey: String(contract.contractId) + '|' + String(line.lineId), contractLabel: line.label,
+        retention: line.retention, coinsurance: line.coinsurance, sourceGroups: groups,
+        sum: movement.sum, premium: movement.premium,
+        commissionPercentage: line.retention ? 0 : commissionRate * 100, commission: commission,
+        taxPercentage: line.retention ? 0 : taxRate * 100, tax: tax,
+        reinsuranceBalance: line.retention ? 0 : money(movement.premium - commission - tax),
+        canViewReinsurers: !line.retention && !line.coinsurance
+      };
+    });
+    const sumBase = rows.filter(function (row) { return !row.coinsurance; }).reduce(function (total, row) { return total + Math.abs(num(row.sum)); }, 0);
+    const premiumBase = rows.filter(function (row) { return !row.coinsurance; }).reduce(function (total, row) { return total + Math.abs(num(row.premium)); }, 0);
+    const usesSum = sumBase > 0.005;
+    rows.forEach(function (row) {
+      const base = usesSum ? sumBase : premiumBase;
+      row.percentage = row.coinsurance || !base ? 0 : Math.abs(num(usesSum ? row.sum : row.premium)) / base * 100;
+    });
+    const selectedLine = rows.find(function (row) { return row.canViewReinsurers && row.groupKey === selectedReinsuranceLineKey; })
+      || rows.find(function (row) { return row.canViewReinsurers && (Math.abs(row.sum) > 0.005 || Math.abs(row.premium) > 0.005); })
+      || rows.find(function (row) { return row.canViewReinsurers; });
+    const participants = selectedLine ? selectedLine.sourceGroups.reduce(function (all, group) {
+      renderLineParticipants(group).forEach(function (participant) {
+        if (!all.some(function (item) { return item.key === participant.key; })) all.push(participant);
+      });
+      return all;
+    }, []).map(function (participant) {
+      const factor = num(participant.split) / 100;
+      return {
+        key: participant.key, contactId: participant.contactId, split: num(participant.split),
+        sumInsured: money(selectedLine.sum * factor), premium: money(selectedLine.premium * factor),
+        commission: money(selectedLine.commission * factor), tax: money(selectedLine.tax * factor)
+      };
+    }) : [];
+    const columns = [
+      { title: t('Contrato'), dataIndex: 'contractLabel', width: 150, render: function (v, row) {
+        return <span className="axx-rea-line-label"><span>{v}</span>{row.canViewReinsurers ? <Button type="text" size="small" className="axx-folder-btn"
+          aria-label={t('Ver reaseguradores')} title={t('Ver reaseguradores')}
+          onClick={function (event) { event.stopPropagation(); setSelectedReinsuranceLineKey(row.groupKey); }}><FolderIcon /></Button> : null}</span>;
+      } },
+      { title: t('Porcentaje (%)'), dataIndex: 'percentage', align: 'right', width: 135, render: function (v) { return num(v).toFixed(4); } },
+      { title: t('Suma'), dataIndex: 'sum', align: 'right', width: 135, render: function (v) { return fmt(v); } },
+      { title: t('Prima'), dataIndex: 'premium', align: 'right', width: 135, render: function (v) { return fmt(v); } },
+      { title: t('Pct. Comision'), dataIndex: 'commissionPercentage', align: 'right', width: 135, render: function (v) { return num(v).toFixed(4); } },
+      { title: t('Comision'), dataIndex: 'commission', align: 'right', width: 135, render: function (v) { return fmt(v); } },
+      { title: t('Pct. Impuesto'), dataIndex: 'taxPercentage', align: 'right', width: 135, render: function (v) { return num(v).toFixed(4); } },
+      { title: t('Impuesto'), dataIndex: 'tax', align: 'right', width: 135, render: function (v) { return fmt(v); } },
+      { title: t('Saldo Rea.'), dataIndex: 'reinsuranceBalance', align: 'right', width: 135, render: function (v) { return fmt(v); } }
+    ];
+    return <div className="axx-rea-line-detail">
+      <Alert type="info" showIcon message={t('Distribución del Movimiento')} description={t('Valores informativos calculados únicamente sobre la porción cambiada por el endoso.')} />
+      <Table size="small" pagination={false} rowKey="key" scroll={{ x: true }} dataSource={rows} columns={columns} summary={function () {
+        const total = function (field) { return money(rows.reduce(function (sum, row) { return sum + num(row[field]); }, 0)); };
+        const percentage = rows.filter(function (row) { return !row.coinsurance; }).reduce(function (sum, row) { return sum + num(row.percentage); }, 0);
+        return <Table.Summary><Table.Summary.Row className="axx-rea-total-row">
+          <Table.Summary.Cell index={0}><b>{t('Totales')}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={1} align="right"><b>{percentage.toFixed(4)}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={2} align="right"><b>{fmt(total('sum'))}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={3} align="right"><b>{fmt(total('premium'))}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={4}></Table.Summary.Cell>
+          <Table.Summary.Cell index={5} align="right"><b>{fmt(total('commission'))}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={6}></Table.Summary.Cell>
+          <Table.Summary.Cell index={7} align="right"><b>{fmt(total('tax'))}</b></Table.Summary.Cell>
+          <Table.Summary.Cell index={8} align="right"><b>{fmt(total('reinsuranceBalance'))}</b></Table.Summary.Cell>
+        </Table.Summary.Row></Table.Summary>;
+      }} />
+      {selectedLine ? <div className="axx-coverage-participants"><div className="axx-coverage-participants-title">{t('Aceptantes de la línea')} {selectedLine.contractLabel}</div>
+        <Table size="small" pagination={false} rowKey="key" dataSource={participants} columns={[
+          { title: t('Reasegurador'), dataIndex: 'contactId', render: function (v) { return contactNames[Number(v)] || v; } },
+          { title: t('Participación'), dataIndex: 'split', align: 'right', render: function (v) { return num(v).toFixed(4) + ' %'; } },
+          { title: t('Suma'), dataIndex: 'sumInsured', align: 'right', render: function (v) { return fmt(v); } },
+          { title: t('Prima'), dataIndex: 'premium', align: 'right', render: function (v) { return fmt(v); } },
+          { title: t('Comisión'), dataIndex: 'commission', align: 'right', render: function (v) { return fmt(v); } },
+          { title: t('Impuesto'), dataIndex: 'tax', align: 'right', render: function (v) { return fmt(v); } }
+        ]} locale={{ emptyText: t('La línea no tiene aceptantes registrados.') }} />
+      </div> : null}
+    </div>;
+  };
   const colsWritten = [
     { title: t('Cesión'), dataIndex: 'id', width: 90 },
     { title: t('Contrato'), dataIndex: 'contractId', width: 90 },
@@ -1642,7 +2044,7 @@
     { title: t('Pagado'), dataIndex: 'paid', align: 'right', render: function (v) { return fmt(v); } }
   ];
   const colsCoverageState = [
-    { title: t('Estado'), dataIndex: 'origin', width: 110, render: function (v) { return <Tag color={v === t('Nueva') ? 'blue' : 'default'}>{v}</Tag>; } },
+    { title: t('Estado'), dataIndex: 'origin', width: 110, render: function (v) { return <Tag color={v === t('Nueva') ? 'blue' : (v === t('Modificada') ? 'orange' : 'default')}>{v}</Tag>; } },
     { title: t('Código'), dataIndex: 'code', width: 90 },
     { title: t('Cobertura'), dataIndex: 'name' },
     { title: t('Suma asegurada'), dataIndex: 'limit', align: 'right', width: 140, render: function (v, row) { return <span className={row.origin === t('Nueva') ? 'axx-nuevo' : 'axx-antes'}>{fmt(v)}</span>; } },
@@ -1912,6 +2314,12 @@
               <DatePicker id="dtEfectiva" value={effectiveDate} format="YYYY-MM-DD" allowClear={false}
                 disabled={running || (result && result.ok)}
                 onChange={function (d) { setEffectiveDate(d); setQuote(null); setSim(null); setReinsuranceConfirmed(false); }} />
+              <span className="axx-topbar-label">{t('Recargo')}</span>
+              <InputNumber id="numRecargo" min={0} step={1} style={{ width: 110 }} value={surcharge}
+                disabled={running || (result && result.ok)} onChange={function (v) { onAjuste('surcharge', v); }} />
+              <span className="axx-topbar-label">{t('Descuento')}</span>
+              <InputNumber id="numDescuento" min={0} step={1} style={{ width: 110 }} value={discount}
+                disabled={running || (result && result.ok)} onChange={function (v) { onAjuste('discount', v); }} />
               <Button id="btnCotizar" type="primary" onClick={cotizar} loading={quoting}
                 disabled={running || disabledAdd || (result && result.ok)}>
                 {t('Calcular endoso')}
@@ -1967,9 +2375,14 @@
                     {quote.zero.length ? <Alert type="warning" showIcon message={t('Coberturas cotizadas con suma y prima en cero') + ': ' + quote.zero.map(function (z) { return z.code; }).join(', ')} /> : null}
                     <Table size="small" rowKey="code" pagination={false} dataSource={quote.rows} columns={colsQuote}
                       title={function () { return t('Coberturas a incluir (cotizadas)'); }} />
+                    {quote.dependents && quote.dependents.length ? (
+                      <Table size="small" rowKey="code" pagination={false} dataSource={quote.dependents} columns={colsDependents} style={{ marginTop: 8 }}
+                        title={function () { return t('Coberturas dependientes recalculadas'); }} />
+                    ) : null}
                     <Table size="small" rowKey="label" pagination={false} columns={colsResumen} style={{ marginTop: 8 }}
                       dataSource={[
                         Object.assign({ label: t('Prima') }, quote.billing.premium),
+                        ...(num(quote.adjustment) !== 0 ? [Object.assign({ label: t('Ajuste (recargo − descuento)') }, quote.billing.adjustment)] : []),
                         Object.assign({ label: t('Impuesto') }, quote.billing.tax),
                         Object.assign({ label: t('Total') }, quote.billing.total)
                       ]} title={function () { return t('Resumen de facturación'); }} />
@@ -2013,6 +2426,9 @@
                       const participants = [];
                       lines.forEach(function (line) { renderLineParticipants(line).forEach(function (participant) { participants.push(Object.assign({}, participant, { key: line.key + '|' + participant.key, coverageCode: line.lineId })); }); });
                       return <Tabs key={contract.key} className="axx-rea-detail-tabs" type="card" activeKey={reaDetailTab} onChange={setReaDetailTab}>
+                        <Tabs.TabPane tab={t('Distribución del Movimiento')} key="movementDistribution">
+                          {renderMovementDistribution(contract)}
+                        </Tabs.TabPane>
                         <Tabs.TabPane tab={t('Distribución')} key="distribution">
                           <div className="axx-rea-actions">
                             <Button type="primary" onClick={guardarDistribucionMemoria}>{t('Guardar')}</Button>
