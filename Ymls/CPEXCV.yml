@@ -4,7 +4,12 @@ Calculations:
     formula: |
       //block
       //noreplace
-      const contextDTO = JSON.stringify({ policyId: context.pol.id, coverages: context.pol.Coverages });
+      const contextDTO = JSON.stringify({
+        policyId: context.pol.id,
+        coverages: context.pol.Coverages,
+        contrato: "CPEXCV",
+        productCode: context.pol.productCode
+      });
       const resultado = doCmd({cmd: "ExeChain", data: { chain: "cmdGetReinsuranceDataVC", context: contextDTO }})
       return resultado.outData
   - name: perc

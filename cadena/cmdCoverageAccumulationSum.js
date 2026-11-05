@@ -4,7 +4,7 @@
  * @name cmdCoverageAccumulationSum
  * @Purpose Suma de la póliza según cfgCoberturaProductoReaTecnicos, capacidad del contrato (cfgLimiteContratoColectivo)
  *          y excedente FAC proporcional por cobertura, cuadrado al centavo con el total de la póliza.
- * @Input { pol, cov, contrato? (CPCAR), pret? (% de retención del contrato) }
+ * @Input { pol, cov, contrato? (CPCAR), IdContrato?, productCode?, pret? (% de retención del contrato) }
  * @Output { sumaPoliza, limite, sumaDistribuye, excedente, suma, prima, sumaContrato, sumaFac, primaContrato, primaFac,
  *           ced, re, cedantPremium, reinsurerPremium }
  */
@@ -14,6 +14,7 @@ const TABLA_LIMITES = "cfgLimiteContratoColectivo";
 const pol = context.pol;
 const cov = context.cov;
 const contrato = String(context.contrato || "CPCAR").trim().toUpperCase();
+const productCode = String(context.productCode || pol?.productCode || "").trim();
 const pret = num(context.pret);
 if (!pol || !cov) throw new Error("cmdCoverageAccumulationSum: el contexto debe incluir pol y cov");
 
@@ -67,11 +68,27 @@ function leerLimite() {
   const rows = GetFullTable?.outData;
   if (!GetFullTable?.ok || !Array.isArray(rows) || rows.length < 2) throw new Error(`No fue posible leer ${TABLA_LIMITES}`);
   const head = rows[0].map(h => norm(h));
-  const iCod = head.indexOf("CODIGOCONTRATO"), iLim = head.indexOf("LIMITE");
-  const fila = rows.slice(1).find(r => norm(r[iCod]) === contrato);
+  const iId = head.indexOf("IDCONTRATO"), iProduct = head.indexOf("PRODUCTCODE"), iLim = head.indexOf("LIMITE");
+  if (iId < 0 || iProduct < 0 || iLim < 0) {
+    throw new Error(`La tabla ${TABLA_LIMITES} debe incluir IdContrato, productCode y Limite`);
+  }
+  const idContrato = resolveContractId(context.IdContrato ?? context.idContrato);
+  const candidatas = rows.slice(1).filter(r => num(r[iId]) === idContrato);
+  const fila = candidatas.find(r => norm(r[iProduct]) === norm(productCode))
+    || candidatas.find(r => norm(r[iProduct]) === "*");
   const valor = fila ? num(fila[iLim]) : 0;
-  if (!(valor > 0)) throw new Error(`No hay límite de capacidad para el contrato ${contrato} en ${TABLA_LIMITES}`);
+  if (!(valor > 0)) throw new Error(`No hay límite de capacidad para IdContrato ${idContrato} y producto ${productCode || "(vacío)"} en ${TABLA_LIMITES}`);
   return valor;
+}
+
+function resolveContractId(explicitId) {
+  const id = num(explicitId);
+  if (id > 0) return id;
+  const safeCode = contrato.replace(/'/g, "''");
+  doCmd({ cmd: "GetContracts", data: { filter: `[code]='${safeCode}'`, size: 1 } });
+  const contract = GetContracts?.outData?.[0];
+  if (!contract?.id) throw new Error(`No se encontró el contrato ${contrato} para resolver IdContrato`);
+  return num(contract.id);
 }
 
 function repartir(pesos, total) {

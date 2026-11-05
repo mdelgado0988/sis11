@@ -772,6 +772,15 @@ function renderTablaAgrupada(data, containerSelector = "#tab2") {
         const grupos = agruparData(data);
         if (!grupos.length) return;
 
+        const camposRequeridosVigencia = new Set(["F. Inicial", "F. Final", "Duración Días"]);
+        grupos.forEach(grupo => {
+            const campos = new Set((grupo.campos || []).map(campo => String(campo.name || "").trim()));
+            const faltantes = Array.from(camposRequeridosVigencia).filter(campo => !campos.has(campo));
+            if (faltantes.length) {
+                console.warn(`La cobertura ${grupo.coverageCode} no tiene las columnas requeridas de vigencia: ${faltantes.join(", ")}`);
+            }
+        });
+
         // ===== columnas (campos únicos) =====
         const camposSet = new Set();
 
@@ -982,6 +991,7 @@ function recalcularVigenciasTecnico($container = $("#tab2")) {
         const calculated = {};
         const calculating = new Set();
         const resolvingRoot = new Set();
+
         const getField = ($row, text) => $row.find("input[data-field]").filter(function () {
             return String($(this).attr("data-field") || "").toLowerCase().includes(text);
         }).first();
@@ -991,7 +1001,7 @@ function recalcularVigenciasTecnico($container = $("#tab2")) {
             if (!normalizedCode || resolvingRoot.has(normalizedCode)) return normalizedCode;
 
             const config = configByCode[normalizedCode];
-            const principal = String(config?.coberturaPrincipal ?? config?.coverageCodeDep ?? "").trim();
+            const principal = String(config?.coverageCodeDep ?? config?.coberturaPrincipal ?? "").trim();
             if (!principal || principal === "0" || principal === "-1" || principal.toUpperCase() === "NULL"
                 || principal.toUpperCase() === normalizedCode) return normalizedCode;
 
@@ -1014,9 +1024,10 @@ function recalcularVigenciasTecnico($container = $("#tab2")) {
 
             calculating.add(normalizedCode);
             const config = configByCode[normalizedCode];
-            const principal = String(config?.coberturaPrincipal ?? config?.coverageCodeDep ?? "").trim();
+            const principal = String(config?.coverageCodeDep ?? config?.coberturaPrincipal ?? "").trim();
             const $duration = getField($row, "duración");
-            const duration = Number($duration.val()) || 0;
+            // Las duraciones pueden mostrarse con separador de miles, por ejemplo 1,095.
+            const duration = parseNumericInputValue($duration.val()) || 0;
             const $start = getField($row, "f. inicial");
             const $end = getField($row, "f. final");
             if (!$start.length || !$end.length) {
@@ -1035,9 +1046,9 @@ function recalcularVigenciasTecnico($container = $("#tab2")) {
                 if (principalResult?.end) start = principalResult.end;
             }
 
-            if (start) $start.val(start).prop("disabled", true);
+            if (start) $start.val(start);
             if (duration > 0 && start) end = sumarDiasTecnico(start, duration);
-            if (end) $end.val(end).prop("disabled", true);
+            if (end) $end.val(end);
 
             const result = { start, end };
             calculated[normalizedCode] = result;
@@ -1076,9 +1087,16 @@ function cargarCobtarDesdeHidden(
     $.each(item, function (key, value) {
       if (key === "coverageCode" || key === "coverageName") return;
 
-      const $input = $(containerSelector).find(
+      let $input = $(containerSelector).find(
         `[data-coverage="${coverage}"][data-field="${key}"]`
       );
+
+      if (!$input.length) {
+        const normalizedKey = String(key).trim().toLowerCase();
+        $input = $(containerSelector).find(`[data-coverage="${coverage}"][data-field]`).filter(function () {
+          return String($(this).attr("data-field") || "").trim().toLowerCase() === normalizedKey;
+        }).first();
+      }
 
       if (!$input.length) return;
 
@@ -1095,6 +1113,10 @@ function cargarCobtarDesdeHidden(
       $input.trigger("change");
     });
   });
+
+  // Rebuild dates after loading legacy values and persist the calculated values.
+  recalcularVigenciasTecnico($(containerSelector));
+  $(hiddenSelector).val(JSON.stringify(construirCobtar(containerSelector)));
 }
 
 function construirCobtar(containerSelector = "#tab2") {
@@ -1210,24 +1232,38 @@ function setDefaultCobtar(){
     }    
 }
 
-function formatearFecha(fecha) {
-    const f = new Date(fecha);
-    if (isNaN(f)) return "";
-
-    const yyyy = f.getFullYear();
-    const mm = String(f.getMonth() + 1).padStart(2, "0");
-    const dd = String(f.getDate()).padStart(2, "0");
-
-    return `${yyyy}-${mm}-${dd}`;
-}
-
 function sumarDiasTecnico(fechaStr, dias) {
     if (!fechaStr || !dias) return "";
 
-    const fecha = new Date(fechaStr);
+    // Una fecha YYYY-MM-DD representa un día calendario local, no medianoche UTC.
+    const texto = String(fechaStr).trim();
+    const partes = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const fecha = partes
+        ? new Date(Number(partes[1]), Number(partes[2]) - 1, Number(partes[3]))
+        : new Date(fechaStr);
     if (isNaN(fecha)) return "";
 
-    fecha.setDate(fecha.getDate() + Number(dias));
+    const duracion = Number(dias);
+    const esDuracionEntera = Number.isInteger(duracion) && duracion > 0;
+    const anios = esDuracionEntera
+        ? (duracion % 365 === 0
+            ? duracion / 365
+            : (duracion % 366 === 0 ? duracion / 366 : 0))
+        : 0;
+
+    if (anios > 0) {
+        const mesOriginal = fecha.getMonth();
+        const diaOriginal = fecha.getDate();
+        fecha.setFullYear(fecha.getFullYear() + anios);
+
+        // Conserva el aniversario de 29/02 en el último día de febrero.
+        if (mesOriginal === 1 && diaOriginal === 29 && fecha.getMonth() !== 1) {
+            fecha.setMonth(1, 28);
+        }
+    } else {
+        fecha.setDate(fecha.getDate() + duracion);
+    }
+
     return formatearFecha(fecha);
 }
 
@@ -2769,7 +2805,17 @@ function vEqual(value){
 }
 
 function formatearFecha(fecha) {
-    const f = new Date(fecha);
+    // Las fechas puras son días calendario locales; no deben interpretarse como UTC.
+    let valor = fecha;
+    if (typeof valor === "string") {
+        const texto = valor.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(texto)) {
+            valor = texto + "Z";
+        }
+    }
+
+    const f = new Date(valor);
     if (isNaN(f)) return "";
 
     const yyyy = f.getFullYear();

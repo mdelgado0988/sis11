@@ -245,10 +245,12 @@
     return String((response && response.msg) || '').replace(/formula ->[\s\S]*/, '').trim();
   };
   const isAutoPolicy = function () { return txt(policy && policy.lob) === '6'; };
-  // Solo Fianza usa la capacidad contractual para decidir entre proporcional y FAC.
-  // Los demas ramos conservan la simulacion historica por lineas vigentes.
+  // Fianzas y CPCAR usan la capacidad contractual para decidir entre proporcional
+  // y FAC. El resto de los ramos conserva la simulacion historica por lineas vigentes.
   const usesSuretyContractCapacity = function () {
-    return ['81', '82', '83', '84'].indexOf(txt(policy && policy.lob)) >= 0;
+    const lob = txt(policy && policy.lob);
+    if (['81', '82', '83', '84'].indexOf(lob) >= 0) return true;
+    return lob === '96' && txt(policy && policy.productCode).toUpperCase() === 'CAR';
   };
   const ramoLabel = function () {
     const name = txt(policy && (policy.lobName || (policy.Lob && policy.Lob.name)));
@@ -257,6 +259,8 @@
     return txt(policy && policy.lob) ? 'ramo ' + txt(policy.lob) : 'ramo de la póliza';
   };
   const coverageTariffChain = function () {
+    const lob = txt(policy && policy.lob);
+    if (lob === '96') return 'cmdCalculatePremiumTecnicos';
     return isAutoPolicy() ? 'cmdCalculatePremiumAuto' : 'cmdCalculatePremiumSuretyBond';
   };
   const normalizeConfigKey = function (value) {

@@ -2634,6 +2634,7 @@
     { title: t('Tipo'), dataIndex: 'reason', width: 110, render: function (v) {
       if (v === 'SELECTED') return <Tag color="blue">{t('Seleccionada')}</Tag>;
       if (v === 'DEPENDENT') return <Tag color="gold">{t('Dependiente recalculada')}</Tag>;
+      if (v === 'SHARED_VALIDITY') return <Tag color="cyan">{t('Vigencia compartida')}</Tag>;
       return <Tag>{t('Sin cambio')}</Tag>;
     } },
     { title: t('Prima anterior'), dataIndex: 'oldPremium', align: 'right', width: 120, render: function (v) { return <span className="axx-antes">{fmt(v)}</span>; } },

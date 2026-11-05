@@ -99,7 +99,13 @@ const cfg = {};
 for (let i = 1; i < table.length; i++) {
   const r = table[i];
   if (txt(r[1]) !== txt(policy.productCode)) continue;
-  cfg[txt(r[3])] = { coverageCode: txt(r[3]), isCoverage: txt(r[5]), principal: txt(r[7]), parent: txt(r[8]) };
+  cfg[txt(r[3])] = {
+    coverageCode: txt(r[3]),
+    isCoverage: txt(r[5]),
+    principal: txt(r[7]),
+    parent: txt(r[8]),
+    sameValidityAs: txt(r[9])
+  };
 }
 
 const isTechnicalCar = txt(policy.lob) === '96' && up(policy.productCode) === 'CAR';
@@ -111,7 +117,13 @@ if (isTechnicalCar) {
   for (let i = 1; i < technicalTable.length; i++) {
     const r = technicalTable[i];
     if (up(r[1]) !== up(policy.productCode)) continue;
-    technicalCfg[txt(r[3])] = { coverageCode: txt(r[3]), isCoverage: txt(r[5]), principal: txt(r[7]), parent: txt(r[8]) };
+    technicalCfg[txt(r[3])] = {
+      coverageCode: txt(r[3]),
+      isCoverage: txt(r[5]),
+      principal: txt(r[7]),
+      parent: txt(r[8]),
+      sameValidityAs: txt(r[9])
+    };
   }
 }
 const coverageCfg = isTechnicalCar ? technicalCfg : cfg;
@@ -201,12 +213,34 @@ if ((coverageCfg[selCode] && coverageCfg[selCode].principal === '-1') || selecte
     const code = txt(c.code);
     if (code === selCode) continue;
     const row = coverageCfg[code];
+    const sameValidityAs = row && txt(row.sameValidityAs).toUpperCase();
+    const sharesValidityWithSelected = sameValidityAs
+      && sameValidityAs !== '0'
+      && sameValidityAs !== '-1'
+      && sameValidityAs !== 'NULL'
+      && sameValidityAs === txt(selCode).toUpperCase();
     const isConfiguredDependent = row && row.parent === selCode;
     const isTechnicalCarMaintenance = selectedIsTechnicalCarPrincipal && code === '23';
-    if (!isConfiguredDependent && !isTechnicalCarMaintenance) continue;
+    if (!sharesValidityWithSelected && !isConfiguredDependent && !isTechnicalCarMaintenance) continue;
     const ps = stamp(c.start, 'inicio dependiente ' + code);
     const pe = stamp(c.end, 'fin dependiente ' + code);
     if (pe <= ps) throw '@La vigencia de la cobertura dependiente ' + code + ' es invalida';
+
+    // sameValidityAs is an explicit shared-validity relationship. It is
+    // intentionally different from parent/coverageCodeDep: shared rows use
+    // the exact principal start/end, while sequential dependents start when
+    // the principal ends and preserve their own duration.
+    if (sharesValidityWithSelected) {
+      c.start = target.start;
+      c.end = target.end;
+      rows.push({
+        code: code, name: c.name, reason: 'SHARED_VALIDITY',
+        oldStart: iso(ps), newStart: c.start, oldEnd: iso(pe), newEnd: c.end,
+        oldPremium: money(c.premium), newPremium: money(c.premium), variation: 0, deltaDays: 0
+      });
+      continue;
+    }
+
     // Every configured dependent coverage follows the new end of the
     // principal coverage, regardless of its previous start date. Its own
     // duration is preserved when calculating the new end.

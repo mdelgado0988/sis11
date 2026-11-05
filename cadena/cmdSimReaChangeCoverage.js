@@ -31,7 +31,7 @@ const finalStateOnly = context.finalStateOnly === true;
 const isLoadingMovement = up(context.movementType) === 'LOADING';
 // Cambio de suma: cuando una cobertura ya tiene facultativo, el limite de
 // las lineas proporcionales esta agotado. La variacion se coloca solo en FAC.
-const suretyLobs = { '81': true, '82': true, '83': true, '84': true };
+const suretyLobs = { '81': true, '82': true, '83': true, '84': true, '96': true };
 const suretyContractCapacity = context.suretyContractCapacity === true;
 const facultativeMovementOnly = context.facultativeMovementOnly === true;
 
@@ -314,7 +314,7 @@ if (contractIdsForCode.length) {
   }
 }
 
-// Fianza: el limite contractual define la fotografia final de RET, CP y FAC.
+// Fianza y CPCAR: el limite contractual define la fotografia final de RET, CP y FAC.
 // Se calcula por contrato y cobertura con el mismo comando usado al emitir,
 // y luego el movimiento se obtiene contra la cesion vigente.
 const capacityByCoverage = {};
@@ -335,6 +335,12 @@ if (useSuretyContractCapacity) {
   }
   Object.keys(contractCoverage).forEach(function (key) {
     const item = contractCoverage[key];
+    const contractCode = up(contractCodeById[item.contractId]);
+    const isCpcar = contractCode === 'CPCAR';
+    const isSuretyContract = suretyLobs[txt(policy.lob)] === true && !isCpcar;
+    // En ramo 96 solo CPCAR usa la tabla de limite colectivo. Los demas
+    // contratos tecnicos conservan el flujo historico sin capacidad contractual.
+    if (txt(policy.lob) === '96' && !isCpcar) return;
     const allCoverages = rows.map(function (row) {
       const code = txt(row.code);
       return {
@@ -367,10 +373,70 @@ if (useSuretyContractCapacity) {
       capacityRequest.ModoCoaseguro = coinsuranceMode;
       capacityRequest.PorcentajeRetenido = coinsuranceRetained;
     }
-    const rea = doCmd({ cmd: 'ExeChain', data: { chain: 'cmdConfiguracionReaseguroPorSuma', context: JSON.stringify(capacityRequest) } });
+    let rea;
+    if (isCpcar) {
+      const cpcarContext = {
+        pol: {
+          id: policy.id,
+          productCode: policy.productCode,
+          Coverages: allCoverages.map(function (coverage) {
+            return {
+              id: coverage.id,
+              code: coverage.codigo,
+              limit: coverage.limite,
+              premium: coverage.prima
+            };
+          })
+        },
+        cov: {
+          id: item.coverageId,
+          code: item.code,
+          limit: Number(finalSum[item.code] || 0),
+          premium: Number(finalPremium[item.code] || 0)
+        },
+        contrato: contractCode,
+        IdContrato: item.contractId,
+        productCode: policy.productCode,
+        pret: 0.10
+      };
+      rea = doCmd({ cmd: 'ExeChain', data: {
+        chain: 'cmdCoverageAccumulationSum',
+        context: JSON.stringify(cpcarContext)
+      } });
+    } else if (isSuretyContract) {
+      rea = doCmd({ cmd: 'ExeChain', data: { chain: 'cmdConfiguracionReaseguroPorSuma', context: JSON.stringify(capacityRequest) } });
+    } else {
+      return;
+    }
     let result = rea && rea.outData;
     if (typeof result === 'string') result = JSON.parse(result);
     if (Array.isArray(result)) result = result[0];
+    if (isCpcar && result && result.sumaPoliza !== undefined) {
+      const cpcarPremium = Number(result.prima || 0);
+      const cpcarFacPremium = Number(result.primaFac || 0);
+      const cpcarCededPremium = Number(result.reinsurerPremium || 0);
+      result = {
+        pret: 0.10,
+        pcp: 0.90,
+        msret: Number(result.ced || 0),
+        mscp: Number(result.re || 0),
+        mpret: Number(result.cedantPremium || 0),
+        mpcp: cpcarCededPremium,
+        mccp: money(cpcarCededPremium * 0.35),
+        micp: money(cpcarCededPremium * 0.02),
+        pfp: Number(result.suma || 0) ? Number((Number(result.sumaFac || 0) / Number(result.suma || 0)).toFixed(6)) : 0,
+        msfp: Number(result.sumaFac || 0),
+        mpfp: cpcarFacPremium,
+        mcfp: 0,
+        mifp: money(cpcarFacPremium * 0.02),
+        SumaEvaluada: Number(result.sumaPoliza || 0),
+        Capacidad: Number(result.limite || 0),
+        factorContrato: Number(result.sumaPoliza || 0) ? Number((Number(result.sumaDistribuye || 0) / Number(result.sumaPoliza || 0)).toFixed(6)) : 0,
+        base: Number(result.suma || 0),
+        basePrima: cpcarPremium,
+        reparto: 'cpcar'
+      };
+    }
     if (!rea || rea.ok === false || !result || result.msret === undefined) {
       throw 'No fue posible calcular la capacidad contractual para el contrato ' + contractCodeById[item.contractId]
         + ', cobertura ' + item.code + ': ' + (rea && rea.msg ? rea.msg : 'sin respuesta valida');
@@ -493,6 +559,17 @@ const cpapRiskPremiumFactor = function (cession) {
 const severeIllnessProductCodes = { EG1: true, EG2: true, EG3: true, EG4: true, EG5: true };
 const normalizedProductCode = up(policy.productCode).replace(/[^A-Z0-9]/g, '');
 const isSevereIllnessProduct = severeIllnessProductCodes[normalizedProductCode] === true;
+
+// AXX-7214: prima vigente de cada cobertura (la misma base con la que la vista calcula la variacion).
+// Sirve para reconocer el recargo/descuento que deja la cobertura sin prima (descuento del 100 %).
+const primaVigentePorCobertura = {};
+(policy.Coverages || []).forEach(function (coverage) {
+  primaVigentePorCobertura[txt(coverage.code)] = Number(coverage.premium || 0);
+});
+const coberturaSinPrimaFinal = function (code, movement) {
+  const vigente = Number(primaVigentePorCobertura[code] || 0);
+  return vigente > 0 && Math.abs(money(vigente + Number(movement || 0))) <= 0.01;
+};
 
 // aceptantes de esas lineas
 const baseIds = [];
@@ -686,6 +763,16 @@ for (let i = 0; i < base.length; i++) {
     pCed = placementBase ? (placementUsesSum ? finalSumCedant / placementBase : finalCedant / placementBase) : 0;
     pRe = placementBase ? (placementUsesSum ? finalSumRe / placementBase : finalRe / placementBase) : 0;
     nonTechnical = 0;
+  }
+  // AXX-7214: un recargo/descuento que deja la cobertura sin prima (descuento del 100 %) anula la cesion vigente
+  // de la linea: retencion, cesion y comision bajan exactamente a cero y el resto del movimiento queda como prima
+  // no tecnica. Repartirlo por proporcion (o retenerlo completo en EG con CPAP) dejaba saldos finales negativos y
+  // la ejecucion del endoso se rechazaba.
+  if (isLoadingMovement && !capacityAllocation && !routesMovementToFacultative && coberturaSinPrimaFinal(code, dv)) {
+    cedant = money(-Number(c.premiumCedant || 0));
+    re = money(-Number(c.premiumRe || 0));
+    commission = money(-(Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0));
+    nonTechnical = money(lineDv - cedant - re);
   }
   grp.rows.push({
     coverageCode: code, cover: txt(c.cover), counts: counts,
