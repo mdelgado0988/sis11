@@ -7,6 +7,7 @@
  * @name cmdGenertFormatoEmdoso
  * @version 1.1
  * @summary This command makes Endosos Template Data Builder + GeneratePolicyDoc
+ * @changes MSN-000151 - ramo 96: marca y modelo por ramo y marca, provincia y ciudad de la dirección del tomador, límite de la cobertura incluida. Los demás ramos no cambian.
 */
 
 const changeId = context.changeId;
@@ -488,6 +489,10 @@ function isDiversosPolicy(policy) {
   return String(policy?.lob ?? '').trim() === '52';
 }
 
+function isRamoTecnico96(policy) {
+  return String(policy?.lob ?? '').trim() === '96';
+}
+
 function isAutoPolicy(policy) {
   return String(policy?.lob ?? '').trim() === '6';
 }
@@ -646,7 +651,9 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
   }
 
   if (isDiversosPolicy(policy)) {
-    return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
+    // MSN-000148: la cancelacion del ramo 52 lleva el detalle de coberturas que anula.
+    const esCancelacion = String(change?.Discriminator || '').trim().toUpperCase() === 'CANCELLATIONCHANGE';
+    return esCambioCoberturaActual || esCancelacion || hasEndorsementPremium(billDiff, change)
       ? reportes.ramoDiverso.conPrima
       : reportes.ramoDiverso.sinPrima;
   }
@@ -817,6 +824,9 @@ function buildTechnicalRisk(userData, catalogs, countries, provinces) {
   const value = name => suretyValue(data, [name]);
   const countryCode = value('cmbPais');
   const provinceCode = value('cmbProvincia');
+  // MSN-000151: en el ramo 96 la marca se busca por ramo y el modelo por ramo y marca, como en la póliza; sin coincidencia queda vacío.
+  const ramoTecnico = isRamoTecnico96(policy);
+  const lob = String(policy?.lob ?? '').trim();
 
   return {
     // Conserva todos los datos originales del objeto para que las plantillas
@@ -846,9 +856,13 @@ function buildTechnicalRisk(userData, catalogs, countries, provinces) {
     Proyecto: value('txtProyecto'),
     Categoria: catalogText(lookup.categorias, value('cmbCategoria'), 0, 1),
     CodigoCategoria: value('cmbCategoria'),
-    Marca: catalogText(lookup.marcas, value('cmbMarca'), 1, 2),
+    Marca: ramoTecnico
+      ? technicalCatalogText(lookup.marcas, [lob, value('cmbMarca')], 2)
+      : catalogText(lookup.marcas, value('cmbMarca'), 1, 2),
     CodigoMarca: value('cmbMarca'),
-    Modelo: catalogText(lookup.modelos, value('cmbModelo'), 2, 3),
+    Modelo: ramoTecnico
+      ? technicalCatalogText(lookup.modelos, [lob, value('cmbMarca'), value('cmbModelo')], 3)
+      : catalogText(lookup.modelos, value('cmbModelo'), 2, 3),
     CodigoModelo: value('cmbModelo'),
     Anio: value('txAnio'),
     Serie: value('txtSerie'),
@@ -866,6 +880,13 @@ function buildTechnicalRisk(userData, catalogs, countries, provinces) {
     NumeroContrato: value('txtSerie'),
     ActoPublico: value('ckOrdenProceder')
   };
+}
+
+function technicalCatalogText(rows, keys, textIndex) {
+  // Las primeras columnas de la tabla son las claves (ramo, marca, modelo); todas deben coincidir.
+  if (!Array.isArray(rows) || keys.some(key => !String(key ?? '').trim())) return '';
+  const row = rows.slice(1).find(item => keys.every((key, i) => String(item?.[i] ?? '').trim() === String(key).trim()));
+  return row?.[textIndex] ?? '';
 }
 
 function buildSuretyRisk(userData, catalogs) {
@@ -1517,6 +1538,16 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
 
   const linea2 = addr.address1 ? String(addr.address1) : (addr.address2 ? String(addr.address2) : "");
 
+  // MSN-000151: en el ramo 96 «Provincia» y «Ciudad» son la provincia y el distrito de la dirección del tomador
+  // (antes: el corregimiento, y un municipio del objeto asegurado que este ramo no captura).
+  const ramoTecnico96 = isRamoTecnico96(policy);
+  const provinciaTomador = ramoTecnico96
+    ? (procincias.find(itm => String(itm.countryCode ?? '') === String(addr.country ?? '') && String(itm.code ?? '') === String(addr.state ?? ''))?.name || "")
+    : "";
+  const ciudadTomador = ramoTecnico96
+    ? (Municipios.find(itm => String(itm.stateCode ?? '') === String(addr.state ?? '') && String(itm.code ?? '') === String(addr.city ?? ''))?.name || "")
+    : "";
+
   // Phones seguro (sin reventar si viene vacío)
   const celPhone = holder?.Phones?.find(p => p.type === "PHONETYPE2")?.num ?? "No Tiene";
 
@@ -1604,15 +1635,15 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     Address: {
       Linea2: linea2,
       NombrePais: countryName,
-      NombreProvincia: sectorName,
-      NombreDistrito: InsuredObject.userData.cmbMunicipio
+      NombreProvincia: ramoTecnico96 ? provinciaTomador : sectorName,
+      NombreDistrito: ramoTecnico96 ? ciudadTomador : (InsuredObject.userData.cmbMunicipio
         ? (Municipios.find(itm => itm.code === InsuredObject.userData.cmbMunicipio)?.name
           || String(InsuredObject.userData.cmbMunicipio))
-        : "",
-      NombreCiudad: InsuredObject.userData.cmbMunicipio
+        : ""),
+      NombreCiudad: ramoTecnico96 ? ciudadTomador : (InsuredObject.userData.cmbMunicipio
         ? (Municipios.find(itm => itm.code === InsuredObject.userData.cmbMunicipio)?.name
           || String(InsuredObject.userData.cmbMunicipio))
-        : "",
+        : ""),
     },
 
     Acreedor:{
@@ -1743,6 +1774,10 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       return Object.assign({}, fromPolicy || {}, fromOld || {}, fromChange || {}, fromAdditional || {}, { code });
     };
 
+    // MSN-000148: en la cancelacion del ramo 52 cada cobertura anula su suma asegurada completa,
+    // que el documento muestra en negativo.
+    const esCancelacionRamoDiverso = String(change?.Discriminator || '') === 'CancellationChange' && isDiversosPolicy(policy);
+
     custom.Endoso.Coberturas = affectedCodes.map(code => {
       const source = coverageSource(code);
       const oldChangeCov = oldCoverages.find(c => codeOf(c) === code);
@@ -1754,14 +1789,17 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
         const oldLimit = oldChangeCov?.limit ?? (polCov?.limit ?? 0);
         const newLimit = changeCov?.limit ?? oldLimit;
         const primaDiff = changeCovDetail ? n(changeCovDetail.premiumDif) : 0;
+        const limitDif = esCancelacionRamoDiverso ? -Number(oldLimit || 0) : newLimit - oldLimit;
         return {
           ...polCov,
           premiumDif: endosoSinPrima ? n(0) : primaDiff,
-          limitDif: endosoSinPrima ? n(0) : n(newLimit - oldLimit)
+          limitDif: endosoSinPrima ? n(0) : n(limitDif)
         };
       }
 
-      const oldLimit = oldChangeCov?.limit ?? source?.limit ?? 0;
+      // MSN-000151: en una inclusión del ramo 96 la cobertura incluida no existía antes: su límite anterior es 0.
+      const incluidaRamoTecnico = isRamoTecnico96(policy) && !isCoverageRemoval && !oldChangeCov;
+      const oldLimit = incluidaRamoTecnico ? 0 : (oldChangeCov?.limit ?? source?.limit ?? 0);
       const newLimit = isCoverageRemoval
         ? 0
         : (changeCov?.limit ?? source?.limit ?? oldLimit);

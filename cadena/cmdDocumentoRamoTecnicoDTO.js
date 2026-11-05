@@ -9,6 +9,7 @@
   *@Created: 11/05/2026
   *@Input: {policyId}
   *@Output: [{ resultado }]
+  *@Changes: MSN-000151 - ramo 96: dirección completa del tomador, teléfono del asegurado, número de oferta, cuotas de la oferta, coberturas numeradas con límite propio y columna de deducible. Los demás ramos que usan esta cadena no cambian.
 */
 
 const policyId = context.policyId;
@@ -27,13 +28,14 @@ let oaUserData;
 let limites;
 const objectDefinitionCode = 'DT_RAMO_TECNICO';
 const hoy = new Date();
-const dia = hoy.getUTCDate();
+const hoyPanama = toPanamaDate(hoy);
+const dia = hoyPanama.getUTCDate();
 const meses = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ];
-const mes = meses[hoy.getUTCMonth()];
-const anio = hoy.getUTCFullYear();
+const mes = meses[hoyPanama.getUTCMonth()];
+const anio = hoyPanama.getUTCFullYear();
 const celPhoneType = "PHONETYPE2";
 const faxPhoneType = "PHONETYPE4";
 const telPhoneType = "PHONETYPE1";
@@ -59,20 +61,22 @@ setInsuredObject();
 setLimites();
 setAcreedor();
 setCurrency(policy.currency);
+// MSN-000151: las correcciones de origen de datos aplican sólo a Ramos Técnicos (ramo 96).
+const esRamoTecnico = String(policy.lob ?? '').trim() == '96';
 
-const dateIni = new Date(policy.start);
+const dateIni = toPanamaDate(policy.start);
 const diaIni = dateIni.getUTCDate();
 const mesIni = meses[dateIni.getUTCMonth()];
 const anioIni = dateIni.getUTCFullYear();
 
-const dateFin = new Date(policy.end);
+const dateFin = toPanamaDate(policy.end);
 const diaFin = dateFin.getUTCDate();
 const mesFin = meses[dateFin.getUTCMonth()];
 const anioFin = dateFin.getUTCFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
-resultado.Direccion = holder.Addresses?.[0]?.address2 ?? "";
+resultado.Direccion = esRamoTecnico ? unirDireccion(holder.Addresses?.[0]) : (holder.Addresses?.[0]?.address2 ?? "");
 resultado.Telefono = holder.phone ?? "";
 
 //return holder.Phones
@@ -86,9 +90,9 @@ resultado.Provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${hold
 resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${holder.Addresses?.[0]?.state}' AND code = '${holder.Addresses?.[0]?.city}'`, "name") ?? "";
 
 //Datos del asegurado
-const fnacimiento = new Date(insured.birth);
+const fnacimiento = toPanamaDate(insured.birth);
 resultado.DiaNac = fnacimiento.getUTCDate();
-resultado.MesNac = fnacimiento.getUTCMonth();
+resultado.MesNac = fnacimiento.getUTCMonth() + 1;
 resultado.AnioNac = fnacimiento.getUTCFullYear();
 resultado.Asegurado = getNombreCompleto(insured);
 resultado.FNacimiento = toFecha(insured.birth);
@@ -103,16 +107,23 @@ resultado.insuredPhone = insured.Phones.find(x => x.type == telPhoneType)?.num ?
 resultado.insuredPhone = resultado.insuredPhone 
                                   ? resultado.insuredPhone 
                                   : "";
+if (esRamoTecnico) {
+  // Como en el tomador: el teléfono principal del contacto es «Teléfono»; «Celular» sólo si tiene un número de tipo celular.
+  resultado.insuredPhone = insured.Phones?.find(x => x.type == telPhoneType)?.num || insured.phone || "";
+  resultado.insuredCelular = insured.Phones?.find(x => x.type == celPhoneType)?.num || "";
+}
 resultado.insuredEmail = insured.Emails.find(x => x.type == emailType)?.num ?? "";
 resultado.insuredEmail = resultado.insuredEmail 
                                   ? resultado.insuredEmail 
                                   : insured.email 
                                       ? insured.email
                                       : "";
-const addressInsured = insured.Addresses && insured.Addresses.length > 0 ? insured.Addresses[0] : null;
-const address1Insured = addressInsured.address1 ? addressInsured.address1 : "";
-const address2Insured = addressInsured.address2 ? addressInsured.address2 : "";
-resultado.insuredAddress = `${address1Insured} ${address1Insured}`;
+const addressInsured = Array.isArray(insured?.Addresses) && insured.Addresses.length > 0
+  ? insured.Addresses[0]
+  : null;
+const address1Insured = addressInsured?.address1 ?? "";
+const address2Insured = addressInsured?.address2 ?? "";
+resultado.insuredAddress = `${address1Insured} ${address2Insured}`.trim();
 resultado.insuredPais = getCatalogValue("RepoCountryCatalog", `code = '${addressInsured?.country}'`, "name") ?? "";
 resultado.insuredProvincia = getCatalogValue("RepoStateCatalog", `countryCode = '${addressInsured?.country}' AND code = '${addressInsured?.state}'`, "name") ?? "";
 resultado.insuredCiudad = getCatalogValue("RepoCityCatalog", `stateCode = '${addressInsured?.state}' AND code = '${addressInsured?.city}'`, "name") ?? "";
@@ -129,7 +140,7 @@ resultado.Acreedor = resultado.Acreedor == "" ? "No Tiene" : resultado.Acreedor;
 //Datos de la póliza
 resultado.Poliza = paramPolicyCode ? paramPolicyCode : policy.code;
 resultado.Certificado = 0;
-resultado.Oferta = policyId;
+resultado.Oferta = esRamoTecnico ? getCodigoOferta() : policyId;
 resultado.Moneda = policy.currency;
 resultado.symbol = currency.symbol;
 resultado.Suma = n(policy.insuredSum);
@@ -146,13 +157,15 @@ resultado.Impuesto = n(paramTax ? paramTax : (policy.tax ?? 0));
 resultado.Total = n(paramAnualTotal ? paramAnualTotal : (policy.annualTotal ?? 0));
 resultado.FormaPago = getCatalogValue("RepoPaymentMethodCatalog", `code = '${policy.paymentMethod ?? "-1"}'`, "name") ?? "";
 resultado.Cuotas = paramPayPlan ? (paramPayPlan?.length ?? 0) : (policy.PayPlan?.length ?? 0)
+// La oferta se genera antes de calcular el plan de pagos: sin plan, se informan las cuotas que tendrá.
+if (esRamoTecnico && !resultado.Cuotas) resultado.Cuotas = getCuotasEsperadas();
 
 //Datos de Coberturas
 const tarifaEntrada = JSON.parse(oaUserData.hiddenCobtar)
 doCmd({"cmd":"GetFullTable","data":{"table":"cfgCobtarRamoTecnico"}});
 const configCobtar = mapearTablaConfig(GetFullTable.outData ?? []);
 resultado.Coberturas = policy.Coverages
-  .filter(({ name }) => !/^\s*(?:\d|NMA2919|HMACC)/i.test(String(name ?? "")))
+  .filter(cov => !esCoberturaClausula(cov))
   .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es", { sensitivity: "base" }))
   .map(({ code, name, limit, premium, deductible }) => {
     const findCoverage = tarifaEntrada.find(x => x.coverageCode == code);
@@ -169,15 +182,24 @@ resultado.Coberturas = policy.Coverages
       Porcentaje: findCoverage && findCoverage.Porcentaje ? findCoverage.Porcentaje : 0,
       //findCoverage
     };
-    const findDTCoverageDeducible = configCobtar.find(x => x.coverageCode == code && x.name == "Deducible");    
+    const findDTCoverageDeducible = configCobtar.find(x => x.coverageCode == code && x.name == "Deducible"
+      && (!esRamoTecnico || vEqual(x.productCode) == vEqual(policy.productCode)));
     cov.findDTCoverageDeducible = findDTCoverageDeducible;
     if(findDTCoverageDeducible && findDTCoverageDeducible.catalog) {      
        const catalogDeductible = JSON.parse(findDTCoverageDeducible.catalog.replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":'));
-       const findDescriptionDeductible = catalogDeductible.find(x => x.code == findCoverage.Deducible);
+       const findDescriptionDeductible = catalogDeductible.find(x => x.code == findCoverage?.Deducible);
        cov.DeducibleText = findDescriptionDeductible && findDescriptionDeductible.name ? findDescriptionDeductible.name : "";
-    }       
+    }
+    // Ramo 96: «Deducible» muestra la opción de deducible elegida o, si no hay, el monto de deducible de la cobertura.
+    if (esRamoTecnico && !cov.Deducible)
+      cov.Deducible = textoDeducible(cov.DeducibleText) || (Number(deductible ?? 0) > 0 ? n(deductible) : "");
     return cov;
   });
+//Coberturas por suma asegurada, de mayor a menor; a igual suma, el orden de Coberturas (MSN-000147)
+resultado.CoberturasPorSuma = resultado.Coberturas
+  .map((cov, i) => ({ cov, i, suma: Number(policy.Coverages.find(x => x.code == cov.Codigo)?.limit ?? 0) }))
+  .sort((a, b) => (b.suma - a.suma) || (a.i - b.i))
+  .map(x => x.cov);
 
 //Datos del DT
 resultado.EdadEmi = oaUserData?.txtEdadSuscripcion ?? "0";
@@ -193,6 +215,9 @@ resultado.Propiedad = oaUserData?.txtPropietario ?? "0";
 resultado.SumaDT = n(oaUserData?.txtSA ?? 0);
 resultado.PaisDT = getCatalogValue("RepoCountryCatalog", `code = '${oaUserData.cmbPais ?? "0"}'`, "name") ?? "";
 resultado.Comentarios = oaUserData?.txtDescripcion ?? "";
+//Descripción del riesgo línea por línea, con los saltos y espacios tal como se escribieron (MSN-000147)
+const lineasDescripcion = String(resultado.Comentarios).replace(/\r\n?/g, "\n").split("\n");
+resultado.ComentariosLineas = lineasDescripcion.map((texto, i) => ({ Linea: texto, Salto: i < lineasDescripcion.length - 1 }));
 resultado.userData = oaUserData;
 agregarAdendosAlResultado();
 
@@ -280,7 +305,7 @@ function setAcreedor() {
 }
 
 function setInsured() {
-  doCmd({cmd: "GetContacts", data: { operation: "GET", filter: `id = ${policy.MainInsured?.contactId ?? -1}` }});
+  doCmd({cmd: "GetContacts", data: { operation: "GET", include: ["Addresses", "Phones", "Emails"], filter: `id = ${policy.MainInsured?.contactId ?? -1}` }});
   insured = GetContacts.outData?.[0];
   if(!insured)
     throw new Error(`No se pudo recuperar el asegurado de la póliza: ${GetContacts.msg}`);
@@ -393,18 +418,56 @@ function getNombreCompleto(contact) {
 function toFecha(value) {
   if (!value) return "";
 
-  const date = (value instanceof Date) ? value : new Date(value);
+  const date = toPanamaDate(value);
 
   // Validar fecha inválida
   if (isNaN(date.getTime())) return "";
 
-  // Las fechas se persisten en UTC. El documento presenta la fecha de
-  // calendario UTC para no moverla por la zona horaria del servidor.
+  // Las fechas se persisten en UTC y el documento las presenta en horario de
+  // Panamá (UTC-5), independientemente de la zona horaria del servidor.
   const day = String(date.getUTCDate()).padStart(2, '0');
   const month = String(date.getUTCMonth() + 1).padStart(2, '0'); // meses 0-11
   const year = date.getUTCFullYear();
 
   return `${day}/${month}/${year}`;
+}
+
+function toPanamaDate(value) {
+  if (value === null || value === undefined || value === "") return new Date(NaN);
+
+  const utcDate = value instanceof Date
+    ? new Date(value.getTime())
+    : createUtcDate(value);
+
+  if (Number.isNaN(utcDate.getTime())) return new Date(NaN);
+
+  // Panamá permanece en UTC-5 durante todo el año. Se usan getters UTC
+  // sobre la fecha desplazada para no depender del servidor.
+  return new Date(utcDate.getTime() - (5 * 60 * 60 * 1000));
+}
+
+function createUtcDate(value) {
+  const text = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return new Date(`${text}T00:00:00.000Z`);
+  }
+
+  const ymd = text.match(/^(\d{4})[\/-](\d{2})[\/-](\d{2})$/);
+  if (ymd) {
+    return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])));
+  }
+
+  const dmy = text.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/);
+  if (dmy) {
+    return new Date(Date.UTC(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1])));
+  }
+
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
+    return new Date(text);
+  }
+
+  return new Date(`${text}Z`);
 }
 
 function fechaDocumento(value) {
@@ -585,6 +648,55 @@ function setCurrency(currencyCode) {
   if(!currency)
     throw new Error(`No se pudo recuperar la moneda de la póliza: ${RepoCurrency.msg}`);
   
+}
+
+function unirDireccion(address) {
+  return [address?.address1, address?.address2]
+    .map(v => String(v ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getCodigoOferta() {
+  // En la emisión la póliza todavía tiene en base el código de oferta (con el prefijo); emitida, se le antepone el prefijo del producto.
+  const codigo = String(policy.code ?? "").trim();
+  if (!codigo) return policyId;
+  let prefijo = "";
+  try {
+    doCmd({cmd: "RepoProduct", data: { operation: "GET", filter: `code = '${policy.productCode}'` }});
+    const config = RepoProduct.outData?.[0]?.configJson;
+    prefijo = String((typeof config === "string" ? JSON.parse(config) : config)?.Main?.proposalPrefix ?? "").trim();
+  } catch (error) {
+    prefijo = "";
+  }
+  return !prefijo || codigo.startsWith(prefijo) ? codigo : prefijo + codigo;
+}
+
+function getCuotasEsperadas() {
+  // Misma regla que el plan de pagos del primer año: pagos por año según la periodicidad, acotados en contratos de meses.
+  let cuotas = pagosPorAnio(policy.periodicity);
+  const mesesContrato = Number(policy.durationMonths ?? 0);
+  if (Number(policy.duration ?? 0) == 0 && mesesContrato > 0 && Number(policy.paymentDuration ?? 0) == 0 && cuotas > mesesContrato) cuotas = mesesContrato;
+  return cuotas;
+}
+
+function pagosPorAnio(periodicidad) {
+  const texto = String(periodicidad || "y");
+  const base = { m: 12, q: 4, s: 2, y: 1, w: 52, d: 365 }[texto.substring(0, 1)] ?? 12;
+  if (texto.length == 1) return base;
+  const unidad = parseInt(texto.substring(1), 10);
+  return Math.floor(base / (Number.isInteger(unidad) && unidad > 0 ? unidad : 1));
+}
+
+function esCoberturaClausula({ name, limit }) {
+  if (!/^\s*(?:\d|NMA2919|HMACC)/i.test(String(name ?? ""))) return false;
+  // Ramo 96: una cobertura numerada con límite propio es cobertura (todas las de RM lo son), no sólo una cláusula.
+  return !(esRamoTecnico && Number(limit ?? 0) > 0);
+}
+
+function textoDeducible(texto) {
+  // Las opciones del catálogo traen el grupo delante («G3|1% Valores en Riesgo…»); el documento muestra sólo la descripción.
+  return String(texto ?? "").replace(/^[^|]*\|/, "").trim();
 }
 
 function mapearTablaConfig(data) {

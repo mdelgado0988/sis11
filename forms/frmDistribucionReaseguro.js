@@ -2080,6 +2080,9 @@ function renderReaseguradores() {
       inputs.eq(5).val(row.saldoRea);
     }
 
+    // Mantener el pie de totales sincronizado mientras se edita la fila.
+    actualizarTotalesReaseguradores();
+
   })
 
   // ===== BLUR → FORMATEO FINAL =====
@@ -2114,6 +2117,8 @@ function renderReaseguradores() {
       reaseguradoresData[index]["saldoRea"] = saldoRea;
       inputs.eq(5).val(formatearRedondeado(saldoRea));
     }
+
+    actualizarTotalesReaseguradores();
 
   });
 
@@ -2444,12 +2449,12 @@ function renderGrid() {
   });
 
   const totals = reaseguradoresData.reduce((acc, participant) => {
-    acc.split += Number(participant.split) || 0;
-    acc.sumInsured += Number(participant.sumInsured) || 0;
-    acc.premium += Number(participant.premium) || 0;
-    acc.commission += Number(participant.commission) || 0;
-    acc.tax += Number(participant.tax) || 0;
-    acc.saldoRea += Number(participant.saldoRea) || 0;
+    acc.split += numeroReasegurador(participant.split);
+    acc.sumInsured += numeroReasegurador(participant.sumInsured);
+    acc.premium += numeroReasegurador(participant.premium);
+    acc.commission += numeroReasegurador(participant.commission);
+    acc.tax += numeroReasegurador(participant.tax);
+    acc.saldoRea += numeroReasegurador(participant.saldoRea);
     return acc;
   }, {
     split: 0,
@@ -2476,6 +2481,42 @@ function renderGrid() {
   `);
 
   $table.append(totalRow);
+}
+
+function actualizarTotalesReaseguradores() {
+  const $cells = $("#gridReaseguradores tfoot tr.reaseguradores-totales td");
+  if (!$cells.length) return;
+
+  const totals = reaseguradoresData.reduce((acc, participant) => {
+    acc.split += numeroReasegurador(participant.split);
+    acc.sumInsured += numeroReasegurador(participant.sumInsured);
+    acc.premium += numeroReasegurador(participant.premium);
+    acc.commission += numeroReasegurador(participant.commission);
+    acc.tax += numeroReasegurador(participant.tax);
+    acc.saldoRea += numeroReasegurador(participant.saldoRea);
+    return acc;
+  }, {
+    split: 0,
+    sumInsured: 0,
+    premium: 0,
+    commission: 0,
+    tax: 0,
+    saldoRea: 0
+  });
+
+  // La primera celda ocupa las cuatro columnas iniciales mediante colspan.
+  $cells.eq(1).text(formatInput(redondear(totals.split, 6, true), "percent"));
+  $cells.eq(2).text(formatInput(redondear(totals.sumInsured), "number"));
+  $cells.eq(3).text(formatInput(redondear(totals.premium), "number"));
+  $cells.eq(4).text(formatInput(redondear(totals.commission), "number"));
+  $cells.eq(5).text(formatInput(redondear(totals.tax), "number"));
+  $cells.eq(6).text(formatInput(redondear(totals.saldoRea), "number"));
+}
+
+function numeroReasegurador(value) {
+  const normalized = String(value ?? "").replace(/,/g, "").trim();
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
 }
 
 ///////////////////////////////////////////////////////////
