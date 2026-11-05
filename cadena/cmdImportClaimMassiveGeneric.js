@@ -8,12 +8,12 @@
  *           mismo payload que la vista 48 InformaciónResumenDelReclamo. Una fila con errores se rechaza con TODOS sus
  *           motivos (también los mensajes del sistema al crear el reclamo).
  *           - Póliza: Id Poliza = código de la póliza; si el código tiene varias versiones, la vigente a la fecha del
- *             siniestro. Reclamante = contratante (o primer asegurado), como la vista.
+ *             siniestro. Contacto del reclamo = contratante (o primer asegurado), como la vista.
  *           - Causa = evento asegurado (código o descripción), validado contra InsuredEventCatalog y la tabla
  *             SysInsuredEventsPerCoverage del producto; la razón del evento y el claimType (mode) salen del evento.
  *           - Ocurrencia: sólo fecha (DD/MM/AAAA, AAAA-MM-DD, … o número de Excel) + Hora opcional (08:00 a. m. por
  *             defecto), en la hora local del ambiente (Main.timeOffset) guardada como instante UTC, como la vista.
- *           - Catálogos por código o descripción: estado, sucursal, ramo, evento, ajustador, reclamante, país,
+ *           - Catálogos por código o descripción: estado, sucursal, ramo, evento, ajustador, país,
  *             provincia y ciudad.
  * @context  { row:{fSiniestro, hora, fNotificacion, statSin, usuario, edadConductor, lugar, descripcionSiniestro,
  *           culpabilidad, responsable, cdgocaus, cdgosucu, cdgoramo, numepoli, idPoliza, ajustador, observaciones,
@@ -27,6 +27,9 @@
  * @mission  MSN-000142 rev.2 (globaluat) — 2026-11-05: usuario que lanzó la carga. La cola de DoBatch corre la fila
  *           como SUPERVISOR; al terminar, lo que la fila creó pasa al usuario que ejecutó el lote (extra.user o Batch.user),
  *           como en la renovación (cmdRenewalPolicyIssuance): ver lcuRestoreUser al final.
+ * @mission  MSN-000146 (globaluat) — 2026-11-05: la columna usuario se llama «Reclamante» (antes «Usuario») y es obligatoria:
+ *           Afectado, Asegurado o Tercera Persona, el selector «Reclamante» de la vista 48 (tipoReclamante de «Detalle del
+ *           Siniestro»). Una fila sin valor, o con otro valor, se rechaza.
  */
 
 const TAG = "Reclamo";
@@ -47,7 +50,7 @@ const FIELDS = ["fSiniestro", "hora", "fNotificacion", "statSin", "usuario", "ed
   "idPoliza", "ajustador", "observaciones", "cdgoPais", "cdgociu1", "cdgoest1", "cober15", "cober39"];
 const LABELS = {
   fSiniestro: "Fecha del siniestro", hora: "Hora del siniestro", fNotificacion: "Fecha de notificación",
-  statSin: "Estado del siniestro", usuario: "Persona que reporta o notifica", edadConductor: "Edad del conductor",
+  statSin: "Estado del siniestro", usuario: "Reclamante", edadConductor: "Edad del conductor",
   lugar: "Lugar del siniestro", descripcionSiniestro: "Descripción del siniestro", culpabilidad: "Indicador de culpabilidad",
   responsable: "Responsable del siniestro", cdgocaus: "Código de causa (evento asegurado)", cdgosucu: "Código de sucursal",
   cdgoramo: "Código de ramo", numepoli: "Número de póliza", idPoliza: "Id Poliza", ajustador: "Ajustador",
@@ -99,7 +102,7 @@ try {
   }
   const event = policy && required(r.cdgocaus, LABELS.cdgocaus) ? resolveEvent(r.cdgocaus, policy.productCode) : null;
   const adjuster = r.ajustador ? findAdjuster(r.ajustador) : null;
-  const claimantType = r.usuario ? findClaimantType(r.usuario) : "";
+  const claimantType = findClaimantType(r.usuario);
   const geo = resolveGeo(r.cdgoPais, r.cdgoest1, r.cdgociu1);
 
   // 4. Datos de auto de la información adicional (la vista sólo los permite en ramo 6)
@@ -366,12 +369,13 @@ function age(value) {
   return String(Number(text));
 }
 
-// «Reclamante» de la vista 48: Afectado, Asegurado o Tercera Persona.
+// «Reclamante» de la vista 48 (tipoReclamante de «Detalle del Siniestro»): Afectado, Asegurado o Tercera Persona.
 function findClaimantType(value) {
+  if (!value) { errors.push(`${LABELS.usuario} es obligatorio: Afectado, Asegurado o Tercera Persona.`); return ""; }
   const key = norm(value);
   const hit = CLAIMANT_TYPES.find(t => norm(t) === key) || (key === "TERCERO" ? "Tercera Persona" : null);
   if (hit) return hit;
-  errors.push(`${LABELS.usuario} '${value}' debe ser Afectado, Asegurado o Tercera Persona (el «Reclamante» de la vista de reclamos).`);
+  errors.push(`${LABELS.usuario} '${value}' debe ser Afectado, Asegurado o Tercera Persona.`);
   return "";
 }
 

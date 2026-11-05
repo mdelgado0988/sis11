@@ -23,6 +23,11 @@
  * @mission  MSN-000142 rev.2 (globaluat) — 2026-11-05: usuario que lanzó la carga. La cola de DoBatch corre la fila
  *           como SUPERVISOR; al terminar, lo que la fila creó pasa al usuario que ejecutó el lote (extra.user o Batch.user),
  *           como en la renovación (cmdRenewalPolicyIssuance): ver lcuRestoreUser al final.
+ * @mission  MSN-000146 (globaluat) — 2026-11-05: «Reclamante» es el tipo de reclamante de la vista 48 (Afectado, Asegurado o
+ *           Tercera Persona), no un contacto. La columna reclamante es obligatoria, se valida sin distinguir mayúsculas ni
+ *           tildes y se graba en tipoReclamante de «Detalle del Siniestro» (formulario 371), el campo que lee el selector
+ *           «Reclamante» de la vista 48. El contacto del reclamo es el contratante de la póliza, como en «Nuevo siniestro»
+ *           y en la carga genérica.
  */
 
 const TAG = "Reclamo";
@@ -33,6 +38,7 @@ const MIN_DATE = "1900-01-01";
 const DETAIL_SECTION = "Detalle del Siniestro";
 const EXTRA_SECTION = "InformacionResumenDelReclamo";
 const BATCH_FIELD = "loteCargaMasiva";
+const CLAIMANT_TYPES = ["Afectado", "Asegurado", "Tercera Persona"];
 const AFFECTED_SECTION = "ObjetosAfectados";
 const AFFECTED_FORM = "frmOATarjetaFraude";
 const PANAMA_UTC_OFFSET_HOURS = 5;
@@ -75,7 +81,8 @@ try {
   // 3. Evento asegurado de la carga y razón derivada para el reclamo.
   const stage = { code: "1", name: "NOTIFICADO" };
   const adjuster = findAdjuster(r.ajustador);
-  const claimer = required(r.reclamante, "Reclamante") ? findContact(r.reclamante, "Reclamante", false) : null;
+  const claimantType = findClaimantType(r.reclamante);
+  const claimer = policy ? { id: Number(policy.holderId) } : null;
   const event = policy && required(r.causa, "Evento asegurado") ? resolveEvent(r.causa, policy.productCode) : null;
   const geo = resolveGeo(r.provincia, r.ciudad);
   required(r.lugar, "Lugar");
@@ -102,6 +109,7 @@ try {
     ajustadorEmail: adjuster.email || "",
     hiddenAjustador: String(adjuster.id),
     descripcion: r.obserAdicional,
+    tipoReclamante: claimantType,
     cmbProvincia: String(geo.state.code),
     cmbMunicipio: String(geo.city.code),
     lugar: r.lugar,
@@ -254,6 +262,7 @@ function findPolicy(idText, codeText) {
   if (!codeText) errors.push(`Poliza es obligatorio (IdPoliza ${idText} corresponde a la póliza ${policy.code}).`);
   else if (norm(policy.code) !== norm(codeText)) { errors.push(`Poliza '${codeText}' no coincide con la póliza de IdPoliza ${idText} (${policy.code}).`); return null; }
   if (!(policy.active === true || policy.active === 1)) errors.push(`La póliza ${policy.code} (id ${policy.id}) no está vigente${policy.inactiveReason ? ": " + policy.inactiveReason : ""}.`);
+  if (!Number(policy.holderId)) errors.push(`La póliza ${policy.code} no tiene contratante.`);
   return policy;
 }
 
@@ -327,28 +336,14 @@ function contactName(c) {
   return parts.map(p => String(p || "").trim()).filter(Boolean).join(" ").replace(/\s+/g, " ");
 }
 
-// Contacto por id (código SIS), por cédula/pasaporte o por nombre completo.
-function findContact(value, label, personOnly) {
-  let rows = [];
-  if (/^\d+$/.test(value)) rows = query(`SELECT ${CONTACT_COLS} FROM Contact WHERE id=${Number(value)}`);
-  if (!rows.length) {
-    const key = idKey(value);
-    rows = query(`SELECT TOP 20 ${CONTACT_COLS} FROM Contact WHERE REPLACE(REPLACE(ISNULL(cnp,''),'-',''),' ','')='${sql(key)}' OR REPLACE(REPLACE(ISNULL(nationalId,''),'-',''),' ','')='${sql(key)}' OR REPLACE(REPLACE(ISNULL(passport,''),'-',''),' ','')='${sql(key)}'`);
-  }
-  if (!rows.length) {
-    const words = norm(value).split(" ").filter(w => w.length > 1);
-    if (words.length >= 2) {
-      const full = "(RTRIM(ISNULL([name],''))+' '+RTRIM(ISNULL(middleName,''))+' '+RTRIM(ISNULL(surname1,''))+' '+RTRIM(ISNULL(surname2,'')))";
-      const candidates = query(`SELECT TOP 50 ${CONTACT_COLS} FROM Contact WHERE ${words.map(w => `CHARINDEX(N'${sql(w)}', ${full}) > 0`).join(" AND ")}`);
-      rows = candidates.filter(c => norm(contactName(c)) === norm(value));
-    }
-  }
-  if (personOnly) rows = rows.filter(c => !(Number(c.isPerson) === 0 || c.isPerson === false));
-  if (rows.length === 1) return Object.assign(rows[0], { fullName: contactName(rows[0]) });
-  errors.push(rows.length > 1
-    ? `${label} '${value}' es ambiguo (contactos ${rows.map(c => c.id).join(", ")}); use el código del contacto.`
-    : `${label} '${value}' no existe como contacto (ni por código, ni por cédula, ni por nombre).`);
-  return null;
+// «Reclamante» de la vista 48 (tipoReclamante de «Detalle del Siniestro»): Afectado, Asegurado o Tercera Persona.
+function findClaimantType(value) {
+  if (!value) { errors.push("Reclamante es obligatorio: Afectado, Asegurado o Tercera Persona."); return ""; }
+  const key = norm(value);
+  const hit = CLAIMANT_TYPES.find(t => norm(t) === key) || (key === "TERCERO" ? "Tercera Persona" : null);
+  if (hit) return hit;
+  errors.push(`Reclamante '${value}' debe ser Afectado, Asegurado o Tercera Persona.`);
+  return "";
 }
 
 // casegurado: código numérico del ente; Cedula debe coincidir con su identificación registrada.
