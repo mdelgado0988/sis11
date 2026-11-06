@@ -11,6 +11,8 @@
  *   cmdApplyReaChangeCoverage                                cesiones confirmadas por changeId
  *   cmdGenertFormatoEmdoso                                   documento del endoso
  * La informacion especial del endoso viaja en jAdditional del Change (endorsementType INCLUSIONCOBERTURA).
+ * MSN-000151 (AXX-7657): la pantalla se bloquea por producto con InclusionCobertura en Main.disabledChanges; ChangeAddCoverage
+ *   solo deshabilita la opcion nativa del menu de endosos.
  * MSN-000124 (AXX-7003): fechas de las coberturas con las funciones actuales del formulario 574 (las mismas de la
  *   cadena 755, que ahora lee jAdditional.cobtar en la inclusion) y hiddenCobtar con las fechas del endoso registrado.
  */
@@ -307,7 +309,7 @@
       const config = parseJson(product.configJson, {}) || {};
       const main = config.Main || {};
       const disabled = parseJson(main.disabledChanges, []) || [];
-      setDisabledAdd(Array.isArray(disabled) && disabled.indexOf('ChangeAddCoverage') >= 0);
+      setDisabledAdd(Array.isArray(disabled) && disabled.indexOf('InclusionCobertura') >= 0);
       setProductCoverages(Array.isArray(config.Coverages) ? config.Coverages : []);
 
       const lob = num(pol.lob);
@@ -1084,14 +1086,72 @@
       if (!closeEnough(item.premium, item.expectedPremium)) errors.push(t('La prima distribuida de la cobertura') + ' ' + code + ' ' + t('no coincide con la prima final.'));
       if (!closeEnough(item.sum, item.expectedSum)) errors.push(t('La suma distribuida de la cobertura') + ' ' + code + ' ' + t('no coincide con la suma final.'));
     });
+    const contractChecks = [];
     (contractRows || []).forEach(function (contract) {
       const distributedSum = (contract.lineRows || []).reduce(function (sum, row) { return sum + num(row.sum); }, 0);
       const distributedPremium = (contract.lineRows || []).reduce(function (sum, row) { return sum + num(row.premium); }, 0);
       const distributedPercentage = (contract.lineRows || []).filter(function (row) { return !row.coinsurance; }).reduce(function (sum, row) { return sum + num(row.percentage); }, 0);
+      contractChecks.push({
+        contractId: contract.contractId,
+        expected: { sum: num(contract.finalSum), premium: num(contract.finalPremium) },
+        distributed: { sum: distributedSum, premium: distributedPremium, percentage: distributedPercentage },
+        differences: {
+          sum: money(distributedSum - num(contract.finalSum)),
+          premium: money(distributedPremium - num(contract.finalPremium)),
+          percentage: distributedPercentage - 100
+        },
+        lines: (contract.lineRows || []).map(function (row) {
+          return {
+            lineId: row.lineId, label: row.label, coinsurance: !!row.coinsurance,
+            percentage: num(row.percentage), sum: num(row.sum), premium: num(row.premium),
+            commission: num(row.commission), tax: num(row.tax),
+            rows: (row.rows || []).map(function (item) {
+              return {
+                coverageCode: item.coverageCode, coverageName: item.coverageName,
+                counts: item.counts !== false, finalSum: num(item.finalSum), finalPremium: num(item.finalPremium),
+                sumInsuredCedant: num(item.sumInsuredCedant), sumInsuredRe: num(item.sumInsuredRe),
+                premiumCedant: num(item.premiumCedant), premiumRe: num(item.premiumRe),
+                proportionCed: num(item.proportionCed), proportionRe: num(item.proportionRe),
+                commission: num(item.commission), tax: num(item.tax)
+              };
+            })
+          };
+        })
+      });
       if (Math.abs(distributedPercentage - 100) > 0.01) errors.push(t('Contrato') + ' ' + contract.contractId + ': ' + t('la distribución debe sumar 100%.'));
       if (!closeEnough(distributedSum, contract.finalSum)) errors.push(t('La suma distribuida del contrato') + ' ' + contract.contractId + ' ' + t('no coincide con la suma final.'));
       if (!closeEnough(distributedPremium, contract.finalPremium)) errors.push(t('La prima distribuida del contrato') + ' ' + contract.contractId + ' ' + t('no coincide con la prima final.'));
     });
+    if (errors.length && typeof console !== 'undefined' && console.log) {
+      const debug = {
+        view: 'InclusionCobertura',
+        marker: 'reinsurance-validation-debug',
+        timestamp: new Date().toISOString(),
+        policy: policy ? {
+          id: policy.id, code: policy.code, productCode: policy.productCode,
+          lob: policy.lob, currency: policy.currency
+        } : null,
+        endorsement: {
+          policyId: policyId,
+          effectiveDate: effectiveDate && effectiveDate.format ? effectiveDate.format('YYYY-MM-DD') : effectiveDate,
+          selected: selected,
+          surcharge: num(surcharge), discount: num(discount)
+        },
+        billing: quote && quote.billing ? quote.billing : null,
+        sim: {
+          rows: sim.rows,
+          finalRows: sim.finalRows,
+          lineOverrides: sim.lineOverrides || {}
+        },
+        coverageTotals: byCoverage,
+        lineTotals: byLine,
+        contractChecks: contractChecks,
+        sourceCessions: baseCessions,
+        sourceParticipants: baseParts,
+        errors: errors
+      };
+      console.log('[InclusionCobertura] reinsurance-validation-debug', JSON.stringify(debug, null, 2));
+    }
     return { ok: errors.length === 0, errors: errors };
   };
   const confirmarReaseguro = function () {
@@ -2339,7 +2399,7 @@
           </Button>
         </div>
 
-        {disabledAdd ? <Alert type="warning" showIcon message={t('El producto tiene deshabilitado el endoso de inclusión de coberturas (ChangeAddCoverage).')} /> : null}
+        {disabledAdd ? <Alert type="warning" showIcon message={t('El producto tiene deshabilitada la pantalla de inclusión de coberturas (InclusionCobertura).')} /> : null}
         {policy && policy.active === false ? <Alert type="warning" showIcon message={t('La póliza no está activa.')} /> : null}
         {error ? <Alert className="axx-alerta" type="error" showIcon message={error} closable onClose={function () { setError(null); }} /> : null}
         {result ? (

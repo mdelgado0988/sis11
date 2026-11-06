@@ -665,7 +665,23 @@ function bloquearCamposPolizaEmitida() {
     $('#btnGestionarCoberturas').prop('disabled', true);
 
     if (isEndorsment) {
-        const $editable = $('#tbextras, #txtColorAuto, #tbplaca, #cmbCombustibleAuto, #tbVIN');
+        // En endoso se permite modificar los datos propios del vehículo. Algunos
+        // formularios/versiones del objeto usan nombres distintos, por eso se
+        // contemplan los identificadores conocidos y sus atributos equivalentes.
+        const $editable = $scope.find([
+            '#tbextras',
+            '#txtColorAuto',
+            '#tbplaca',
+            '#cmbCombustibleAuto',
+            '#tbVIN',
+            '#tbseriechasis',
+            '#tbseriemotor',
+            '#tbnumprestamo',
+            '#cmbUsoAuto',
+            '#cmbtipo',
+            '#txtTransmision',
+            '#cmbCilindrosAuto'
+        ].join(', '));
         $editable
             .prop('readonly', false)
             .prop('disabled', false)

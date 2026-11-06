@@ -14,7 +14,9 @@
  *
  * @param {string} context.filter  La misma condicion WHERE sobre LifePolicy que arma la vista con sus
  *                                 filtros actuales (General, Fechas, Otros, filtro rapido, seleccion guardada).
- *                                 Vacia = sin filtro. Se valida: solo lectura.
+ *                                 Vacia = sin filtro. También acepta filtros de objeto asegurado Auto:
+ *                                 motor, chasis, placa y numeroPrestamo ya traducidos a SQL por la vista.
+ *                                 Se valida: solo lectura.
  * @param {number} context.size    Filas por pagina (1..500).
  * @param {number} context.page    Pagina BASE 0 (igual que RepoLifePolicy GET).
  * @param {string} context.policyStatus  OFFERED, CURRENT, CANCELLED o RENEWED.

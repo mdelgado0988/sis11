@@ -296,6 +296,16 @@
   const quickSql = (k) => { const q = QUICK.filter((x) => x[0] === k)[0]; return q ? q[2] : undefined; };
   const val = (lv) => (lv && typeof lv === 'object' ? lv.value : lv);
 
+  // Los datos propios del auto viven en InsuredObject.jValues (objeto DTAUT).
+  const autoObjectFilter = (fieldName, value) => {
+    if (!has(value)) return undefined;
+    return "id IN (SELECT io.lifePolicyId FROM InsuredObject io " +
+      "JOIN ObjectDefinition od ON od.id=io.objectDefinitionId " +
+      "CROSS APPLY OPENJSON(CASE WHEN ISJSON(io.jValues)=1 THEN io.jValues ELSE N'[]' END) " +
+      "WITH (name nvarchar(100) '$.name', fieldValue nvarchar(max) '$.userData[0]') field " +
+      "WHERE od.code='DTAUT' AND field.name='" + fieldName + "' AND field.fieldValue LIKE N'%" + esc(value) + "%')";
+  };
+
   // La MISMA consulta que arma la busqueda nativa, en el mismo orden.
   const buildFilter = (v, br) => {
     const q = [];
@@ -336,6 +346,11 @@
     if (has(v.restrictedStatus)) q.push("restricted='" + (v.restrictedStatus === 'RESTRICTED' ? 1 : 0) + "'");
     if (has(v.organizationId)) q.push('organizationId=' + parseInt(v.organizationId, 10));
     if (cmpStr(v.certificates)) q.push("id in (SELECT groupPolicyId FROM lifepolicy where policyType='C' GROUP BY groupPolicyId HAVING COUNT(*)" + cmpStr(v.certificates) + ')');
+    ['motor', 'chasis', 'placa', 'numeroPrestamo'].forEach((key) => {
+      const fieldName = { motor: 'tbseriemotor', chasis: 'tbseriechasis', placa: 'tbplaca', numeroPrestamo: 'tbnumprestamo' }[key];
+      const condition = autoObjectFilter(fieldName, v[key]);
+      if (condition) q.push(condition);
+    });
     if (has(v.quickFilter) && quickSql(v.quickFilter)) q.push(quickSql(v.quickFilter));
     return q.join(' AND ');
   };
@@ -859,6 +874,16 @@
                   {currencies.filter((c) => c.enabled).map((c) => <Option key={c.code} value={c.code}>{c.name}</Option>)}
                 </Select>)}
               {campo(t('Certificate Count'), compare('certificates'))}
+            </TabPane>
+            <TabPane tab="Auto" key="auto">
+              {fila(
+                campo('Motor', textInput('motor', 'Número de motor')),
+                campo('Chasis', textInput('chasis', 'Número de chasis'))
+              )}
+              {fila(
+                campo('Placa', textInput('placa', 'Número de placa')),
+                campo('Número de préstamo', textInput('numeroPrestamo', 'Número de préstamo'))
+              )}
             </TabPane>
           </Tabs>
           <Button style={{ marginTop: 10 }} type="primary" icon={<IcoSearch />} onClick={onSearch} loading={loading}>

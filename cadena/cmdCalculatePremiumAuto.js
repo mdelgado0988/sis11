@@ -646,8 +646,30 @@ function normalizeComparable(value) {
 }
 
 function evalConfig(obj, formula) {
-  const keys = Object.keys(obj);
-  const values = Object.values(obj);
+  // Las configuraciones históricas no usan una convención única para los
+  // nombres de variables (por ejemplo, Suma/SUMA/suma). Como las fórmulas
+  // se evalúan en un scope JavaScript, agregamos alias por mayúsculas y
+  // minúsculas sin reemplazar una clave explícita que ya exista.
+  const scope = Object.create(null);
+  const isIdentifier = value => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
+
+  Object.keys(obj).forEach(key => {
+    scope[key] = obj[key];
+  });
+
+  Object.keys(obj).forEach(key => {
+    [key.toUpperCase(), key.toLowerCase()].forEach(alias => {
+      if (
+        isIdentifier(alias) &&
+        !Object.prototype.hasOwnProperty.call(scope, alias)
+      ) {
+        scope[alias] = obj[key];
+      }
+    });
+  });
+
+  const keys = Object.keys(scope);
+  const values = Object.values(scope);
   const fn = new Function(...keys, "n", `return ${formula}`);
   return fn(...values, n);
 }

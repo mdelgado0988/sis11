@@ -147,7 +147,9 @@ resultado.Prima = n(paramAnualPremium ?? policy.annualPremium ?? 0);
 resultado.Impuesto = n(paramTax ?? policy.tax ?? 0);
 resultado.Total = n(paramAnualTotal ?? policy.annualTotal ?? 0);
 resultado.FormaPago = getCatalogValue("RepoPaymentMethodCatalog", `code = '${escapeSql(policy?.paymentMethod ?? "-1")}'`, "name") ?? "";
-resultado.Cuotas = Array.isArray(paramPayPlan) ? paramPayPlan.length : (Array.isArray(policy?.PayPlan) ? policy.PayPlan.length : 0)
+const policyPayPlan = normalizeArrayInput(policy?.PayPlan);
+const payPlan = paramPayPlan.length ? paramPayPlan : policyPayPlan;
+resultado.Cuotas = payPlan.length;
 
 //Datos de Coberturas
 const tarifaEntrada = parseJsonArray(oaUserData?.hiddenCobtar);
@@ -156,7 +158,13 @@ const configCobtarAuto = GetFullTable.ok
   ? mapearTablaConfig(GetFullTable.outData ?? [])
   : [];
 resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : [])
-  .sort((a, b) => Number(a.number ?? 0) - Number(b.number ?? 0))
+  .sort((a, b) => {
+    const ordenA = ordenCoberturaAuto(a?.name);
+    const ordenB = ordenCoberturaAuto(b?.name);
+
+    if (ordenA !== ordenB) return ordenA - ordenB;
+    return Number(a?.number ?? 0) - Number(b?.number ?? 0);
+  })
   .map(({ code, name, limit, premium, deductible }) => {
     const findCoverage = Array.isArray(tarifaEntrada)
       ? tarifaEntrada.find(x => vEqual(x?.coverageCode) == vEqual(code))
@@ -167,10 +175,11 @@ resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : []
       ...catalogTexts,
       Codigo: code,
       Cobertura: name,
-      Limite: n(limit),
+      Limite: getLimiteDesdeHiddenCobtar({ ...(findCoverage || {}), ...catalogTexts }, limit),
       Prima: n(premium),
       Moneda: monedaDocumento,
       DeductibleCov: deductible,
+      Deducible: deductible,
       Evento: limites.find(x => vEqual(x.Producto) == vEqual(policy.productCode) && vEqual(x.Cobertura) == vEqual(code))?.Limite ?? "",
       Porcentaje: findCoverage && findCoverage.Porcentaje ? findCoverage.Porcentaje : 0,
       //findCoverage
@@ -363,6 +372,84 @@ function getCatalogTexts(coverageCode, values, configRows) {
   });
 
   return result;
+}
+
+function getLimiteDesdeHiddenCobtar(coverage, fallbackLimit) {
+  if (!coverage || typeof coverage !== "object") return formatearLimite(fallbackLimit);
+
+  const key = Object.keys(coverage).find(name =>
+    ["SUMA", "LIMITE"].includes(String(name).trim().toUpperCase())
+  );
+  if (!key) return formatearLimite(fallbackLimit);
+
+  const value = coverage[key];
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return formatearLimite(fallbackLimit);
+  }
+
+  const numericValue = toNumeric(value);
+  if (numericValue !== null && numericValue === 0) return "Incluido";
+
+  const textKey = Object.keys(coverage).find(name =>
+    String(name).trim().toUpperCase() === `${String(key).trim().toUpperCase()}TEXT`
+  );
+  const description = textKey ? String(coverage[textKey] ?? "").trim() : "";
+  if (description) return formatearTextoLimite(description);
+
+  return numericValue !== null ? n(numericValue) : formatearTextoLimite(String(value).trim());
+}
+
+function ordenCoberturaAuto(nombre) {
+  const orden = [
+    "LESIONES CORPORALES",
+    "LESIONES CORPORALES SOBAT",
+    "DANOS A LA PROPIEDAD AJENA",
+    "DANOS A LA PROPIEDAD AJENA SOBAT",
+    "GASTOS MEDICOS",
+    "COMPRENSIVO",
+    "COLISION",
+    "ENDOSO GLOBAL SUPER",
+    "ENDOSO ASISTENCIA VIAL",
+    "ENDOSO MAS GLOBAL",
+    "ENDOSO DE MUERTE ACCIDENTAL"
+  ];
+
+  const normalizado = String(nombre ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+
+  const indice = orden.indexOf(normalizado);
+  return indice >= 0 ? indice : orden.length;
+}
+
+function formatearLimite(value) {
+  const numericValue = toNumeric(value);
+  if (numericValue === null) return String(value ?? "").trim();
+  if (numericValue === 0) return "Incluido";
+  return n(numericValue);
+}
+
+function toNumeric(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+
+  const text = String(value).replace(/,/g, "").trim();
+  if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) return null;
+
+  const numericValue = Number(text);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function formatearTextoLimite(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return text;
+
+  return text.replace(/(?<![\w.])-?\d+(?:[.,]\d+)?(?![\w.])/g, token => {
+    const numericValue = toNumeric(token);
+    return numericValue === null ? token : n(numericValue);
+  });
 }
 
 function enrichAutoUserData(source, configRows, catalogFields) {
@@ -648,17 +735,7 @@ function toFecha(value) {
 }
 
 function getHora(fecha) {
-  const date = toPanamaDate(fecha);
-
-  if (isNaN(date)) return "";
-
-  let horas = date.getUTCHours();
-  const minutos = String(date.getUTCMinutes()).padStart(2, "0");
-  const periodo = horas >= 12 ? "pm" : "am";
-
-  horas = horas % 12 || 12;
-
-  return `${String(horas).padStart(2, "0")}:${minutos} ${periodo}`;
+  return "12:00 AM";
 }
 
 function toPanamaDate(value) {

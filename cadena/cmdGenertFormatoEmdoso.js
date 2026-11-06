@@ -8,6 +8,7 @@
  * @version 1.1
  * @summary This command makes Endosos Template Data Builder + GeneratePolicyDoc
  * @changes MSN-000151 - ramo 96: marca y modelo por ramo y marca, provincia y ciudad de la dirección del tomador, límite de la cobertura incluida. Los demás ramos no cambian.
+ * @changes MSN-000160 - ramo 6: plantillas FormatoEndososAuto / FormatoEndososSinCoberturaAuto (el aumento de suma sigue con AdendoAumentoAUTO), dirección completa, ciudad y provincia del tomador, suma asegurada y descripciones extras del vehículo, tasa de impuesto de la póliza. Los demás ramos no cambian.
 */
 
 const changeId = context.changeId;
@@ -60,6 +61,10 @@ const reportesEndoso = {
   ramoDiverso: {
     conPrima: 'FormatoEndososRD.docx',
     sinPrima: 'FormatoEndososSinCoberturaRD.docx'
+  },
+  auto: {
+    conPrima: 'FormatoEndososAuto.docx',
+    sinPrima: 'FormatoEndososSinCoberturaAuto.docx'
   },
   vidaTarjetaProtegida: 'FormatoEndososVidaTarjetaProtegida.docx'
   
@@ -641,6 +646,7 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
     if (isSuretyPolicy(policy)) {
       return (isSuretyV2Policy(policy) ? reportes.fianza.anticipo : reportes.fianza).sinPrima;
     }
+    if (isAutoPolicy(policy)) return reportes.auto.sinPrima;
     return reportes.incendio.sinPrima;
   }
 
@@ -662,6 +668,16 @@ function seleccionarReporteEndoso(policy, change, billDiff, reportes) {
     return esCambioCoberturaActual || hasEndorsementPremium(billDiff, change)
       ? reportes.ramoTecnico.conPrima
       : reportes.ramoTecnico.sinPrima;
+  }
+
+  // MSN-000160: Automóvil usa sus propias plantillas. Llevan el detalle de coberturas los endosos que las
+  // modifican, la cancelación y los que generan prima; el resto dice que no se modificaron coberturas.
+  if (isAutoPolicy(policy)) {
+    const modificaCoberturas = esCambioCoberturaActual
+      || ['COVERAGECHANGE', 'CHANGECOVERAGE', 'CANCELLATIONCHANGE'].includes(autoChangeType.discriminator);
+    return modificaCoberturas || (!endosoNoGeneraPrima(change) && hasEndorsementPremium(billDiff, change))
+      ? reportes.auto.conPrima
+      : reportes.auto.sinPrima;
   }
 
   const endorsementType = tipoCambioCobertura(change).endorsementType;
@@ -1699,6 +1715,30 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       policy, change, insuredData, insuredObject: InsuredObject, holder, contacts: dataContacto,
       countries, provinces: procincias, cities: Municipios, sectors
     });
+  }
+
+  // MSN-000160: las plantillas de endoso de Automóvil imprimen la dirección completa, la ciudad y la provincia
+  // del tomador (antes: el corregimiento como provincia y una ciudad del riesgo que el vehículo no tiene), la suma
+  // asegurada con formato, las Descripciones Extras del vehículo y la tasa de impuesto de la póliza.
+  if (isAutoPolicy(policy)) {
+    const sameCode = (left, right) => String(left ?? '').trim() === String(right ?? '').trim();
+    const corregimientoAuto = addr.sector
+      ? (sectors.find(itm => Number(itm.id) === Number(addr.sector))?.name || '')
+      : '';
+    const ciudadAuto = Municipios.find(itm => sameCode(itm.stateCode, addr.state) && sameCode(itm.code, addr.city))?.name || '';
+    custom.Address.Linea2 = [addr.address1, addr.address2, corregimientoAuto]
+      .map(value => String(value ?? '').trim())
+      .filter((value, index, list) => value && list.indexOf(value) === index)
+      .join(', ');
+    custom.Address.NombreProvincia = procincias.find(itm => sameCode(itm.countryCode, addr.country) && sameCode(itm.code, addr.state))?.name || '';
+    custom.Address.NombreDistrito = ciudadAuto;
+    custom.Address.NombreCiudad = ciudadAuto;
+    const sumaVehiculo = String(riesgo.SumaAsegurada ?? '').trim();
+    riesgo.SumaAseguradaTexto = sumaVehiculo ? n(sumaVehiculo) : '';
+    riesgo.ComentariosExtras = String(suretyValue(insuredData, ['tbextras']) ?? '').trim();
+    const primaPoliza = numericValue(policy?.anualPremium);
+    const tasaImpuesto = primaPoliza ? Math.round(numericValue(policy?.tax) / primaPoliza * 1000) / 10 : 0;
+    custom.EtiquetaImpuesto = tasaImpuesto > 0 ? `Impuesto ${tasaImpuesto}%:` : 'Impuesto:';
   }
 
   dataContacto.forEach(row => {
