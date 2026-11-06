@@ -1964,7 +1964,12 @@
   };
 
   const validateProceedReinsurance = function (snapshotOverride) {
-    const source = snapshotOverride || buildEditedReinsuranceSnapshot() || reinsuranceSnapshot;
+    // La línea puede haber cambiado por una prorrata o por el porcentaje de
+    // comisión. Recalcular los aceptantes antes de validar evita comparar la
+    // comisión de la línea nueva contra importes de aceptantes del snapshot
+    // anterior.
+    const candidate = snapshotOverride || buildEditedReinsuranceSnapshot() || reinsuranceSnapshot;
+    const source = candidate ? recalculateReinsuranceParticipants(candidate) : candidate;
     const sourceRows = source && Array.isArray(source.distribution) ? source.distribution : [];
     const errors = [];
     if (!source) {
@@ -2033,12 +2038,15 @@
           const split = participants.reduce((sum, participant) => sum + Number(participant.split || 0), 0);
           const participantSum = participants.reduce((sum, participant) => sum + Number(participant.sumInsured || 0), 0);
           const participantPremium = participants.reduce((sum, participant) => sum + Number(participant.premium || 0), 0);
-          const participantCommission = participants.reduce((sum, participant) => sum + Number(participant.commission || 0), 0);
+          // Las comisiones se persisten a centavos. Redondear ambos lados
+          // antes de comparar evita que una diferencia binaria de JavaScript
+          // convierta una diferencia exacta de 0.01 en un descuadre mayor.
+          const participantCommission = moneyValue(participants.reduce((sum, participant) => sum + Number(participant.commission || 0), 0));
           const participantTax = participants.reduce((sum, participant) => sum + Number(participant.tax || 0), 0);
           if (Math.abs(split - 100) > 0.01) errors.push(t('Los aceptantes deben sumar 100%.'));
           if (Math.abs(participantSum - cededSum) > 0.01) errors.push(t('La suma de aceptantes no coincide con la suma cedida.'));
           if (Math.abs(participantPremium - cededPremium) > 0.01) errors.push(t('La prima de aceptantes no coincide con la prima cedida.'));
-          if (Math.abs(participantCommission - Number(row.commission || 0)) > 0.01) errors.push(t('La comisión de aceptantes no coincide con la línea.'));
+          if (Math.abs(participantCommission - moneyValue(row.commission)) > 0.01) errors.push(t('La comisión de aceptantes no coincide con la línea.'));
           if (Math.abs(participantTax - Number(row.tax || 0)) > 0.01) errors.push(t('El impuesto de aceptantes no coincide con la línea.'));
         }
       }
@@ -2393,6 +2401,21 @@
       setResult({ kind: 'error', msg: t('Confirme el reaseguro antes de ejecutar el endoso.') });
       setResultTab('reinsurance');
       message.warning(t('Confirme el reaseguro antes de ejecutar el endoso.'));
+      return;
+    }
+    // La distribución puede cambiar después de confirmarse (por ejemplo,
+    // por una edición de aceptantes o un recálculo). Revalidar aquí evita
+    // ejecutar usando un estado confirmado que ya quedó desactualizado.
+    const executionReinsurance = recalculateReinsuranceParticipants(
+      buildEditedReinsuranceSnapshot() || reinsuranceSnapshot
+    );
+    const executionValidation = validateProceedReinsurance(executionReinsurance);
+    if (!executionValidation.ok) {
+      setReinsuranceConfirmed(false);
+      setReinsuranceError(executionValidation.errors.join(' '));
+      setResult({ kind: 'error', msg: t('La distribución no permite ejecutar el endoso') + ': ' + executionValidation.errors.join(' ') });
+      setResultTab('reinsurance');
+      message.error(executionValidation.errors.join(' '));
       return;
     }
     let currentProceedOrderEnabled = false;

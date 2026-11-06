@@ -1875,7 +1875,11 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       custom.Endoso.Coberturas.forEach(x => {
         x.limit = n(x.limit);
         x.premiumDif = n(x.premiumDif);
-        x.deductible = endosoSinPrima ? n(0) : n(x.deductible);
+        x.deductible = formatearDeducibleEndoso(
+          x.deductible,
+          changeName === 'CancellationChange',
+          endosoSinPrima
+        );
       })
     };
 
@@ -2031,6 +2035,18 @@ function n(x) {
     decimalSeparator: '.',
     fallback: '0.00'
   }); 
+}
+
+function formatearDeducibleEndoso(value, esCancelacion, endosoSinPrima) {
+  const text = value === null || value === undefined ? "" : String(value).trim();
+  if (!text) return endosoSinPrima ? n(0) : "";
+
+  const numeric = Number(text.replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) return text;
+
+  if (esCancelacion) return n(-Math.abs(numeric));
+  if (endosoSinPrima) return n(0);
+  return n(numeric);
 }
 
 function toDate(dt) {

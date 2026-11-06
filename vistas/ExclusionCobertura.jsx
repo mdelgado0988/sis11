@@ -2,6 +2,8 @@
  * @name  ExclusionCobertura
  * @purpose Endoso de exclusion de coberturas vigentes opcionales del producto (ChangeRemoveCoverage).
  * La informacion especial del endoso viaja en jAdditional del Change (endorsementType EXCLUSIONCOBERTURA).
+ * MSN-000151 (AXX-7657): la pantalla se bloquea por producto con ExclusionCobertura en Main.disabledChanges; ChangeRemoveCoverage
+ *   solo deshabilita la opcion nativa del menu de endosos.
  */
 () => {
   const Tabs = A.Tabs;
@@ -284,7 +286,7 @@
       const config = parseJson(product.configJson, {}) || {};
       const main = config.Main || {};
       const disabled = parseJson(main.disabledChanges, []) || [];
-      setDisabledRemove(Array.isArray(disabled) && disabled.indexOf('ChangeRemoveCoverage') >= 0);
+      setDisabledRemove(Array.isArray(disabled) && disabled.indexOf('ExclusionCobertura') >= 0);
       setProductCoverages(Array.isArray(config.Coverages) ? config.Coverages : []);
 
       const lob = num(pol.lob);
@@ -772,43 +774,78 @@
         return { payload: quotePayload, o: out };
       };
       let quoted = await cotizarCon(amendments);
-      // MSN-000139 (T05): el ajuste (recargo − descuento) va a la prima de la portadora: la primera dependiente o, si no
-      // hay, la cobertura básica que queda (si no, la primera que suma). Segunda cotización con el ajuste en la enmienda.
+      // MSN-000139 (T05): el ajuste (recargo − descuento) se distribuye entre
+      // las coberturas que permanecen en la póliza. En una exclusión la prima
+      // eliminada es negativa, por lo que un recargo positivo puede compensarla
+      // sin cargar todo el importe a una sola cobertura.
       const adjustment = money(num(surcharge) - num(discount));
       const changedRows = dependents.map(function (d) { return Object.assign({ dependent: true }, d); });
+      const adjustmentByCoverage = {};
       let adjustmentCoverageCode = '';
+      let adjustmentValidationError = null;
       if (adjustment !== 0) {
-        const carrierCoverage = dependents.length
-          ? coverageByCode(remainingCoverages, dependents[0].code)
-          : (remainingCoverages.find(function (c) { return c.basic === true; }) || remainingCoverages.find(function (c) { return countsFor(c.code); }) || null);
-        if (!carrierCoverage) throw new Error(t('No queda ninguna cobertura en la póliza para aplicar el recargo o descuento.'));
-        adjustmentCoverageCode = txt(carrierCoverage.code);
-        const quotedCarrier = coverageByCode(parseJson(quoted.o.jAfterRemovedCoverages, []) || [], adjustmentCoverageCode);
-        const dependentEntry = coverageByCode(amendments, adjustmentCoverageCode);
-        const baseWithout = dependentEntry ? num(dependentEntry.basePremium) : num(quotedCarrier ? quotedCarrier.basePremium : carrierCoverage.basePremium);
-        const carrierExtra = num(quotedCarrier ? quotedCarrier.extraPremium : carrierCoverage.extraPremium);
-        const adjustedBase = money(baseWithout + adjustment);
-        if (money(adjustedBase + carrierExtra) < 0) throw new Error(t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + adjustmentCoverageCode + ')');
-        const carrierRow = coverageByCode(changedRows, adjustmentCoverageCode);
-        if (carrierRow && dependentEntry) {
-          dependentEntry.basePremium = adjustedBase;
-          carrierRow.newBasePremium = adjustedBase;
-          carrierRow.newPremium = money(adjustedBase + num(carrierRow.extraPremium));
-          carrierRow.movement = money(carrierRow.newPremium - carrierRow.oldPremium);
-        } else {
-          const carrierLimit = num(carrierCoverage.limit);
-          const carrierOldPremium = money(num(carrierCoverage.basePremium) + num(carrierCoverage.extraPremium));
-          const carrierNewPremium = money(adjustedBase + carrierExtra);
-          changedRows.push({
-            dependent: false, key: adjustmentCoverageCode, code: adjustmentCoverageCode,
-            name: txt(carrierCoverage.name || carrierCoverage.commercialName || carrierCoverage.description), coverageId: Number(carrierCoverage.id || 0),
-            oldSum: carrierLimit, newSum: carrierLimit, oldPremium: carrierOldPremium, newPremium: carrierNewPremium, extraPremium: carrierExtra,
-            oldBasePremium: num(carrierCoverage.basePremium), newBasePremium: adjustedBase, prorate: 1,
-            movement: money(carrierNewPremium - carrierOldPremium), sumMovement: 0, start: carrierCoverage.start, end: carrierCoverage.end
-          });
-          amendments.push({ code: adjustmentCoverageCode, oldLimit: carrierLimit, oldBasePremium: num(carrierCoverage.basePremium), limit: carrierLimit, basePremium: adjustedBase });
+        const quotedCoverages = parseJson(quoted.o.jAfterRemovedCoverages, []) || [];
+        const targets = remainingCoverages.map(function (coverage) {
+          const quotedCoverage = coverageByCode(quotedCoverages, coverage.code);
+          const basePremium = quotedCoverage ? num(quotedCoverage.basePremium) : num(coverage.basePremium);
+          return { coverage: coverage, quoted: quotedCoverage, basePremium: basePremium };
+        }).filter(function (item) { return item.basePremium > 0; });
+        if (!targets.length) {
+          throw new Error(t('No queda ninguna cobertura en la póliza para aplicar el recargo o descuento.'));
         }
-        quoted = await cotizarCon(amendments);
+        adjustmentCoverageCode = txt(targets[0].coverage.code);
+        const totalWeight = targets.reduce(function (sum, item) { return sum + item.basePremium; }, 0) || 1;
+        let remainingAdjustment = adjustment;
+        const adjustedAmendments = amendments.slice();
+        targets.forEach(function (item, index) {
+          const coverage = item.coverage;
+          const code = txt(coverage.code);
+          const share = index === targets.length - 1
+            ? money(remainingAdjustment)
+            : money(adjustment * item.basePremium / totalWeight);
+          remainingAdjustment = money(remainingAdjustment - share);
+          adjustmentByCoverage[code] = share;
+          const baseWithout = item.basePremium;
+          const carrierExtra = num(item.quoted ? item.quoted.extraPremium : coverage.extraPremium);
+          const adjustedBase = money(baseWithout + share);
+          if (money(adjustedBase + carrierExtra) < 0) {
+            adjustmentValidationError = t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + code + ')';
+            return;
+          }
+          const existingIndex = adjustedAmendments.findIndex(function (entry) { return up(entry.code) === up(code); });
+          const existingAmendment = existingIndex >= 0 ? adjustedAmendments[existingIndex] : null;
+          const amendment = {
+            code: code,
+            oldLimit: existingAmendment ? num(existingAmendment.oldLimit) : num(coverage.limit),
+            oldBasePremium: existingAmendment ? num(existingAmendment.oldBasePremium) : baseWithout,
+            limit: num(coverage.limit), basePremium: adjustedBase
+          };
+          if (existingIndex >= 0) adjustedAmendments[existingIndex] = amendment;
+          else adjustedAmendments.push(amendment);
+          const carrierRow = coverageByCode(changedRows, code);
+          const carrierOldPremium = carrierRow
+            ? money(carrierRow.oldPremium)
+            : money(baseWithout + num(coverage.extraPremium));
+          const carrierNewPremium = money(adjustedBase + carrierExtra);
+          if (carrierRow) {
+            carrierRow.newBasePremium = adjustedBase;
+            carrierRow.newPremium = carrierNewPremium;
+            carrierRow.movement = money(carrierNewPremium - carrierRow.oldPremium);
+            carrierRow.adjustment = share;
+          } else {
+            changedRows.push({
+              dependent: false, key: code, code: code,
+              name: txt(coverage.name || coverage.commercialName || coverage.description), coverageId: Number(coverage.id || 0),
+              oldSum: num(coverage.limit), newSum: num(coverage.limit), oldPremium: carrierOldPremium,
+              newPremium: carrierNewPremium, extraPremium: carrierExtra, oldBasePremium: baseWithout,
+              newBasePremium: adjustedBase, prorate: 1, movement: money(carrierNewPremium - carrierOldPremium),
+              adjustment: share, sumMovement: 0, start: coverage.start, end: coverage.end
+            });
+          }
+        });
+        if (!adjustmentValidationError) {
+          quoted = await cotizarCon(adjustedAmendments);
+        }
       }
       const payload = quoted.payload;
       const o = quoted.o;
@@ -841,23 +878,35 @@
       const beforePremium = hasBill ? num(bill.anualPremium) - num(diff.annualPremium) : money(currentAnnualPremium);
       const beforeTax = hasBill ? num(bill.tax) - num(diff.tax) : num(policy.tax);
       const beforeTotal = hasBill ? num(bill.anualTotal) - num(diff.annualTotal) : beforePremium + beforeTax;
-      const movementPremium = hasBill ? num(diff.annualPremium) : money(annualMovement + changedMovement);
-      const movementTax = hasBill ? num(diff.tax) : 0;
-      const movementTotal = hasBill ? num(diff.annualTotal) : movementPremium + movementTax;
-      // El impuesto de BillDiff es anual. Para la columna "A facturar" debe
-      // seguir la prorrata efectiva del movimiento de primas, incluyendo las
-      // coberturas dependientes recalculadas. Antes se dejaba fijo en cero y
-      // el total prorrateado omitía el impuesto.
+      // BillDiff representa el movimiento neto después del recargo/descuento.
+      // La fila Prima debe mostrar la prima bruta de las coberturas y el ajuste
+      // debe quedar separado para no duplicarlo en el total.
+      const netPremiumMovement = hasBill ? num(diff.annualPremium) : money(annualMovement + changedMovement);
+      const movementPremium = money(netPremiumMovement - adjustment);
       const annualDependentMovement = changedRows.reduce(function (sum, row) {
         const factor = num(row.prorate) > 0 ? num(row.prorate) : 1;
         return sum + num(row.movement) / factor;
       }, 0);
-      const annualPremiumMovement = annualMovement + annualDependentMovement;
       const proratedPremiumMovement = proratedMovement + changedMovement;
-      const taxProrate = Math.abs(annualPremiumMovement) > 0.005
-        ? Math.max(0, Math.min(1, Math.abs(proratedPremiumMovement / annualPremiumMovement)))
+      const grossAnnualDependentMovement = annualDependentMovement - adjustment;
+      const grossAnnualPremiumMovement = money(annualMovement + grossAnnualDependentMovement);
+      const grossProratedPremiumMovement = money(proratedPremiumMovement - adjustment);
+      const nativeTaxMovement = hasBill ? num(diff.tax) : 0;
+      const movementTax = Math.abs(grossAnnualPremiumMovement) > 0.01
+        ? money(nativeTaxMovement * netPremiumMovement / grossAnnualPremiumMovement)
+        : (netPremiumMovement <= 0.01 ? 0 : nativeTaxMovement);
+      const movementTotal = money(netPremiumMovement + movementTax);
+      // El impuesto de BillDiff es anual. Para la columna "A facturar" debe
+      // seguir la prorrata efectiva del movimiento de primas, incluyendo las
+      // coberturas dependientes recalculadas. Antes se dejaba fijo en cero y
+      // el total prorrateado omitía el impuesto.
+      const taxProrate = Math.abs(grossAnnualPremiumMovement) > 0.005
+        ? Math.max(0, Math.min(1, Math.abs(grossProratedPremiumMovement / grossAnnualPremiumMovement)))
         : prorate;
-      const proratedTax = money(movementTax * taxProrate);
+      const netProratedPremiumMovement = money(grossProratedPremiumMovement + adjustment);
+      const proratedTax = netProratedPremiumMovement <= 0.01 && adjustment !== 0
+        ? 0
+        : money(movementTax * taxProrate);
       const before = {
         premium: beforePremium,
         tax: beforeTax,
@@ -879,18 +928,19 @@
           policyDuration: policyDuration, remainingDays: Math.round(Math.abs(proratedMovement) / (Math.abs(annualMovement) || 1) * policyDuration)
         }), rows: selectedRows, zero: [],
         dependents: changedRows.filter(function (c) { return c.dependent; }), changedRows: changedRows,
-        adjustment: adjustment, adjustmentCoverageCode: adjustmentCoverageCode, surcharge: num(surcharge), discount: num(discount),
+        adjustment: adjustment, adjustmentCoverageCode: adjustmentCoverageCode, adjustmentByCoverage: adjustmentByCoverage, surcharge: num(surcharge), discount: num(discount),
         jNewPayPlan: calculatedPayPlan,
         billing: {
           // MSN-000139 (T05): la fila Prima muestra la prima del motor sin el ajuste; el ajuste va en su propia fila.
-          premium: { before: before.premium, after: money((hasBill ? num(bill.anualPremium) : money(before.premium + movementPremium)) - adjustment), movement: money(movementPremium - adjustment), prorated: money(proratedMovement + changedMovement - adjustment) },
+          premium: { before: before.premium, after: money((hasBill ? num(bill.anualPremium) : money(before.premium + movementPremium)) - adjustment), movement: movementPremium, prorated: grossProratedPremiumMovement },
           adjustment: { before: 0, after: adjustment, movement: adjustment, prorated: adjustment },
           tax: { before: before.tax, after: hasBill ? num(bill.tax) : money(before.tax + movementTax), movement: movementTax, prorated: proratedTax },
-          total: { before: before.total, after: hasBill ? num(bill.anualTotal) : money(before.total + movementTotal), movement: movementTotal, prorated: money(proratedPremiumMovement + proratedTax) }
+          total: { before: before.total, after: hasBill ? num(bill.anualTotal) : money(before.total + movementTotal), movement: movementTotal, prorated: money(netProratedPremiumMovement + proratedTax) }
         },
         stateRows: buildCoverageState(selectedRows, changedRows)
       });
       setSim(simulate(selectedRows, changedRows));
+      if (adjustmentValidationError) throw new Error(adjustmentValidationError);
     } catch (e) {
       setError(String(e && e.message ? e.message : e));
     } finally {
@@ -2347,7 +2397,7 @@
           </Button>
         </div>
 
-        {disabledRemove ? <Alert type="warning" showIcon message={t('El producto tiene deshabilitado el endoso de exclusión de coberturas (ChangeRemoveCoverage).')} /> : null}
+        {disabledRemove ? <Alert type="warning" showIcon message={t('El producto tiene deshabilitada la pantalla de exclusión de coberturas (ExclusionCobertura).')} /> : null}
         {policy && policy.active === false ? <Alert type="warning" showIcon message={t('La póliza no está activa.')} /> : null}
         {error ? <Alert className="axx-alerta" type="error" showIcon message={error} closable onClose={function () { setError(null); }} /> : null}
         {result ? (

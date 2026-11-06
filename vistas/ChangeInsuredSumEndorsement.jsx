@@ -325,8 +325,28 @@
     return (100 - coinsurancePercentage()) / 100;
   }
 
+  // El coaseguro usa el estado final, pero solo deben entrar las coberturas
+  // que cuentan para la suma asegurada. Las coberturas dependientes (por
+  // ejemplo 312/314) vienen marcadas como counts:false en la simulacion.
+  function countsForCoinsurance(coverage) {
+    if (coverage && coverage.counts === false) return false;
+    const code = txt(coverage && (coverage.code || coverage.coverageCode));
+    if (!code) return true;
+    let found = false;
+    let counted = false;
+    (sim && sim.contracts || []).forEach(function (contract) {
+      (contract.rows || []).forEach(function (row) {
+        if (txt(row.coverageCode) !== code) return;
+        found = true;
+        if (row.counts !== false) counted = true;
+      });
+    });
+    return found ? counted : true;
+  }
+
   function finalCoinsuranceBase() {
     return (Array.isArray(calc && calc.finalCoverages) ? calc.finalCoverages : [])
+      .filter(function (coverage) { return countsForCoinsurance(coverage); })
       .reduce(function (total, coverage) {
         total.sum += coinsuranceNumber(coverage.limit || coverage.sumInsured);
         total.premium += coinsuranceNumber(coverage.premium || coverage.newPremium);
@@ -3836,7 +3856,7 @@
   function renderCoinsuranceTab() {
     if (!calc) return <Empty description={t('Calcule el endoso para visualizar el coaseguro')} />;
     const finalCoverages = Array.isArray(calc.finalCoverages) ? calc.finalCoverages : [];
-    const base = finalCoverages.reduce(function (total, coverage) {
+    const base = finalCoverages.filter(function (coverage) { return countsForCoinsurance(coverage); }).reduce(function (total, coverage) {
       total.sum += coinsuranceNumber(coverage.limit || coverage.sumInsured);
       total.premium += coinsuranceNumber(coverage.premium || coverage.newPremium);
       return total;
