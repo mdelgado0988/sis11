@@ -893,7 +893,9 @@
             : money(adjustment * weight / totalWeight);
           remainingAdjustment = money(remainingAdjustment - share);
           adjustmentByCoverage[target.code] = share;
-          adjustmentProratedByCoverage[target.code] = money(share * target.factor);
+          // El ajuste manual conserva el importe completo; sólo la prima de
+          // la cobertura se prorratea por vigencia.
+          adjustmentProratedByCoverage[target.code] = share;
           adjustmentCoverageCode = adjustmentCoverageCode || target.code;
           if (money(carrierBase + share) < 0) {
             adjustmentValidationError = t('El ajuste dejaría la prima de la cobertura en negativo') + ' (' + target.code + ')';
@@ -907,7 +909,7 @@
             if (dependentRow) {
               dependentRow.reinsurancePremium = money(num(dependentRow.newPremium) + share);
               dependentRow.reinsuranceMovement = money(num(dependentRow.movement) + share);
-              dependentRow.reinsuranceProrated = money((num(dependentRow.movement) + share) * target.factor);
+              dependentRow.reinsuranceProrated = money(num(dependentRow.movement) * target.factor + share);
             }
           }
         });
@@ -931,7 +933,7 @@
         dependent.prorate = factor;
         dependent.reinsurancePremium = money(num(dependent.newPremium) + share);
         dependent.reinsuranceMovement = money(num(dependent.movement) + share);
-        dependent.reinsuranceProrated = money((num(dependent.movement) + share) * factor);
+        dependent.reinsuranceProrated = money(num(dependent.movement) * factor + share);
         dependent.movementProrated = money(num(dependent.movement) * factor);
       });
       const zero = addedRows.filter(function (c) { return c.premium === 0 && c.limit === 0; });
@@ -1321,21 +1323,67 @@
     let prepared = false;
     let executed = false;
     const snapshot = buildSnapshot();
+    // El motor nativo de inclusiones calcula el Billing a partir de las
+    // primas de jAddedCoverages. Para que el recargo/descuento no quede sólo
+    // como dato informativo en jAdditional, la ejecución recibe una copia del
+    // estado final con el ajuste incorporado en basePremium/premium.
+    const nativeQuotedCoverages = parseJson(quote.raw && quote.raw.jNewCoverages, null)
+      || parseJson(quote.payload && quote.payload.jAddedCoverages, []) || [];
+    const nativeAdjustmentByCoverage = quote.adjustmentByCoverage || {};
+    const nativeExpectedCoverages = nativeQuotedCoverages.map(function (coverage) {
+      const code = txt(coverage.code);
+      const share = num(nativeAdjustmentByCoverage[code]);
+      if (!share) return coverage;
+      const base = coverage.basePremium !== undefined && coverage.basePremium !== null
+        ? num(coverage.basePremium) : num(coverage.premium) - num(coverage.extraPremium);
+      const extra = num(coverage.extraPremium);
+      return Object.assign({}, coverage, {
+        basePremium: money(base + share),
+        premium: money(base + share + extra)
+      });
+    });
+    const nativeExecutionByCode = {};
+    nativeExpectedCoverages.forEach(function (coverage) { nativeExecutionByCode[txt(coverage.code)] = coverage; });
+    const nativeDependentEntries = (quote.dependents || []).map(function (dependent) {
+      const code = txt(dependent.code);
+      return {
+        code: code, oldLimit: dependent.oldSum, oldBasePremium: dependent.oldBasePremium,
+        limit: dependent.newSum,
+        basePremium: money(num(dependent.newBasePremium) + num(nativeAdjustmentByCoverage[code]))
+      };
+    });
+    const nativeAmendmentCodes = nativeDependentEntries.map(function (entry) { return entry.code; });
+    const nativeExecutionPayload = Object.assign({}, quote.payload, {
+      // La cadena nativa aplica el ajuste una sola vez a partir de
+      // jAdditional.surcharge/discount. No enviamos aqui una segunda prima
+      // ajustada porque eso provocaba diferencias o doble ajuste.
+      jAddedCoverages: JSON.stringify(nativeQuotedCoverages),
+      jAmendments: buildAmendments(nativeDependentEntries)
+    });
+    // jDetail.newAnnualPremium representa el total anual registrado por
+    // Billing (prima + impuesto), no únicamente la prima de coberturas.
+    const nativePremiumAfter = money(num(quote.billing.total.before)
+      + num(quote.billing.total.movement));
     const jAdditional = {
       endorsementType: ENDORSEMENT_TYPE,
       effectiveDate: effectiveDate.format('YYYY-MM-DD'),
-      coverages: quote.rows.map(function (r) { return { code: r.code, name: r.name, limit: r.limit, premium: r.premium, prorated: r.prorated, deductible: r.deductible }; }),
+      coverages: quote.rows.map(function (r) {
+        const native = nativeExecutionByCode[txt(r.code)] || {};
+        return { code: r.code, name: r.name, limit: r.limit, premium: native.premium !== undefined ? native.premium : r.premium, prorated: r.prorated, deductible: r.deductible };
+      }),
       cobtar: quote.cobtar,
       adendos: buildAdendos(),
       prorate: quote.prorate,
       // MSN-000139: premium/proratedPremium siguen siendo los del motor (incluyen el ajuste, que tambien va aparte)
-      premium: money(quote.billing.premium.movement + num(quote.adjustment)), tax: quote.billing.tax.movement, total: quote.billing.total.movement,
+      premium: nativePremiumAfter, tax: quote.billing.tax.after, total: quote.billing.total.after,
       proratedPremium: money(quote.billing.premium.prorated + num(quote.billing.adjustment && quote.billing.adjustment.prorated)), proratedTotal: quote.billing.total.prorated,
       // MSN-000139: coberturas dependientes recalculadas y recargo/descuento del endoso
       dependentCoverages: (quote.dependents || []).map(function (d) {
         return { code: d.code, oldSum: d.oldSum, newSum: d.newSum, oldPremium: d.oldPremium, newPremium: d.newPremium, prorate: d.prorate };
       }),
       surcharge: num(quote.surcharge), discount: num(quote.discount), adjustment: num(quote.adjustment),
+      adjustmentByCoverage: quote.adjustmentByCoverage || {},
+      adjustmentAppliedByAmendments: nativeAmendmentCodes,
       adjustmentCoverageCode: quote.adjustmentCoverageCode || '',
       reinsuranceSnapshot: snapshot
     };
@@ -1351,7 +1399,7 @@
     };
     try {
       // 1. registro del endoso (el comando vuelve a cotizar con las mismas tarifas de entrada)
-      const created = await exe('ChangeAddCoverage', Object.assign({}, quote.payload, {
+      const created = await exe('ChangeAddCoverage', Object.assign({}, nativeExecutionPayload, {
         jAdditional: JSON.stringify(jAdditional),
         jNewPayPlan: JSON.stringify(quote.jNewPayPlan || []),
         operation: 'ADD', code: null, note: txt(note)
@@ -1363,18 +1411,27 @@
       const saved = (parseJson(change.jNewCoverages, []) || []).filter(function (c) { return policyCodes.indexOf(up(c.code)) < 0; });
       const mismatch = quote.rows.filter(function (r) {
         const s = saved.find(function (c) { return up(c.code) === up(r.code); });
-        return !s || money(s.premium) !== money(r.premium) || money(s.limit) !== money(r.limit);
+        const expected = nativeExecutionByCode[txt(r.code)] || r;
+        return !s || money(s.premium) !== money(expected.premium) || money(s.limit) !== money(expected.limit);
       });
       // MSN-000139: las dependientes tienen que quedar registradas con la suma y la prima cotizadas
       const savedAll = parseJson(change.jNewCoverages, []) || [];
       const dependentMismatch = (quote.dependents || []).filter(function (d) {
         const s = coverageByCode(savedAll, d.code);
-        return !s || money(s.limit) !== money(d.newSum) || money(num(s.basePremium) + num(s.extraPremium)) !== money(d.newPremium);
+        const expectedBase = money(num(d.newBasePremium) + num(nativeAdjustmentByCoverage[txt(d.code)]));
+        return !s || money(s.limit) !== money(d.newSum) || money(num(s.basePremium) + num(s.extraPremium)) !== money(expectedBase + num(s.extraPremium));
       });
       if (mismatch.length || dependentMismatch.length) {
         await exe('AbortChange', { changeId: changeId });
         throw new Error(t('La prima registrada no coincide con la cotizada; el endoso') + ' ' + changeId + ' ' + t('fue anulado. Vuelva a cotizar.')
           + (dependentMismatch.length ? ' (' + dependentMismatch.map(function (d) { return d.code; }).join(', ') + ')' : ''));
+      }
+      const savedDetail = parseJson(change.jDetail, {}) || {};
+      const expectedNativePremium = money(num(quote.billing.total.before)
+        + num(quote.billing.total.movement));
+      if (savedDetail.newAnnualPremium !== undefined && Math.abs(num(savedDetail.newAnnualPremium) - expectedNativePremium) > 0.01) {
+        await exe('AbortChange', { changeId: changeId });
+        throw new Error(t('La facturación nativa no coincide con la prima ajustada; el endoso') + ' ' + changeId + ' ' + t('fue anulado. Vuelva a cotizar.') + ' (' + fmt(num(savedDetail.newAnnualPremium)) + ' / ' + fmt(expectedNativePremium) + ')');
       }
       // 2. aprobacion del circuito
       let processId = Number(change.processId || 0);
@@ -1397,17 +1454,36 @@
       if (!exeResponse || !exeResponse.ok) throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(exeResponse));
       executed = true;
 
-      // MSN-000139: las dependientes recalculadas tienen que haber quedado grabadas por ExeChangeAddCoverage
+      // MSN-000139: las dependientes recalculadas tienen que quedar grabadas
+      // con la prima ajustada. ExeChangeAddCoverage puede ejecutar el endoso
+      // sin persistir la AmendmentCoverage, por lo que se sincroniza igual
+      // que en ExclusionCobertura.
       if ((quote.dependents || []).length) {
         try {
           const reread = first(await exe('RepoLifePolicy', { operation: 'GET', filter: 'id=' + policyId, include: ['Coverages'], size: 1, page: 0 }));
           const rereadCoverages = reread && Array.isArray(reread.Coverages) ? reread.Coverages : [];
-          quote.dependents.forEach(function (d) {
+          for (let di = 0; di < quote.dependents.length; di++) {
+            const d = quote.dependents[di];
             const cov = coverageByCode(rereadCoverages, d.code);
-            if (!cov || Math.abs(num(cov.limit) - num(d.newSum)) > 0.005 || Math.abs(num(cov.basePremium) + num(cov.extraPremium) - num(d.newPremium)) > 0.005) {
-              failures.push(t('cobertura dependiente') + ' ' + d.code + ': ' + t('no quedó grabada con la suma y prima recalculadas') + ' (' + fmt(d.newSum) + ' / ' + fmt(d.newPremium) + ')');
+            const share = num(nativeAdjustmentByCoverage[txt(d.code)]);
+            const expectedBase = money(num(d.newBasePremium) + share);
+            const expectedPremium = money(expectedBase + num(d.extraPremium));
+            if (!cov || !Number(cov.id)) {
+              failures.push(t('cobertura dependiente') + ' ' + d.code + ': ' + t('no se encontró en la póliza después de ejecutar el endoso'));
+              continue;
             }
-          });
+            if (Math.abs(num(cov.limit) - num(d.newSum)) <= 0.005
+              && Math.abs(num(cov.basePremium) + num(cov.extraPremium) - expectedPremium) <= 0.005) continue;
+            const synced = await exe('SetField', {
+              entity: 'LifeCoverage', entityId: Number(cov.id),
+              fieldValue: '[limit]=' + money(d.newSum).toFixed(2)
+                + ',basePremium=' + expectedBase.toFixed(2)
+                + ',manualLimit=1,manualPremium=1', raw: true
+            });
+            if (!synced || !synced.ok) {
+              failures.push(t('cobertura dependiente') + ' ' + d.code + ': ' + t('no se pudo sincronizar la suma y prima recalculadas') + ' (' + fmt(d.newSum) + ' / ' + fmt(expectedPremium) + ')');
+            }
+          }
         } catch (depError) { failures.push(t('coberturas dependientes') + ': ' + String(depError && depError.message ? depError.message : depError)); }
       }
 

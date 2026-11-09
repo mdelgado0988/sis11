@@ -48,7 +48,7 @@ Ajuste = recargo - descuento
 Prima neta = Prima bruta del movimiento + Ajuste
 ```
 
-El recargo o descuento se reparte proporcionalmente entre las coberturas que permanecen y tienen prima positiva. La cotización nativa recibe una enmienda por cada cobertura ajustada; la última cobertura absorbe el remanente de redondeo.
+El recargo o descuento se reparte proporcionalmente entre las coberturas que permanecen y tienen prima positiva. El ajuste se conserva separado de la prima nativa y se propaga por cobertura a facturación y reaseguro; la última cobertura absorbe el remanente de redondeo.
 
 En reaseguro, las filas de las coberturas remanentes utilizan la prima nueva calculada por la enmienda, que ya contiene su parte del ajuste. Así, el saldo final y el movimiento sintético reflejan la misma prima neta que la facturación. Si el recargo compensa completamente la prima negativa de la exclusión, el impuesto del movimiento debe resultar `0.00` cuando la prima neta sea cero.
 
@@ -71,6 +71,8 @@ Coberturas con prima cero:
 - Si todas tienen prima cero, se conserva la cobertura seleccionada como respaldo y la validación debe impedir una prima negativa.
 
 La prorrata se calcula con la vigencia propia de cada cobertura: días restantes desde la fecha efectiva hasta su fecha final, divididos entre los días totales de esa cobertura. No debe reutilizarse una prorrata global de la póliza.
+
+El recargo o descuento es una cantidad monetaria manual y no se prorratea. Se distribuye íntegramente entre las coberturas participantes, por lo que la suma de sus partes debe ser exactamente el importe ingresado. La prorrata afecta únicamente la prima de la cobertura y su movimiento facturable.
 
 La validación se realiza sobre:
 

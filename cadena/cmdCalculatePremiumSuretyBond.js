@@ -47,9 +47,19 @@ try {
   const oldCapital = n(changeData.oldCapital !== undefined ? changeData.oldCapital : poliza.insuredSum);
   const capitalAdjustment = n(changeData.surcharge !== undefined ? changeData.surcharge : additionalData.surcharge)
     - n(changeData.discount !== undefined ? changeData.discount : additionalData.discount);
+  const coverageAdjustmentMap = additionalData.adjustmentByCoverage && typeof additionalData.adjustmentByCoverage === "object"
+    ? additionalData.adjustmentByCoverage : null;
+  const amendmentAdjustmentCodes = Array.isArray(additionalData.adjustmentAppliedByAmendments)
+    ? additionalData.adjustmentAppliedByAmendments : [];
   const isCapitalChange = endorsementAction === "changepolicycapital"
     || endorsementAction === "capitalchange"
     || (newCapital > 0 && oldCapital > 0 && Math.abs(newCapital - oldCapital) > 0.009);
+  // InclusionCobertura y ExclusionCobertura tambien distribuyen el ajuste
+  // manual sobre las coberturas que participan en el movimiento. Antes esta
+  // ruta solo se activaba para cambios de capital, por lo que el comando
+  // recalculaba la prima bruta y terminaba ignorando el recargo/descuento.
+  const isIntegralCoverageMovement = endorsementType === "INCLUSIONCOBERTURA"
+    || endorsementType === "EXCLUSIONCOBERTURA";
 
   setResultCoverages();
 
@@ -175,8 +185,12 @@ try {
 
   }
 
-  if (isCapitalChange && Math.abs(capitalAdjustment) > 0.009) {
-    applyCapitalAdjustment(resultCoverages, poliza.Coverages || [], capitalAdjustment);
+  if ((isCapitalChange || isIntegralCoverageMovement) && Math.abs(capitalAdjustment) > 0.009) {
+    if (isIntegralCoverageMovement && coverageAdjustmentMap && Object.keys(coverageAdjustmentMap).length) {
+      applyCoverageAdjustmentMap(resultCoverages, coverageAdjustmentMap, capitalAdjustment, amendmentAdjustmentCodes);
+    } else {
+      applyCapitalAdjustment(resultCoverages, poliza.Coverages || [], capitalAdjustment);
+    }
   }
 
   return resultCoverages
@@ -499,6 +513,35 @@ function applyCapitalAdjustment(calculatedCoverages, currentCoverages, adjustmen
     result.premium = adjustedPremium;
     allocated = n(allocated + share);
   });
+}
+
+// InclusionCobertura y ExclusionCobertura ya distribuyen el ajuste por
+// cobertura considerando las primas directas y dependientes. El comando debe
+// respetar esa distribución para que la cotización y la ejecución sean
+// idénticas y para no concentrar el descuento en una sola cobertura.
+function applyCoverageAdjustmentMap(calculatedCoverages, adjustmentMap, adjustment, skippedCodes) {
+  const skipped = (skippedCodes || []).map(code => String(code).trim().toUpperCase());
+  let applied = Object.keys(adjustmentMap).reduce((sum, key) => {
+    return skipped.indexOf(String(key).trim().toUpperCase()) >= 0
+      ? round2(sum + n(adjustmentMap[key])) : sum;
+  }, 0);
+  calculatedCoverages.forEach(result => {
+    const code = String(result?.code ?? "").trim().toUpperCase();
+    const key = Object.keys(adjustmentMap).find(item => String(item).trim().toUpperCase() === code);
+    if (key === undefined || skipped.indexOf(code) >= 0) return;
+
+    const share = round2(adjustmentMap[key]);
+    const adjustedPremium = round2(n(result.premium) + share);
+    if (adjustedPremium < 0) {
+      throw new Error("El descuento no puede dejar una cobertura con prima negativa.");
+    }
+    result.premium = adjustedPremium;
+    applied = round2(applied + share);
+  });
+
+  if (Math.abs(applied - adjustment) > 0.01) {
+    throw new Error("La distribución del recargo o descuento no coincide con la prima del endoso.");
+  }
 }
 
 function parseChangeObject(value) {
