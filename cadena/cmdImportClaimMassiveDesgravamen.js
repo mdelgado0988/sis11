@@ -30,11 +30,18 @@
  *           tildes y se graba en tipoReclamante de «Detalle del Siniestro» (formulario 371), el campo que lee el selector
  *           «Reclamante» de la vista 48. El contacto del reclamo es el contratante de la póliza, como en «Nuevo siniestro»
  *           y en la carga genérica.
+ * @mission  MSN-000173 (globaluat) — 2026-11-09: fechas en la hora del negocio (Main.timeOffset; Panamá = -5), como la
+ *           vista 48 y la carga genérica. FSiniestro llega en hora local y se guarda como instante UTC; sin hora, o con
+ *           00:00 (una celda de fecha llega de la vista 63 como «AAAA-MM-DD 00:00:00»), queda a las 08:00 a. m. local.
+ *           FNotificacionS de otro día = medianoche local. «Hoy» es el día local. Antes la hora se guardaba como UTC y
+ *           en Panamá el reclamo mostraba el día anterior a las 7:00 p. m.
  */
 
 const TAG = "Reclamo";
 const IMPORT_NAME = "CargaMasivaReclamosDesgravamen";
 const DEFAULT_COUNTRY = "591";
+const DEFAULT_OFFSET = -5;
+const DEFAULT_HOUR = 8;
 const DETAIL_SECTION = "Detalle del Siniestro";
 const EXTRA_SECTION = "InformacionResumenDelReclamo";
 const BATCH_FIELD = "loteCargaMasiva";
@@ -59,13 +66,14 @@ try {
   // Una fila de encabezado que llegue como dato no es un reclamo.
   if (norm(r.fSiniestro) === "FSINIESTRO" || norm(r.idPoliza) === "IDPOLIZA") return { ok: true, msg: "Encabezado omitido." };
 
-  const today = new Date().toISOString().slice(0, 10);
+  const offset = timeOffset();
+  const today = localDay(Date.now(), offset);
 
   // 1. Póliza (IdPoliza; Poliza se valida contra ella)
   const policy = findPolicy(r.idPoliza, r.poliza);
 
   // 2. Fechas del reclamo
-  const occurrence = parseOccurrence(r.fSiniestro);
+  const occurrence = parseOccurrence(r.fSiniestro, offset);
   const notificationDate = required(r.fNotificacionS, "FNotificacionS") ? parseDate(r.fNotificacionS, "FNotificacionS") : null;
   if (occurrence && occurrence.date > today) errors.push(`FSiniestro ${occurrence.date} no puede ser posterior a hoy (${today}).`);
   if (notificationDate && notificationDate > today) errors.push(`FNotificacionS ${notificationDate} no puede ser posterior a hoy (${today}).`);
@@ -110,7 +118,7 @@ try {
   const jCustomForms = withBatchField(buildCustomForms(values, coverages, rules, objectValues), values.loteCargaMasiva);
 
   // 8. Creación del reclamo (mismo payload que la vista 48)
-  const notification = notificationDate === occurrence.date ? occurrence.iso : `${notificationDate}T00:00:00Z`;
+  const notification = notificationDate === occurrence.date ? occurrence.iso : utcIso(notificationDate, 0, 0, offset);
   const claimerId = Number(claimer.id);
   const entity = {
     lifePolicyId: Number(policy.id),
@@ -267,30 +275,48 @@ function optionalDate(value, label) { return value ? (parseDate(value, label) ||
 
 function pad(n) { const t = String(n); return t.length < 2 ? "0" + t : t; }
 
-// FSiniestro se persiste en UTC; sin hora se usa 14:00Z para mostrar 08:00 AM en la aplicación.
-function parseOccurrence(dateText) {
+// FSiniestro llega en la hora local del negocio y se persiste como instante UTC, como la vista 48. Sin hora, o con
+// 00:00 (lo que manda la vista 63 por una celda de fecha), se usa 08:00 a. m. local.
+function parseOccurrence(dateText, offset) {
   if (!required(dateText, "FSiniestro")) return null;
   const date = parseDate(dateText, "FSiniestro");
   if (!date) return null;
-  let hour = 14, minute = 0;
+  let hour = DEFAULT_HOUR, minute = 0;
   const text = String(dateText).trim();
   const serial = text.match(/^\d{5}(\.\d+)$/);
   const inline = text.match(/[ T](\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?\s*m?\.?$/i);
   if (serial) {
-    const mins = Math.round(Number("0" + serial[1]) * 1440);
-    if (mins > 0) { hour = Math.floor(mins / 60) % 24; minute = mins % 60; }
+    const mins = Math.round(Number("0" + serial[1]) * 1440) % 1440;
+    if (mins > 0) { hour = Math.floor(mins / 60); minute = mins % 60; }
   }
   else if (inline) {
-    hour = Number(inline[1]); minute = Number(inline[2]);
+    let h = Number(inline[1]), mi = Number(inline[2]);
     const half = inline[3] ? inline[3].toLowerCase() : "";
     if (half) {
-      if (hour < 1 || hour > 12) { errors.push(`FSiniestro '${dateText}': la hora no es válida.`); return null; }
-      hour = half === "p" ? (hour % 12) + 12 : hour % 12;
+      if (h < 1 || h > 12) { errors.push(`FSiniestro '${dateText}': la hora no es válida.`); return null; }
+      h = half === "p" ? (h % 12) + 12 : h % 12;
     }
-    if (hour > 23 || minute > 59) { errors.push(`FSiniestro '${dateText}': la hora no es válida.`); return null; }
+    if (h > 23 || mi > 59) { errors.push(`FSiniestro '${dateText}': la hora no es válida.`); return null; }
+    if (h || mi) { hour = h; minute = mi; }
   }
-  const hhmm = `${pad(hour)}:${pad(minute)}`;
-  return { date: date, iso: `${date}T${hhmm}:00Z`, stamp: `${date}T${hhmm}:00` };
+  const iso = utcIso(date, hour, minute, offset);
+  return { date: date, iso: iso, stamp: iso.slice(0, 19) };
+}
+
+// Zona del negocio: Main.timeOffset (horas respecto de UTC; Panamá = -5).
+function timeOffset() {
+  doCmd({ cmd: "GetConfig", data: { path: "$.Main.timeOffset" } });
+  const raw = GetConfig.ok ? GetConfig.outData : null;
+  const value = raw === null || raw === undefined || String(raw).trim() === "" ? NaN : Number(raw);
+  return Number.isFinite(value) && Math.abs(value) <= 14 ? value : DEFAULT_OFFSET;
+}
+
+function localDay(ms, offset) { return new Date(ms + offset * 3600000).toISOString().slice(0, 10); }
+
+// Día + hora local del negocio → instante UTC (AAAA-MM-DDTHH:mm:ssZ).
+function utcIso(day, hour, minute, offset) {
+  const y = Number(day.slice(0, 4)), m = Number(day.slice(5, 7)), d = Number(day.slice(8, 10));
+  return new Date(Date.UTC(y, m - 1, d, hour, minute, 0) - offset * 3600000).toISOString().slice(0, 19) + "Z";
 }
 
 function number(value, label, integer, min, max) {

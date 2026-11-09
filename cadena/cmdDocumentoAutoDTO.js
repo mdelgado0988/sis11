@@ -74,7 +74,8 @@ const anioFin = dateFin.getUTCFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
-resultado.Direccion = holder?.Addresses?.[0]?.address2 ?? "";
+const addressHolder = Array.isArray(holder?.Addresses) && holder.Addresses.length > 0 ? holder.Addresses[0] : null;
+resultado.Direccion = `${addressHolder?.address1 ?? ""} ${addressHolder?.address2 ?? ""}`.trim();
 resultado.Telefono = holder.phone ?? "";
 
 //return holder.Phones
@@ -170,13 +171,15 @@ resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : []
       ? tarifaEntrada.find(x => vEqual(x?.coverageCode) == vEqual(code))
       : null;
     const catalogTexts = getCatalogTexts(code, findCoverage, configCobtarAuto);
+    const esSobat = esCoberturaSobat(name);
+    const limiteSobat = esSobat ? getLimiteSobat(code) : "";
     const cov = {
       ...(findCoverage || {}),
       ...catalogTexts,
       Codigo: code,
       Cobertura: name,
-      Limite: getLimiteDesdeHiddenCobtar({ ...(findCoverage || {}), ...catalogTexts }, limit),
-      Prima: n(premium),
+      Limite: limiteSobat || getLimiteDesdeHiddenCobtar({ ...(findCoverage || {}), ...catalogTexts }, limit),
+      Prima: esSobat && !(toNumeric(premium) > 0) ? "Incluida" : n(premium),
       Moneda: monedaDocumento,
       DeductibleCov: deductible,
       Deducible: deductible,
@@ -397,6 +400,21 @@ function getLimiteDesdeHiddenCobtar(coverage, fallbackLimit) {
   if (description) return formatearTextoLimite(description);
 
   return numericValue !== null ? n(numericValue) : formatearTextoLimite(String(value).trim());
+}
+
+// SOBAT: el límite sale de tbLimiteCobertura (fila del producto o, si no hay, la fila "*") y la prima en cero dice "Incluida".
+function esCoberturaSobat(nombre) {
+  return /\bSOBAT$/.test(String(nombre ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase());
+}
+
+function getLimiteSobat(code) {
+  const fila = limites.find(x => vEqual(x.Producto) == vEqual(policy.productCode) && vEqual(x.Cobertura) == vEqual(code))
+    ?? limites.find(x => vEqual(x.Producto) == "*" && vEqual(x.Cobertura) == vEqual(code));
+  const texto = String(fila?.Limite ?? "").trim();
+  if (!texto) return "";
+  const partes = texto.split("/").map(parte => parte.trim());
+  if (partes.some(parte => toNumeric(parte) === null)) return texto;
+  return partes.map(parte => n(toNumeric(parte))).join(" / ");
 }
 
 function ordenCoberturaAuto(nombre) {

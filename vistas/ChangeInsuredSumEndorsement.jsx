@@ -811,8 +811,28 @@
         const editableRows = rows.filter(function (row) { return !row.contractCapacityAllocation; });
         const totals = group.totals || {};
         if (hasFacultativeMovementOnly(group)) {
-          // Esta distribucion representa un exceso de limite. La variacion ya
-          // esta asignada a FAC y no debe reconstruirse proporcionalmente.
+          // La suma/capacidad sigue siendo FAC, pero la prima debe seguir los
+          // porcentajes de colocacion de la suma final del contrato.
+          const finalPlacement = finalPlacementPercentagesBySum(group, next.contracts || []);
+          const baseRows = (baseCessions || []).filter(function (cession) {
+            return String(cession.contractId) === String(group.contractId)
+              && String(cession.lineId) === String(group.lineId);
+          });
+          const baseCededPremium = baseRows.reduce(function (sum, cession) { return sum + numberFrom(cession, ['premiumRe']); }, 0);
+          const baseCommission = baseRows.reduce(function (sum, cession) { return sum + numberFrom(cession, ['commission', 'comissionCedant']); }, 0);
+          const baseTax = baseRows.reduce(function (sum, cession) { return sum + numberFrom(cession, ['tax']); }, 0);
+          const commissionRate = baseCededPremium ? baseCommission / baseCededPremium : 0;
+          const taxRate = baseCededPremium ? baseTax / baseCededPremium : 0;
+          recalculateReinsuranceTotals(group);
+          editableRows.forEach(function (row) {
+            const finalPremium = finalCoverageDistributionPremium(group, row);
+            row.proportionCed = placementProportion(finalPlacement.ced);
+            row.proportionRe = placementProportion(finalPlacement.re);
+            row.premiumCedant = money(finalPremium * finalPlacement.ced / 100);
+            row.premiumRe = money(finalPremium * finalPlacement.re / 100);
+            row.commission = money(row.premiumRe * commissionRate);
+            row.tax = money(row.premiumRe * taxRate);
+          });
           recalculateReinsuranceTotals(group);
           (group.participants || []).forEach(function (participant) {
             const row = rows.find(function (item) {
@@ -2150,6 +2170,35 @@
     };
   }
 
+  // En una transicion a FAC, la suma final ya viene distribuida por linea.
+  // La prima debe seguir esa colocacion final, no quedar completa en FAC.
+  function finalPlacementPercentagesBySum(group, groups) {
+    const sameContract = (groups || []).filter(function (candidate) {
+      return String(candidate.contractId) === String(group && group.contractId);
+    });
+    const lineTotals = sameContract.map(function (candidate) {
+      const unique = {};
+      (candidate.rows || []).forEach(function (row) {
+        const code = String(row.coverageCode || row.code || '');
+        if (!code) return;
+        if (row.counts === false && unique[code]) return;
+        if (!unique[code] || row.counts === true) unique[code] = row;
+      });
+      const rows = Object.keys(unique).map(function (code) { return unique[code]; });
+      return {
+        group: candidate,
+        ced: rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, ['sumInsuredCedant'])); }, 0),
+        re: rows.reduce(function (sum, row) { return sum + Math.abs(numberFrom(row, ['sumInsuredRe'])); }, 0)
+      };
+    });
+    const total = lineTotals.reduce(function (sum, item) { return sum + item.ced + item.re; }, 0);
+    const current = lineTotals.find(function (item) { return item.group === group; });
+    if (total > 0.01 && current) {
+      return { ced: current.ced / total * 100, re: current.re / total * 100 };
+    }
+    return initialContractPercentages(group);
+  }
+
   function hydrateFinalDistribution(group, groups) {
     const percentages = initialContractPercentages(group);
     const totals = group.totals || {};
@@ -2190,43 +2239,14 @@
         return;
       }
       if (row.facultativeMovementOnly) {
-        const source = baseCessionForRow(row) || {};
-        const retentionOwner = isRetentionOwner(group, groups);
-        const asProportion = function (value) {
-          const numeric = Number(value || 0);
-          return Math.abs(numeric) <= 1 ? numeric : numeric / 100;
-        };
-        const movedCedantPremium = numberFrom(row, ['premiumCedantMovement']);
-        const movedRePremium = numberFrom(row, ['premiumReMovement']);
-        const movedCedantSum = numberFrom(row, ['sumInsuredCedantMovement']);
-        const movedReSum = numberFrom(row, ['sumInsuredReMovement']);
-        // La suma/prima de Cession puede ser una base tecnica acumulada por
-        // linea. El estado anterior correcto es el total cotizado menos la
-        // variacion del endoso, no ese valor almacenado por separado.
-        const sourcePremium = money(finalPremium - numberFrom(row, ['sourcePremiumMovement', 'premiumMovement']));
-        const sourceSum = money(finalSum - numberFrom(row, ['sourceSumInsuredMovement', 'sumInsuredMovement']));
-        // Los importes premiumCedant/premiumRe pueden repetirse en lineas
-        // complementarias. Las proporciones son la fuente unica de la
-        // colocacion base; luego se agrega solo el movimiento del endoso.
-        const premiumCedantRate = asProportion(source.proportionCed);
-        const premiumReRate = asProportion(source.proportionRe);
-        const sumCedantRate = asProportion(source.proportionCed);
-        const sumReRate = asProportion(source.proportionRe);
-        // Algunas lineas complementarias repiten los importes de retencion
-        // como referencia. Solo su linea propietaria puede contabilizarlos.
-        row.premiumCedant = retentionOwner ? money(sourcePremium * premiumCedantRate + movedCedantPremium) : 0;
-        row.premiumRe = money(sourcePremium * premiumReRate + movedRePremium);
-        // `counts` solo define si la cobertura aporta suma al movimiento
-        // sintetico. No debe borrar la suma propia de una cobertura en el
-        // saldo final: 312 y 314 tambien deben conservar su distribucion.
-        row.sumInsuredCedant = retentionOwner ? money(sourceSum * sumCedantRate + movedCedantSum) : 0;
-        row.sumInsuredRe = money(sourceSum * sumReRate + movedReSum);
+        const finalPlacement = finalPlacementPercentagesBySum(group, groups);
+        row.premiumCedant = money(finalPremium * finalPlacement.ced / 100);
+        row.premiumRe = money(finalPremium * finalPlacement.re / 100);
         row.commission = money(row.premiumRe * commissionRate);
         row.tax = money(row.premiumRe * taxRate);
-        // Las proporciones de Cession representan la colocacion de suma.
-        // Mantener esa base permite contratos con prima y suma independientes.
-        row.proportionCed = retentionOwner ? sumCedantRate : 0;
-        row.proportionRe = sumReRate;
+        // La suma final se conserva; solo la prima cambia de distribucion.
+        row.proportionCed = placementProportion(finalPlacement.ced);
+        row.proportionRe = placementProportion(finalPlacement.re);
         return;
       }
       row.proportionCed = placementProportion(percentages.ced);

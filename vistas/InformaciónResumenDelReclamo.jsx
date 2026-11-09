@@ -6,6 +6,9 @@
  * @created 2026-09-28
  */
 () => {
+  const DEFAULT_TIME_ZONE = 'America/Panama';
+  const PANAMA_OFFSET_MINUTES = -300;
+
   // Workflow uses the same process, form data and transition commands as the native claim.
   const ClaimWorkflow = React.useMemo(() => function ClaimWorkflow(props) {
     const claim = props.claim;
@@ -256,8 +259,8 @@
     const dateTime = (value) => {
       if (!value) return '';
       const text = String(value);
-      // Repository timestamps without an offset are UTC; date-only values are calendar dates.
-      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text) || /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? moment(text) : moment.utc(text).local();
+      // Repository timestamps are UTC (with or without a marker); display them in Panama.
+      const parsed = moment.utc(text).utcOffset(PANAMA_OFFSET_MINUTES);
       return parsed.isValid() ? parsed.format(/^\d{4}-\d{2}-\d{2}$/.test(text) ? 'DD/MM/YYYY' : 'DD/MM/YYYY HH:mm') : text;
     };
     const statusTag = (status) => {
@@ -1280,15 +1283,26 @@
     const date = new Date(timestamp);
     return Number.isNaN(date.getTime()) ? null : date;
   };
-  const formatDate = (value) => {
+  const panamaDateParts = (value) => {
     const date = utcBrowserDate(value);
     if (!date) return null;
-    return String(date.getDate()).padStart(2, '0') + '/'
-      + String(date.getMonth() + 1).padStart(2, '0') + '/' + date.getFullYear();
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: DEFAULT_TIME_ZONE,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(date).reduce((result, part) => {
+      if (part.type !== 'literal') result[part.type] = part.value;
+      return result;
+    }, {});
+  };
+  const formatDate = (value) => {
+    const parts = panamaDateParts(value);
+    if (!parts) return null;
+    return parts.day + '/' + parts.month + '/' + parts.year;
   };
   const policyStartYear = (value) => {
-    const date = utcBrowserDate(value);
-    return date ? String(date.getFullYear()) : null;
+    const parts = panamaDateParts(value);
+    return parts ? String(parts.year) : null;
   };
   const policyTypeLabel = (value) => ({
     I: 'Individual',
@@ -1296,10 +1310,10 @@
     C: 'Certificado'
   })[String(value || '').trim().toUpperCase()] || value || null;
   const occurrenceTime = (value) => {
-    const date = utcBrowserDate(value);
-    if (!date) return {};
-    const hour = date.getHours();
-    return { hour: String(hour % 12 || 12).padStart(2, '0'), minute: String(date.getMinutes()).padStart(2, '0'), period: hour < 12 ? 'am' : 'pm' };
+    const parts = panamaDateParts(value);
+    if (!parts) return {};
+    const hour = Number(parts.hour);
+    return { hour: String(hour % 12 || 12).padStart(2, '0'), minute: parts.minute, period: hour < 12 ? 'am' : 'pm' };
   };
 
   const firstValue = (...values) => values.find((value) => value !== null
@@ -4855,7 +4869,7 @@ END CATCH;`;
 
   const localMidnightIso = (value, label) => {
     const parts = validDateParts(value, label);
-    return new Date(parts.year, parts.month - 1, parts.day, 0, 0, 0).toISOString();
+    return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 5, 0, 0)).toISOString();
   };
 
   const EXTRA_SECTION = 'InformacionResumenDelReclamo';
@@ -5464,8 +5478,8 @@ END CATCH;`;
     }
     const hour24 = draftValue.occurrencePeriod === 'pm'
       ? (hour % 12) + 12 : hour % 12;
-    // The form captures browser-local time; persist its equivalent UTC instant.
-    return new Date(date.year, date.month - 1, date.day, hour24, minute, 0).toISOString();
+    // The form captures Panama-local time; persist its equivalent UTC instant.
+    return new Date(Date.UTC(date.year, date.month - 1, date.day, hour24 + 5, minute, 0)).toISOString();
   };
 
   const serializeEntity = (claim) => {
@@ -6965,6 +6979,7 @@ END CATCH;`;
     const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value) ? value + 'Z' : value;
     const date = new Date(timestamp);
     return Number.isNaN(date.getTime()) ? EMPTY_VALUE : date.toLocaleString('es', {
+      timeZone: DEFAULT_TIME_ZONE,
       year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
     });
   };

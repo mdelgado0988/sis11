@@ -26,8 +26,9 @@ Reglas aplicadas:
  - El registro del ente padre va en 0 solo cuando hay integrantes registrados (CA10);
    sin integrantes aplica CA8 al 100%.
  - Total Cumulo = SUM(sumaasegurada) de las filas devueltas, a dos decimales. La prima NO suma.
- - MSN-000167. Suma contractual = parte cedida al reaseguro en las lineas NO facultativas
-   (sumInsuredRe de las cesiones vigentes, ISNULL(overwritten,0) = 0); la retencion no cuenta.
+ - MSN-000167. Suma contractual = retencion mas la parte cedida al reaseguro en las lineas
+   NO facultativas (sumInsuredCedant + sumInsuredRe de las cesiones vigentes,
+   ISNULL(overwritten,0) = 0). Una fianza 100% retencion no cuenta en el cumulo contractual.
    Suma facultativa = sumInsuredRe de las lineas facultativas (lineId FAC... o contrato
    facultive = 1). Solo cuentan las coberturas que forman la suma asegurada de la fianza
    (isCoverage = Si en cfgCoberturaProductoReaFianza para el producto, igual que el contrato
@@ -158,15 +159,18 @@ const filas = DoQuery.outData || [];
 doCmd({ cmd: 'DoQuery', data: { sql: sqlTotales } });
 const totales = DoQuery.outData || [];
 
-// MSN-000167: reparto contractual / facultativo de la suma cedida de cada fianza.
+// MSN-000167: reparto contractual / facultativo de la suma asegurada de cada fianza.
 const reparto = getRepartoCesion(filas);
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 filas.forEach(f => {
   const r = reparto[f.polizaId];
-  const conCesion = !!(r && r.cesiones > 0 && r.base > 0);
+  // Una distribucion 100% retencion no tiene cedido efectivo y se excluye
+  // del cumulo contractual, aunque exista una fila de Cession vigente.
+  const cedido = r ? (Number(r.contrato) || 0) + (Number(r.facultativo) || 0) : 0;
+  const conCesion = !!(r && r.cesiones > 0 && r.base > 0 && cedido > 0);
   const suma = Number(f.sumaasegurada) || 0;
   f.conCesion = conCesion;
-  f.sumaContractual = conCesion ? r2(suma * r.contrato / r.base) : 0;
+  f.sumaContractual = conCesion ? r2(suma * (r.retenido + r.contrato) / r.base) : 0;
   f.sumaFacultativa = conCesion ? r2(suma * r.facultativo / r.base) : 0;
 });
 totales.forEach(t => {
@@ -188,8 +192,9 @@ return {
   totalesPorMoneda: totales
 };
 
-// Por poliza: base = suma de los limites de las coberturas que suman; contrato / facultativo =
-// sumInsuredRe de sus cesiones vigentes en lineas no facultativas / facultativas.
+// Por poliza: base = suma de los limites de las coberturas que suman; retenido =
+// sumInsuredCedant; contrato / facultativo = sumInsuredRe de sus cesiones vigentes
+// en lineas no facultativas / facultativas.
 function getRepartoCesion(filas) {
   const ids = [...new Set(filas.map(f => parseInt(f.polizaId, 10)).filter(n => n > 0))];
   const reparto = {};
@@ -200,6 +205,7 @@ function getRepartoCesion(filas) {
   doCmd({ cmd: 'DoQuery', data: { sql: `
 SELECT lc.lifePolicyId AS polizaId, p.productCode, lc.[code] AS coberturaCodigo,
        MAX(ISNULL(lc.limit,0)) AS limite,
+       SUM(CASE WHEN c.id IS NOT NULL THEN ISNULL(c.sumInsuredCedant,0) ELSE 0 END) AS retenido,
        SUM(CASE WHEN c.id IS NOT NULL AND NOT ${FAC} THEN ISNULL(c.sumInsuredRe,0) ELSE 0 END) AS cedidoContrato,
        SUM(CASE WHEN c.id IS NOT NULL AND ${FAC} THEN ISNULL(c.sumInsuredRe,0) ELSE 0 END) AS cedidoFacultativo,
        COUNT(c.id) AS cesiones
@@ -216,8 +222,9 @@ GROUP BY lc.id, lc.lifePolicyId, p.productCode, lc.[code]` } });
   (DoQuery.outData || []).forEach(c => {
     const lista = suman[String(c.productCode || '').trim()];
     if (lista && !lista.includes(String(c.coberturaCodigo || '').trim())) return;
-    const r = reparto[c.polizaId] || (reparto[c.polizaId] = { base: 0, contrato: 0, facultativo: 0, cesiones: 0 });
+    const r = reparto[c.polizaId] || (reparto[c.polizaId] = { base: 0, retenido: 0, contrato: 0, facultativo: 0, cesiones: 0 });
     r.base += Number(c.limite) || 0;
+    r.retenido += Number(c.retenido) || 0;
     r.contrato += Number(c.cedidoContrato) || 0;
     r.facultativo += Number(c.cedidoFacultativo) || 0;
     r.cesiones += Number(c.cesiones) || 0;
