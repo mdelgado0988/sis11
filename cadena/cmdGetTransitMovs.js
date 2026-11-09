@@ -26,7 +26,8 @@
 try {
   const input = normalizeInput(context);
   const offset = (input.page - 1) * input.size;
-  const filter = buildFilter(input);
+  const clientAccounts = loadClientAccounts(input);
+  const filter = buildFilter(input, clientAccounts);
 
   const masterSql = `
 SELECT
@@ -85,6 +86,7 @@ OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
   const movementsByAccount = loadMovements(accountIds, input);
   const data = masterRows.map(row => ({
     ...row,
+    ...clientBalance(row, clientAccounts),
     Movements: movementsByAccount[toPositiveInteger(row && row.id)] || []
   }));
 
@@ -134,7 +136,7 @@ function normalizeInput(source) {
   };
 }
 
-function buildFilter(input) {
+function buildFilter(input, clientAccounts) {
   const conditions = ["a.[type] = 'TRANSIT'"];
 
   if (input.policyId > 0) {
@@ -163,7 +165,15 @@ function buildFilter(input) {
 
   if (input.cancellations) { conditions.push("EXISTS (SELECT 1 FROM [AccountMov] cm WHERE cm.[accountId]=a.[id] AND cm.[transaction]='Cancellation')"); }
   if (input.holderId > 0) {
-    conditions.push(`EXISTS (SELECT 1 FROM [AccountMov] contactMovement WHERE contactMovement.[accountId]=a.[id] AND ${movementPredicate('contactMovement', input)})`);
+    // MSN-000170: the accounts where the client has movements come from loadClientAccounts; with "only with balance"
+    // the client's own balance must not be zero, and on a shared (non-policy) account it must be in his favour.
+    conditions.push(input.cancellations
+      ? `EXISTS (SELECT 1 FROM [AccountMov] contactMovement WHERE contactMovement.[accountId]=a.[id] AND ${movementPredicate('contactMovement', input)})`
+      : `a.[id] IN (${idList(clientAccounts)})`);
+    if (input.onlyWithBalance) {
+      conditions.push(`a.[id] IN (${idList(clientAccounts.filter(item => Number(item.clientBalance) > 0
+        || (item.lifePolicyId != null && Number(item.clientBalance) < 0)))})`);
+    }
   }
 
   if (input.transferId > 0) {
@@ -228,6 +238,66 @@ ORDER BY am.[accountId], am.[date], am.[id];`;
   }, {});
 }
 
+// MSN-000170: per account, the movements of the client (the same ones the detail lists) and the client's pending
+// requests, read once for the filter and the master row.
+function loadClientAccounts(input) {
+  if (!(input.holderId > 0)) {
+    return [];
+  }
+
+  const sql = `SELECT clientMovements.[accountId], clientMovements.[lifePolicyId], clientMovements.[movementCount], clientMovements.[movementBalance],
+    ROUND(clientMovements.[movementBalance] - ISNULL(clientRequests.[pendingRefundAmount], 0), 2) AS [clientBalance]
+FROM (SELECT cb.[accountId], ca.[lifePolicyId], ca.[currency], COUNT(cb.[id]) AS [movementCount], SUM(ISNULL(cb.[amount], 0)) AS [movementBalance]
+  FROM [AccountMov] cb
+  JOIN [Account] ca ON ca.[id] = cb.[accountId]
+  WHERE ca.[type] = 'TRANSIT'
+    AND ${movementPredicate('cb', { holderId: input.holderId })}
+  GROUP BY cb.[accountId], ca.[lifePolicyId], ca.[currency]) clientMovements
+OUTER APPLY (
+  SELECT SUM(ISNULL(cp.[total], 0)) AS [pendingRefundAmount]
+  FROM [ClaimPayment] cp
+  WHERE cp.[sourceAccountId] = clientMovements.[accountId]
+    AND cp.[claimId] IS NULL
+    AND cp.[contactId] = ${input.holderId}
+    AND (cp.[producer] IS NULL OR (
+      UPPER(ISNULL(cp.[producer], '')) = 'MANUAL'
+      AND ISNULL(cp.[paymentType], '') = '15'
+    ))
+    AND UPPER(ISNULL(cp.[currency], '')) = UPPER(ISNULL(clientMovements.[currency], ''))
+    AND UPPER(ISNULL(cp.[entityState], '')) NOT IN ('EXECUTED', 'REJECTED')
+) clientRequests;`;
+
+  doCmd({ cmd: "DoQuery", data: { sql } });
+  const response = getQueryResult();
+  if (!response.ok) {
+    throw new Error(response.msg || "No fue posible calcular el saldo del cliente en las cuentas en transito");
+  }
+  return response.outData;
+}
+
+// MSN-000170: with a client in the search the master row carries the client's own balance. A shared (non-policy)
+// account holds money of several clients, so the available amount is never more than the account itself has available.
+function clientBalance(row, clientAccounts) {
+  const id = toPositiveInteger(row && row.id);
+  const client = clientAccounts.find(item => toPositiveInteger(item && item.accountId) === id);
+  if (!client || Number(client.movementCount) === Number(row.movementCount)) {
+    return {};
+  }
+
+  const movementBalance = Number(client.movementBalance) || 0;
+  const clientAvailable = Math.max(0, movementBalance - (Number(row.pendingRefundAmount) || 0));
+  return {
+    movementCount: Number(client.movementCount) || 0,
+    movementBalance,
+    availableBalance: Math.round(Math.min(clientAvailable, Number(row.availableBalance) || 0) * 1000000) / 1000000
+  };
+}
+
+function idList(items) {
+  const ids = items.map(item => toPositiveInteger(item && item.accountId)).filter(id => id > 0);
+  return ids.length > 0 ? ids.join(",") : "0";
+}
+
 function movementPredicate(alias, input) {
   const parts = [];
   if (input && input.holderId > 0) {
@@ -235,6 +305,9 @@ function movementPredicate(alias, input) {
     // MSN-000138: an income with no persisted contact on a shared (non-policy) account belongs to the
     // contact whose account was debited by the same cashier operation (PPXA: same date, cash desk,
     // income type and reference). Only the filter changes; stored data is read as it is.
+    // MSN-000170: money that leaves a shared account for the client is the client's too: an outflow paid by a payment
+    // request whose beneficiary is the client, or the outgoing leg of a cashier operation whose income leg landed in an
+    // account of the client (same date, cash desk, income type and reference).
     parts.push(`EXISTS (SELECT 1 FROM [Transfer] contactTransfer JOIN [Account] contactAccount ON contactAccount.[id]=${alias}.[accountId]
       OUTER APPLY (SELECT TOP 1 TRY_CONVERT(int,JSON_VALUE(j.[value],'$.userData[0]')) AS contactId
         FROM OPENJSON(CASE WHEN ISJSON(contactTransfer.[jIncomeTypeForm])=1 THEN contactTransfer.[jIncomeTypeForm] ELSE '[]' END) j
@@ -258,7 +331,31 @@ function movementPredicate(alias, input) {
                 AND sourceTransfer.[amount]<0
                 AND sourceTransfer.[executed]=1
                 AND sourceTransfer.[status]=1
-                AND COALESCE(sourceContact.contactId,sourceAccount.[holderId])=${input.holderId}))))`);
+                AND COALESCE(sourceContact.contactId,sourceAccount.[holderId])=${input.holderId}))
+          OR (storedContact.contactId IS NULL
+            AND contactAccount.[lifePolicyId] IS NULL
+            AND ${alias}.[amount]<0
+            AND EXISTS (SELECT 1 FROM [ClaimPayment] paidRequest
+              WHERE paidRequest.[id]=contactTransfer.[claimPaymentId]
+                AND paidRequest.[contactId]=${input.holderId}))
+          OR (storedContact.contactId IS NULL
+            AND contactAccount.[lifePolicyId] IS NULL
+            AND ISNULL(contactTransfer.[isExternal],0)=1
+            AND contactTransfer.[amount]<0
+            AND EXISTS (SELECT 1 FROM [Transfer] targetTransfer JOIN [Account] targetAccount ON targetAccount.[id]=targetTransfer.[destinationAccountId]
+              OUTER APPLY (SELECT TOP 1 TRY_CONVERT(int,JSON_VALUE(tj.[value],'$.userData[0]')) AS contactId
+                FROM OPENJSON(CASE WHEN ISJSON(targetTransfer.[jIncomeTypeForm])=1 THEN targetTransfer.[jIncomeTypeForm] ELSE '[]' END) tj
+                WHERE JSON_VALUE(tj.[value],'$.name')='hiddenCodigoCliente') targetContact
+              WHERE targetTransfer.[id]<>contactTransfer.[id]
+                AND targetTransfer.[date]=contactTransfer.[date]
+                AND ISNULL(targetTransfer.[transferWorkspaceId],0)=ISNULL(contactTransfer.[transferWorkspaceId],0)
+                AND ISNULL(targetTransfer.[incomeType],'')=ISNULL(contactTransfer.[incomeType],'')
+                AND ISNULL(targetTransfer.[concept],'')=ISNULL(contactTransfer.[concept],'')
+                AND ISNULL(targetTransfer.[isExternal],0)=1
+                AND targetTransfer.[amount]>0
+                AND targetTransfer.[executed]=1
+                AND targetTransfer.[status]=1
+                AND COALESCE(targetContact.contactId,targetAccount.[holderId])=${input.holderId}))))`);
   }
   parts.push(baseMovementPredicate(alias,input));
   return parts.join(' AND ');

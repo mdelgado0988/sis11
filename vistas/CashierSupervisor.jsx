@@ -2781,6 +2781,51 @@
       || ['reciboglobal', 'reciboglobaloriginal', 'recibodecaja', 'roc', 'rociv'].includes(reportCode);
   }
 
+  function translateCashReceiptText(key, fallback) {
+    const value = t(key);
+    return value && value !== key ? value : fallback;
+  }
+
+  // ReciboGlobal and ROC_IV certify money received at the cash desk: they are issued only for the
+  // main movement of a row, never for a payment detail or for a movement the system generates internally.
+  function getCashReceiptBlockReason(movement) {
+    if (!movement || movement.isExternal !== true) return 'detail';
+
+    const source = getTrimmedString(movement.sourceExternal).toUpperCase();
+    const internalType = getTrimmedString(movement.IncomeType && movement.IncomeType.internalType).toUpperCase();
+    if (
+      source.startsWith('ALLOCATION:')
+      || /\sDEP$/.test(source)
+      || internalType.startsWith('DEPOSIT-')
+      || internalType === 'DEPOPAYMENT'
+      || internalType === 'PPXA'
+    ) {
+      return 'internal';
+    }
+
+    return Number(movement.amount) > 0 ? '' : 'outflow';
+  }
+
+  function getCashReceiptBlockedMessage(transfer) {
+    const messages = {
+      detail: [
+        'The cash receipt is only issued for the main movement. Movement {id} is a payment detail.',
+        'El recibo de caja sólo se emite para el movimiento principal. El movimiento {id} es un detalle de pago.'
+      ],
+      internal: [
+        'The cash receipt is only issued for the main movement. Movement {id} is an internal system movement.',
+        'El recibo de caja sólo se emite para el movimiento principal. El movimiento {id} es un movimiento interno del sistema.'
+      ],
+      outflow: [
+        'The cash receipt is only issued for the main movement. Movement {id} is not an income.',
+        'El recibo de caja sólo se emite para el movimiento principal. El movimiento {id} no es un ingreso.'
+      ]
+    };
+    const [key, fallback] = messages[transfer && transfer.blockReason] || messages.detail;
+    return translateCashReceiptText(key, fallback).replace('{id}', String(transfer && transfer.transferId));
+  }
+
+  // The row of a payment is its main movement; its children are the payment details and never get a receipt.
   function getSelectedSupervisorReportTransfers() {
     const selectedGroups = movementSelectedRowKeys
       .map(key => movementRows.find(row => String(row && row.id) === String(key)))
@@ -2788,18 +2833,13 @@
     const transfers = [];
 
     selectedGroups.forEach(group => {
-      const children = getSupervisorMovementChildren(group);
-      const items = children.length > 0 ? children : [group];
-      items.forEach(item => {
-        const transferId = Number(item && item.id);
-        if (!Number.isFinite(transferId) || transferId <= 0) return;
-        const allocationValue = Number(item && (item.allocationId || item.Allocation && item.Allocation.id)
-          || group && (group.allocationId || group.Allocation && group.Allocation.id)
-          || 0);
-        transfers.push({
-          transferId: transferId,
-          allocationId: Number.isFinite(allocationValue) && allocationValue > 0 ? allocationValue : 0
-        });
+      const transferId = Number(group && group.id);
+      if (!Number.isFinite(transferId) || transferId <= 0) return;
+      const allocationValue = Number(group.allocationId || group.Allocation && group.Allocation.id || 0);
+      transfers.push({
+        transferId: transferId,
+        allocationId: Number.isFinite(allocationValue) && allocationValue > 0 ? allocationValue : 0,
+        blockReason: getCashReceiptBlockReason(group)
       });
     });
 
@@ -2820,6 +2860,12 @@
 
     const selectedTransfers = getSelectedSupervisorReportTransfers();
     if (selectedTransfers.length === 0) return;
+
+    const blockedTransfer = selectedTransfers.find(item => item.blockReason);
+    if (blockedTransfer) {
+      message.warning(getCashReceiptBlockedMessage(blockedTransfer));
+      return;
+    }
 
     const allocatedTransfers = selectedTransfers.filter(item => item.allocationId > 0);
     const unallocatedTransfers = selectedTransfers.filter(item => item.allocationId <= 0);
@@ -3372,7 +3418,7 @@
       key: 'id',
       width: 70,
       align: 'center',
-      render: (_, group) => getSupervisorMovementFirst(group).id || group.id || '-'
+      render: (_, group) => group.id || getSupervisorMovementFirst(group).id || '-'
     },
     { title: t('Date'), dataIndex: 'date', key: 'date', width: 63, align: 'center', render: formatDate },
     { title: t('Status'), key: 'status', width: 70, align: 'center', render: (_, group) => renderSupervisorMovementStatus(group) },

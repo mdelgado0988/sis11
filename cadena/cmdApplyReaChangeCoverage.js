@@ -19,6 +19,15 @@
  * finalGrossPremium, finalGrossSum, retencion, cesion, comision, impuesto y
  * proporciones exactamente como llegan en el snapshot. Si el snapshot llega
  * incorrecto, se persiste incorrecto; no se intenta corregirlo aqui.
+ *
+ * Coaseguro (MSN-000169): igual que el motor nativo, cada linea vigente que
+ * se sobrescribe deja su anulacion (importes negativos, overwritten = 1 y
+ * changeId del endoso), de modo que la suma de todas las lineas de coaseguro
+ * es siempre la linea vigente. ExeChangeCoverage vuelve a anular y emitir el
+ * coaseguro con la suma asegurada que la poliza tiene al ejecutar (la
+ * anterior en un cambio de suma) y escala comision e impuesto por esa suma;
+ * el modo SYNC_COINSURANCE, despues de ejecutar, deja la linea vigente del
+ * endoso con los importes confirmados en el snapshot. No crea ni anula filas.
  */
 
 const CESSION_COLUMNS = [
@@ -98,7 +107,7 @@ const sqlValue = function (value) {
 const changeId = Number(context && context.changeId || 0);
 if (!changeId) throw 'Falta el identificador del endoso';
 const mode = txt(context && context.mode).toUpperCase() || 'FINALIZE';
-if (['PREPARE', 'PREPARE_EXECUTION', 'FINALIZE', 'ROLLBACK', 'CANCEL_ONLY'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
+if (['PREPARE', 'PREPARE_EXECUTION', 'FINALIZE', 'ROLLBACK', 'CANCEL_ONLY', 'SYNC_COINSURANCE'].indexOf(mode) < 0) throw 'Modo de aplicacion de reaseguro no valido: ' + mode;
 let requestedRows = Array.isArray(context && context.distribution) ? context.distribution : [];
 let requestedParts = Array.isArray(context && context.participants) ? context.participants : [];
 let requestedCoinsurance = [];
@@ -157,6 +166,64 @@ if (mode === 'ROLLBACK') {
     msg: 'No fue posible restaurar el reaseguro anterior del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
   return { ok: true, stage: 'ROLLBACK', changeId: changeId, policyId: policyId,
     msg: 'El reaseguro anterior fue restaurado correctamente.' };
+}
+
+// Despues de ejecutar el endoso: alinea la linea vigente de coaseguro que el
+// motor emitio para este endoso con los importes confirmados en el snapshot.
+// Solo actualiza filas vigentes de este mismo endoso; si el coaseguro vigente
+// pertenece a otro movimiento no toca nada.
+if (mode === 'SYNC_COINSURANCE') {
+  if (Number(change.status) !== 1) throw 'El endoso ' + changeId + ' no esta ejecutado';
+  const confirmedCoinsurance = Array.isArray(snapshot.coinsurance) ? snapshot.coinsurance : [];
+  if (!confirmedCoinsurance.length) return { ok: true, stage: 'SYNC_COINSURANCE', changeId: changeId, policyId: policyId,
+    updated: 0, msg: 'El endoso no tiene coaseguro que alinear.' };
+  doCmd({ cmd: 'LoadEntities', data: {
+    entity: 'CoCession',
+    filter: 'lifePolicyId = ' + policyId + ' AND parentCoCession IS NULL AND overwritten = 0',
+    noTracking: true
+  } });
+  const activeLines = Array.isArray(LoadEntities.outData) ? LoadEntities.outData : [];
+  const foreignLines = activeLines.filter(function (line) { return Number(line.changeId || 0) !== changeId; });
+  if (foreignLines.length || activeLines.length !== confirmedCoinsurance.length) return {
+    ok: false, stage: 'SYNC_COINSURANCE', changeId: changeId, policyId: policyId,
+    active: activeLines.length, expected: confirmedCoinsurance.length, foreign: foreignLines.length,
+    msg: 'El coaseguro vigente no corresponde a este endoso; no se modifico.' };
+  const usedLines = {};
+  const pairs = confirmedCoinsurance.map(function (wanted) {
+    const line = activeLines.find(function (candidate) {
+      return !usedLines[Number(candidate.id)] && Number(candidate.contactId) === Number(wanted.contactId);
+    });
+    if (line) usedLines[Number(line.id)] = true;
+    return { wanted: wanted, line: line || null };
+  });
+  const unmatched = pairs.filter(function (pair) { return !pair.line; });
+  if (unmatched.length) return { ok: false, stage: 'SYNC_COINSURANCE', changeId: changeId, policyId: policyId,
+    msg: 'No hay linea vigente del endoso para el coasegurador ' + unmatched.map(function (pair) {
+      return Number(pair.wanted.contactId || 0);
+    }).join(', ') };
+  const SYNC_FIELDS = ['sumInsured', 'premium', 'sumInsuredCeded', 'premiumCeded', 'commission', 'tax'];
+  const syncStatements = [];
+  pairs.forEach(function (pair) {
+    const drift = SYNC_FIELDS.some(function (field) {
+      return Math.abs(num(pair.line[field]) - money(pair.wanted[field])) > 0.005;
+    });
+    if (!drift) return;
+    syncStatements.push('UPDATE CoCession SET ' + SYNC_FIELDS.map(function (field) {
+      return field + ' = ' + sqlValue(money(pair.wanted[field]));
+    }).join(', ') + ' WHERE id = ' + Number(pair.line.id) + ' AND lifePolicyId = ' + policyId
+      + ' AND changeId = ' + changeId + ' AND overwritten = 0;');
+  });
+  if (syncStatements.length) {
+    doCmd({ cmd: 'DoQuery', data: {
+      sql: ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'].concat(syncStatements, ['COMMIT TRANSACTION;']).join('\n')
+    } });
+    if (!DoQuery || DoQuery.ok === false) return { ok: false, stage: 'SYNC_COINSURANCE', changeId: changeId, policyId: policyId,
+      msg: 'No fue posible alinear el coaseguro del endoso: ' + (DoQuery && DoQuery.msg ? DoQuery.msg : 'error de persistencia') };
+  }
+  return { ok: true, stage: 'SYNC_COINSURANCE', changeId: changeId, policyId: policyId, updated: syncStatements.length,
+    msg: syncStatements.length
+      ? 'El coaseguro vigente del endoso quedo con los importes confirmados.'
+      : 'El coaseguro vigente del endoso ya tenia los importes confirmados.' };
 }
 
 if (snapshot && Array.isArray(snapshot.distribution)) {
@@ -900,6 +967,19 @@ finalCessions.forEach(function (cession) {
 // inserta una nueva fotografia con nuevos identificadores.
 const statements = ['SET XACT_ABORT ON;', 'BEGIN TRANSACTION;'];
 if (requestedCoinsurance.length) {
+  // Cada linea vigente que se sobrescribe deja su anulacion, como hace el
+  // motor nativo: sin ella el saldo del coaseguro cuenta dos veces la linea.
+  statements.push('DECLARE @CoNow DATETIME2 = SYSUTCDATETIME();');
+  currentCoinsurance.forEach(function (source) {
+    const reversal = clone(source);
+    ['sumInsured', 'premium', 'sumInsuredCeded', 'premiumCeded', 'commission', 'tax', 'brokerCommission']
+      .forEach(function (field) { reversal[field] = money(-num(source[field])); });
+    reversal.liquidationId = null;
+    reversal.allocationId = null;
+    statements.push(insertSql('CoCession', COCESSION_COLUMNS, reversal, {
+      created: '@CoNow', changeId: changeId, overwritten: 1
+    }));
+  });
   statements.push('UPDATE CoCession SET overwritten = 1 WHERE lifePolicyId = ' + policyId
     + ' AND parentCoCession IS NULL AND overwritten = 0;');
   requestedCoinsurance.forEach(function (cession, index) {
@@ -913,9 +993,11 @@ if (requestedCoinsurance.length) {
     next.premiumCeded = money(cession.premiumCeded);
     next.commission = money(cession.commission);
     next.tax = money(cession.tax);
+    next.liquidationId = null;
+    next.allocationId = null;
     next.changeId = changeId;
     next.overwritten = 0;
-    statements.push(insertSql('CoCession', COCESSION_COLUMNS, next));
+    statements.push(insertSql('CoCession', COCESSION_COLUMNS, next, { created: '@CoNow' }));
   });
 }
 statements.push('DELETE FROM CessionPart WHERE cessionId IN (SELECT id FROM Cession WHERE lifePolicyId = ' + policyId + ' AND changeId = ' + changeId + ');');

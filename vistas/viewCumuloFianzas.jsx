@@ -2,14 +2,17 @@
  * @author aiden_sa_3
  * @created 2026-09-04
  * @modified 2026-09-07  revision 3 — corrige separación de paneles (CA-08) y recorte (CA-09)
+ * @modified 2026-11-06  aiden_mission_configurator (MSN-000167 / AXX-7868) — «Total cúmulo contractual»
+ *           al lado de «Total Cúmulo» y columnas «Suma contractual» / «Suma facultativa» en la grilla.
  * @summary Consulta de Cumulo de Fianzas — busca un contacto y muestra sus fianzas vigentes
  *          con la participacion directa o proporcional derivada de consorcios (formulario 611).
  * @name viewCumuloFianzas
- * @version 3.0.0
+ * @version 3.1.0
  * @origin AXX-251 / jira GLOB-1214
  *
  * SOLO CONSULTA: la vista no emite ningun comando de escritura (CA18 rev1).
- * Reglas de calculo intactas: viven en la cadena 841, esta vista no las toca.
+ * Reglas de calculo intactas: viven en la cadena 830 cmdCumuloFianzasPorContacto, esta vista no las toca
+ * (sumaContractual, sumaFacultativa, conCesion y totalCumuloContractual vienen de la cadena desde su 1.10).
  *
  * Notas de motor (react-live -> buble), las dos aprendidas a golpes:
  *  - NO usar arrow functions async: buble le come el `async` y la vista no abre.
@@ -55,6 +58,7 @@
   const [contactoSel, setContactoSel] = useState(null);
   const [filas, setFilas] = useState([]);
   const [totalCumulo, setTotalCumulo] = useState(null);
+  const [totalContractual, setTotalContractual] = useState(null);
   const [totalesMoneda, setTotalesMoneda] = useState([]);
   const [cargandoBusqueda, setCargandoBusqueda] = useState(false);
   const [cargandoCumulo, setCargandoCumulo] = useState(false);
@@ -71,7 +75,7 @@
   // Ancho total de cada grilla: con el se habilita el desplazamiento horizontal DENTRO
   // de la grilla en vez de que el panel crezca y se salga del area visible.
   const ANCHO_CONTACTOS = 910;
-  const ANCHO_CUMULO = 1810;
+  const ANCHO_CUMULO = 2090;
 
   useEffect(function () {
     exe('GetFullTable', { table: 'cfgGrupoEconomico' }).then(function (r) {
@@ -155,6 +159,12 @@
     return <span className={cls}>{txt}</span>;
   }
 
+  // MSN-000167: fianza sin cesiones de reaseguro => se marca en vez de mostrar 0.
+  function montoCesion(v, r) {
+    if (r && r.conCesion === false) return <Text type="secondary" title={t('Sin cesión de reaseguro')}>{t('Sin cesión')}</Text>;
+    return monto(v);
+  }
+
   function setCampo(campo, valor) {
     const nuevo = Object.assign({}, criterios);
     nuevo[campo] = valor;
@@ -182,6 +192,7 @@
     setFilas([]);
     setTotalCumulo(null);
     setTotalesMoneda([]);
+    setTotalContractual(null);
     setError(null);
     setErrorFiltros(null);
     setBuscado(false);
@@ -201,6 +212,7 @@
     setFilas([]);
     setTotalCumulo(null);
     setTotalesMoneda([]);
+    setTotalContractual(null);
     setPestana('busqueda');
     const row = Object.assign({}, criterios, { currentPage: 1, pageSize: 50 });
     exe('ExeChain', { chain: 'cmdBuscarContactoFianzas', context: JSON.stringify({ row: row }) })
@@ -240,17 +252,23 @@
 
   function aplicarCumuloFiltrado(filasValidas) {
     const totales = {};
+    const contractuales = {};
     let total = 0;
+    let totalContr = 0;
     filasValidas.forEach(function (fila) {
       const montoFila = numeroCumulo(fila.sumaasegurada);
+      const contrFila = numeroCumulo(fila.sumaContractual);
       const moneda = String(fila.moneda || '');
       total += montoFila;
+      totalContr += contrFila;
       totales[moneda] = (totales[moneda] || 0) + montoFila;
+      contractuales[moneda] = (contractuales[moneda] || 0) + contrFila;
     });
     setFilas(filasValidas);
     setTotalCumulo(total);
+    setTotalContractual(totalContr);
     setTotalesMoneda(Object.keys(totales).map(function (moneda) {
-      return { moneda: moneda, totalCumulo: totales[moneda] };
+      return { moneda: moneda, totalCumulo: totales[moneda], totalCumuloContractual: contractuales[moneda] };
     }));
   }
 
@@ -263,6 +281,7 @@
     setFilas([]);
     setTotalCumulo(null);
     setTotalesMoneda([]);
+    setTotalContractual(null);
     exe('ExeChain', {
       chain: 'cmdCumuloFianzasPorContacto',
       context: JSON.stringify({ row: { contactId: contacto.noSis } })
@@ -281,6 +300,7 @@
           setCargandoCumulo(false);
           setFilas(data);
           setTotalCumulo(o.totalCumulo);
+          setTotalContractual(o.totalCumuloContractual);
           setTotalesMoneda(o.totalesPorMoneda || []);
           return null;
         }
@@ -303,6 +323,7 @@
           if (!inactiveIds.length) {
             setFilas(data);
             setTotalCumulo(o.totalCumulo);
+            setTotalContractual(o.totalCumuloContractual);
             setTotalesMoneda(o.totalesPorMoneda || []);
             return;
           }
@@ -433,6 +454,10 @@
                   align="right" width={95} render={monto} />
                 <Column title={t('Suma asegurada usada para el cálculo')} dataIndex="sumaasegurada" key="saCalc"
                   align="right" width={175} render={monto} />
+                <Column title={t('Suma contractual')} dataIndex="sumaContractual" key="saContractual"
+                  align="right" width={140} render={montoCesion} />
+                <Column title={t('Suma facultativa')} dataIndex="sumaFacultativa" key="saFacultativa"
+                  align="right" width={140} render={montoCesion} />
                 <Column title={t('Prima de la participación')} dataIndex="primaParticipacion" key="primaPart"
                   align="right" width={145} render={monto} />
               </Table>
@@ -442,11 +467,15 @@
                       return <div key={m.moneda}>
                         <Text strong>{t('Total Cúmulo')} ({m.moneda}): </Text>
                         <Text strong style={{ fontSize: 16 }}>{num2(m.totalCumulo)}</Text>
+                        <Text strong style={{ marginLeft: 32 }}>{t('Total cúmulo contractual')} ({m.moneda}): </Text>
+                        <Text strong style={{ fontSize: 16 }}>{num2(m.totalCumuloContractual)}</Text>
                       </div>;
                     })
                   : <div>
                       <Text strong>{t('Total Cúmulo')}{totalesMoneda.length === 1 ? ' (' + totalesMoneda[0].moneda + ')' : ''}: </Text>
                       <Text strong style={{ fontSize: 16 }}>{num2(totalCumulo)}</Text>
+                      <Text strong style={{ marginLeft: 32 }}>{t('Total cúmulo contractual')}{totalesMoneda.length === 1 ? ' (' + totalesMoneda[0].moneda + ')' : ''}: </Text>
+                      <Text strong style={{ fontSize: 16 }}>{num2(totalContractual)}</Text>
                     </div>}
               </div>
             </div>}

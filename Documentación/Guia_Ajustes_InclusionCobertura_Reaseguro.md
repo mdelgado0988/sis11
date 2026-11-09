@@ -54,12 +54,14 @@ En reaseguro, las filas de las coberturas remanentes utilizan la prima nueva cal
 
 ## Distribución del ajuste por cobertura
 
-El ajuste no debe cargarse completo a la primera cobertura seleccionada. Debe repartirse entre las coberturas seleccionadas que tengan prima base positiva.
+El ajuste no debe cargarse completo a la primera cobertura seleccionada. Debe repartirse entre las coberturas seleccionadas y las coberturas dependientes recalculadas que aporten prima al movimiento.
 
 ```text
 pesoCobertura = primaBaseCobertura / sumaPrimasBase
 ajusteCobertura = ajusteTotal * pesoCobertura
 ```
+
+Para una cobertura dependiente, el peso corresponde a su movimiento de prima (`newPremium - oldPremium`), no a toda su prima anual nueva. Para una cobertura incluida directamente, el peso corresponde a la prima generada por la inclusión.
 
 La última cobertura debe recibir el remanente para que la suma de los ajustes coincida exactamente con el ajuste ingresado, incluyendo los centavos.
 
@@ -67,6 +69,8 @@ Coberturas con prima cero:
 
 - No participan en el reparto proporcional.
 - Si todas tienen prima cero, se conserva la cobertura seleccionada como respaldo y la validación debe impedir una prima negativa.
+
+La prorrata se calcula con la vigencia propia de cada cobertura: días restantes desde la fecha efectiva hasta su fecha final, divididos entre los días totales de esa cobertura. No debe reutilizarse una prorrata global de la póliza.
 
 La validación se realiza sobre:
 
@@ -84,6 +88,8 @@ Para cada cobertura incluida se conservan dos valores:
 - `reinsurancePremium`: prima neta para el estado final del reaseguro.
 - `prorated`: prima bruta prorrateada para la vista de cotización.
 - `reinsuranceProrated`: prima prorrateada neta para el movimiento de reaseguro.
+
+La pestaña de distribución del movimiento utiliza `reinsuranceProrated` por cobertura y por participación de la línea. El saldo final del contrato continúa utilizando `reinsurancePremium`.
 
 La construcción del estado final debe usar `reinsurancePremium` cuando exista:
 
@@ -131,12 +137,13 @@ Al replicar el comportamiento en otra vista, revisar estos puntos:
 2. Cálculo de la prima base por cobertura.
 3. Reparto proporcional del recargo/descuento.
 4. Validación de primas negativas.
-5. Segunda cotización con los ajustes por cobertura.
+5. Cotización nativa sin mutar parcialmente las primas; el ajuste se conserva separado por cobertura para facturación y reaseguro.
 6. Resumen con prima bruta, ajuste, impuesto neto y total.
 7. Campos separados para prima de facturación y prima usada por reaseguro.
 8. Movimiento sintético y saldo final usando la prima neta.
 9. Bloqueo del endoso si hay prima negativa.
 10. Conservación del resumen aun cuando la cotización sea inválida.
+11. La vista previa de cuotas debe distribuir el total neto del endoso, incluyendo ajuste e impuesto.
 
 ## Casos mínimos de prueba
 
