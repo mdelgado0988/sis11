@@ -1473,7 +1473,7 @@
       ? Math.abs(getInstallmentRawAmount(installment))
       : getInstallmentRawAmount(installment)));
   const getInstallmentPaidAmount = installment => installment && installment.isCancellationGroup
-    ? (installment.cancellationAmount < 0 ? -Math.abs(installment.payed) : installment.payed)
+    ? (installment.cancellationAmount < 0 ? -Math.abs(Math.round(installment.payed * 100) / 100) + 0 : installment.payed)
     : (isTechnicalCancellation(installment) ? 0 : firstNumber(installment, ['payed', 'paid'], 0));
   const getInstallmentCancelledAmount = installment => {
     if (installment && installment.isCancellationGroup) return installment.cancellationAmount;
@@ -1493,13 +1493,35 @@
   const delinquencyInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
   const cancelledInstallmentRows = collectibleInstallmentRows.filter(installment => !isLatestDisplayableCancellation(installment)
     && !!(installment && installment.cancellationDate));
-  const refundInstallmentRows = installmentRows.filter(installment => isCancellationInstallment(installment) && getInstallmentRawAmount(installment) < 0);
+  // MSN-000178: the balance to refund follows the negative installments, whatever they come from (cancellation, discount or another
+  // reduction of the plan): the part of each non-cancelled negative installment that is still pending is shown, and it is 0 once the
+  // installment is applied in Caja. A negative installment settled at creation with no allocation is a credit that went to the policy
+  // transit account before the negative-installment model (MSN-000175): a cancellation one keeps the former rule (credit minus what
+  // left the transit account); any other is already in transit and is not shown here.
+  const getInstallmentPayedAmount = installment => firstNumber(installment, ['payed', 'paid'], 0);
+  const isSettledNegativeInstallment = installment => getInstallmentRawAmount(installment) < 0
+    && !(Number(installment && installment.allocationId) > 0)
+    && getInstallmentPayedAmount(installment) - getInstallmentRawAmount(installment) < 0.005;
+  const isTransitCreditInstallment = installment => isCancellationInstallment(installment) && isSettledNegativeInstallment(installment);
+  const refundInstallmentRows = installmentRows.filter(installment => isTransitCreditInstallment(installment));
+  const balanceInstallmentRows = installmentRows.filter(installment => getInstallmentRawAmount(installment) < 0
+    && !(installment && installment.cancellationDate)
+    && !isSettledNegativeInstallment(installment));
   const totalRefundAmount = Math.abs(refundInstallmentRows.reduce((total, installment) => total + getInstallmentRawAmount(installment), 0));
   const refundAppliedAmount = Math.min(totalRefundAmount, Math.max(refundAmount, 0));
-  const remainingRefundAmount = Math.max(totalRefundAmount - refundAppliedAmount, 0);
+  const pendingBalanceAmount = balanceInstallmentRows.reduce((total, installment) => total
+    + Math.max(getInstallmentPayedAmount(installment) - getInstallmentRawAmount(installment), 0), 0);
+  const remainingRefundAmount = Math.round((Math.max(totalRefundAmount - refundAppliedAmount, 0) + pendingBalanceAmount) * 100) / 100;
+  const hasRefundSummary = totalRefundAmount > 0 || balanceInstallmentRows.length > 0;
+  const cancellationCreditAmount = Math.abs(installmentRows
+    .filter(installment => isCancellationInstallment(installment) && getInstallmentRawAmount(installment) < 0)
+    .reduce((total, installment) => total + getInstallmentRawAmount(installment), 0));
+  const cancellationBalanceAppliedAmount = balanceInstallmentRows
+    .filter(installment => isCancellationInstallment(installment))
+    .reduce((total, installment) => total + Math.max(-getInstallmentPayedAmount(installment), 0), 0);
   const cancellationGroupCancelledAmount = cancellationGroupAmounts.signedAmount;
-  const calculatedCancellationGroupPaidAmount = totalRefundAmount > 0
-    ? Math.min(totalRefundAmount, cancellationGroupAmounts.paid + refundAppliedAmount)
+  const calculatedCancellationGroupPaidAmount = cancellationCreditAmount > 0
+    ? Math.min(cancellationCreditAmount, cancellationGroupAmounts.paid + refundAppliedAmount + cancellationBalanceAppliedAmount)
     : cancellationGroupAmounts.paid;
   const regularInstallmentRows = installmentRows.filter(installment => !isCancellationInstallment(installment));
   const regularInstallmentPaid = regularInstallmentRows.reduce(
@@ -3220,9 +3242,9 @@
                       <span>{t('Show cancelled installments')}</span>
                       <Switch checked={showCancelledInstallments} onChange={setShowCancelledInstallments} />
                     </Space>
-                    {remainingRefundAmount > 0 && (
+                    {hasRefundSummary && !refundLoading && (
                       <span className="historical-billing-refund-summary">
-                        {t('Balance to refund')}: {renderCancellationMoney(remainingRefundAmount)}
+                        {t('Balance to refund')}: {remainingRefundAmount > 0 ? renderCancellationMoney(remainingRefundAmount) : renderMoney(0)}
                       </span>
                     )}
                   </div>

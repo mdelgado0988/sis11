@@ -31,6 +31,8 @@ try {
 
   // MSN-000138: refundTransfers also counts credit taken out of the policy transit account by a transfer
   // between accounts (PPXA, account transfer, premium paid from transit); refundApplied keeps the cap.
+  // MSN-000178: the cap is only the cancellation credit that went to the transit account before the negative-installment model
+  // (settled with no allocation); a pending negative cancellation installment counts as refunded only for the part applied in Caja.
   const dataSql = `
 WITH BillingRows AS (
     SELECT
@@ -148,7 +150,20 @@ WITH BillingRows AS (
     LEFT JOIN (
         SELECT
             refundPlan.[lifePolicyId],
-            SUM(ABS(ISNULL(refundPlan.[minimum], refundPlan.[expected]))) AS [amount]
+            SUM(CASE
+                WHEN refundPlan.[allocationId] IS NULL
+                 AND ISNULL(refundPlan.[payed], 0) - ISNULL(refundPlan.[minimum], refundPlan.[expected]) < 0.005
+                    THEN ABS(ISNULL(refundPlan.[minimum], refundPlan.[expected]))
+                ELSE 0
+            END) AS [amount],
+            SUM(CASE
+                WHEN (refundPlan.[allocationId] IS NOT NULL
+                    OR ISNULL(refundPlan.[payed], 0) - ISNULL(refundPlan.[minimum], refundPlan.[expected]) >= 0.005)
+                 AND refundPlan.[cancellationDate] IS NULL
+                 AND ISNULL(refundPlan.[payed], 0) < 0
+                    THEN -ISNULL(refundPlan.[payed], 0)
+                ELSE 0
+            END) AS [appliedAmount]
         FROM [PayPlan] refundPlan
         WHERE UPPER(ISNULL(refundPlan.[concept], '')) = N'CANCELLATION'
           AND ISNULL(refundPlan.[minimum], refundPlan.[expected]) < 0
@@ -160,7 +175,7 @@ WITH BillingRows AS (
             WHEN COALESCE(refundTransfers.[amount], 0) > COALESCE(refundCancellation.[amount], 0)
                 THEN COALESCE(refundCancellation.[amount], 0)
             ELSE COALESCE(refundTransfers.[amount], 0)
-        END AS [amount]
+        END + COALESCE(refundCancellation.[appliedAmount], 0) AS [amount]
     ) refundApplied
     WHERE 1 = 1
       AND ISNULL(pp.[concept], '') <> N'Cancellation'
