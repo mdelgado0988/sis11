@@ -3172,6 +3172,11 @@
         await checkTransitLines(account.id, sumTransitLines(accountLines), accountLines);
       }
 
+      /* Temporarily disabled: Transferencia entre cuentas in Montos en tránsito
+         has zero accounting/cash effect for this workflow. Keep the validation
+         above, but do not create RepoTransfer records, stamp transit lines, or
+         execute DoTransfer records until this operation is re-enabled. */
+      /*
       const createdTransfers = [];
       try {
         for (const account of sourceAccounts) {
@@ -3232,10 +3237,11 @@
             : t('The transfer movement could not be executed.'));
         }
       }
+      */
 
       closePpxaApplyModal();
       refreshTransitAfterOperation();
-      message.success(t('The transfer between accounts was executed successfully.'));
+      message.success(t('The transfer between accounts was processed without creating accounting movements.'));
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
     } finally {
