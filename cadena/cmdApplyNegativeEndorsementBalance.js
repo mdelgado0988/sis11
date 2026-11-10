@@ -270,8 +270,9 @@ try {
         }
     }
 
-    // Marca las cuotas negativas del endoso como pagadas,
-    // conservando el signo original del saldo.
+    /* Deshabilitado temporalmente: la cuota negativa se aplicará desde Caja
+       cuando exista el allocationId. La cuenta y el movimiento TRANSIT se
+       mantienen activos arriba.
     pendingNegativePayPlans.forEach(payPlan => {
         const minimum = roundMoney(Number(payPlan.minimum || 0));
 
@@ -296,10 +297,11 @@ try {
             );
         }
     });
+    */
 
     return {
         ok: true,
-        msg: 'Saldo negativo registrado en AccountMov y cuota marcada como pagada',
+        msg: 'Saldo negativo registrado en AccountMov; cuota pendiente para Caja',
         changeId: changeId,
         policyId: policyId,
         amount: amount,

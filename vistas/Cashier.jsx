@@ -292,6 +292,7 @@
   const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
   const [transitInnerTab, setTransitInnerTab] = React.useState('accounts');
   const [transitDetailAccount, setTransitDetailAccount] = React.useState(null);
+  const [transitSelectedAccountRowKeys, setTransitSelectedAccountRowKeys] = React.useState([]);
   const [transitLineRows, setTransitLineRows] = React.useState([]);
   const [transitLineLoading, setTransitLineLoading] = React.useState(false);
   const [transitLinePagination, setTransitLinePagination] = React.useState({ current: 1, pageSize: 25 });
@@ -306,14 +307,6 @@
   const [refundAccountCreateVisible, setRefundAccountCreateVisible] = React.useState(false);
   const [refundAccountCreateLoading, setRefundAccountCreateLoading] = React.useState(false);
   const [refundAccountCreateForm] = Form.useForm();
-  const [accountTransferVisible, setAccountTransferVisible] = React.useState(false);
-  const [accountTransferForm] = Form.useForm();
-  const accountTransferAmount = Form.useWatch('amount', accountTransferForm);
-  const [accountTransferSourceBalance, setAccountTransferSourceBalance] = React.useState(0);
-  const [accountTransferAccountOptions, setAccountTransferAccountOptions] = React.useState([]);
-  const [accountTransferSourceOption, setAccountTransferSourceOption] = React.useState(null);
-  const [accountTransferAccountLoading, setAccountTransferAccountLoading] = React.useState(false);
-  const accountTransferAccountSearchTimer = React.useRef(null);
   const [ppxaApplyVisible, setPpxaApplyVisible] = React.useState(false);
   const [ppxaApplyLoading, setPpxaApplyLoading] = React.useState(false);
   const [ppxaApplyAccountOptions, setPpxaApplyAccountOptions] = React.useState([]);
@@ -423,15 +416,6 @@
   const reversalFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
   const mainViewportRef = React.useRef(null);
-
-  React.useEffect(() => {
-    if (!accountTransferVisible || !Array.isArray(currencyOptions) || currencyOptions.length === 0) return;
-
-    const currentCurrency = accountTransferForm.getFieldValue('currency');
-    if (!currentCurrency) {
-      accountTransferForm.setFieldsValue({ currency: currencyOptions[0].value });
-    }
-  }, [accountTransferVisible, currencyOptions]);
 
   React.useEffect(() => {
     if (!transitFilterVisible || !Array.isArray(currencyOptions) || currencyOptions.length !== 1) return;
@@ -1156,6 +1140,19 @@
         padding: 6px 10px;
         background: #f6ffed;
         border: 1px solid #b7eb8f;
+        border-radius: 4px;
+      }
+
+      .cashier-transit-transfer-sources {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .cashier-transit-transfer-source {
+        padding: 6px 10px;
+        background: #fafafa;
+        border: 1px solid #d9d9d9;
         border-radius: 4px;
       }
 
@@ -2230,6 +2227,7 @@
   function resetTransitDetail() {
     setTransitInnerTab('accounts');
     setTransitDetailAccount(null);
+    setTransitSelectedAccountRowKeys([]);
     setTransitLineRows([]);
     setTransitLineTotal(0);
     setTransitLineTotals({});
@@ -2682,7 +2680,48 @@
     );
   }
 
-  // MSN-000176: a transit operation (PPXA, manual account transfer, premium reversal credited to an account)
+  // MSN-000177: the source of «Transfer between accounts» is the account of the selected lines (one or several).
+  // Each one is listed with its lines and what leaves it for the amount typed, oldest selected lines first.
+  function renderTransitTransferSources(amount) {
+    const entries = getTransitLineSelectionEntries();
+    const value = Number(amount);
+    let used = [];
+    try {
+      used = distributeTransitLines(Number.isFinite(value) && value > 0 ? value : 0, entries);
+    } catch (error) {
+      used = [];
+    }
+    const usedByAccount = groupTransitLinesByAccount(used);
+    return (
+      <div className="cashier-transit-transfer-sources">
+        {getSelectedTransitAccounts().map(account => {
+          const accountId = Number(account && account.id) || 0;
+          const movIds = entries
+            .filter(entry => Number(entry.accountId) === accountId)
+            .map(entry => entry.movId);
+          const policy = getTrimmedString(account && account.policyCode);
+          const contact = getTrimmedString(account && account.contactName);
+          return (
+            <div key={accountId} className="cashier-transit-transfer-source">
+              <div>
+                <strong>{getTrimmedString(account && account.accNo) || accountId}</strong>
+                {` · ${getTrimmedString(account && account.name) || '-'}`}
+                {policy ? ` · ${t('Policy')}: ${policy}` : ''}
+                {contact ? ` · ${contact}` : ''}
+              </div>
+              <div>
+                {`${t('Selected lines')}: ${movIds.length} (${movIds.slice(0, 10).join(', ')}${movIds.length > 10 ? ` +${movIds.length - 10}` : ''})`}
+                {` · ${t('Available to apply')}: ${formatMoney(getSelectedTransitLinesTotal(accountId))} · ${t('Leaves this account')}: `}
+                <strong>{formatMoney(sumTransitLines(usedByAccount[String(accountId)]))}</strong>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // MSN-000176: a transit operation (transfer between accounts, premium reversal credited to an account)
   // references a client the way the cash income form does: the «Cliente» fields of jIncomeTypeForm (clientePA,
   // hiddenCodigoCliente), which the Contact filter of the transit tab reads.
   function buildClientReferenceForm(client) {
@@ -2969,8 +3008,15 @@
           if (!response || response.ok === false) {
             throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
           }
-          setPpxaApplyAccountOptions(mapTransitAccountOptions(getAccountSearchRows(response))
-            .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency));
+          // A source account cannot be the destination; the account already chosen stays in the list.
+          const sourceIds = getSelectedTransitAccountIds();
+          const chosenId = Number(ppxaApplyForm.getFieldValue('destinationAccount')) || 0;
+          const found = mapTransitAccountOptions(getAccountSearchRows(response))
+            .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency)
+            .filter(option => sourceIds.indexOf(String(option.value)) < 0);
+          setPpxaApplyAccountOptions(current => current
+            .filter(option => Number(option && option.value) === chosenId && !found.some(item => item.value === chosenId))
+            .concat(found));
         })
         .catch(error => {
           setPpxaApplyAccountOptions([]);
@@ -2980,7 +3026,9 @@
     }, 250);
   }
 
-  async function openPpxaApplyModal() {
+  // MSN-000177: «Transfer between accounts» (formerly «Apply pending premiums (PPXA)») takes the selected lines as the
+  // source and sends them to any transit account the cashier picks; there is no default destination.
+  function openPpxaApplyModal() {
     const summary = getSelectedTransitAccountsSummary();
     if (!summary.accounts.length) {
       message.warning(t('Select at least one line with available balance.'));
@@ -3004,30 +3052,6 @@
       client: presetOperationClient(getSelectedTransitLinesDefaultClient(summary.accounts, getTransitLineSelectionEntries()))
     });
     setPpxaApplyVisible(true);
-    setPpxaApplyAccountLoading(true);
-    try {
-      const response = await exe('RepoAccount', {
-        operation: 'GET',
-        filter: "accNo = 'PPXA'",
-        size: 25,
-        page: 0
-      });
-      if (!response || response.ok === false) {
-        throw new Error(response && response.msg ? response.msg : t('The PPXA account could not be loaded.'));
-      }
-      const ppxaAccounts = getRows(response).filter(account =>
-        getTrimmedString(account && account.accNo).toUpperCase() === 'PPXA'
-        && getTrimmedString(account && account.currency).toUpperCase() === summary.currencies[0]
-      );
-      setPpxaApplyAccountOptions(mapTransitAccountOptions(ppxaAccounts));
-      if (ppxaAccounts.length > 0) {
-        ppxaApplyForm.setFieldsValue({ destinationAccount: Number(ppxaAccounts[0].id) });
-      }
-    } catch (error) {
-      message.error(error && error.message ? error.message : String(error));
-    } finally {
-      setPpxaApplyAccountLoading(false);
-    }
   }
 
   async function submitPpxaApply(values) {
@@ -3090,7 +3114,7 @@
     setPpxaApplyLoading(true);
     const date = getCurrentUtcDateTime();
     const incomeType = getTrimmedString(ppxaIncomeType.value || ppxaIncomeType.code);
-    const destinationName = getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo)) || 'PPXA';
+    const destinationName = getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo)) || String(destinationAccountId);
     const concept = buildClientReferenceText(reference, client);
     const buildTransferEntity = (transferAmount, destinationId, destinationLabel, incomeForm) => ({
       currency: currency,
@@ -3164,13 +3188,13 @@
             execute: false
           });
           if (!outgoing || outgoing.ok === false) {
-            throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The PPXA source transfer could not be created.'));
+            throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The outgoing transfer could not be created.'));
           }
 
           const outgoingTransfer = getRows(outgoing)[0] || {};
           const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
           if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
-            throw new Error(t('The PPXA source transfer was created, but its movement identifier could not be identified.'));
+            throw new Error(t('The outgoing transfer was created, but its movement identifier could not be identified.'));
           }
           createdTransfers.push({ id: outgoingId, amount: -transferAmount });
           await stampTransitLines(sourceId, 'PPXA', { transferId: outgoingId }, transferAmount, accountLines);
@@ -3183,13 +3207,13 @@
           execute: false
         });
         if (!response || response.ok === false) {
-          throw new Error(response && response.msg ? response.msg : t('The PPXA transfer could not be created.'));
+          throw new Error(response && response.msg ? response.msg : t('The incoming transfer could not be created.'));
         }
 
         const createdTransfer = getRows(response)[0] || {};
         const transferId = Number(createdTransfer.id || createdTransfer.transferId || 0);
         if (!Number.isFinite(transferId) || transferId <= 0) {
-          throw new Error(t('The PPXA transfer was created, but its movement identifier could not be identified.'));
+          throw new Error(t('The incoming transfer was created, but its movement identifier could not be identified.'));
         }
         createdTransfers.push({ id: transferId, amount: amount });
       } catch (error) {
@@ -3205,13 +3229,13 @@
         if (!executeResponse || executeResponse.ok === false) {
           throw new Error(executeResponse && executeResponse.msg
             ? executeResponse.msg
-            : t('The PPXA transfer movement could not be executed.'));
+            : t('The transfer movement could not be executed.'));
         }
       }
 
       closePpxaApplyModal();
       refreshTransitAfterOperation();
-      message.success(t('The PPXA transfers were executed successfully.'));
+      message.success(t('The transfer between accounts was executed successfully.'));
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
     } finally {
@@ -3690,257 +3714,6 @@
       message.error(error && error.message ? error.message : String(error));
     } finally {
       setRefundMoneySubmitting(false);
-    }
-  }
-
-  function openAccountTransferModal() {
-    const account = getSingleSelectedTransitAccount(t('Select lines of a single transit account to transfer them.'));
-    if (!account) return;
-
-    const available = getSelectedTransitLinesTotal(account.id);
-    accountTransferForm.resetFields();
-    setAccountTransferSourceBalance(available);
-    setAccountTransferSearchTarget(null);
-    setAccountTransferAccountOptions([]);
-    setAccountTransferSourceOption(mapTransitAccountOptions([account])[0] || null);
-    accountTransferForm.setFieldsValue({
-      currency: getTrimmedString(account.currency).toUpperCase() || (currencyOptions[0] && currencyOptions[0].value),
-      externalSource: false,
-      sourceAccount: Number(account.id),
-      sourceName: getTrimmedString(account.contactName || account.holderName || account.holder),
-      amount: available,
-      client: presetOperationClient(getSelectedTransitLinesDefaultClient([account], getSelectedTransitLineEntries(account.id)))
-    });
-    setAccountTransferVisible(true);
-  }
-
-  function closeAccountTransferModal() {
-    if (accountTransferAccountSearchTimer.current) {
-      clearTimeout(accountTransferAccountSearchTimer.current);
-      accountTransferAccountSearchTimer.current = null;
-    }
-    setAccountTransferVisible(false);
-    setAccountTransferSourceBalance(0);
-    setAccountTransferSearchTarget(null);
-    setAccountTransferAccountOptions([]);
-    setAccountTransferSourceOption(null);
-    presetOperationClient(null);
-    accountTransferForm.resetFields();
-  }
-
-  function searchAccountTransferAccounts(value) {
-    const text = getTrimmedString(value);
-    const currency = getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase();
-
-    if (accountTransferAccountSearchTimer.current) {
-      clearTimeout(accountTransferAccountSearchTimer.current);
-      accountTransferAccountSearchTimer.current = null;
-    }
-
-    if (!text) {
-      setAccountTransferAccountOptions([]);
-      return;
-    }
-
-    if (!currency) {
-      setAccountTransferAccountOptions([]);
-      message.warning(t('Select a currency before searching accounts.'));
-      return;
-    }
-
-    accountTransferAccountSearchTimer.current = setTimeout(() => {
-      setAccountTransferAccountLoading(true);
-      exe('ExeChain', {
-        chain: 'cmdSearchTransitAccounts',
-        context: JSON.stringify({ page: 1, size: 10, accountName: text, currency: currency, showAll: true })
-      })
-        .then(response => {
-          if (!response || response.ok === false) {
-            throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
-          }
-
-          setAccountTransferAccountOptions(
-            mapTransitAccountOptions(getAccountSearchRows(response))
-              .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency)
-          );
-        })
-        .catch(error => {
-          setAccountTransferAccountOptions([]);
-          message.error(error && error.message ? error.message : String(error));
-        })
-        .finally(() => setAccountTransferAccountLoading(false));
-    }, 250);
-  }
-
-  function updateAccountTransferDestinationContact(accountId) {
-    const selectedOption = accountTransferAccountOptions.find(option => Number(option && option.value) === Number(accountId));
-    const account = selectedOption && selectedOption.account;
-    accountTransferForm.setFieldsValue({
-      destinationName: getTrimmedString(account && (account.contactName || account.holderName || account.holder))
-    });
-  }
-
-  function getAccountTransferSourceBalance() {
-    const balance = Number(accountTransferSourceBalance);
-    return Number.isFinite(balance) ? balance : 0;
-  }
-
-  async function submitAccountTransfer(values) {
-    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
-    const sourceAccountId = Number(values && values.sourceAccount);
-    const destinationAccountId = Number(values && values.destinationAccount);
-    const amount = Number(values && values.amount);
-
-    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
-      message.error(t('Select an open cash desk first.'));
-      return;
-    }
-
-    if (!Number.isFinite(sourceAccountId) || sourceAccountId <= 0
-      || !Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
-      message.error(t('Select both source and destination accounts.'));
-      return;
-    }
-
-    if (sourceAccountId === destinationAccountId) {
-      message.error(t('Source and destination accounts must be different.'));
-      return;
-    }
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      message.error(t('Enter an amount greater than zero.'));
-      return;
-    }
-
-    const availableBalance = getAccountTransferSourceBalance();
-    if (amount > availableBalance) {
-      message.error(
-        `${t('The source account does not have enough balance.')} ${t('Available')}: ${formatMoney(availableBalance)}.`
-      );
-      return;
-    }
-
-    const depositPaymentType = incomeTypeOptions.find(item =>
-      getTrimmedString(item && item.internalType).toUpperCase() === 'DEPOPAYMENT'
-      || getTrimmedString(item && (item.value || item.code)).toUpperCase() === 'DEPOPAYMENT'
-    );
-    if (!depositPaymentType) {
-      message.error(t('The DEPOPAYMENT income type is not configured.'));
-      return;
-    }
-
-    const client = getOperationClient(values && values.client);
-    if (!client) {
-      message.error(t('Select a client.'));
-      return;
-    }
-
-    const currency = getTrimmedString(values && values.currency);
-    const concept = buildClientReferenceText(values && values.reference, client);
-    const sourceName = getTrimmedString(values && values.sourceName);
-    const destinationName = getTrimmedString(values && values.destinationName);
-    const incomeType = getTrimmedString(depositPaymentType.value || depositPaymentType.code);
-    const date = getCurrentUtcDateTime();
-
-    // Each movement points only to its destination account, matching the cash income model.
-    const buildTransferEntity = (transferAmount, destinationAccount, accountName, incomeForm) => ({
-      currency: currency,
-      amount: transferAmount,
-      sourceAccountId: null,
-      destinationAccountId: destinationAccount,
-      concept: concept,
-      paymentMethod: 'OT',
-      paymentMethodName: 'OT',
-      SplitPayments: [{
-        paymentMethod: 'OT',
-        paymentMethodName: 'OT',
-        amount: transferAmount,
-        currency: currency,
-        id: 0,
-        transferId: 0
-      }],
-      sourceName: null,
-      destinationName: accountName,
-      source: null,
-      destination: null,
-      AllocationMovements: null,
-      id: 0,
-      transactionCode: null,
-      producer: null,
-      lifePolicyId: null,
-      date: date,
-      status: 0,
-      executed: false,
-      isExternal: true,
-      sourceExternal: null,
-      allocationId: null,
-      Allocation: null,
-      operatingAccountId: 0,
-      claimPaymentId: null,
-      ClaimPayment: null,
-      SourceAccount: null,
-      DestinationAccount: null,
-      Movements: null,
-      reversalDate: null,
-      incomeType: incomeType,
-      IncomeType: null,
-      jIncomeTypeForm: incomeForm || null,
-      transferWorkspaceId: workspaceId,
-      user: currentUserEmail || null
-    });
-
-    async function createTransfer(transferEntity) {
-      const response = await exe('RepoTransfer', {
-        operation: 'ADD',
-        entity: transferEntity,
-        bulkJson: null,
-        filter: null,
-        include: null,
-        size: 0,
-        page: 0,
-        execute: false,
-        otherReceivables: null
-      });
-
-      if (!response || response.ok === false) {
-        throw new Error(response && response.msg ? response.msg : t('The account transfer could not be created.'));
-      }
-
-      const createdRows = getRows(response);
-      const createdTransfer = createdRows[0]
-        || (response && response.outData && !Array.isArray(response.outData) ? response.outData : {});
-      const transferId = Number(createdTransfer && (createdTransfer.id || createdTransfer.transferId));
-      if (!Number.isFinite(transferId) || transferId <= 0) {
-        throw new Error(t('The transfer was created, but its movement identifier could not be identified.'));
-      }
-
-      return { id: transferId, amount: transferEntity.amount, concept: transferEntity.concept };
-    }
-
-    try {
-      const transferLines = distributeTransitLines(amount, getSelectedTransitLineEntries(sourceAccountId));
-      await checkTransitLines(sourceAccountId, amount, transferLines);
-      const outgoingEntity = buildTransferEntity(-amount, sourceAccountId, sourceName, getTransitLinesOwnerForm(transferLines));
-      const incomingEntity = buildTransferEntity(amount, destinationAccountId, destinationName, buildClientReferenceForm(client));
-
-      const createdTransfers = [];
-      try {
-        const outgoingTransfer = await createTransfer(outgoingEntity);
-        createdTransfers.push(outgoingTransfer);
-        const incomingTransfer = await createTransfer(incomingEntity);
-        createdTransfers.push(incomingTransfer);
-        await stampTransitLines(sourceAccountId, 'TRANSFER', { transferId: outgoingTransfer.id }, amount, transferLines);
-      } catch (error) {
-        await deletePendingTransitTransfers(createdTransfers);
-        throw error;
-      }
-
-      closeAccountTransferModal();
-      refreshTransitAfterOperation();
-      loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } });
-      showAccountTransferExecutionConfirm(createdTransfers);
-    } catch (error) {
-      message.error(error && error.message ? error.message : String(error));
     }
   }
 
@@ -4655,12 +4428,11 @@
     const contactId = isRefundAccountSearch
       ? Number(refundMoneyForm.getFieldValue('beneficiary'))
       : Number(source.contact);
-    const isAccountTransferSearch = searchTarget === 'sourceAccount'
-      || searchTarget === 'destinationAccount';
+    const isTransitTransferSearch = searchTarget === 'ppxaDestinationAccount';
     const transferCurrency = isRefundAccountSearch
       ? getTrimmedString(refundMoneyForm.getFieldValue('currency')).toUpperCase()
-      : isAccountTransferSearch
-        ? getTrimmedString(accountTransferForm.getFieldValue('currency')).toUpperCase()
+      : isTransitTransferSearch
+        ? getTrimmedString(ppxaApplyForm.getFieldValue('currency')).toUpperCase()
         : '';
 
     setNewIncomeAccountSearchLoading(true);
@@ -4808,17 +4580,17 @@
       return;
     }
 
-    if (accountTransferSearchTarget === 'destinationAccount') {
-      const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
+    if (accountTransferSearchTarget === 'ppxaDestinationAccount') {
+      if (getSelectedTransitAccountIds().indexOf(String(id)) >= 0) {
+        message.warning({ content: t('The destination account cannot be one of the selected source accounts.'), key: 'transit-transfer-destination-is-source' });
+        return;
+      }
       const options = mapTransitAccountOptions([account]);
 
-      setAccountTransferAccountOptions(current => options.concat(
+      setPpxaApplyAccountOptions(current => options.concat(
         current.filter(item => Number(item.value) !== id)
       ));
-      accountTransferForm.setFieldsValue({
-        destinationAccount: id,
-        destinationName: contactName
-      });
+      ppxaApplyForm.setFieldsValue({ destinationAccount: id });
       setAccountTransferSearchTarget(null);
       setNewIncomeAccountSearchVisible(false);
       return;
@@ -5456,90 +5228,6 @@
       onOk: () => {
         openMovements();
         executeMovement({ id: transferId });
-      },
-      onCancel: openMovements
-    });
-  }
-
-  async function executeAccountTransferPair(transfers) {
-    const validTransfers = Array.isArray(transfers)
-      ? transfers.filter(item => Number(item && item.id) > 0)
-      : [];
-
-    if (validTransfers.length < 2) {
-      message.error(t('The account transfer movements are required.'));
-      return;
-    }
-
-    try {
-      setMovementActionId(validTransfers[0].id);
-      for (let index = 0; index < validTransfers.length; index += 1) {
-        const transferId = Number(validTransfers[index].id);
-        const response = await exe('DoTransfer', {
-          transferId: transferId,
-          transfer: null
-        });
-
-        if (!response || response.ok === false) {
-          throw new Error(response && response.msg
-            ? response.msg
-            : t('The account transfer movement could not be executed.'));
-        }
-      }
-
-      message.success(t('The outgoing and incoming movements were executed successfully.'));
-      loadMovements({ pagination: movementPagination });
-    } catch (error) {
-      message.error(error && error.message ? error.message : String(error));
-    } finally {
-      setMovementActionId(0);
-    }
-  }
-
-  function showAccountTransferExecutionConfirm(transfers) {
-    const validTransfers = Array.isArray(transfers)
-      ? transfers.filter(item => Number(item && item.id) > 0)
-      : [];
-
-    if (validTransfers.length < 2) {
-      message.error(t('The account transfer movements are required.'));
-      return;
-    }
-
-    const openMovements = () => {
-      setActiveTab('movements');
-      loadMovements({
-        pagination: {
-          current: 1,
-          pageSize: movementPagination.pageSize
-        }
-      });
-    };
-
-    Modal.confirm({
-      title: t('Account transfer created'),
-      content: (
-        <div>
-          <div>{t('The account transfer movements were created successfully.')}</div>
-          <div style={{ marginTop: 8 }}>{t('Approval will execute all outgoing and incoming movements.')}</div>
-          <div>
-            <strong>{t('Outgoing movement ID')}:</strong> {validTransfers[0].id}
-            {' - '}
-            {formatMoney(Math.abs(Number(validTransfers[0].amount) || 0))}
-          </div>
-          <div>
-            <strong>{t('Incoming movement ID')}:</strong> {validTransfers[1].id}
-            {' - '}
-            {formatMoney(Math.abs(Number(validTransfers[1].amount) || 0))}
-          </div>
-          <div style={{ marginTop: 8 }}>{t('Do you want to execute all movements now?')}</div>
-        </div>
-      ),
-      okText: t('Yes'),
-      cancelText: t('No'),
-      onOk: () => {
-        openMovements();
-        return executeAccountTransferPair(validTransfers);
       },
       onCancel: openMovements
     });
@@ -7024,7 +6712,14 @@
     }, 0);
     // MSN-000175: the selected policies' credit balance lowers the cash to collect.
     const creditAmount = selectedRows.reduce((total, row) => total + getCollectionPolicyCredit(row), 0);
-    const expectedAmount = Number(Math.max(amount - creditAmount, 0).toFixed(2));
+    const positivePendingAmount = selectedRows.reduce(
+      (total, row) => total + getCollectionPolicyGrossPending(row),
+      0
+    );
+    const hasPositivePending = positivePendingAmount > 0.005;
+    const expectedAmount = hasPositivePending
+      ? Number(Math.max(amount - creditAmount, 0).toFixed(2))
+      : Number((-creditAmount).toFixed(2));
 
     clearNewIncomeForm();
     setTransitCollectionMode(false);
@@ -7270,6 +6965,38 @@
       .slice()
       .sort((left, right) => getCollectionPolicyOldestDueDate(left) - getCollectionPolicyOldestDueDate(right));
 
+    const paymentAmount = getCollectionPaymentAmount();
+
+    // A negative amount is a direct application of the available credit
+    // balance to negative installments. The backend receives the credit as a
+    // positive amount in `credits`, while the cashier input keeps its sign.
+    if (!transitCollectionMode && paymentAmount < -0.01) {
+      let remainingCredit = Number(Math.abs(paymentAmount).toFixed(2));
+      const negativeCreditRows = selectedRows
+        .filter(row => getCollectionPolicyCredit(row) > 0)
+        .map(row => {
+          const availableAmount = getCollectionPolicyCredit(row);
+          const amount = Number(Math.min(availableAmount, remainingCredit).toFixed(2));
+          remainingCredit = Number((remainingCredit - amount).toFixed(2));
+
+          return {
+            key: `credit-${getCollectionRowKey(row)}`,
+            policyId: getCollectionPolicyIdentifier(row),
+            policy: getTrimmedString(row && row.poliza),
+            availableAmount: availableAmount,
+            amount: amount,
+            installments: (Array.isArray(row && row.Cuotas) ? row.Cuotas : [])
+              .filter(item => getCollectionInstallmentPending(item) < 0)
+          };
+        });
+
+      setCollectionPolicyRows([]);
+      setCollectionCreditRows(negativeCreditRows);
+      setCollectionSupplementaryRows([]);
+      setCollectionChargeStep('allocation');
+      return;
+    }
+
     // MSN-000175: in a collection the premium to apply is the positive pending; a policy with only credit balance goes to the credit table.
     const policyRows = selectedRows
       .filter(row => transitCollectionMode || getCollectionPolicyGrossPending(row) > 0 || getCollectionPolicyCredit(row) <= 0)
@@ -7365,6 +7092,21 @@
         return;
       }
 
+      const hasPositivePayment = newIncomePayments.some(payment => parseIncomeAmount(payment.amount) > 0.01);
+      const hasNegativePayment = newIncomePayments.some(payment => parseIncomeAmount(payment.amount) < -0.01);
+      if (hasPositivePayment && hasNegativePayment) {
+        message.error(t('Positive and negative payment amounts cannot be mixed.'));
+        return;
+      }
+
+      if (!transitCollectionMode && getNewIncomeTotal() < -0.01) {
+        const requestedCredit = Math.abs(getNewIncomeTotal());
+        if (requestedCredit > getSelectedCollectionCredit() + 0.01) {
+          message.error(t('The negative amount cannot exceed the available negative balance.'));
+          return;
+        }
+      }
+
       if (transitCollectionMode) {
         const amount = getCollectionPaymentAmount();
         const availableAmount = Number(transitCollectionAccount && transitCollectionAccount.availableAmount) || 0;
@@ -7406,7 +7148,9 @@
     const transitValid = !transitCollectionMode
       || (paymentTotal <= transitAmount + 0.01 && Math.abs(policyTotal - paymentTotal) <= 0.01);
     const creditTotal = getCollectionCreditTotal();
-    const creditValid = creditTotal <= policyTotal + 0.01
+    const creditValid = (paymentTotal < -0.01
+      ? Math.abs(paymentTotal - (-creditTotal)) <= 0.01
+      : creditTotal <= policyTotal + 0.01)
       && !collectionCreditRows.some(row => Number(row && row.amount) > Number(row && row.availableAmount) + 0.01);
 
     return (paymentTotal > 0 || creditTotal > 0)
@@ -7442,9 +7186,16 @@
       return;
     }
 
-    if (creditTotal > policyTotal + 0.01) {
+    if (paymentTotal >= -0.01 && creditTotal > policyTotal + 0.01) {
       message.error(t('El saldo a favor aplicado no puede superar las primas a aplicar.'));
       return;
+    }
+
+    if (paymentTotal < -0.01) {
+      if (policyTotal > 0.01 || supplementaryTotal > 0.01 || Math.abs(paymentTotal + creditTotal) > 0.01) {
+        message.error(t('The negative payment must be applied entirely to negative installments.'));
+        return;
+      }
     }
 
     if (transitCollectionMode) {
@@ -7495,17 +7246,13 @@
       const formValues = transitCollectionMode
         ? newIncomeForm.getFieldsValue()
         : await newIncomeForm.validateFields();
-      // MSN-000175: a payment paid only with credit balance moves no money, so it has no transfer.
-      const cashless = !transitCollectionMode && paymentTotal <= 0;
-      const destinationAccountId = transitCollectionMode || cashless
+      const destinationAccountId = transitCollectionMode
         ? 0
         : await resolveNewIncomeDestinationAccount(formValues);
-      const transferEntity = cashless
-        ? null
-        : getNewIncomeTransferEntity(
-          formValues,
-          transitCollectionMode ? 208 : destinationAccountId
-        );
+      const transferEntity = getNewIncomeTransferEntity(
+        formValues,
+        transitCollectionMode ? 208 : destinationAccountId
+      );
 
       setCollectionPaymentExecuting(true);
       const transitLines = transitCollectionMode
@@ -8931,6 +8678,12 @@
       .finally(() => setReversalAccountLoading(false));
   }
 
+  // MSN-000179: the policy-account credit that cmdPremiumsPayment records when a negative installment is applied.
+  function isNegativeApplicationCredit(movement) {
+    return getTrimmedString(movement && movement.sourceExternal).toUpperCase().startsWith('ALLOCATION:')
+      && Number(movement && movement.amount) > 0;
+  }
+
   function openReversalModal(group) {
     const first = getMovementFirst(group);
     const executed = Boolean(first.executed || first.status);
@@ -8940,6 +8693,16 @@
     }
 
     const allocationId = getMovementAllocationId(group);
+    // MSN-000179: UnDoPaymentAllocation cannot revert a negative installment while a later installment is paid
+    // ("The reversion must start with the last installment paid"), and the failed attempt leaves the reversal half done.
+    if (allocationId > 0 && isNegativeApplicationCredit(first)) {
+      message.warning(translateCashReceiptText(
+        'The application of a negative installment cannot be reverted from the cashier yet.',
+        'La aplicación de una cuota negativa todavía no se puede reversar desde Caja.'
+      ));
+      return;
+    }
+
     setReversalRecord({
       group: group,
       allocationId: allocationId > 0 ? allocationId : null
@@ -10055,11 +9818,13 @@
     }
   ];
 
+  // MSN-000177: PPXA is the operation now called «Transfer between accounts»; TRANSFER is the manual account transfer
+  // the view no longer offers (the lines it applied keep that name).
   const transitOperationLabels = {
     REFUND: t('Return money'),
     PREMIUM: t('Collect premium'),
-    PPXA: t('Apply pending premiums (PPXA)'),
-    TRANSFER: t('Transfer between accounts')
+    PPXA: t('Transfer between accounts'),
+    TRANSFER: t('Manual account transfer')
   };
 
   function describeTransitApplication(item) {
@@ -10152,7 +9917,7 @@
       {transitSelectedAccountCount > 0 ? (
         <span>
           {t('Accounts')}: <strong>{getSelectedTransitAccounts().map(account => getTrimmedString(account && account.accNo) || account.id).join(', ')}</strong>
-          {transitSelectedAccountCount > 1 ? ` (${t('only PPXA combines several accounts')})` : ''}
+          {transitSelectedAccountCount > 1 ? ` (${t('only Transfer between accounts combines several accounts')})` : ''}
         </span>
       ) : null}
       <Button size="small" disabled={!transitLineSelectionEntries.length} onClick={clearTransitLineSelection}>
@@ -10198,6 +9963,17 @@
         bordered
         className="cashier-supervisor-table"
         loading={transitAccountLoading}
+         rowClassName={record => transitSelectedAccountRowKeys.indexOf(String(record && record.id)) >= 0
+           ? 'cashier-supervisor-selected-row'
+           : ''}
+         onRow={record => ({
+           onClick: event => {
+             if (event.target.closest('button, a, input, .ant-checkbox-wrapper')) return;
+             const key = String(record && record.id);
+             if (!key || key === 'undefined') return;
+             setTransitSelectedAccountRowKeys(current => current.indexOf(key) >= 0 ? [] : [key]);
+           }
+         })}
         pagination={{
           current: transitAccountPagination.current,
           pageSize: transitAccountPagination.pageSize,
@@ -10254,14 +10030,6 @@
           icon={<TransferAccountIcon />}
           disabled={transitSelectedAccountCount === 0}
           onClick={openPpxaApplyModal}
-        >
-          {t('Apply pending premiums (PPXA)')}
-        </Button>
-        <Button
-          className="cashier-supervisor-success-button"
-          icon={<TransferAccountIcon />}
-          disabled={transitSelectedAccountCount !== 1}
-          onClick={openAccountTransferModal}
         >
           {t('Transfer between accounts')}
         </Button>
@@ -10748,18 +10516,22 @@
             </Button>
           </Popconfirm>
         </div>
-        <div className="cashier-supervisor-section-title">{t('Premium to apply')}</div>
-        <div className="cashier-supervisor-collection-policy-table">
-          <Table
-            rowKey="key"
-            columns={policyColumns}
-            dataSource={collectionPolicyRows}
-            size="small"
-            className="cashier-supervisor-table"
-            pagination={false}
-            bordered
-          />
-        </div>
+        {paymentTotal >= -0.01 && (
+          <>
+            <div className="cashier-supervisor-section-title">{t('Premium to apply')}</div>
+            <div className="cashier-supervisor-collection-policy-table">
+              <Table
+                rowKey="key"
+                columns={policyColumns}
+                dataSource={collectionPolicyRows}
+                size="small"
+                className="cashier-supervisor-table"
+                pagination={false}
+                bordered
+              />
+            </div>
+          </>
+        )}
         {!transitCollectionMode && collectionCreditRows.length > 0 && (
           <>
             <div className="cashier-supervisor-section-title">{t('Saldo a favor')}</div>
@@ -10776,7 +10548,7 @@
             </div>
           </>
         )}
-        {!transitCollectionMode && (
+        {!transitCollectionMode && paymentTotal >= -0.01 && (
           <>
             <div className="cashier-supervisor-section-title">{t('Complementary premiums')}</div>
             {expectedSupplementary > 0 ? (
@@ -11691,7 +11463,7 @@
         </Modal>
 
         <Modal
-          title={t('Apply pending premiums (PPXA)')}
+          title={t('Transfer between accounts')}
           className="cashier-supervisor-collection-payment-modal"
           open={ppxaApplyVisible}
           onCancel={closePpxaApplyModal}
@@ -11704,6 +11476,9 @@
         >
           <Form form={ppxaApplyForm} layout="vertical" onFinish={submitPpxaApply}>
             {renderTransitSelectionNote()}
+            <Form.Item label={getSelectedTransitAccounts().length > 1 ? t('Source accounts') : t('Source account')} shouldUpdate>
+              {() => renderTransitTransferSources(ppxaApplyForm.getFieldValue('amount'))}
+            </Form.Item>
             <Form.Item label={t('Currency')} name="currency">
               <Select disabled options={currencyOptions} />
             </Form.Item>
@@ -11714,23 +11489,35 @@
             >
               <InputNumber min={0} max={getSelectedTransitLinesTotal()} precision={2} style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item
-              label={t('Destination account')}
-              name="destinationAccount"
-              rules={[{ required: true, message: t('Select a destination account.') }]}
-            >
-              <Select
-                showSearch
-                allowClear
-                filterOption={false}
-                optionFilterProp="label"
-                optionLabelProp="shortAccountLabel"
-                options={ppxaApplyAccountOptions}
-                loading={ppxaApplyAccountLoading}
-                placeholder={t('Search account')}
-                onSearch={searchPpxaApplyAccounts}
-                notFoundContent={ppxaApplyAccountLoading ? t('Loading...') : t('No accounts found')}
-              />
+            <Form.Item label={t('Destination account')} required>
+              <Input.Group compact style={{ display: 'flex', width: '100%' }}>
+                <Form.Item
+                  name="destinationAccount"
+                  noStyle
+                  rules={[{ required: true, message: t('Select a destination account.') }]}
+                >
+                  <Select
+                    showSearch
+                    allowClear
+                    filterOption={false}
+                    optionFilterProp="label"
+                    optionLabelProp="shortAccountLabel"
+                    options={ppxaApplyAccountOptions}
+                    loading={ppxaApplyAccountLoading}
+                    placeholder={t('Search account')}
+                    onSearch={searchPpxaApplyAccounts}
+                    notFoundContent={ppxaApplyAccountLoading ? t('Loading...') : t('No accounts found')}
+                    style={{ width: 'calc(100% - 40px)' }}
+                  />
+                </Form.Item>
+                <Button
+                  icon={<InstallmentsIcon />}
+                  aria-label={t('Search accounts')}
+                  title={t('Search accounts')}
+                  onClick={() => openNewIncomeAccountSearch('ppxaDestinationAccount')}
+                  style={{ width: 40 }}
+                />
+              </Input.Group>
             </Form.Item>
             <Form.Item
               label={t('Client')}
@@ -11746,133 +11533,6 @@
             >
               <Input />
             </Form.Item>
-          </Form>
-        </Modal>
-
-        <Modal
-          title={t('Manual account transfer')}
-          open={accountTransferVisible}
-          onCancel={closeAccountTransferModal}
-          onOk={() => accountTransferForm.submit()}
-          okText={t('Execute')}
-          cancelText={t('Cancel')}
-          destroyOnClose={false}
-          width={900}
-        >
-          <Form
-            form={accountTransferForm}
-            layout="vertical"
-            onFinish={submitAccountTransfer}
-          >
-            {renderTransitSelectionNote()}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div>
-                <div className="cashier-supervisor-section-title">{t('Source information')}</div>
-                <Form.Item
-                  label={t('Currency')}
-                  name="currency"
-                  rules={[{ required: true, message: t('Select a currency.') }]}
-                >
-                  <Select disabled options={currencyOptions} placeholder={t('Currency')} />
-                </Form.Item>
-                <Form.Item
-                  label={t('Amount')}
-                  name="amount"
-                  rules={[{ required: true, message: t('Enter an amount.') }]}
-                >
-                  <InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} />
-                </Form.Item>
-                <Form.Item
-                  label={t('Reference')}
-                  name="reference"
-                  rules={[{ required: true, message: t('Enter a reference.') }]}
-                >
-                  <Input />
-                </Form.Item>
-                <Form.Item
-                  label={t('Client')}
-                  name="client"
-                  rules={[{ required: true, message: t('Select a client.') }]}
-                >
-                  {renderOperationClientSelect()}
-                </Form.Item>
-                <Form.Item shouldUpdate>
-                  {() => {
-                    const availableBalance = getAccountTransferSourceBalance();
-                    const transferAmount = Number(accountTransferAmount);
-                    const safeTransferAmount = Number.isFinite(transferAmount) ? transferAmount : 0;
-                    const finalBalance = availableBalance - safeTransferAmount;
-                    const renderSummaryAmount = amount => (
-                      <strong style={{ color: amount < 0 ? '#cf1322' : undefined }}>
-                        {formatMoney(amount)}
-                      </strong>
-                    );
-
-                    return (
-                      <div className="cashier-supervisor-account-transfer-summary">
-                        <div><span>{t('Available balance')}: </span>{renderSummaryAmount(availableBalance)}</div>
-                        <div><span>{t('Amount to transfer')}: </span>{renderSummaryAmount(safeTransferAmount)}</div>
-                        <div><span>{t('Final balance')}: </span>{renderSummaryAmount(finalBalance)}</div>
-                      </div>
-                    );
-                  }}
-                </Form.Item>
-                {/* External source is kept disabled until its transfer flow is defined. */}
-              </div>
-
-              <div>
-                <div className="cashier-supervisor-section-title">{t('Account information')}</div>
-                <Form.Item
-                  label={t('Source account')}
-                  name="sourceAccount"
-                  rules={[{ required: true, message: t('Select a source account.') }]}
-                >
-                  <Select
-                    disabled
-                    optionLabelProp="shortAccountLabel"
-                    options={accountTransferSourceOption ? [accountTransferSourceOption] : []}
-                  />
-                </Form.Item>
-                <Form.Item label={t('Source name')} name="sourceName">
-                  <Input />
-                </Form.Item>
-                <Form.Item
-                  label={t('Destination account')}
-                >
-                  <Input.Group compact style={{ display: 'flex', width: '100%' }}>
-                    <Form.Item
-                      name="destinationAccount"
-                      noStyle
-                      rules={[{ required: true, message: t('Select a destination account.') }]}
-                    >
-                      <Select
-                        showSearch
-                        allowClear
-                        filterOption={false}
-                        optionFilterProp="label"
-                        optionLabelProp="shortAccountLabel"
-                        options={accountTransferAccountOptions}
-                        loading={accountTransferAccountLoading}
-                        placeholder={t('Type to search account')}
-                        onSearch={searchAccountTransferAccounts}
-                        onChange={updateAccountTransferDestinationContact}
-                        notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
-                        style={{ width: 'calc(100% - 40px)' }}
-                      />
-                    </Form.Item>
-                    <Button
-                      icon={<InstallmentsIcon />}
-                      aria-label={t('Search accounts')}
-                      onClick={() => openNewIncomeAccountSearch('destinationAccount')}
-                      style={{ width: 40 }}
-                    />
-                  </Input.Group>
-                </Form.Item>
-                <Form.Item label={t('Destination name')} name="destinationName">
-                  <Input />
-                </Form.Item>
-              </div>
-            </div>
           </Form>
         </Modal>
 

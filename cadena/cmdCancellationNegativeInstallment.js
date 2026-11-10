@@ -6,7 +6,7 @@
  * @email support@axxis-systems.com
  * @created 2026/11/10
  * @name cmdCancellationNegativeInstallment
- * @version 1.0
+ * @version 1.1
  * @purpose: A cancellation that returns premium leaves the refund as a pending negative installment ("Cancellation")
  *   in the payment calendar, to be applied in the cashier, instead of an available balance in the policy's transit
  *   account. Runs after ExeChangeCancellation (post trigger).
@@ -17,7 +17,11 @@
  *   2. A negative installment of an earlier endorsement already applied in part is not cancelled by the core, while
  *      the refund already counts what was applied: its billed amount (minimum) is reduced to the applied amount, so
  *      the rest is not returned twice.
- *   Running it again changes nothing: the mirror movement is found by its concept and the installment is pending.
+ *   3. MSN-000180: the negative installment takes the number of the policy's last installment + 1
+ *      (cmdNegativeInstallmentLastNumber) instead of 0, so reversing a payment that applied it is not refused with
+ *      "The reversion must start with the last installment paid".
+ *   Running it again changes nothing: the mirror movement is found by its concept, the installment is pending and it
+ *   no longer has number 0.
  * @context: { changeId: number }
  */
 
@@ -54,7 +58,11 @@ ORDER BY pp.[id];`);
 
   const installments = refundRows.map(row => keepRefundPending(changeId, policyId, row));
   const closedInstallments = closePartlyAppliedNegatives(changeId, policyId);
+  const numbering = refundRows.length > 0 ? numberAsLastInstallment(changeId) : null;
   const errors = installments.filter(item => item.error).map(item => item.error);
+  if (numbering && numbering.ok === false) {
+    errors.push(numbering.msg);
+  }
 
   return {
     ok: errors.length === 0,
@@ -66,7 +74,8 @@ ORDER BY pp.[id];`);
     changeId,
     lifePolicyId: policyId,
     installments,
-    closedInstallments
+    closedInstallments,
+    numbering
   };
 } catch (error) {
   return { ok: false, msg: error && error.message ? error.message : String(error) };
@@ -77,6 +86,8 @@ function keepRefundPending(changeId, policyId, row) {
   const amount = roundMoney(-toNumber(row.minimum));
   const result = { payPlanId, amount };
 
+  /* Deshabilitado: la contabilización de la cuenta TRANSIT y la creación de
+     la transferencia negativa se realizarán cuando la cuota se aplique en Caja.
   const credit = query(`SELECT TOP 1 t.[id], t.[sourceAccountId], t.[destinationAccountId]
 FROM [Transfer] t
 INNER JOIN [Account] a ON a.[id] = t.[destinationAccountId]
@@ -157,6 +168,8 @@ ORDER BY m.[id];`)[0];
   } else {
     result.transitCredit = 'none';
   }
+  */
+  result.transitCredit = 'skipped';
 
   const settled = Math.abs(toNumber(row.payed) - toNumber(row.minimum)) < MONEY_EPSILON;
   if (settled && toPositiveInteger(row.allocationId) <= 0) {
@@ -196,6 +209,23 @@ ORDER BY pp.[id];`);
       ok: !!update && update.ok !== false
     };
   });
+}
+
+function numberAsLastInstallment(changeId) {
+  doCmd({
+    cmd: 'ExeChain',
+    data: {
+      chain: 'cmdNegativeInstallmentLastNumber',
+      context: JSON.stringify({ changeId })
+    }
+  });
+  const response = typeof ExeChain === 'undefined' ? null : ExeChain;
+  const result = response && response.outData ? response.outData : null;
+  if (!response || response.ok === false || !result || result.ok === false) {
+    const reason = (result && result.msg) || (response && response.msg) || 'sin respuesta';
+    return { ok: false, msg: `No se pudo numerar la cuota negativa del endoso ${changeId} como la última + 1: ${reason}.` };
+  }
+  return result;
 }
 
 function query(sql) {

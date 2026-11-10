@@ -14,11 +14,9 @@
  *          propia cuota (su impuesto entre su prima), 6 % si la cuota no trae impuesto; asi las
  *          cuotas emitidas al 5 % antes del cambio se contabilizan al 5 % que paga el cliente.
  *          Los demas ramos siguen con ImpuestoSobrePrimas (5 %).
- * @changes 1.3 (MSN-000175) Saldo a favor aplicado en Caja: lo cobrado de cada linea es el efectivo mas
- *          la compensacion SALDOFAVOR; la cuota negativa que aporta el saldo entra en negativo y la
- *          plantilla CobroPrima la asienta con los lados invertidos. Una aplicacion pagada solo con
- *          saldo a favor no mueve dinero ni tiene transferencia PREMIUMPAY: sus lineas se leen de
- *          AllocationInstallment.
+ * @changes 1.3 (MSN-000175) Las lineas de la asignacion se leen tambien directamente de
+ *          AllocationInstallment para soportar cuotas negativas y aplicaciones sin transferencia
+ *          PREMIUMPAY. El signo original se conserva para la contabilizacion.
  */
 const { id } = context;
 const round2 = n =>
@@ -77,14 +75,13 @@ return InstallmentPremiums.map( premium =>{
 function getTransfer(id) {
   doCmd({cmd:'FilterTransfer',data:{ allocationId: id }});
   if(!FilterTransfer.ok) throw '@'+FilterTransfer.msg;
-  const Payment = FilterTransfer.outData.find(item => item.transactionCode === 'PREMIUMPAY');
+  const transfers = Array.isArray(FilterTransfer.outData) ? FilterTransfer.outData : [];
+  const Payment = transfers.find(item => item.transactionCode === 'PREMIUMPAY')
+    || transfers.find(item => Number(item && item.allocationId) === Number(id));
   return Payment;
 }
 
-/**
- * MSN-000175: lineas del cobro. Con efectivo vienen de la transferencia PREMIUMPAY; una aplicacion
- * pagada solo con saldo a favor no la tiene y sus lineas se leen de AllocationInstallment.
- */
+/** Las lineas del cobro se leen de la transferencia o directamente de la asignacion. */
 function getInstallmentPremiums(id) {
   const Payment = getTransfer(id);
   if (Payment) return Payment?.Allocation?.InstallmentPremiums ?? [];
@@ -93,14 +90,11 @@ function getInstallmentPremiums(id) {
   FROM AllocationInstallment a
   WHERE a.allocationId = ${ Number(id) }` } });
   const lineas = DoQuery?.outData ?? [];
-  if (!lineas.some(x => x.compensationType === 'SALDOFAVOR')) throw '@Pago no encontrado.';
+  if (!Array.isArray(lineas) || lineas.length === 0) throw '@Pago no encontrado.';
   return lineas;
 }
 
-/**
- * MSN-000175: lo cobrado de la linea = efectivo + compensacion SALDOFAVOR. La cuota negativa que
- * aporta el saldo a favor la trae en negativo.
- */
+/** Conserva el signo de la linea; si existe compensacion, suma efectivo y compensacion. */
 function getMontoCobrado(premium) {
   if (premium.compensationType !== 'SALDOFAVOR') return premium.moneyInAmount;
   return round2(Number(premium.moneyInAmount ?? 0) + Number(premium.compensationAmount ?? 0));

@@ -6,7 +6,7 @@
  * @email support@axxis-systems.com
  * @created 2026/08/09
  * @name cmdPremiumsPayment
- * @version 1.2
+ * @version 1.3
  * @purpose: Apply one payment to multiple policies and send any excess to transit.
  * @context: {
  *   workspaceId: number,
@@ -44,7 +44,7 @@ try {
   const workspaceId = getPositiveInteger(input.workspaceId);
   const payments = getPaymentRows(input);
   const supplementaryPayments = getSupplementaryPaymentRows(input);
-  const requestedAmount = getMoney(input.amount);
+  const requestedAmount = getSignedMoney(input.amount);
   const sourceTransitAccountId = getPositiveInteger(input.sourceTransitAccountId);
   const credits = getCreditRows(input);
   const creditTotal = roundMoney(credits.reduce((total, item) => total + item.amount, 0));
@@ -65,8 +65,8 @@ try {
     throw new Error('El saldo a favor no se puede aplicar en un cobro desde una cuenta en tránsito.');
   }
 
-  if (totalAmount < 0) {
-    throw new Error('El saldo a favor aplicado supera el monto asignado a las pólizas.');
+  if (totalAmount < 0 && creditTotal <= 0) {
+    throw new Error('Un monto negativo debe aplicarse a cuotas negativas disponibles.');
   }
 
   if (sourceTransitAccountId > 0) {
@@ -85,6 +85,10 @@ try {
     if (existing) existing.amount = roundMoney(existing.amount + payment.amount);
     else combinedPayments.push({ policyId: payment.policyId, amount: payment.amount });
   });
+  const creditPolicyIds = credits
+    .map(item => item.policyId)
+    .filter(policyId => !combinedPayments.some(payment => payment.policyId === policyId));
+  creditPolicyIds.forEach(policyId => combinedPayments.push({ policyId: policyId, amount: 0 }));
   const details = combinedPayments.map(payment => {
     const policy = loadPolicy(payment.policyId);
     return { policy, amount: payment.amount, payPlan: loadPayPlan(policy.id) };
@@ -117,8 +121,11 @@ try {
   validateTotals(totalAmount, totals, creditTotal);
   assignCredit(details, creditTotal, creditDetails);
 
-  const transfer = totalAmount > 0 ? createTransfer(input, workspaceId, totalAmount) : null;
-  const entity = buildPaymentAllocationEntity(input, workspaceId, totalAmount, transfer, details, totals, creditDetails, creditTotal);
+  const transferAmount = totalAmount;
+  const transfer = transferAmount !== 0
+    ? createTransfer(input, workspaceId, transferAmount)
+    : null;
+  const entity = buildPaymentAllocationEntity(input, workspaceId, transferAmount, transfer, details, totals, creditDetails, creditTotal);
 
   doCmd({
     cmd: 'DoPaymentAllocation',
@@ -132,7 +139,8 @@ try {
   }
 
   const allocationId = getAllocationId(DoPaymentAllocation && DoPaymentAllocation.outData)
-    || loadAllocationIdByTransferId(transfer && transfer.id);
+    || loadAllocationIdByTransferId(transfer && transfer.id)
+    || loadAllocationIdByCreditDetails(creditDetails);
   const transitTransfer = sourceTransitAccountId > 0
     ? createTransitDebitTransfer(input, workspaceId, totalAmount, sourceTransitAccountId, details, allocationId)
     : null;
@@ -147,6 +155,7 @@ try {
       difference: totals.difference,
       creditAmount: creditTotal,
       allocationId: allocationId || null,
+      creditTransfers: [],
       transitTransfer: transitTransfer,
       policies: details.map(item => ({
         policyId: item.policy.id,
@@ -185,7 +194,10 @@ function validateInput(input) {
 
   const payments = getPaymentRows(input);
   const supplementaryPayments = getSupplementaryPaymentRows(input);
-  if (payments.length === 0 && supplementaryPayments.length === 0) {
+  const requestedAmount = getSignedMoney(input.amount);
+  const creditRows = getCreditRows(input);
+  if (payments.length === 0 && supplementaryPayments.length === 0
+    && !(requestedAmount < -0.01 && creditRows.length > 0)) {
     throw new Error('Debe indicar al menos una póliza para realizar el cobro.');
   }
 
@@ -410,6 +422,37 @@ function getTransitIncomeType(input) {
   return code;
 }
 
+function getPremiumIncomeType(input, sourceEntity) {
+  const requestedCode = getTrimmedString(input && input.incomeType)
+    || getTrimmedString(sourceEntity && sourceEntity.incomeType);
+  if (requestedCode) return requestedCode;
+
+  doCmd({
+    cmd: 'RepoIncomeTypeCatalog',
+    data: {
+      operation: 'GET',
+      filter: "internalType = 'PREMIUM'",
+      entity: null,
+      bulkJson: null,
+      include: null,
+      size: 0,
+      page: 0,
+      showColumnsIfEmpty: false
+    }
+  });
+
+  const options = getRows(RepoIncomeTypeCatalog && RepoIncomeTypeCatalog.outData);
+  const option = options.find(item =>
+    getTrimmedString(item && item.internalType).toUpperCase() === 'PREMIUM'
+  );
+  const code = getTrimmedString(option && (option.code || option.value));
+  if (!code) {
+    throw new Error('El tipo de ingreso PREMIUM no está configurado.');
+  }
+
+  return code;
+}
+
 function getOtherPaymentMethodName() {
   doCmd({
     cmd: 'RepoPaymentMethodCatalog',
@@ -519,6 +562,15 @@ function validateTotals(totalAmount, totals, creditTotal) {
   }
 
   const credit = roundMoney(creditTotal || 0);
+  if (totalAmount < -0.01) {
+    if (credit <= 0 || Math.abs(roundMoney(Math.abs(totalAmount) - credit)) > 0.01) {
+      throw new Error('El monto negativo no coincide con el saldo a favor aplicado.');
+    }
+    if (totals.appliedAmount > 0.01 || totals.transitAmount > 0.01) {
+      throw new Error('Un monto negativo solo puede aplicarse a cuotas negativas.');
+    }
+    return;
+  }
   if (credit > totals.appliedAmount + 0.01) {
     throw new Error('El saldo a favor aplicado supera las cuotas que se cobran.');
   }
@@ -528,18 +580,20 @@ function validateTotals(totalAmount, totals, creditTotal) {
   }
 }
 
-function createTransfer(input, workspaceId, amount) {
+function createTransfer(input, workspaceId, amount, options) {
   const currency = getTrimmedString(input.currency) || 'USD';
   const paymentMethod = getTrimmedString(input.paymentMethod) || 'ACH';
   const sourceEntity = input && input.transferEntity && typeof input.transferEntity === 'object'
     && !Array.isArray(input.transferEntity)
     ? input.transferEntity
     : null;
+  const incomeType = getPremiumIncomeType(input, sourceEntity);
   const entity = sourceEntity
     ? {
         ...sourceEntity,
         currency: sourceEntity.currency || currency,
         amount: amount,
+        incomeType: incomeType,
         // Keep the accounting concept expected by UnDoPaymentAllocation.
         concept: 'IW',
         transferWorkspaceId: workspaceId
@@ -552,7 +606,7 @@ function createTransfer(input, workspaceId, amount) {
           paymentMethod: paymentMethod,
           paymentMethodName: getTrimmedString(input.paymentMethodName) || paymentMethod
         }],
-        incomeType: getTrimmedString(input.incomeType) || 'IT7',
+        incomeType: incomeType,
         sourceExternal: getTrimmedString(input.sourceExternal) || 'CajaAhUSD',
         destinationAccountId: getPositiveInteger(input.destinationAccountId) || 208,
         isExternal: true,
@@ -581,6 +635,9 @@ function createTransfer(input, workspaceId, amount) {
     throw new Error('La transferencia no devolvió un identificador válido.');
   }
 
+  // El movimiento debe quedar ejecutado antes de la asignación. Conservamos
+  // el objeto original de RepoTransfer para que DoPaymentAllocation reciba la
+  // misma estructura que el flujo nativo.
   doCmd({
     cmd: 'DoTransfer',
     data: { transferId: transfer.id, transfer: null }
@@ -592,7 +649,7 @@ function createTransfer(input, workspaceId, amount) {
       : 'No se pudo ejecutar la transferencia.');
   }
 
-  return getRows(DoTransfer.outData)[0] || transfer;
+  return transfer;
 }
 
 function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId, details, allocationId) {
@@ -752,10 +809,11 @@ function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, deta
         lifePolicyId: policy.id,
         payPlanId: installment.id,
         dueAmount: -installment.taken,
-        moneyInAmount: 0,
+        // Native negative applications book the signed amount as money-in;
+        // they are not represented as a SALDOFAVOR compensation line.
+        moneyInAmount: -installment.taken,
         currency: installment.currency || currency,
-        compensationAmount: -installment.taken,
-        compensationType: 'SALDOFAVOR',
+        compensationAmount: 0,
         transitAmount: 0
       });
 
@@ -786,8 +844,8 @@ function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, deta
     transactionDate: new Date().toISOString(),
     transferAmount: amount,
     fromTransitAmount: 0,
-    compensationAmount: roundMoney(creditTotal || 0),
-    premiumAmount: totals.appliedAmount,
+    compensationAmount: amount < -0.01 ? 0 : roundMoney(creditTotal || 0),
+    premiumAmount: amount < -0.01 ? amount : totals.appliedAmount,
     supplementaryAmount: totals.transitAmount,
     premiumDifferenceAmount: 0,
     transferWorkspaceId: workspaceId,
@@ -800,6 +858,7 @@ function getAllocationId(value) {
   const row = getRows(value)[0] || {};
   const nestedAllocation = row && row.Allocation;
   const candidates = [
+    row && row.entity && row.entity.id,
     row && row.allocationId,
     row && row.id,
     nestedAllocation && nestedAllocation.id,
@@ -834,6 +893,31 @@ function loadAllocationIdByTransferId(transferId) {
   return getPositiveInteger(row.allocationId)
     || getPositiveInteger(row.Allocation && row.Allocation.id)
     || getPositiveInteger(row.Allocation && row.Allocation.allocationId);
+}
+
+function loadAllocationIdByCreditDetails(creditDetails) {
+  const payPlanIds = Array.from(new Set((Array.isArray(creditDetails) ? creditDetails : [])
+    .flatMap(item => Array.isArray(item && item.installments) ? item.installments : [])
+    .map(item => getPositiveInteger(item && item.id))
+    .filter(id => id > 0)));
+
+  if (payPlanIds.length === 0) return 0;
+
+  doCmd({
+    cmd: 'LoadEntities',
+    data: {
+      entity: 'AllocationInstallment',
+      fields: 'allocationId,payPlanId',
+      filter: `payPlanId IN (${payPlanIds.join(',')})`,
+      size: 100,
+      page: 0,
+      noTracking: true
+    }
+  });
+
+  return getRows(LoadEntities && LoadEntities.outData)
+    .map(row => getPositiveInteger(row && row.allocationId))
+    .find(id => id > 0) || 0;
 }
 
 function getRows(value) {
