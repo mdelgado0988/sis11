@@ -283,7 +283,6 @@
   const [balanceRows, setBalanceRows] = React.useState([]);
   const [balanceLoading, setBalanceLoading] = React.useState(false);
   const [transitAccountRows, setTransitAccountRows] = React.useState([]);
-  const [selectedTransitAccountId, setSelectedTransitAccountId] = React.useState([]);
   const [transitAccountLoading, setTransitAccountLoading] = React.useState(false);
   const [transitExportLoading, setTransitExportLoading] = React.useState(false);
   const [transitAccountPagination, setTransitAccountPagination] = React.useState({ current: 1, pageSize: 25 });
@@ -291,8 +290,15 @@
   const [transitAccountFilters, setTransitAccountFilters] = React.useState({ showAll: false });
   const [transitHasSearched, setTransitHasSearched] = React.useState(false);
   const [transitFilterVisible, setTransitFilterVisible] = React.useState(false);
-  const [transitDetailPagination, setTransitDetailPagination] = React.useState({});
-  const [expandedTransitAccountKeys, setExpandedTransitAccountKeys] = React.useState([]);
+  const [transitInnerTab, setTransitInnerTab] = React.useState('accounts');
+  const [transitDetailAccount, setTransitDetailAccount] = React.useState(null);
+  const [transitLineRows, setTransitLineRows] = React.useState([]);
+  const [transitLineLoading, setTransitLineLoading] = React.useState(false);
+  const [transitLinePagination, setTransitLinePagination] = React.useState({ current: 1, pageSize: 25 });
+  const [transitLineTotal, setTransitLineTotal] = React.useState(0);
+  const [transitLineTotals, setTransitLineTotals] = React.useState({});
+  const [transitLineAccountSummary, setTransitLineAccountSummary] = React.useState(null);
+  const [transitLineSelection, setTransitLineSelection] = React.useState({});
   const [transitFilterForm] = Form.useForm();
   const [refundMoneyVisible, setRefundMoneyVisible] = React.useState(false);
   const [refundMoneySubmitting, setRefundMoneySubmitting] = React.useState(false);
@@ -305,6 +311,7 @@
   const accountTransferAmount = Form.useWatch('amount', accountTransferForm);
   const [accountTransferSourceBalance, setAccountTransferSourceBalance] = React.useState(0);
   const [accountTransferAccountOptions, setAccountTransferAccountOptions] = React.useState([]);
+  const [accountTransferSourceOption, setAccountTransferSourceOption] = React.useState(null);
   const [accountTransferAccountLoading, setAccountTransferAccountLoading] = React.useState(false);
   const accountTransferAccountSearchTimer = React.useRef(null);
   const [ppxaApplyVisible, setPpxaApplyVisible] = React.useState(false);
@@ -326,6 +333,10 @@
   const [reversalAccountOptions, setReversalAccountOptions] = React.useState([]);
   const [reversalAccountLoading, setReversalAccountLoading] = React.useState(false);
   const [reversalFormConfig, setReversalFormConfig] = React.useState(null);
+  const [reversalClientId, setReversalClientId] = React.useState(undefined);
+  const [operationClientOptions, setOperationClientOptions] = React.useState([]);
+  const [operationClientLoading, setOperationClientLoading] = React.useState(false);
+  const operationClientSearchTimer = React.useRef(null);
   const [restructurePromptVisible, setRestructurePromptVisible] = React.useState(false);
   const [restructurePromptLoading, setRestructurePromptLoading] = React.useState(false);
   const [cashierRestructureVisible, setCashierRestructureVisible] = React.useState(false);
@@ -359,6 +370,7 @@
   const [collectionChargeStep, setCollectionChargeStep] = React.useState('payment');
   const [collectionPolicyRows, setCollectionPolicyRows] = React.useState([]);
   const [collectionSupplementaryRows, setCollectionSupplementaryRows] = React.useState([]);
+  const [collectionCreditRows, setCollectionCreditRows] = React.useState([]);
   const [collectionExternalPolicyVisible, setCollectionExternalPolicyVisible] = React.useState(false);
   const [collectionExternalPolicyOptions, setCollectionExternalPolicyOptions] = React.useState([]);
   const [collectionExternalPolicyLoading, setCollectionExternalPolicyLoading] = React.useState(false);
@@ -1104,34 +1116,63 @@
         white-space: pre-line;
       }
 
-      .cashier-supervisor-transit-detail .ant-table-thead > tr > th,
-      .cashier-supervisor-transit-detail .ant-table-tbody > tr > td {
-        padding: 3px 8px !important;
-        font-size: 12px;
-        line-height: 18px;
+      .cashier-transit-inner-tabs > .ant-tabs-nav {
+        margin-bottom: 8px;
       }
 
-      .cashier-supervisor-transit-detail {
-        padding: 8px 16px 16px;
-        background: #fafafa;
-        overflow: visible;
-      }
-
-      .cashier-supervisor-transit-detail .ant-table-pagination {
-        margin-bottom: 4px !important;
-      }
-
-      .cashier-supervisor-transit-detail-pager {
+      .cashier-transit-lines-header {
         display: flex;
-        justify-content: flex-end;
-        gap: 4px;
-        margin-top: 8px;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 8px 24px;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        background: #fafafa;
+        border: 1px solid #f0f0f0;
+        border-radius: 4px;
       }
 
-      .cashier-supervisor-transit-detail-pager .ant-btn {
-        min-width: 28px;
-        height: 24px;
-        padding: 0 7px;
+      .cashier-transit-lines-header > div {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 16px;
+      }
+
+      .cashier-transit-lines-selection {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 16px;
+        padding: 6px 12px;
+        margin-bottom: 8px;
+        background: #e6f4ff;
+        border: 1px solid #91caff;
+        border-radius: 4px;
+      }
+
+      .cashier-transit-lines-note {
+        margin-bottom: 12px;
+        padding: 6px 10px;
+        background: #f6ffed;
+        border: 1px solid #b7eb8f;
+        border-radius: 4px;
+      }
+
+      .cashier-transit-lines-empty {
+        padding: 32px 16px;
+        text-align: center;
+        color: #8c8c8c;
+      }
+
+      .cashier-transit-lines-table .ant-table-tbody > tr.cashier-transit-lines-closed > td {
+        color: #8c8c8c;
+        background: #fafafa;
+      }
+
+      .cashier-transit-lines-applied {
+        cursor: help;
+        border-bottom: 1px dotted #8c8c8c;
       }
 
       .cashier-supervisor-shell .ant-checkbox-inner {
@@ -2089,7 +2130,9 @@
         currency: getTrimmedString(filters && filters.currency),
         name: getTrimmedString(filters && filters.name),
         cancellations: filters && filters.cancellations === true,
-        onlyWithBalance: !(filters && filters.showAll === true)
+        onlyWithBalance: !(filters && filters.showAll === true),
+        // MSN-000174: the movements of one account are read in its detail tab, line by line.
+        includeMovements: false
       })
     })
       .then(response => {
@@ -2102,19 +2145,11 @@
           : {};
         const rows = Array.isArray(payload.data) ? payload.data : [];
         setTransitAccountRows(rows);
-        setExpandedTransitAccountKeys(current => current.filter(key =>
-          rows.some(row => String(row && row.id) === String(key))
-        ));
-        setSelectedTransitAccountId(current => (Array.isArray(current) ? current : [current])
-          .map(value => String(value))
-          .filter(value => rows.some(row => String(row && row.id) === value)));
         setTransitAccountTotal(Number(payload.total) || 0);
         setTransitAccountPagination({ current: currentPage, pageSize });
       })
       .catch(error => {
         setTransitAccountRows([]);
-        setExpandedTransitAccountKeys([]);
-        setSelectedTransitAccountId([]);
         setTransitAccountTotal(0);
         message.error(error && error.message ? error.message : String(error));
       })
@@ -2184,10 +2219,21 @@
     setTransitAccountFilters(nextFilters);
     setTransitHasSearched(true);
     setTransitFilterVisible(false);
+    resetTransitDetail();
     loadTransitAccounts({
       filters: nextFilters,
       pagination: { current: 1, pageSize: transitAccountPagination.pageSize }
     });
+  }
+
+  // A new search closes the detail; the selected lines stay selected until they are used or cleared.
+  function resetTransitDetail() {
+    setTransitInnerTab('accounts');
+    setTransitDetailAccount(null);
+    setTransitLineRows([]);
+    setTransitLineTotal(0);
+    setTransitLineTotals({});
+    setTransitLineAccountSummary(null);
   }
 
   function clearTransitFilters() {
@@ -2199,10 +2245,9 @@
     setTransitAccountFilters({ showAll: false });
     setTransitHasSearched(false);
     setTransitAccountRows([]);
-    setExpandedTransitAccountKeys([]);
-    setSelectedTransitAccountId([]);
     setTransitAccountTotal(0);
     setTransitFilterVisible(false);
+    resetTransitDetail();
   }
 
   function handleTransitTableChange(pagination) {
@@ -2309,77 +2354,166 @@
     }
   }
 
-  function getTransitDetailPage(account, total) {
-    const accountId = Number(account && account.id) || 0;
-    const storedPage = account && account.__transitDetailPage
-      ? account.__transitDetailPage
-      : transitDetailPagination[accountId] || {};
-    const pageSize = Number(storedPage.pageSize) > 0 ? Number(storedPage.pageSize) : 10;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const current = Math.min(
-      Math.max(Number(storedPage.current) || 1, 1),
-      totalPages
-    );
-    return { current, pageSize, total };
+  // MSN-000174: the detail tab works line by line. Each incoming movement of a transit account
+  // is a line with its own available amount (cmdTransitLines); the operations take selected lines.
+  function getTransitTime(value) {
+    const time = value ? new Date(value).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
   }
 
-  function setTransitDetailPage(accountId, pagination) {
-    const current = Math.max(Number(pagination && pagination.current) || 1, 1);
-    const pageSize = Math.max(Number(pagination && pagination.pageSize) || 10, 1);
-    const nextPage = { current, pageSize };
-
-    setTransitDetailPagination(current => ({
-      ...current,
-      [accountId]: nextPage
-    }));
-    setTransitAccountRows(rows => rows.map(row =>
-      Number(row && row.id) === Number(accountId)
-        ? {
-          ...row,
-          __transitDetailPage: nextPage,
-          __transitDetailVersion: Date.now()
-        }
-        : row
-    ));
-  }
-
-  function renderTransitDetailPager(accountId, page) {
-    const totalPages = Math.max(1, Math.ceil((Number(page && page.total) || 0) / (Number(page && page.pageSize) || 10)));
-    if (totalPages <= 1) return null;
-
-    const currentPage = Math.min(Math.max(Number(page && page.current) || 1, 1), totalPages);
-    const changePage = nextPage => event => {
-      if (event && event.stopPropagation) event.stopPropagation();
-      setTransitDetailPage(accountId, { current: nextPage, pageSize: page.pageSize });
+  function getTransitLineFilterContext(filters) {
+    const source = filters || {};
+    return {
+      holderId: source.holderId !== undefined && source.holderId !== null ? source.holderId : '',
+      transferId: source.transferId !== undefined && source.transferId !== null ? source.transferId : '',
+      name: getTrimmedString(source.name),
+      cancellations: source.cancellations === true,
+      showAll: source.showAll === true
     };
+  }
 
-    return (
-      <div
-        className="cashier-supervisor-transit-detail-pager"
-        onClick={event => event.stopPropagation()}
-      >
-        <Button size="small" disabled={currentPage <= 1} onClick={changePage(currentPage - 1)}>
-          {'<'}
-        </Button>
-        {Array.from({ length: totalPages }, (_, index) => index + 1).map(pageNumber => (
-          <Button
-            key={pageNumber}
-            size="small"
-            type={pageNumber === currentPage ? 'primary' : 'default'}
-            onClick={changePage(pageNumber)}
-          >
-            {pageNumber}
-          </Button>
-        ))}
-        <Button size="small" disabled={currentPage >= totalPages} onClick={changePage(currentPage + 1)}>
-          {'>'}
-        </Button>
-      </div>
-    );
+  function loadTransitLines(params = {}) {
+    const account = params.account || transitDetailAccount;
+    const accountId = Number(account && account.id) || 0;
+    if (accountId <= 0) return Promise.resolve();
+
+    const filters = params.filters || transitAccountFilters;
+    const pagination = params.pagination || transitLinePagination;
+    const pageSize = Number(pagination && pagination.pageSize) || 25;
+    const currentPage = Number(pagination && pagination.current) || 1;
+
+    setTransitLineLoading(true);
+    return exe('ExeChain', {
+      chain: 'cmdTransitLines',
+      context: JSON.stringify({
+        mode: 'list',
+        accountId: accountId,
+        page: currentPage,
+        size: pageSize,
+        ...getTransitLineFilterContext(filters)
+      })
+    })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The movements of the transit account could not be loaded.'));
+        }
+
+        const payload = response.outData && typeof response.outData === 'object' && !Array.isArray(response.outData)
+          ? response.outData
+          : {};
+        const rows = Array.isArray(payload.data) ? payload.data : [];
+        setTransitLineRows(rows);
+        setTransitLineTotal(Number(payload.total) || 0);
+        setTransitLineTotals(payload.totals && typeof payload.totals === 'object' ? payload.totals : {});
+        setTransitLineAccountSummary(payload.account && typeof payload.account === 'object' ? payload.account : null);
+        setTransitLinePagination({ current: currentPage, pageSize });
+        // A selected line keeps the available amount the server reports now.
+        setTransitLineSelection(current => {
+          const next = { ...current };
+          rows.forEach(row => {
+            const key = String(row && row.id);
+            if (!next[key]) return;
+            const available = getAuditNumber(row.available);
+            if (row.kind !== 'LINE' || available <= 0.005) {
+              delete next[key];
+            } else {
+              next[key] = { ...next[key], available: available };
+            }
+          });
+          return next;
+        });
+      })
+      .catch(error => {
+        setTransitLineRows([]);
+        setTransitLineTotal(0);
+        setTransitLineTotals({});
+        message.error(error && error.message ? error.message : String(error));
+      })
+      .finally(() => setTransitLineLoading(false));
+  }
+
+  function openTransitAccountDetail(account) {
+    const accountId = Number(account && account.id) || 0;
+    if (accountId <= 0) return;
+
+    setTransitDetailAccount(account);
+    setTransitInnerTab('lines');
+    setTransitLineRows([]);
+    setTransitLineTotal(0);
+    setTransitLineTotals({});
+    setTransitLineAccountSummary(null);
+    loadTransitLines({
+      account: account,
+      pagination: { current: 1, pageSize: transitLinePagination.pageSize }
+    });
+  }
+
+  function handleTransitLineTableChange(pagination) {
+    loadTransitLines({
+      pagination: {
+        current: pagination && pagination.current,
+        pageSize: pagination && pagination.pageSize
+      }
+    });
+  }
+
+  function isTransitLineSelectable(row) {
+    return Boolean(row) && row.kind === 'LINE' && getAuditNumber(row.available) > 0.005;
+  }
+
+  function getTransitLineSelectionEntries() {
+    return Object.keys(transitLineSelection || {})
+      .map(key => transitLineSelection[key])
+      .filter(entry => entry && Number(entry.movId) > 0 && getAuditNumber(entry.available) > 0.005)
+      .sort((left, right) => (getTransitTime(left.date) - getTransitTime(right.date))
+        || (Number(left.movId) - Number(right.movId)));
+  }
+
+  function toggleTransitLineSelection(rows, selected) {
+    const account = transitDetailAccount;
+    const accountId = Number(account && account.id) || 0;
+    if (accountId <= 0) return;
+
+    setTransitLineSelection(current => {
+      const next = { ...current };
+      (Array.isArray(rows) ? rows : []).forEach(row => {
+        const key = String(row && row.id);
+        if (!row || !key) return;
+        if (!selected) {
+          delete next[key];
+          return;
+        }
+        if (!isTransitLineSelectable(row)) return;
+        next[key] = {
+          key: key,
+          movId: Number(row.id),
+          accountId: accountId,
+          account: account,
+          available: getAuditNumber(row.available),
+          amount: getAuditNumber(row.amount),
+          date: row.date,
+          transaction: row.transaction,
+          ownerId: row.ownerId,
+          ownerName: row.ownerName
+        };
+      });
+      return next;
+    });
+  }
+
+  function clearTransitLineSelection() {
+    setTransitLineSelection({});
   }
 
   function getTransitSourceAccountOptions() {
-    return transitAccountRows
+    const accounts = transitAccountRows.slice();
+    getSelectedTransitAccounts().forEach(account => {
+      if (!accounts.some(row => Number(row && row.id) === Number(account && account.id))) {
+        accounts.push(account);
+      }
+    });
+
+    return accounts
       .map(account => {
         const label = getTransitAccountLabel(account);
         const accountId = Number(account && account.id) || 0;
@@ -2395,26 +2529,39 @@
   }
 
   function getSelectedTransitAccountIds() {
-    return (Array.isArray(selectedTransitAccountId) ? selectedTransitAccountId : [selectedTransitAccountId])
-      .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
-      .map(value => String(value));
-  }
-
-  function getSingleSelectedTransitAccount(actionMessage) {
-    const selectedIds = getSelectedTransitAccountIds();
-    if (selectedIds.length !== 1) {
-      message.warning(actionMessage || t('Select exactly one transit account for this action.'));
-      return null;
-    }
-
-    return transitAccountRows.find(row => String(row && row.id) === selectedIds[0]) || null;
+    return Array.from(new Set(getTransitLineSelectionEntries().map(entry => String(entry.accountId))));
   }
 
   function getSelectedTransitAccounts() {
-    const selectedIds = getSelectedTransitAccountIds();
-    return selectedIds
-      .map(id => transitAccountRows.find(row => String(row && row.id) === id))
-      .filter(Boolean);
+    const accounts = {};
+    getTransitLineSelectionEntries().forEach(entry => {
+      const key = String(entry.accountId);
+      if (!accounts[key]) {
+        accounts[key] = entry.account || { id: entry.accountId };
+      }
+    });
+    return Object.keys(accounts).map(key => accounts[key]);
+  }
+
+  function getSingleSelectedTransitAccount(actionMessage) {
+    const accounts = getSelectedTransitAccounts();
+    if (accounts.length !== 1) {
+      message.warning(actionMessage || t('Select lines of a single transit account for this action.'));
+      return null;
+    }
+
+    return accounts[0];
+  }
+
+  function getSelectedTransitLineEntries(accountId) {
+    return getTransitLineSelectionEntries()
+      .filter(entry => !accountId || Number(entry.accountId) === Number(accountId));
+  }
+
+  function getSelectedTransitLinesTotal(accountId) {
+    return Number(getSelectedTransitLineEntries(accountId)
+      .reduce((total, entry) => total + getAuditNumber(entry.available), 0)
+      .toFixed(2));
   }
 
   function getSelectedTransitAccountsSummary() {
@@ -2422,8 +2569,370 @@
     const currencies = Array.from(new Set(accounts
       .map(account => getTrimmedString(account && account.currency).toUpperCase())
       .filter(Boolean)));
-    const total = accounts.reduce((sum, account) => sum + Math.max(0, getAuditNumber(getTransitAccountBalance(account))), 0);
+    const total = getSelectedTransitLinesTotal();
     return { accounts, currencies, total };
+  }
+
+  // The amount is taken from the oldest selected lines first; the last line used may be partial.
+  function distributeTransitLines(amount, entries) {
+    let remaining = Number(getAuditNumber(amount).toFixed(2));
+    const lines = [];
+    (Array.isArray(entries) ? entries : []).forEach(entry => {
+      if (remaining <= 0) return;
+      const used = Number(Math.min(getAuditNumber(entry.available), remaining).toFixed(2));
+      if (used <= 0) return;
+      lines.push({ movId: Number(entry.movId), accountId: Number(entry.accountId), amount: used });
+      remaining = Number((remaining - used).toFixed(2));
+    });
+    if (remaining > 0.005) {
+      throw new Error(t('The amount cannot exceed the available balance of the selected lines.'));
+    }
+    return lines;
+  }
+
+  function sumTransitLines(lines) {
+    return Number((Array.isArray(lines) ? lines : [])
+      .reduce((total, line) => total + getAuditNumber(line && line.amount), 0)
+      .toFixed(2));
+  }
+
+  function groupTransitLinesByAccount(lines) {
+    return (Array.isArray(lines) ? lines : []).reduce((groups, line) => {
+      const key = String(line.accountId);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(line);
+      return groups;
+    }, {});
+  }
+
+  async function runTransitLinesChain(context, failureMessage) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdTransitLines',
+      context: JSON.stringify(context)
+    });
+    if (!response || response.ok === false) {
+      throw new Error(response && response.msg ? response.msg : failureMessage);
+    }
+
+    return response.outData && typeof response.outData === 'object' && !Array.isArray(response.outData)
+      ? response.outData
+      : {};
+  }
+
+  function checkTransitLines(accountId, amount, lines) {
+    return runTransitLinesChain({
+      mode: 'check',
+      accountId: Number(accountId),
+      amount: Number(getAuditNumber(amount).toFixed(2)),
+      lines: lines.map(line => ({ movId: line.movId, amount: line.amount }))
+    }, t('The selected lines could not be validated.'));
+  }
+
+  function stampTransitLines(accountId, operation, reference, amount, lines) {
+    return runTransitLinesChain({
+      mode: 'stamp',
+      accountId: Number(accountId),
+      operation: operation,
+      opTransferId: Number(reference && reference.transferId) || 0,
+      opRequestId: Number(reference && reference.requestId) || 0,
+      amount: Number(getAuditNumber(amount).toFixed(2)),
+      lines: lines.map(line => ({ movId: line.movId, amount: line.amount }))
+    }, t('The applied lines could not be recorded.'));
+  }
+
+  // Pending transfers created by an operation that could not record its lines are removed again.
+  async function deletePendingTransitTransfers(transfers) {
+    for (const transfer of (Array.isArray(transfers) ? transfers : [])) {
+      const id = Number(transfer && transfer.id) || 0;
+      if (id <= 0) continue;
+      await exe('RepoTransfer', {
+        operation: 'DELETE',
+        entity: { id: id }
+      });
+    }
+  }
+
+  function refreshTransitAfterOperation() {
+    setTransitLineSelection({});
+    loadTransitAccounts({
+      filters: transitAccountFilters,
+      pagination: {
+        current: transitAccountPagination.current,
+        pageSize: transitAccountPagination.pageSize
+      }
+    });
+    if (transitDetailAccount) {
+      loadTransitLines({
+        account: transitDetailAccount,
+        pagination: transitLinePagination
+      });
+    }
+  }
+
+  function renderTransitSelectionNote(accountId) {
+    const entries = getSelectedTransitLineEntries(accountId);
+    return (
+      <div className="cashier-transit-lines-note">
+        {t('Selected lines')}: <strong>{entries.length}</strong>
+        {' · '}
+        {t('Available to apply')}: <strong>{formatMoney(getSelectedTransitLinesTotal(accountId))}</strong>
+        {' · '}
+        {t('A partial amount is taken from the oldest selected lines first.')}
+      </div>
+    );
+  }
+
+  // MSN-000176: a transit operation (PPXA, manual account transfer, premium reversal credited to an account)
+  // references a client the way the cash income form does: the «Cliente» fields of jIncomeTypeForm (clientePA,
+  // hiddenCodigoCliente), which the Contact filter of the transit tab reads.
+  function buildClientReferenceForm(client) {
+    const id = Number(client && client.id);
+    const name = getTrimmedString(client && client.name);
+    if (!Number.isFinite(id) || id <= 0 || !name) return null;
+
+    return JSON.stringify([
+      {
+        type: 'text',
+        required: true,
+        label: 'Cliente',
+        placeholder: 'Digite un nombre para buscar un cliente',
+        className: 'ant-input col-md-12 row-1',
+        name: 'clientePA',
+        access: false,
+        subtype: 'text',
+        userData: [name]
+      },
+      {
+        type: 'hidden',
+        name: 'hiddenCodigoCliente',
+        access: false,
+        userData: [String(id)]
+      }
+    ]);
+  }
+
+  function getFormClient(form) {
+    let fields = form;
+    if (typeof fields === 'string') {
+      try {
+        fields = JSON.parse(fields);
+      } catch (error) {
+        return null;
+      }
+    }
+    if (!Array.isArray(fields)) return null;
+
+    const getValue = fieldName => {
+      const field = fields.find(item => item && item.name === fieldName);
+      return getTrimmedString(field && (Array.isArray(field.userData) ? field.userData[0] : field.userData));
+    };
+    const id = Number(getValue('hiddenCodigoCliente'));
+    const name = getValue('clientePA');
+    return Number.isFinite(id) && id > 0 && name ? { id: id, name: name } : null;
+  }
+
+  // The movement text is the reference followed by the client name, unless the reference already holds the name.
+  function buildClientReferenceText(reference, client) {
+    const text = getTrimmedString(reference);
+    const name = getTrimmedString(client && client.name);
+    if (!name || text.toLowerCase().indexOf(name.toLowerCase()) >= 0) return text;
+    return text ? `${text} - ${name}` : name;
+  }
+
+  // Own accounts do not determine the client, as in the cash income (updateNewIncomeTransitContact).
+  function getDefaultOperationClient(client) {
+    const id = Number(client && client.id);
+    const name = getTrimmedString(client && client.name);
+    return Number.isFinite(id) && id > 0 && name && name.toUpperCase().indexOf('ASEGURADORA GLOBAL') < 0
+      ? { id: id, name: name }
+      : null;
+  }
+
+  // The client of the given selected lines, or null when they belong to more than one client.
+  function getTransitLinesClient(entries) {
+    const owners = {};
+    (Array.isArray(entries) ? entries : []).forEach(entry => {
+      const id = Number(entry && entry.ownerId);
+      if (Number.isFinite(id) && id > 0) {
+        owners[id] = getTrimmedString(entry.ownerName) || owners[id] || '';
+      }
+    });
+    const ids = Object.keys(owners);
+    return ids.length === 1 && owners[ids[0]] ? { id: Number(ids[0]), name: owners[ids[0]] } : null;
+  }
+
+  // Default client of an operation on selected lines: the holder of their accounts when they all have the same
+  // one, else the client the lines belong to.
+  function getSelectedTransitLinesDefaultClient(accounts, entries) {
+    const holders = (Array.isArray(accounts) ? accounts : [])
+      .map(account => getDefaultOperationClient(getTransitAccountContact(account)));
+    const holderIds = Array.from(new Set(holders.map(holder => (holder ? holder.id : 0))));
+    if (holders.length > 0 && holderIds.length === 1 && holderIds[0] > 0) return holders[0];
+    return getDefaultOperationClient(getTransitLinesClient(entries));
+  }
+
+  // The outgoing movement of an account keeps the client of the lines it takes.
+  function getTransitLinesOwnerForm(lines) {
+    const taken = {};
+    (Array.isArray(lines) ? lines : []).forEach(line => {
+      taken[String(line && line.movId)] = true;
+    });
+    return buildClientReferenceForm(getTransitLinesClient(
+      getTransitLineSelectionEntries().filter(entry => taken[String(entry.movId)])
+    ));
+  }
+
+  function mapOperationClientOption(contact) {
+    const id = Number(contact && contact.id);
+    const name = getTrimmedString(contact && (contact.FullName || contact.fullName || [
+      contact.name,
+      contact.surname1,
+      contact.surname2
+    ].filter(Boolean).join(' '))) || String(id);
+    const identifier = getTrimmedString(contact && (contact.identifier || contact.cnp || contact.nif || contact.passport));
+
+    return {
+      value: id,
+      id: id,
+      name: name,
+      label: (
+        <div style={{ lineHeight: 1.25 }}>
+          <div>{name}</div>
+          <div style={{ color: '#8c8c8c', fontSize: 11 }}>
+            {`${t('ID')}: ${id}${identifier ? ` | ${identifier}` : ''}`}
+          </div>
+        </div>
+      )
+    };
+  }
+
+  function fetchOperationClients(filter, size) {
+    return exe('GetContacts', { operation: 'GET', filter: filter, size: size || 15 })
+      .then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('Clients could not be loaded.'));
+        }
+
+        return getRows(response)
+          .map(mapOperationClientOption)
+          .filter(option => Number.isFinite(option.id) && option.id > 0);
+      });
+  }
+
+  function searchOperationClients(value) {
+    const searchText = getTrimmedString(value);
+    const isNumericId = /^\d+$/.test(searchText);
+
+    if (operationClientSearchTimer.current) {
+      clearTimeout(operationClientSearchTimer.current);
+      operationClientSearchTimer.current = null;
+    }
+
+    if (!searchText || (!isNumericId && searchText.length < 3)) {
+      setOperationClientLoading(false);
+      return;
+    }
+
+    operationClientSearchTimer.current = setTimeout(() => {
+      const escaped = escapeSqlString(searchText);
+      const filter = isNumericId
+        ? `(inactive=0) AND [id] = ${Number(searchText)}`
+        : `(inactive=0) AND (([name] LIKE N'%${escaped}%') OR ([surname1] LIKE N'%${escaped}%') OR ([surname2] LIKE N'%${escaped}%') OR ([cnp] LIKE N'%${escaped}%') OR ([nif] LIKE N'%${escaped}%'))`;
+
+      setOperationClientLoading(true);
+      fetchOperationClients(filter, 15)
+        .then(options => setOperationClientOptions(options))
+        .catch(error => {
+          message.error(error && error.message ? error.message : String(error));
+        })
+        .finally(() => setOperationClientLoading(false));
+    }, 400);
+  }
+
+  // Shows the default client as the only option and returns its id for the field.
+  function presetOperationClient(client) {
+    if (operationClientSearchTimer.current) {
+      clearTimeout(operationClientSearchTimer.current);
+      operationClientSearchTimer.current = null;
+    }
+    setOperationClientLoading(false);
+    setOperationClientOptions(client ? [mapOperationClientOption(client)] : []);
+    return client ? client.id : undefined;
+  }
+
+  function getOperationClient(clientId) {
+    const option = operationClientOptions.find(item => Number(item && item.id) === Number(clientId));
+    return option && Number(option.id) > 0 ? { id: Number(option.id), name: getTrimmedString(option.name) } : null;
+  }
+
+  function renderOperationClientSelect(value, onChange) {
+    return (
+      <Select
+        showSearch
+        allowClear
+        filterOption={false}
+        value={value}
+        onChange={onChange}
+        options={operationClientOptions}
+        loading={operationClientLoading}
+        onSearch={searchOperationClients}
+        optionLabelProp="name"
+        placeholder={t('Type at least 3 characters')}
+        notFoundContent={operationClientLoading ? t('Loading...') : t('No contacts found')}
+      />
+    );
+  }
+
+  // The client of a reversed premium payment: the «Cliente» of its income, else the holder of the paid policy accounts.
+  function presetReversalClient(record) {
+    const allocationId = Number(record && record.allocationId) || 0;
+    if (allocationId <= 0 || reversalClientId) return;
+
+    const formClient = getDefaultOperationClient(getFormClient(getMovementViewValue(record.group, 'jIncomeTypeForm')));
+    if (formClient) {
+      setReversalClientId(presetOperationClient(formClient));
+      return;
+    }
+
+    setOperationClientLoading(true);
+    fetchOperationClients(`[id] IN (SELECT a.[holderId] FROM [Account] a INNER JOIN [Transfer] tr ON tr.[destinationAccountId] = a.[id] WHERE tr.[allocationId] = ${allocationId} AND tr.[transactionCode] = 'PREMIUMPAY')`, 2)
+      .then(options => {
+        const client = options.length === 1 ? getDefaultOperationClient(options[0]) : null;
+        if (!client) return;
+        setOperationClientOptions(current => (current.some(item => Number(item && item.id) === client.id)
+          ? current
+          : [mapOperationClientOption(client)].concat(current)));
+        setReversalClientId(current => current || client.id);
+      })
+      .catch(error => message.error(error && error.message ? error.message : String(error)))
+      .finally(() => setOperationClientLoading(false));
+  }
+
+  // The credits a reversal creates (TRANSIT transfers of the allocation into the chosen account) keep the client
+  // chosen in the reversal, so the Contact filter of the transit tab finds them.
+  async function stampReversalCreditClient(allocationId, accountId, client) {
+    const failure = t('The reversal was applied, but the client could not be saved on the credited movement.');
+    const form = buildClientReferenceForm(client);
+    const response = await exe('RepoTransfer', {
+      operation: 'GET',
+      filter: `allocationId = ${Number(allocationId)} AND transactionCode = 'TRANSIT' AND destinationAccountId = ${Number(accountId)}`,
+      size: 100,
+      page: 0
+    });
+    const credits = response && response.ok !== false
+      ? getRows(response).filter(item => Number(item && item.id) > 0)
+      : [];
+    if (!form || !credits.length) throw new Error(failure);
+
+    for (const credit of credits) {
+      const result = await exe('SetField', {
+        entity: 'Transfer',
+        entityId: Number(credit.id),
+        fieldValue: `jIncomeTypeForm=N'${escapeSqlString(form)}'`,
+        raw: true
+      });
+      if (!result || result.ok === false) throw new Error(failure);
+    }
   }
 
   function closePpxaApplyModal() {
@@ -2433,6 +2942,7 @@
     }
     setPpxaApplyVisible(false);
     setPpxaApplyAccountOptions([]);
+    presetOperationClient(null);
     ppxaApplyForm.resetFields();
   }
 
@@ -2473,7 +2983,7 @@
   async function openPpxaApplyModal() {
     const summary = getSelectedTransitAccountsSummary();
     if (!summary.accounts.length) {
-      message.warning(t('Select at least one transit account.'));
+      message.warning(t('Select at least one line with available balance.'));
       return;
     }
     if (summary.currencies.length !== 1) {
@@ -2490,7 +3000,8 @@
     ppxaApplyForm.setFieldsValue({
       currency: summary.currencies[0],
       amount: Number(summary.total.toFixed(2)),
-      reference: ''
+      reference: '',
+      client: presetOperationClient(getSelectedTransitLinesDefaultClient(summary.accounts, getTransitLineSelectionEntries()))
     });
     setPpxaApplyVisible(true);
     setPpxaApplyAccountLoading(true);
@@ -2525,11 +3036,12 @@
     const amount = Number(values && values.amount);
     const currency = getTrimmedString(values && values.currency).toUpperCase();
     const reference = getTrimmedString(values && values.reference);
+    const client = getOperationClient(values && values.client);
     const destination = ppxaApplyAccountOptions.find(option => Number(option && option.value) === destinationAccountId);
     const destinationAccount = destination && destination.account;
 
     if (!summary.accounts.length) {
-      message.error(t('Select at least one transit account.'));
+      message.error(t('Select at least one line with available balance.'));
       return;
     }
     if (summary.currencies.length !== 1 || summary.currencies[0] !== currency) {
@@ -2540,12 +3052,20 @@
       message.error(t('Select a destination account.'));
       return;
     }
-    if (!Number.isFinite(amount) || amount <= 0 || Math.abs(amount - Number(summary.total.toFixed(2))) > 0.01) {
-      message.error(t('The amount must match the total selected balance.'));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      message.error(t('Enter an amount greater than zero.'));
+      return;
+    }
+    if (amount > summary.total + 0.005) {
+      message.error(t('The amount cannot exceed the available balance of the selected lines.'));
       return;
     }
     if (!reference) {
       message.error(t('Enter a reference.'));
+      return;
+    }
+    if (!client) {
+      message.error(t('Select a client.'));
       return;
     }
     if (summary.accounts.some(account => Number(account && account.id) === destinationAccountId)) {
@@ -2571,12 +3091,13 @@
     const date = getCurrentUtcDateTime();
     const incomeType = getTrimmedString(ppxaIncomeType.value || ppxaIncomeType.code);
     const destinationName = getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo)) || 'PPXA';
-    const buildTransferEntity = (transferAmount, destinationId, destinationLabel) => ({
+    const concept = buildClientReferenceText(reference, client);
+    const buildTransferEntity = (transferAmount, destinationId, destinationLabel, incomeForm) => ({
       currency: currency,
       amount: transferAmount,
       sourceAccountId: null,
       destinationAccountId: destinationId,
-      concept: reference,
+      concept: concept,
       paymentMethod: 'OT',
       paymentMethodName: 'OT',
       SplitPayments: [{
@@ -2612,54 +3133,70 @@
       reversalDate: null,
       incomeType: incomeType,
       IncomeType: null,
-      jIncomeTypeForm: null,
+      jIncomeTypeForm: incomeForm || null,
       transferWorkspaceId: workspaceId,
       user: currentUserEmail || null
     });
 
     try {
-      const createdTransfers = [];
-      for (const account of summary.accounts) {
-        const transferAmount = Number(Math.max(0, getAuditNumber(getTransitAccountBalance(account))).toFixed(2));
-        if (transferAmount <= 0) continue;
+      // The amount is taken from the selected lines, oldest first, across the selected accounts.
+      const ppxaLines = distributeTransitLines(amount, getTransitLineSelectionEntries());
+      const ppxaLinesByAccount = groupTransitLinesByAccount(ppxaLines);
+      const sourceAccounts = summary.accounts.filter(account => ppxaLinesByAccount[String(account && account.id)]);
+      for (const account of sourceAccounts) {
+        const accountLines = ppxaLinesByAccount[String(account.id)];
+        await checkTransitLines(account.id, sumTransitLines(accountLines), accountLines);
+      }
 
-        const sourceId = Number(account && account.id);
-        const sourceName = getTrimmedString(account && (account.name || account.accNo)) || String(sourceId);
-        const outgoing = await exe('RepoTransfer', {
+      const createdTransfers = [];
+      try {
+        for (const account of sourceAccounts) {
+          const accountLines = ppxaLinesByAccount[String(account.id)];
+          const transferAmount = sumTransitLines(accountLines);
+          if (transferAmount <= 0) continue;
+
+          const sourceId = Number(account && account.id);
+          const sourceName = getTrimmedString(account && (account.name || account.accNo)) || String(sourceId);
+          const outgoing = await exe('RepoTransfer', {
+            operation: 'ADD',
+            entity: buildTransferEntity(-transferAmount, sourceId, sourceName, getTransitLinesOwnerForm(accountLines)),
+            otherReceivables: [],
+            execute: false
+          });
+          if (!outgoing || outgoing.ok === false) {
+            throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The PPXA source transfer could not be created.'));
+          }
+
+          const outgoingTransfer = getRows(outgoing)[0] || {};
+          const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
+          if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
+            throw new Error(t('The PPXA source transfer was created, but its movement identifier could not be identified.'));
+          }
+          createdTransfers.push({ id: outgoingId, amount: -transferAmount });
+          await stampTransitLines(sourceId, 'PPXA', { transferId: outgoingId }, transferAmount, accountLines);
+        }
+
+        const response = await exe('RepoTransfer', {
           operation: 'ADD',
-          entity: buildTransferEntity(-transferAmount, sourceId, sourceName),
+          entity: buildTransferEntity(amount, destinationAccountId, destinationName, buildClientReferenceForm(client)),
           otherReceivables: [],
           execute: false
         });
-        if (!outgoing || outgoing.ok === false) {
-          throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The PPXA source transfer could not be created.'));
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The PPXA transfer could not be created.'));
         }
 
-        const outgoingTransfer = getRows(outgoing)[0] || {};
-        const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
-        if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
-          throw new Error(t('The PPXA source transfer was created, but its movement identifier could not be identified.'));
+        const createdTransfer = getRows(response)[0] || {};
+        const transferId = Number(createdTransfer.id || createdTransfer.transferId || 0);
+        if (!Number.isFinite(transferId) || transferId <= 0) {
+          throw new Error(t('The PPXA transfer was created, but its movement identifier could not be identified.'));
         }
-        createdTransfers.push({ id: outgoingId, amount: -transferAmount });
+        createdTransfers.push({ id: transferId, amount: amount });
+      } catch (error) {
+        await deletePendingTransitTransfers(createdTransfers);
+        throw error;
       }
 
-      const response = await exe('RepoTransfer', {
-        operation: 'ADD',
-        entity: buildTransferEntity(amount, destinationAccountId, destinationName),
-        otherReceivables: [],
-        execute: false
-      });
-      if (!response || response.ok === false) {
-        throw new Error(response && response.msg ? response.msg : t('The PPXA transfer could not be created.'));
-      }
-
-      const createdTransfer = getRows(response)[0] || {};
-      const transferId = Number(createdTransfer.id || createdTransfer.transferId || 0);
-      if (!Number.isFinite(transferId) || transferId <= 0) {
-        throw new Error(t('The PPXA transfer was created, but its movement identifier could not be identified.'));
-      }
-
-      createdTransfers.push({ id: transferId, amount: amount });
       for (const transfer of createdTransfers) {
         const executeResponse = await exe('DoTransfer', {
           transferId: transfer.id,
@@ -2673,7 +3210,7 @@
       }
 
       closePpxaApplyModal();
-      loadTransitAccounts({ filters: transitAccountFilters, pagination: transitAccountPagination });
+      refreshTransitAfterOperation();
       message.success(t('The PPXA transfers were executed successfully.'));
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
@@ -2683,7 +3220,7 @@
   }
 
   function openRefundMoneyModal() {
-    const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select lines of a single transit account to return money.'));
 
     if (!selectedAccount) {
       return;
@@ -2726,7 +3263,7 @@
       currency: currency,
       sourceAccount: Number(selectedAccount.id),
       sourcePercentage: 100,
-      amount: Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount))),
+      amount: getSelectedTransitLinesTotal(selectedAccount.id),
       paymentMethod: undefined,
       beneficiary: defaultBeneficiaryOption ? beneficiaryId : undefined,
       accountId: defaultDestinationOption ? defaultDestinationOption.value : undefined,
@@ -2859,9 +3396,9 @@
 
   function updateRefundPercentage(value) {
     const percentage = Number(value);
-    const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select lines of a single transit account to return money.'));
     if (!selectedAccount) return;
-    const availableAmount = Math.max(0, getAuditNumber(getTransitAccountBalance(selectedAccount)));
+    const availableAmount = getSelectedTransitLinesTotal(selectedAccount.id);
 
     if (!Number.isFinite(percentage)) return;
 
@@ -3018,7 +3555,7 @@
   }
 
   async function submitRefundMoneyRequest(values) {
-    const selectedAccount = getSingleSelectedTransitAccount(t('Select exactly one transit account to return money.'));
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select lines of a single transit account to return money.'));
     const selectedPolicyId = Number(selectedAccount && (selectedAccount.lifePolicyId || selectedAccount.policyId));
     const lifePolicyId = Number.isFinite(selectedPolicyId) && selectedPolicyId > 0 ? selectedPolicyId : null;
     const sourceAccountId = Number(values && values.sourceAccount);
@@ -3055,6 +3592,11 @@
       return;
     }
 
+    if (total > getSelectedTransitLinesTotal(selectedAccount.id) + 0.005) {
+      message.error(t('The amount cannot exceed the available balance of the selected lines.'));
+      return;
+    }
+
     const manualDestinationRequired = refundNeedsManualDestination
       || requiresManualRefundDestination(contactId, selectedAccount);
     const manualDestinationAccountId = Number(values && values.accountId);
@@ -3066,6 +3608,9 @@
 
     setRefundMoneySubmitting(true);
     try {
+      const refundLines = distributeTransitLines(total, getSelectedTransitLineEntries(selectedAccount.id));
+      await checkTransitLines(selectedAccount.id, total, refundLines);
+
       const requestCommand = !manualDestinationRequired && lifePolicyId !== null
         ? 'DoPaymentRequest'
         : 'DoManualPaymentRequest';
@@ -3119,6 +3664,14 @@
         throw new Error(t('The refund request was created, but its identifier could not be identified.'));
       }
 
+      // The request now holds the lines it takes; if that cannot be recorded it still reserves the oldest ones.
+      let refundLinesWarning = '';
+      try {
+        await stampTransitLines(selectedAccount.id, 'REFUND', { requestId: requestId }, total, refundLines);
+      } catch (stampError) {
+        refundLinesWarning = stampError && stampError.message ? stampError.message : String(stampError);
+      }
+
       await createRefundTransfer(
         values,
         selectedAccount,
@@ -3128,11 +3681,11 @@
       );
 
       message.success(response.msg || t('Refund request and transfer created successfully.'));
+      if (refundLinesWarning) {
+        message.warning(`${t('The request was created, but its lines could not be recorded')}: ${refundLinesWarning}`);
+      }
       closeRefundMoneyModal();
-      loadTransitAccounts({
-        filters: transitAccountFilters,
-        pagination: transitAccountPagination
-      });
+      refreshTransitAfterOperation();
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
     } finally {
@@ -3141,13 +3694,22 @@
   }
 
   function openAccountTransferModal() {
+    const account = getSingleSelectedTransitAccount(t('Select lines of a single transit account to transfer them.'));
+    if (!account) return;
+
+    const available = getSelectedTransitLinesTotal(account.id);
     accountTransferForm.resetFields();
-    setAccountTransferSourceBalance(0);
+    setAccountTransferSourceBalance(available);
     setAccountTransferSearchTarget(null);
     setAccountTransferAccountOptions([]);
+    setAccountTransferSourceOption(mapTransitAccountOptions([account])[0] || null);
     accountTransferForm.setFieldsValue({
-      currency: currencyOptions[0] && currencyOptions[0].value,
-      externalSource: false
+      currency: getTrimmedString(account.currency).toUpperCase() || (currencyOptions[0] && currencyOptions[0].value),
+      externalSource: false,
+      sourceAccount: Number(account.id),
+      sourceName: getTrimmedString(account.contactName || account.holderName || account.holder),
+      amount: available,
+      client: presetOperationClient(getSelectedTransitLinesDefaultClient([account], getSelectedTransitLineEntries(account.id)))
     });
     setAccountTransferVisible(true);
   }
@@ -3161,6 +3723,8 @@
     setAccountTransferSourceBalance(0);
     setAccountTransferSearchTarget(null);
     setAccountTransferAccountOptions([]);
+    setAccountTransferSourceOption(null);
+    presetOperationClient(null);
     accountTransferForm.resetFields();
   }
 
@@ -3208,35 +3772,12 @@
     }, 250);
   }
 
-  function handleAccountTransferCurrencyChange(value) {
-    if (accountTransferAccountSearchTimer.current) {
-      clearTimeout(accountTransferAccountSearchTimer.current);
-      accountTransferAccountSearchTimer.current = null;
-    }
-
-    accountTransferForm.setFieldsValue({
-      currency: value,
-      sourceAccount: undefined,
-      sourceName: '',
-      destinationAccount: undefined,
-      destinationName: ''
-    });
-    setAccountTransferSourceBalance(0);
-    setAccountTransferAccountOptions([]);
-  }
-
-  function updateAccountTransferContact(fieldName, accountId) {
+  function updateAccountTransferDestinationContact(accountId) {
     const selectedOption = accountTransferAccountOptions.find(option => Number(option && option.value) === Number(accountId));
     const account = selectedOption && selectedOption.account;
-    const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
-    const targetField = fieldName === 'sourceAccount' ? 'sourceName' : 'destinationName';
-
-    if (fieldName === 'sourceAccount') {
-      const balance = getTransitAccountBalance(account);
-      setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
-    }
-
-    accountTransferForm.setFieldsValue({ [targetField]: contactName });
+    accountTransferForm.setFieldsValue({
+      destinationName: getTrimmedString(account && (account.contactName || account.holderName || account.holder))
+    });
   }
 
   function getAccountTransferSourceBalance() {
@@ -3288,15 +3829,21 @@
       return;
     }
 
+    const client = getOperationClient(values && values.client);
+    if (!client) {
+      message.error(t('Select a client.'));
+      return;
+    }
+
     const currency = getTrimmedString(values && values.currency);
-    const concept = getTrimmedString(values && values.reference);
+    const concept = buildClientReferenceText(values && values.reference, client);
     const sourceName = getTrimmedString(values && values.sourceName);
     const destinationName = getTrimmedString(values && values.destinationName);
     const incomeType = getTrimmedString(depositPaymentType.value || depositPaymentType.code);
     const date = getCurrentUtcDateTime();
 
     // Each movement points only to its destination account, matching the cash income model.
-    const buildTransferEntity = (transferAmount, destinationAccount, accountName) => ({
+    const buildTransferEntity = (transferAmount, destinationAccount, accountName, incomeForm) => ({
       currency: currency,
       amount: transferAmount,
       sourceAccountId: null,
@@ -3337,13 +3884,10 @@
       reversalDate: null,
       incomeType: incomeType,
       IncomeType: null,
-      jIncomeTypeForm: null,
+      jIncomeTypeForm: incomeForm || null,
       transferWorkspaceId: workspaceId,
       user: currentUserEmail || null
     });
-
-    const outgoingEntity = buildTransferEntity(-amount, sourceAccountId, sourceName);
-    const incomingEntity = buildTransferEntity(amount, destinationAccountId, destinationName);
 
     async function createTransfer(transferEntity) {
       const response = await exe('RepoTransfer', {
@@ -3374,12 +3918,27 @@
     }
 
     try {
-      const outgoingTransfer = await createTransfer(outgoingEntity);
-      const incomingTransfer = await createTransfer(incomingEntity);
+      const transferLines = distributeTransitLines(amount, getSelectedTransitLineEntries(sourceAccountId));
+      await checkTransitLines(sourceAccountId, amount, transferLines);
+      const outgoingEntity = buildTransferEntity(-amount, sourceAccountId, sourceName, getTransitLinesOwnerForm(transferLines));
+      const incomingEntity = buildTransferEntity(amount, destinationAccountId, destinationName, buildClientReferenceForm(client));
+
+      const createdTransfers = [];
+      try {
+        const outgoingTransfer = await createTransfer(outgoingEntity);
+        createdTransfers.push(outgoingTransfer);
+        const incomingTransfer = await createTransfer(incomingEntity);
+        createdTransfers.push(incomingTransfer);
+        await stampTransitLines(sourceAccountId, 'TRANSFER', { transferId: outgoingTransfer.id }, amount, transferLines);
+      } catch (error) {
+        await deletePendingTransitTransfers(createdTransfers);
+        throw error;
+      }
 
       closeAccountTransferModal();
+      refreshTransitAfterOperation();
       loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } });
-      showAccountTransferExecutionConfirm([outgoingTransfer, incomingTransfer]);
+      showAccountTransferExecutionConfirm(createdTransfers);
     } catch (error) {
       message.error(error && error.message ? error.message : String(error));
     }
@@ -4249,10 +4808,7 @@
       return;
     }
 
-    if (accountTransferSearchTarget === 'sourceAccount'
-      || accountTransferSearchTarget === 'destinationAccount') {
-      const targetField = accountTransferSearchTarget;
-      const targetName = targetField === 'sourceAccount' ? 'sourceName' : 'destinationName';
+    if (accountTransferSearchTarget === 'destinationAccount') {
       const contactName = getTrimmedString(account && (account.contactName || account.holderName || account.holder));
       const options = mapTransitAccountOptions([account]);
 
@@ -4260,13 +4816,9 @@
         current.filter(item => Number(item.value) !== id)
       ));
       accountTransferForm.setFieldsValue({
-        [targetField]: id,
-        [targetName]: contactName
+        destinationAccount: id,
+        destinationName: contactName
       });
-      if (targetField === 'sourceAccount') {
-        const balance = getTransitAccountBalance(account);
-        setAccountTransferSourceBalance(Number.isFinite(balance) ? balance : 0);
-      }
       setAccountTransferSearchTarget(null);
       setNewIncomeAccountSearchVisible(false);
       return;
@@ -6470,7 +7022,9 @@
       const overdue = Number(row && row.vencido || 0);
       return total + (Number.isFinite(overdue) ? overdue : 0);
     }, 0);
-    const expectedAmount = Math.max(amount, 0);
+    // MSN-000175: the selected policies' credit balance lowers the cash to collect.
+    const creditAmount = selectedRows.reduce((total, row) => total + getCollectionPolicyCredit(row), 0);
+    const expectedAmount = Number(Math.max(amount - creditAmount, 0).toFixed(2));
 
     clearNewIncomeForm();
     setTransitCollectionMode(false);
@@ -6482,6 +7036,7 @@
     setCollectionChargeStep('payment');
     setCollectionPolicyRows([]);
     setCollectionSupplementaryRows([]);
+    setCollectionCreditRows([]);
     setCollectionExpectedAmount(expectedAmount);
     setNewIncomePayments([{ key: Date.now(), methodCode: undefined, amount: expectedAmount.toFixed(2) }]);
 
@@ -6499,11 +7054,14 @@
   }
 
   async function openTransitPremiumCollection() {
-    const account = getSingleSelectedTransitAccount(t('Select exactly one transit account to collect a premium.'));
-    const availableAmount = Number(getTransitAccountBalance(account).toFixed(2));
+    const account = getSingleSelectedTransitAccount(t('Select lines of a single transit account to collect a premium.'));
+    if (!account) return;
+
+    const transitLineEntries = getSelectedTransitLineEntries(account.id);
+    const availableAmount = getSelectedTransitLinesTotal(account.id);
     const policyCode = getTrimmedString(account && (account.policyCode || account.lifePolicyCode || account.policy));
 
-    if (!account || !policyCode) {
+    if (!policyCode) {
       message.warning(t('The selected transit account does not have a valid policy code.'));
       return;
     }
@@ -6530,7 +7088,7 @@
         return;
       }
 
-      setTransitCollectionAccount({ ...account, availableAmount: availableAmount });
+      setTransitCollectionAccount({ ...account, availableAmount: availableAmount, transitLineEntries: transitLineEntries });
       setTransitCollectionPolicyRows(policyRows);
       setTransitCollectionPolicySelection(policyRows.length === 1
         ? [String(getCollectionRowKey(policyRows[0]))]
@@ -6541,7 +7099,11 @@
         return;
       }
 
-      openTransitPremiumCollectionForPolicies(policyRows, { ...account, availableAmount: availableAmount });
+      openTransitPremiumCollectionForPolicies(policyRows, {
+        ...account,
+        availableAmount: availableAmount,
+        transitLineEntries: transitLineEntries
+      });
     } catch (error) {
       message.error(error && error.message ? error.message : t('The policy premiums could not be loaded.'));
     } finally {
@@ -6569,6 +7131,7 @@
     setCollectionChargeStep('payment');
     setCollectionPolicyRows([]);
     setCollectionSupplementaryRows([]);
+    setCollectionCreditRows([]);
     setCollectionExpectedAmount(collectionAmount);
     const transitPaymentKey = Date.now();
     setNewIncomePayments([{ key: transitPaymentKey, methodCode: 'OT', amount: collectionAmount.toFixed(2) }]);
@@ -6621,6 +7184,53 @@
     return Number.isFinite(overdue) && overdue > 0 ? Number(overdue.toFixed(2)) : 0;
   }
 
+  // MSN-000175: the pending negative installments of a policy are credit balance that pays the payer's premiums.
+  function getCollectionInstallmentPending(installment) {
+    const pending = Number(installment && installment.pendingAmount);
+    return Number.isFinite(pending) ? pending : 0;
+  }
+
+  function getCollectionPolicyGrossPending(row) {
+    const installments = Array.isArray(row && row.Cuotas) ? row.Cuotas : [];
+    if (installments.length === 0) return getCollectionPolicyPending(row);
+    return Number(installments
+      .reduce((total, item) => total + Math.max(getCollectionInstallmentPending(item), 0), 0)
+      .toFixed(2));
+  }
+
+  function getCollectionPolicyCredit(row) {
+    const installments = Array.isArray(row && row.Cuotas) ? row.Cuotas : [];
+    return Number(installments
+      .reduce((total, item) => total + Math.max(-getCollectionInstallmentPending(item), 0), 0)
+      .toFixed(2));
+  }
+
+  function getSelectedCollectionCredit() {
+    if (transitCollectionMode) return 0;
+    return Number(getSelectedCollectionRows()
+      .reduce((total, row) => total + getCollectionPolicyCredit(row), 0)
+      .toFixed(2));
+  }
+
+  function getCollectionCreditTotal() {
+    if (transitCollectionMode) return 0;
+    return Number(collectionCreditRows
+      .reduce((total, row) => total + (Number(row && row.amount) || 0), 0)
+      .toFixed(2));
+  }
+
+  function updateCollectionCreditAmount(key, value) {
+    setCollectionCreditRows(rows => rows.map(row => {
+      if (String(row.key) !== String(key)) return row;
+      const amount = Number(value);
+      const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+      return {
+        ...row,
+        amount: Number(Math.min(safeAmount, row.availableAmount).toFixed(2))
+      };
+    }));
+  }
+
   function getCollectionPolicyIdentifier(row) {
     const policyId = getCollectionPolicyNumericId(row);
     if (Number.isFinite(policyId) && policyId > 0) return policyId;
@@ -6659,21 +7269,49 @@
     const selectedRows = getSelectedCollectionRows()
       .slice()
       .sort((left, right) => getCollectionPolicyOldestDueDate(left) - getCollectionPolicyOldestDueDate(right));
-    let remainingAmount = getCollectionPaymentAmount();
 
-    const policyRows = selectedRows.map(row => {
-      const pendingAmount = getCollectionPolicyPending(row);
+    // MSN-000175: in a collection the premium to apply is the positive pending; a policy with only credit balance goes to the credit table.
+    const policyRows = selectedRows
+      .filter(row => transitCollectionMode || getCollectionPolicyGrossPending(row) > 0 || getCollectionPolicyCredit(row) <= 0)
+      .map(row => {
+        const pendingAmount = transitCollectionMode
+          ? getCollectionPolicyPending(row)
+          : getCollectionPolicyGrossPending(row);
 
-      return {
-        key: getCollectionRowKey(row),
-        policyId: getCollectionPolicyIdentifier(row),
-        policy: getTrimmedString(row && row.poliza),
-        pendingAmount: pendingAmount,
-        overdueAmount: Math.min(getCollectionPolicyOverdue(row), pendingAmount),
-        amount: 0,
-        installments: Array.isArray(row && row.Cuotas) ? row.Cuotas : []
-      };
-    });
+        return {
+          key: getCollectionRowKey(row),
+          policyId: getCollectionPolicyIdentifier(row),
+          policy: getTrimmedString(row && row.poliza),
+          pendingAmount: pendingAmount,
+          overdueAmount: Math.min(getCollectionPolicyOverdue(row), pendingAmount),
+          amount: 0,
+          installments: Array.isArray(row && row.Cuotas)
+            ? row.Cuotas.filter(item => transitCollectionMode || getCollectionInstallmentPending(item) > 0)
+            : []
+        };
+      });
+
+    // MSN-000175: the credit balance pays the premiums before the cash, up to the premium pending.
+    let creditToApply = Number(policyRows.reduce((total, row) => total + row.pendingAmount, 0).toFixed(2));
+    const creditRows = transitCollectionMode ? [] : selectedRows
+      .filter(row => getCollectionPolicyCredit(row) > 0)
+      .map(row => {
+        const availableAmount = getCollectionPolicyCredit(row);
+        const amount = Number(Math.min(availableAmount, Math.max(creditToApply, 0)).toFixed(2));
+        creditToApply = Number((creditToApply - amount).toFixed(2));
+
+        return {
+          key: `credit-${getCollectionRowKey(row)}`,
+          policyId: getCollectionPolicyIdentifier(row),
+          policy: getTrimmedString(row && row.poliza),
+          availableAmount: availableAmount,
+          amount: amount,
+          installments: (Array.isArray(row && row.Cuotas) ? row.Cuotas : [])
+            .filter(item => getCollectionInstallmentPending(item) < 0)
+        };
+      });
+    let remainingAmount = Number((getCollectionPaymentAmount()
+      + creditRows.reduce((total, row) => total + row.amount, 0)).toFixed(2));
 
     // First apply the payment to each policy's overdue amount.
     policyRows.forEach(row => {
@@ -6703,6 +7341,7 @@
       : [];
 
     setCollectionPolicyRows(policyRows);
+    setCollectionCreditRows(creditRows);
     setCollectionSupplementaryRows(supplementaryRows);
     setCollectionChargeStep('allocation');
   }
@@ -6719,7 +7358,9 @@
         return;
       }
 
-      if (getNewIncomeTotal() <= 0) {
+      // MSN-000175: a payment fully covered by the selected policies' credit balance carries no cash.
+      const creditOnly = !transitCollectionMode && getNewIncomeTotal() <= 0 && getSelectedCollectionCredit() > 0;
+      if (getNewIncomeTotal() <= 0 && !creditOnly) {
         message.error(t('Enter at least one payment amount greater than zero.'));
         return;
       }
@@ -6741,7 +7382,7 @@
         }
       }
 
-      if (!transitCollectionMode && newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
+      if (!transitCollectionMode && !creditOnly && newIncomePayments.some(payment => !payment.methodCode || parseIncomeAmount(payment.amount) <= 0)) {
         message.error(t('Complete the payment method and amount for every payment.'));
         return;
       }
@@ -6764,11 +7405,15 @@
     const transitAmount = Number(transitCollectionAccount && transitCollectionAccount.availableAmount) || 0;
     const transitValid = !transitCollectionMode
       || (paymentTotal <= transitAmount + 0.01 && Math.abs(policyTotal - paymentTotal) <= 0.01);
+    const creditTotal = getCollectionCreditTotal();
+    const creditValid = creditTotal <= policyTotal + 0.01
+      && !collectionCreditRows.some(row => Number(row && row.amount) > Number(row && row.availableAmount) + 0.01);
 
-    return paymentTotal > 0
+    return (paymentTotal > 0 || creditTotal > 0)
       && !hasInvalidPolicyAmount
       && Math.abs(difference) <= 0.01
-      && transitValid;
+      && transitValid
+      && creditValid;
   }
 
   async function handleCollectionPaymentExecute() {
@@ -6787,6 +7432,18 @@
 
     if (collectionPolicyRows.some(row => Number(row.amount) > Number(row.pendingAmount) + 0.01)) {
       message.error(t('A policy amount cannot exceed its pending balance.'));
+      return;
+    }
+
+    // MSN-000175: credit balance applied from the selected policies' pending negative installments.
+    const creditTotal = getCollectionCreditTotal();
+    if (collectionCreditRows.some(row => Number(row.amount) > Number(row.availableAmount) + 0.01)) {
+      message.error(t('El saldo a favor aplicado de una póliza no puede superar su disponible.'));
+      return;
+    }
+
+    if (creditTotal > policyTotal + 0.01) {
+      message.error(t('El saldo a favor aplicado no puede superar las primas a aplicar.'));
       return;
     }
 
@@ -6815,14 +7472,21 @@
         policyId: getCollectionPolicyNumericId(row),
         amount: Number(Number(row && row.amount).toFixed(2))
       }));
+    const credits = transitCollectionMode ? [] : collectionCreditRows
+      .filter(row => Number(row && row.amount) > 0)
+      .map(row => ({
+        policyId: getCollectionPolicyNumericId(row),
+        amount: Number(Number(row && row.amount).toFixed(2))
+      }));
 
     if (payments.some(row => !Number.isFinite(row.policyId) || row.policyId <= 0)
-      || supplementaryPayments.some(row => !Number.isFinite(row.policyId) || row.policyId <= 0)) {
+      || supplementaryPayments.some(row => !Number.isFinite(row.policyId) || row.policyId <= 0)
+      || credits.some(row => !Number.isFinite(row.policyId) || row.policyId <= 0)) {
       message.error(t('Every payment detail must have a valid policy.'));
       return;
     }
 
-    if (Math.abs(Number((policyTotal + supplementaryTotal - paymentTotal).toFixed(2))) > 0.01) {
+    if (Math.abs(Number((policyTotal + supplementaryTotal - paymentTotal - creditTotal).toFixed(2))) > 0.01) {
       message.error(t('The payment distribution does not match the payment total.'));
       return;
     }
@@ -6831,15 +7495,25 @@
       const formValues = transitCollectionMode
         ? newIncomeForm.getFieldsValue()
         : await newIncomeForm.validateFields();
-      const destinationAccountId = transitCollectionMode
+      // MSN-000175: a payment paid only with credit balance moves no money, so it has no transfer.
+      const cashless = !transitCollectionMode && paymentTotal <= 0;
+      const destinationAccountId = transitCollectionMode || cashless
         ? 0
         : await resolveNewIncomeDestinationAccount(formValues);
-      const transferEntity = getNewIncomeTransferEntity(
-        formValues,
-        transitCollectionMode ? 208 : destinationAccountId
-      );
+      const transferEntity = cashless
+        ? null
+        : getNewIncomeTransferEntity(
+          formValues,
+          transitCollectionMode ? 208 : destinationAccountId
+        );
 
       setCollectionPaymentExecuting(true);
+      const transitLines = transitCollectionMode
+        ? distributeTransitLines(paymentTotal, transitCollectionAccount && transitCollectionAccount.transitLineEntries)
+        : [];
+      if (transitCollectionMode) {
+        await checkTransitLines(transitCollectionAccount && transitCollectionAccount.id, paymentTotal, transitLines);
+      }
       const response = await exe('ExeChain', {
         chain: 'cmdPremiumsPayment',
         context: JSON.stringify({
@@ -6851,7 +7525,8 @@
           sourceTransitAccountId: transitCollectionMode
             ? Number(transitCollectionAccount && transitCollectionAccount.id)
             : 0,
-          transferEntity: transferEntity
+          transferEntity: transferEntity,
+          credits: credits
         })
       });
 
@@ -6862,12 +7537,30 @@
         throw new Error(result && result.msg ? result.msg : t('The premium payment could not be executed.'));
       }
 
+      let transitLinesWarning = '';
+      if (transitCollectionMode) {
+        const transitTransfer = result && result.data && result.data.transitTransfer;
+        const transitTransferId = Number(transitTransfer && transitTransfer.id) || 0;
+        try {
+          if (transitTransferId <= 0) {
+            throw new Error(t('The transit debit transfer could not be identified.'));
+          }
+          await stampTransitLines(transitCollectionAccount.id, 'PREMIUM', { transferId: transitTransferId }, paymentTotal, transitLines);
+        } catch (stampError) {
+          transitLinesWarning = stampError && stampError.message ? stampError.message : String(stampError);
+        }
+      }
+
       const refreshTransitAccounts = transitCollectionMode;
       message.success(t('Premium payment executed successfully.'));
+      if (transitLinesWarning) {
+        message.warning(`${t('The payment was applied, but its lines could not be recorded')}: ${transitLinesWarning}`);
+      }
       setCollectionChargeVisible(false);
       setCollectionChargeStep('payment');
       setCollectionPolicyRows([]);
       setCollectionSupplementaryRows([]);
+      setCollectionCreditRows([]);
       setCollectionSelectedRowKeys([]);
       setTransitCollectionMode(false);
       setTransitCollectionAccount(null);
@@ -6893,13 +7586,7 @@
           },
           filters: movementFilters
         });
-        loadTransitAccounts({
-          filters: transitAccountFilters,
-          pagination: {
-            current: transitAccountPagination.current,
-            pageSize: transitAccountPagination.pageSize
-          }
-        });
+        refreshTransitAfterOperation();
       }
     } catch (error) {
       message.error(error && error.message ? error.message : t('The premium payment could not be executed.'));
@@ -6928,7 +7615,7 @@
 
   function getCollectionSupplementaryExpected() {
     if (transitCollectionMode) return 0;
-    return Number(Math.max(getCollectionPaymentAmount() - getCollectionPolicyTotal(), 0).toFixed(2));
+    return Number(Math.max(getCollectionPaymentAmount() + getCollectionCreditTotal() - getCollectionPolicyTotal(), 0).toFixed(2));
   }
 
   function getCollectionSupplementaryTotal() {
@@ -7005,11 +7692,11 @@
 
   function selectCashDesk(record) {
     setSelectedCashierRow(record || null);
-    setSelectedTransitAccountId([]);
     setTransitHasSearched(false);
     setTransitAccountRows([]);
     setTransitAccountTotal(0);
-    setExpandedTransitAccountKeys([]);
+    resetTransitDetail();
+    setTransitLineSelection({});
     if (!record) {
       setActiveTab('cash-desks');
       setBalanceRows([]);
@@ -8263,6 +8950,8 @@
     setReversalAccountId(undefined);
     setReversalAccountOptions([]);
     setReversalFormConfig(null);
+    setReversalClientId(undefined);
+    presetOperationClient(null);
     setReversalVisible(true);
     loadReversalCatalogs().catch(error => {
       setReversalVisible(false);
@@ -8529,6 +9218,14 @@
       return;
     }
 
+    // A premium payment credited to an account keeps its income: only the premiums are reverted and the funds go
+    // to that account, with the client chosen here.
+    const creditClient = allocationId > 0 && reversalCreditFunds ? getOperationClient(reversalClientId) : null;
+    if (allocationId > 0 && reversalCreditFunds && !creditClient) {
+      message.warning(t('Select a client.'));
+      return;
+    }
+
     setReversalLoading(true);
     const reversalCommand = allocationId > 0
       ? 'UnDoPaymentAllocation'
@@ -8544,7 +9241,8 @@
           workspaceId: Number(selectedCashierRow && selectedCashierRow.id) || null,
           reversalCause: cause,
           reversalSubcause: subcause,
-          jReversalFormValues: reversalFormValues
+          jReversalFormValues: reversalFormValues,
+          creditFundsToAccountId: creditClient ? accountId : null
         }
       : {
           transferId: transferId,
@@ -8557,7 +9255,7 @@
         };
 
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id) || null;
-    const loadTransitDebit = allocationId > 0 && workspaceId > 0
+    const loadTransitDebit = allocationId > 0 && workspaceId > 0 && !creditClient
       ? exe('RepoTransfer', {
           operation: 'GET',
           filter: `transferWorkspaceId = ${workspaceId} AND sourceExternal = 'ALLOCATION:${allocationId}'`,
@@ -8604,6 +9302,12 @@
         }
 
         return response;
+      })
+      .then(response => {
+        if (!creditClient) return response;
+        return stampReversalCreditClient(allocationId, accountId, creditClient)
+          .catch(error => message.warning(error && error.message ? error.message : String(error)))
+          .then(() => response);
       })
       .then(response => {
 
@@ -9329,12 +10033,136 @@
       key: 'movementCount',
       width: 110,
       align: 'center',
-      render: (_, record) => getTransitMovements(record).length
+      render: (_, record) => (Array.isArray(record && record.Movements) && record.Movements.length > 0
+        ? getTransitMovements(record).length
+        : Number(record && record.movementCount) || 0)
+    },
+    {
+      title: t('Detail'),
+      key: 'detail',
+      width: 130,
+      align: 'center',
+      fixed: 'right',
+      render: (_, record) => (
+        <Button
+          size="small"
+          type={Number(record && record.id) === Number(transitDetailAccount && transitDetailAccount.id) ? 'primary' : 'default'}
+          onClick={() => openTransitAccountDetail(record)}
+        >
+          {t('View detail')}
+        </Button>
+      )
     }
   ];
 
-  const transitPremiumsTabContent = (
-    <Card size="small">
+  const transitOperationLabels = {
+    REFUND: t('Return money'),
+    PREMIUM: t('Collect premium'),
+    PPXA: t('Apply pending premiums (PPXA)'),
+    TRANSFER: t('Transfer between accounts')
+  };
+
+  function describeTransitApplication(item) {
+    const amount = formatMoney(item && item.amount);
+    const reserved = item && item.kind === 'RESERVED' ? ` (${t('Reserved')})` : '';
+    if (item && item.type === 'STAMP') {
+      const label = transitOperationLabels[item.op] || getTrimmedString(item.op);
+      const reference = Number(item.requestId) > 0
+        ? `${t('Request')} ${item.requestId}`
+        : `${t('Transfer ID')} ${item.transferId}`;
+      const author = [getTrimmedString(item.user), item.date ? formatDate(item.date) : ''].filter(Boolean).join(' ');
+      return `${label} · ${reference} · ${amount}${reserved}${author ? ` · ${author}` : ''}`;
+    }
+    if (item && item.type === 'REQUEST') {
+      return `${t('Refund request')} ${item.requestId} · ${amount}${reserved}`;
+    }
+    return `${t('Movement')} ${item && item.movementId} · ${getTrimmedString(item && item.transaction)} · ${amount}${reserved}`;
+  }
+
+  function renderTransitApplications(record, kind) {
+    if (!record || record.kind !== 'LINE') return '-';
+    const value = kind === 'RESERVED' ? record.reserved : record.applied;
+    const items = (Array.isArray(record.applications) ? record.applications : [])
+      .filter(item => item && item.kind === kind);
+    if (!items.length) return renderGridMoney(value);
+
+    return (
+      <Tooltip
+        title={(
+          <div>
+            {items.map((item, index) => <div key={index}>{describeTransitApplication(item)}</div>)}
+          </div>
+        )}
+      >
+        <span className="cashier-transit-lines-applied">{renderGridMoney(value)}</span>
+      </Tooltip>
+    );
+  }
+
+  function renderTransitLineAvailable(record) {
+    if (record && record.kind === 'LINE') {
+      return <strong>{renderGridMoney(record.available)}</strong>;
+    }
+    if (record && record.kind === 'NEUTRAL') {
+      return <Tag>{t('No effect')}</Tag>;
+    }
+
+    const coveredBy = record && record.coveredBy;
+    const label = coveredBy && coveredBy.type === 'STAMP'
+      ? transitOperationLabels[coveredBy.op] || getTrimmedString(coveredBy.op)
+      : coveredBy && coveredBy.type === 'REQUEST'
+        ? `${t('Refund request')} ${coveredBy.requestId}`
+        : '';
+    return label
+      ? <Tooltip title={label}><Tag>{t('Outgoing')}</Tag></Tooltip>
+      : <Tag>{t('Outgoing')}</Tag>;
+  }
+
+  const transitLineColumns = [
+    { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 95, align: 'center' },
+    { title: t('Date'), dataIndex: 'date', key: 'date', width: 100, align: 'center', render: value => formatDate(value) },
+    { title: t('Transaction'), dataIndex: 'transaction', key: 'transaction', width: 190, render: value => getTrimmedString(value) || '-' },
+    { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 110, render: value => getTrimmedString(value) || '-' },
+    { title: t('Transfer ID'), dataIndex: 'transferId', key: 'transferId', width: 90, align: 'center', render: value => value || '-' },
+    {
+      title: t('Client'),
+      dataIndex: 'ownerName',
+      key: 'ownerName',
+      width: 190,
+      render: (value, record) => getTrimmedString(value) || (record && record.ownerId) || '-'
+    },
+    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 105, align: 'right', render: renderGridMoney },
+    { title: t('Applied'), key: 'applied', width: 105, align: 'right', render: (_, record) => renderTransitApplications(record, 'APPLIED') },
+    { title: t('Reserved'), key: 'reserved', width: 105, align: 'right', render: (_, record) => renderTransitApplications(record, 'RESERVED') },
+    { title: t('Available'), key: 'available', width: 115, align: 'right', render: (_, record) => renderTransitLineAvailable(record) }
+  ];
+
+  const transitLineSelectionEntries = getTransitLineSelectionEntries();
+  const transitSelectedAccountCount = getSelectedTransitAccountIds().length;
+  const transitDetailAccountId = Number(transitDetailAccount && transitDetailAccount.id) || 0;
+  const transitDetailSelectedKeys = transitLineSelectionEntries
+    .filter(entry => Number(entry.accountId) === transitDetailAccountId)
+    .map(entry => String(entry.movId));
+  const transitLineSummary = transitLineAccountSummary || {};
+
+  const transitSelectionBar = (
+    <div className="cashier-transit-lines-selection">
+      <span>{t('Selected lines')}: <strong>{transitLineSelectionEntries.length}</strong></span>
+      <span>{t('Available to apply')}: <strong>{formatMoney(getSelectedTransitLinesTotal())}</strong></span>
+      {transitSelectedAccountCount > 0 ? (
+        <span>
+          {t('Accounts')}: <strong>{getSelectedTransitAccounts().map(account => getTrimmedString(account && account.accNo) || account.id).join(', ')}</strong>
+          {transitSelectedAccountCount > 1 ? ` (${t('only PPXA combines several accounts')})` : ''}
+        </span>
+      ) : null}
+      <Button size="small" disabled={!transitLineSelectionEntries.length} onClick={clearTransitLineSelection}>
+        {t('Clear selection')}
+      </Button>
+    </div>
+  );
+
+  const transitAccountsPane = (
+    <>
       <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
         <Button type="primary" icon={<FilterOutlined />} onClick={() => setTransitFilterVisible(true)}>
           {t('Filter')}
@@ -9350,33 +10178,6 @@
         </Button>
         <Button
           className="cashier-supervisor-outline-button"
-          icon={<RevertMovementIcon />}
-          disabled={!transitHasSearched || getSelectedTransitAccountIds().length !== 1}
-          onClick={openRefundMoneyModal}
-        >
-          {t('Return money')}
-        </Button>
-        <Button
-          type="primary"
-          icon={<PolicyIcon />}
-          disabled={!transitHasSearched || getSelectedTransitAccountIds().length !== 1}
-          onClick={openTransitPremiumCollection}
-        >
-          {t('Collect premium')}
-        </Button>
-        <Button
-          type="primary"
-          icon={<TransferAccountIcon />}
-          disabled={!transitHasSearched || getSelectedTransitAccountIds().length === 0}
-          onClick={openPpxaApplyModal}
-        >
-          {t('Apply pending premiums (PPXA)')}
-        </Button>
-        <Button className="cashier-supervisor-success-button" icon={<TransferAccountIcon />} onClick={openAccountTransferModal}>
-          {t('Transfer between accounts')}
-        </Button>
-        <Button
-          className="cashier-supervisor-outline-button"
           icon={<ReloadOutlined />}
           loading={transitAccountLoading}
           disabled={!transitHasSearched}
@@ -9388,8 +10189,8 @@
           {t('Refresh')}
         </Button>
       </div>
+      {transitLineSelectionEntries.length ? transitSelectionBar : null}
       <Table
-        key={`transit-accounts-${JSON.stringify(transitDetailPagination)}`}
         rowKey={record => String(record && record.id)}
         columns={transitAccountColumns}
         dataSource={transitAccountRows}
@@ -9397,26 +10198,6 @@
         bordered
         className="cashier-supervisor-table"
         loading={transitAccountLoading}
-        rowSelection={{
-          type: 'checkbox',
-          selectedRowKeys: getSelectedTransitAccountIds(),
-          onChange: keys => setSelectedTransitAccountId(keys.map(key => String(key)))
-        }}
-        onRow={record => ({
-          onClick: event => {
-            if (event.target.closest('button, a, input, .ant-checkbox-wrapper, .ant-radio-wrapper, .ant-pagination, .cashier-supervisor-transit-detail')) return;
-            const accountId = record && record.id !== undefined && record.id !== null
-              ? String(record.id)
-              : null;
-            if (!accountId) return;
-            setSelectedTransitAccountId(current => {
-              const selectedIds = Array.isArray(current) ? current.map(value => String(value)) : [];
-              return selectedIds.includes(accountId)
-                ? selectedIds.filter(value => value !== accountId)
-                : selectedIds.concat(accountId);
-            });
-          }
-        })}
         pagination={{
           current: transitAccountPagination.current,
           pageSize: transitAccountPagination.pageSize,
@@ -9425,51 +10206,123 @@
           pageSizeOptions: ['15', '25', '50', '100']
         }}
         onChange={handleTransitTableChange}
-        scroll={{ x: 900, y: transferScrollY }}
-        expandable={{
-          expandedRowKeys: expandedTransitAccountKeys,
-          onExpand: (expanded, record) => {
-            const key = String(record && record.id);
-            setExpandedTransitAccountKeys(current => expanded
-              ? current.concat(key).filter((item, index, list) => list.indexOf(item) === index)
-              : current.filter(item => item !== key)
-            );
-          },
-          rowExpandable: record => getTransitMovements(record).length > 0,
-          expandedRowRender: record => {
-            const movements = getTransitMovements(record);
-            const accountId = Number(record && record.id) || 0;
-            const page = getTransitDetailPage(record, movements.length);
-            const start = (page.current - 1) * page.pageSize;
-            const detailRows = movements.slice(start, start + page.pageSize);
-            const detailVersion = Number(record && record.__transitDetailVersion) || 0;
+        scroll={{ x: 1100, y: transferScrollY }}
+      />
+    </>
+  );
 
-            return (
-              <div
-                className="cashier-supervisor-transit-detail"
-                onClick={event => event.stopPropagation()}
-              >
-                <Table
-                  key={`transit-detail-${accountId}-${page.current}-${page.pageSize}-${detailVersion}`}
-                  rowKey={item => String(item && item.id)}
-                  size="small"
-                  bordered
-                  pagination={false}
-                  columns={[
-                    { title: t('Movement ID'), dataIndex: 'id', key: 'id', width: 120, align: 'center' },
-                    { title: t('Date'), dataIndex: 'date', key: 'date', width: 180, align: 'center', render: value => formatDate(value) },
-                    { title: t('Transaction'), dataIndex: 'transaction', key: 'transaction' },
-                    { title: t('Transaction code'), dataIndex: 'transactionCode', key: 'transactionCode', width: 220 },
-                    { title: t('Amount'), dataIndex: 'amount', key: 'amount', width: 130, align: 'right', render: renderGridMoney }
-                  ]}
-                  dataSource={detailRows}
-                  className="cashier-supervisor-transit-detail"
-                />
-                {renderTransitDetailPager(accountId, page)}
-              </div>
-            );
-          }
+  const transitLinesPane = !transitDetailAccount ? (
+    <div className="cashier-transit-lines-empty">
+      {t('Use View detail on an account to see its movements here.')}
+    </div>
+  ) : (
+    <>
+      <div className="cashier-transit-lines-header">
+        <div>
+          <strong>{getTrimmedString(transitDetailAccount.accNo) || '-'}</strong>
+          <span>{getTrimmedString(transitDetailAccount.name) || '-'}</span>
+          <span>{t('Policy')}: {getTransitAccountLabel(transitDetailAccount).policy}</span>
+          <span>{t('Contact')}: {getTransitAccountLabel(transitDetailAccount).contact}</span>
+          <span>{t('Currency')}: {getTrimmedString(transitDetailAccount.currency) || '-'}</span>
+        </div>
+        <div>
+          <span>{t('Available to apply')}: <strong>{formatMoney(transitLineSummary.available)}</strong></span>
+          <span>{t('Reserved')}: <strong>{formatMoney(transitLineSummary.reserved)}</strong></span>
+          <span>{t('Applied')}: <strong>{formatMoney(transitLineSummary.applied)}</strong></span>
+        </div>
+      </div>
+      <div className="cashier-supervisor-toolbar cashier-supervisor-spaced-toolbar">
+        <Button
+          className="cashier-supervisor-outline-button"
+          icon={<RevertMovementIcon />}
+          disabled={transitSelectedAccountCount !== 1}
+          onClick={openRefundMoneyModal}
+        >
+          {t('Return money')}
+        </Button>
+        <Button
+          type="primary"
+          icon={<PolicyIcon />}
+          disabled={transitSelectedAccountCount !== 1}
+          loading={transitCollectionPolicyLoading}
+          onClick={openTransitPremiumCollection}
+        >
+          {t('Collect premium')}
+        </Button>
+        <Button
+          type="primary"
+          icon={<TransferAccountIcon />}
+          disabled={transitSelectedAccountCount === 0}
+          onClick={openPpxaApplyModal}
+        >
+          {t('Apply pending premiums (PPXA)')}
+        </Button>
+        <Button
+          className="cashier-supervisor-success-button"
+          icon={<TransferAccountIcon />}
+          disabled={transitSelectedAccountCount !== 1}
+          onClick={openAccountTransferModal}
+        >
+          {t('Transfer between accounts')}
+        </Button>
+        <Button
+          className="cashier-supervisor-outline-button"
+          icon={<ReloadOutlined />}
+          loading={transitLineLoading}
+          onClick={() => loadTransitLines({ pagination: transitLinePagination })}
+        >
+          {t('Refresh')}
+        </Button>
+      </div>
+      {transitSelectionBar}
+      <Table
+        rowKey={record => String(record && record.id)}
+        columns={transitLineColumns}
+        dataSource={transitLineRows}
+        size="small"
+        bordered
+        className="cashier-supervisor-table cashier-transit-lines-table"
+        loading={transitLineLoading}
+        rowClassName={record => (isTransitLineSelectable(record) ? '' : 'cashier-transit-lines-closed')}
+        rowSelection={{
+          type: 'checkbox',
+          preserveSelectedRowKeys: true,
+          selectedRowKeys: transitDetailSelectedKeys,
+          getCheckboxProps: record => ({ disabled: !isTransitLineSelectable(record) }),
+          onSelect: (record, selected) => toggleTransitLineSelection([record], selected),
+          onSelectAll: (selected, selectedRows, changeRows) => toggleTransitLineSelection(changeRows, selected)
         }}
+        onRow={record => ({
+          onClick: event => {
+            if (event.target.closest('button, a, input, .ant-checkbox-wrapper')) return;
+            if (!isTransitLineSelectable(record)) return;
+            toggleTransitLineSelection([record], transitDetailSelectedKeys.indexOf(String(record.id)) < 0);
+          }
+        })}
+        pagination={{
+          current: transitLinePagination.current,
+          pageSize: transitLinePagination.pageSize,
+          total: transitLineTotal,
+          showSizeChanger: true,
+          pageSizeOptions: ['15', '25', '50', '100'],
+          showTotal: total => `${t('Movements')}: ${total}`
+        }}
+        onChange={handleTransitLineTableChange}
+        scroll={{ x: 1200, y: transferScrollY }}
+      />
+    </>
+  );
+
+  const transitPremiumsTabContent = (
+    <Card size="small">
+      <Tabs
+        className="cashier-transit-inner-tabs"
+        activeKey={transitInnerTab}
+        onChange={key => setTransitInnerTab(key)}
+        items={[
+          { key: 'accounts', label: t('Accounts'), children: transitAccountsPane },
+          { key: 'lines', label: t('Movement detail'), children: transitLinesPane }
+        ]}
       />
     </Card>
   );
@@ -9662,6 +10515,7 @@
   const renderCollectionAllocationContent = () => {
     const paymentTotal = getCollectionPaymentAmount();
     const policyTotal = getCollectionPolicyTotal();
+    const creditTotal = getCollectionCreditTotal();
     const expectedSupplementary = getCollectionSupplementaryExpected();
     const supplementaryTotal = getCollectionSupplementaryTotal();
     const difference = transitCollectionMode
@@ -9735,6 +10589,73 @@
                       {`: ${formatMoney(item.pendingAmount)}`}
                     </div>
                   ))}
+              </div>
+            )}
+          >
+            <Button type="link" title={t('View installments')}>
+              <InstallmentsIcon />
+            </Button>
+          </Popover>
+        )
+      }
+    ];
+
+    // MSN-000175: credit balance of the selected policies (pending negative installments).
+    const creditColumns = [
+      {
+        title: t('Policy'),
+        dataIndex: 'policy',
+        key: 'policy'
+      },
+      {
+        title: t('Policy ID'),
+        key: 'policyId',
+        width: 90,
+        align: 'center',
+        render: (_, record) => {
+          const policyId = getCollectionPolicyNumericId(record);
+          return policyId > 0 ? policyId : '-';
+        }
+      },
+      {
+        title: t('Available'),
+        dataIndex: 'availableAmount',
+        key: 'availableAmount',
+        align: 'right',
+        render: renderGridMoney
+      },
+      {
+        title: t('Amount to apply'),
+        dataIndex: 'amount',
+        key: 'amount',
+        align: 'right',
+        render: (value, record) => (
+          <InputNumber
+            min={0}
+            max={record.availableAmount}
+            precision={2}
+            value={value}
+            onChange={nextValue => updateCollectionCreditAmount(record.key, nextValue)}
+            style={{ width: '100%' }}
+          />
+        )
+      },
+      {
+        title: t('Installments'),
+        key: 'installments',
+        align: 'center',
+        render: (_, record) => (
+          <Popover
+            title={t('Installment details')}
+            trigger="click"
+            content={(
+              <div className="cashier-supervisor-installments-popup">
+                {record.installments.map(item => (
+                  <div key={item.id || `${record.key}-${item.numberInYear}`}>
+                    <strong>{item.concept || t('Installment')}</strong>
+                    {`: ${formatMoney(item.pendingAmount)}`}
+                  </div>
+                ))}
               </div>
             )}
           >
@@ -9839,6 +10760,22 @@
             bordered
           />
         </div>
+        {!transitCollectionMode && collectionCreditRows.length > 0 && (
+          <>
+            <div className="cashier-supervisor-section-title">{t('Saldo a favor')}</div>
+            <div className="cashier-supervisor-collection-policy-table">
+              <Table
+                rowKey="key"
+                columns={creditColumns}
+                dataSource={collectionCreditRows}
+                size="small"
+                className="cashier-supervisor-table"
+                pagination={false}
+                bordered
+              />
+            </div>
+          </>
+        )}
         {!transitCollectionMode && (
           <>
             <div className="cashier-supervisor-section-title">{t('Complementary premiums')}</div>
@@ -9867,6 +10804,9 @@
         <div className="cashier-supervisor-collection-allocation-summary">
           <div><strong>{t('Payment total')}:</strong> {formatMoney(paymentTotal)}</div>
           <div><strong>{t('Premiums')}:</strong> {formatMoney(policyTotal)}</div>
+          {!transitCollectionMode && creditTotal > 0 && (
+            <div><strong>{t('Saldo a favor aplicado')}:</strong> {formatMoney(creditTotal)}</div>
+          )}
           {!transitCollectionMode && (
             <>
               <div><strong>{t('Complementary expected')}:</strong> {formatMoney(expectedSupplementary)}</div>
@@ -10307,6 +11247,8 @@
                   if (!checked) {
                     setReversalAccountId(undefined);
                     setReversalAccountOptions([]);
+                  } else {
+                    presetReversalClient(reversalRecord);
                   }
                 }}
               >
@@ -10327,6 +11269,11 @@
                   onChange={setReversalAccountId}
                   notFoundContent={t('No accounts found')}
                 />
+              </Form.Item>
+            )}
+            {reversalCreditFunds && Number(reversalRecord && reversalRecord.allocationId) > 0 && (
+              <Form.Item label={t('Client')} required>
+                {renderOperationClientSelect(reversalClientId, setReversalClientId)}
               </Form.Item>
             )}
           </Form>
@@ -10559,6 +11506,7 @@
             layout="vertical"
             onFinish={submitRefundMoneyRequest}
           >
+            {renderTransitSelectionNote()}
             <div className="cashier-supervisor-refund-grid">
               <Form.Item
                 label={t('Currency')}
@@ -10755,18 +11703,16 @@
           width={620}
         >
           <Form form={ppxaApplyForm} layout="vertical" onFinish={submitPpxaApply}>
-            <div className="cashier-supervisor-collection-allocation-summary">
-              <div><strong>{t('Selected balance')}:</strong> {formatMoney(ppxaApplyForm.getFieldValue('amount'))}</div>
-            </div>
+            {renderTransitSelectionNote()}
             <Form.Item label={t('Currency')} name="currency">
               <Select disabled options={currencyOptions} />
             </Form.Item>
             <Form.Item
               label={t('Amount')}
               name="amount"
-              rules={[{ required: true, message: t('The selected balance is required.') }]}
+              rules={[{ required: true, message: t('Enter an amount.') }]}
             >
-              <InputNumber disabled precision={2} style={{ width: '100%' }} />
+              <InputNumber min={0} max={getSelectedTransitLinesTotal()} precision={2} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item
               label={t('Destination account')}
@@ -10785,6 +11731,13 @@
                 onSearch={searchPpxaApplyAccounts}
                 notFoundContent={ppxaApplyAccountLoading ? t('Loading...') : t('No accounts found')}
               />
+            </Form.Item>
+            <Form.Item
+              label={t('Client')}
+              name="client"
+              rules={[{ required: true, message: t('Select a client.') }]}
+            >
+              {renderOperationClientSelect()}
             </Form.Item>
             <Form.Item
               label={t('Reference')}
@@ -10811,6 +11764,7 @@
             layout="vertical"
             onFinish={submitAccountTransfer}
           >
+            {renderTransitSelectionNote()}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div>
                 <div className="cashier-supervisor-section-title">{t('Source information')}</div>
@@ -10819,13 +11773,7 @@
                   name="currency"
                   rules={[{ required: true, message: t('Select a currency.') }]}
                 >
-                  <Select
-                    showSearch
-                    optionFilterProp="label"
-                    options={currencyOptions}
-                    placeholder={t('Currency')}
-                    onChange={handleAccountTransferCurrencyChange}
-                  />
+                  <Select disabled options={currencyOptions} placeholder={t('Currency')} />
                 </Form.Item>
                 <Form.Item
                   label={t('Amount')}
@@ -10840,6 +11788,13 @@
                   rules={[{ required: true, message: t('Enter a reference.') }]}
                 >
                   <Input />
+                </Form.Item>
+                <Form.Item
+                  label={t('Client')}
+                  name="client"
+                  rules={[{ required: true, message: t('Select a client.') }]}
+                >
+                  {renderOperationClientSelect()}
                 </Form.Item>
                 <Form.Item shouldUpdate>
                   {() => {
@@ -10869,35 +11824,14 @@
                 <div className="cashier-supervisor-section-title">{t('Account information')}</div>
                 <Form.Item
                   label={t('Source account')}
+                  name="sourceAccount"
+                  rules={[{ required: true, message: t('Select a source account.') }]}
                 >
-                  <Input.Group compact style={{ display: 'flex', width: '100%' }}>
-                    <Form.Item
-                      name="sourceAccount"
-                      noStyle
-                      rules={[{ required: true, message: t('Select a source account.') }]}
-                    >
-                      <Select
-                        showSearch
-                        allowClear
-                        filterOption={false}
-                        optionFilterProp="label"
-                        optionLabelProp="shortAccountLabel"
-                        options={accountTransferAccountOptions}
-                        loading={accountTransferAccountLoading}
-                        placeholder={t('Type to search account')}
-                        onSearch={searchAccountTransferAccounts}
-                        onChange={value => updateAccountTransferContact('sourceAccount', value)}
-                        notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
-                        style={{ width: 'calc(100% - 40px)' }}
-                      />
-                    </Form.Item>
-                    <Button
-                      icon={<InstallmentsIcon />}
-                      aria-label={t('Search accounts')}
-                      onClick={() => openNewIncomeAccountSearch('sourceAccount')}
-                      style={{ width: 40 }}
-                    />
-                  </Input.Group>
+                  <Select
+                    disabled
+                    optionLabelProp="shortAccountLabel"
+                    options={accountTransferSourceOption ? [accountTransferSourceOption] : []}
+                  />
                 </Form.Item>
                 <Form.Item label={t('Source name')} name="sourceName">
                   <Input />
@@ -10921,7 +11855,7 @@
                         loading={accountTransferAccountLoading}
                         placeholder={t('Type to search account')}
                         onSearch={searchAccountTransferAccounts}
-                        onChange={value => updateAccountTransferContact('destinationAccount', value)}
+                        onChange={updateAccountTransferDestinationContact}
                         notFoundContent={accountTransferAccountLoading ? t('Loading...') : t('Type to search account')}
                         style={{ width: 'calc(100% - 40px)' }}
                       />
@@ -11044,6 +11978,7 @@
             setCollectionChargeStep('payment');
             setCollectionPolicyRows([]);
             setCollectionSupplementaryRows([]);
+            setCollectionCreditRows([]);
             clearNewIncomeForm();
           }}
           footer={null}

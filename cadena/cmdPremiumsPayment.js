@@ -6,7 +6,7 @@
  * @email support@axxis-systems.com
  * @created 2026/08/09
  * @name cmdPremiumsPayment
- * @version 1.0
+ * @version 1.2
  * @purpose: Apply one payment to multiple policies and send any excess to transit.
  * @context: {
  *   workspaceId: number,
@@ -16,7 +16,8 @@
  *   supplementaryPayments?: [{ policyId: number, amount: number }],
  *   sourceTransitAccountId?: number,
  *   transitIncomeType?: string,
- *   transferEntity?: object
+ *   transferEntity?: object,
+ *   credits?: [{ policyId: number, amount: number }]
  * }
  * @notes:
  *   - The payment is distributed by policy without validating a payer or fiscal receipt.
@@ -25,6 +26,14 @@
  *   - When sourceTransitAccountId is provided, a second negative transfer is created and executed
  *     against the transit account after the premium allocation succeeds.
  *   - The transfer entity can be provided by the payment form to preserve split-payment details.
+ *   - v1.1 (MSN-000174): the transit balance counts every movement except PREMIUMPAY, the same rule as the
+ *     transit account list (cmdGetTransitMovs) and its line detail (cmdTransitLines).
+ *   - v1.2 (MSN-000175): credits apply the pending negative installments (credit balance) of policies of the same
+ *     payer. They pay the selected installments before the cash: those lines carry compensationType SALDOFAVOR
+ *     (moneyInAmount = cash part, compensationAmount = credit part) and every negative installment taken gets a
+ *     line with compensationAmount = -taken. No money moves for the credit part; the money-in transfer covers only
+ *     the cash (amount = payments + supplementary - credits) and is not created when the cash is 0.
+ *     A policy's own credit goes to its own installments first. Credits never go to transit.
  */
 
 try {
@@ -37,14 +46,27 @@ try {
   const supplementaryPayments = getSupplementaryPaymentRows(input);
   const requestedAmount = getMoney(input.amount);
   const sourceTransitAccountId = getPositiveInteger(input.sourceTransitAccountId);
+  const credits = getCreditRows(input);
+  const creditTotal = roundMoney(credits.reduce((total, item) => total + item.amount, 0));
   const calculatedAmount = roundMoney(
     payments.reduce((total, item) => total + item.amount, 0)
     + supplementaryPayments.reduce((total, item) => total + item.amount, 0)
+    - creditTotal
   );
   const totalAmount = requestedAmount > 0 ? requestedAmount : calculatedAmount;
 
   if (Math.abs(totalAmount - calculatedAmount) > 0.01) {
-    throw new Error('El monto total no coincide con la suma de los montos asignados a las pólizas.');
+    throw new Error(creditTotal > 0
+      ? 'El monto total no coincide con la suma de los montos asignados a las pólizas menos el saldo a favor aplicado.'
+      : 'El monto total no coincide con la suma de los montos asignados a las pólizas.');
+  }
+
+  if (creditTotal > 0 && sourceTransitAccountId > 0) {
+    throw new Error('El saldo a favor no se puede aplicar en un cobro desde una cuenta en tránsito.');
+  }
+
+  if (totalAmount < 0) {
+    throw new Error('El saldo a favor aplicado supera el monto asignado a las pólizas.');
   }
 
   if (sourceTransitAccountId > 0) {
@@ -90,11 +112,13 @@ try {
     if (item.allocation.transitAmount > 0) ensureTransitAccount(item.policy);
   });
 
+  const creditDetails = loadCredits(credits, details);
   const totals = calculateTotals(details);
-  validateTotals(totalAmount, totals);
+  validateTotals(totalAmount, totals, creditTotal);
+  assignCredit(details, creditTotal, creditDetails);
 
-  const transfer = createTransfer(input, workspaceId, totalAmount);
-  const entity = buildPaymentAllocationEntity(input, workspaceId, totalAmount, transfer, details, totals);
+  const transfer = totalAmount > 0 ? createTransfer(input, workspaceId, totalAmount) : null;
+  const entity = buildPaymentAllocationEntity(input, workspaceId, totalAmount, transfer, details, totals, creditDetails, creditTotal);
 
   doCmd({
     cmd: 'DoPaymentAllocation',
@@ -121,6 +145,8 @@ try {
       appliedAmount: totals.appliedAmount,
       transitAmount: totals.transitAmount,
       difference: totals.difference,
+      creditAmount: creditTotal,
+      allocationId: allocationId || null,
       transitTransfer: transitTransfer,
       policies: details.map(item => ({
         policyId: item.policy.id,
@@ -129,7 +155,16 @@ try {
         transitAmount: item.allocation.transitAmount,
         installments: item.allocation.installments.map(row => ({
           payPlanId: row.id,
-          amount: row.dueAmount
+          amount: row.dueAmount,
+          creditAmount: row.compensationAmount || 0
+        }))
+      })),
+      credits: creditDetails.map(item => ({
+        policyId: item.policy.id,
+        amount: item.amount,
+        installments: item.installments.map(row => ({
+          payPlanId: row.id,
+          amount: -row.taken
         }))
       }))
     }
@@ -183,6 +218,19 @@ function validateInput(input) {
 
     supplementaryIds.add(item.policyId);
   });
+
+  const creditIds = new Set();
+  getCreditRows(input).forEach(item => {
+    if (getPositiveInteger(item.policyId) <= 0 || item.amount <= 0) {
+      throw new Error('El saldo a favor debe tener una póliza válida y un monto mayor que cero.');
+    }
+
+    if (creditIds.has(item.policyId)) {
+      throw new Error(`La póliza ${item.policyId} fue enviada más de una vez en saldos a favor.`);
+    }
+
+    creditIds.add(item.policyId);
+  });
 }
 
 function getPaymentRows(input) {
@@ -211,6 +259,69 @@ function getSupplementaryPaymentRows(input) {
     policyId: getPositiveInteger(item && (item.policyId || item.lifePolicyId)),
     amount: roundMoney(getMoney(item && item.amount))
   }));
+}
+
+function getCreditRows(input) {
+  const source = Array.isArray(input && input.credits) ? input.credits : [];
+
+  return source.map(item => ({
+    policyId: getPositiveInteger(item && (item.policyId || item.lifePolicyId)),
+    amount: roundMoney(getMoney(item && item.amount))
+  }));
+}
+
+// MSN-000175: the pending negative installments each credit takes, oldest first.
+function loadCredits(credits, details) {
+  const holderIds = details.map(item => getPositiveInteger(item.policy && item.policy.holderId));
+
+  return credits.map(credit => {
+    const known = details.find(item => item.policy.id === credit.policyId);
+    const policy = known ? known.policy : loadPolicy(credit.policyId);
+    const policyLabel = getTrimmedString(policy.code) || String(policy.id);
+    if (holderIds.indexOf(getPositiveInteger(policy.holderId)) < 0) {
+      throw new Error(`La póliza ${policyLabel} no es del mismo pagador que las pólizas que se cobran.`);
+    }
+
+    const payPlan = known ? known.payPlan : loadPayPlan(policy.id);
+    const negativeRows = payPlan
+      .filter(row => getSignedMoney(row && row.minimum) - getSignedMoney(row && row.payed) < -0.005)
+      .sort((a, b) => (new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()) || (a.id - b.id));
+    const available = roundMoney(negativeRows.reduce((total, row) =>
+      total + getSignedMoney(row.payed) - getSignedMoney(row.minimum), 0));
+    if (credit.amount > available + 0.01) {
+      throw new Error(`La póliza ${policyLabel} tiene ${available.toFixed(2)} de saldo a favor; se intentó aplicar ${credit.amount.toFixed(2)}.`);
+    }
+
+    let remaining = credit.amount;
+    const installments = [];
+    for (const row of negativeRows) {
+      if (remaining <= 0) break;
+      const open = roundMoney(getSignedMoney(row.payed) - getSignedMoney(row.minimum));
+      const taken = roundMoney(Math.min(open, remaining));
+      if (taken <= 0) continue;
+      installments.push({ ...row, taken: taken });
+      remaining = roundMoney(remaining - taken);
+    }
+
+    return { policy: policy, amount: credit.amount, installments: installments };
+  });
+}
+
+// MSN-000175: the credit pays the installments before the cash, a policy's own installments first.
+function assignCredit(details, creditTotal, creditDetails) {
+  const ownPolicyIds = creditDetails.map(item => item.policy.id);
+  const ordered = details.filter(item => ownPolicyIds.indexOf(item.policy.id) >= 0)
+    .concat(details.filter(item => ownPolicyIds.indexOf(item.policy.id) < 0));
+  let remaining = roundMoney(creditTotal);
+
+  ordered.forEach(item => {
+    item.allocation.installments.forEach(installment => {
+      const credit = roundMoney(Math.min(installment.dueAmount, Math.max(remaining, 0)));
+      installment.compensationAmount = credit;
+      installment.moneyInAmount = roundMoney(installment.dueAmount - credit);
+      remaining = roundMoney(remaining - credit);
+    });
+  });
 }
 
 function loadPolicy(policyId) {
@@ -262,7 +373,7 @@ function loadTransitAccountBalance(accountId) {
   const rows = getRows(LoadEntities && LoadEntities.outData);
   return roundMoney(rows.reduce((total, item) => {
     const transactionCode = getTrimmedString(item && item.transactionCode).toUpperCase();
-    if (transactionCode === 'PREMIUMPAY' || transactionCode === 'MONEYOUT') return total;
+    if (transactionCode === 'PREMIUMPAY') return total;
 
     const amount = Number(item && item.amount);
     return total + (Number.isFinite(amount) ? amount : 0);
@@ -402,12 +513,17 @@ function calculateTotals(details) {
   };
 }
 
-function validateTotals(totalAmount, totals) {
+function validateTotals(totalAmount, totals, creditTotal) {
   if (Math.abs(totals.difference) > 0.01) {
     throw new Error('La distribución del pago no coincide con el monto enviado a tránsito.');
   }
 
-  if (Math.abs(roundMoney(totals.appliedAmount + totals.transitAmount) - totalAmount) > 0.01) {
+  const credit = roundMoney(creditTotal || 0);
+  if (credit > totals.appliedAmount + 0.01) {
+    throw new Error('El saldo a favor aplicado supera las cuotas que se cobran.');
+  }
+
+  if (Math.abs(roundMoney(totals.appliedAmount + totals.transitAmount - credit) - totalAmount) > 0.01) {
     throw new Error('El monto aplicado y el monto enviado a tránsito no coinciden con el total del pago.');
   }
 }
@@ -573,7 +689,7 @@ function createTransitDebitTransfer(input, workspaceId, amount, transitAccountId
   return getRows(DoTransfer.outData)[0] || transfer;
 }
 
-function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, details, totals) {
+function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, details, totals, creditDetails, creditTotal) {
   const installmentPremiums = [];
   const premiums = [];
   const supplementaryPremiums = [];
@@ -584,16 +700,17 @@ function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, deta
     const currency = policy.currency || input.currency || 'USD';
 
     allocation.installments.forEach(installment => {
+      const credit = roundMoney(installment.compensationAmount || 0);
       installmentPremiums.push({
         lifePolicyId: policy.id,
         payPlanId: installment.id,
         dueAmount: installment.dueAmount,
-        moneyInAmount: installment.dueAmount,
+        moneyInAmount: roundMoney(installment.dueAmount - credit),
         currency: installment.currency || currency,
-        compensationAmount: 0,
+        compensationAmount: credit,
+        ...(credit > 0 ? { compensationType: 'SALDOFAVOR' } : {}),
         transitAmount: 0
       });
-
       premiums.push({
         Installment: installment,
         comContractId: policy.comContractId,
@@ -625,6 +742,42 @@ function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, deta
     }
   });
 
+  // MSN-000175: one line per negative installment the credit takes; PayPremium leaves it at payed - taken.
+  creditDetails.forEach(item => {
+    const policy = item.policy;
+    const currency = policy.currency || input.currency || 'USD';
+
+    item.installments.forEach(installment => {
+      installmentPremiums.push({
+        lifePolicyId: policy.id,
+        payPlanId: installment.id,
+        dueAmount: -installment.taken,
+        moneyInAmount: 0,
+        currency: installment.currency || currency,
+        compensationAmount: -installment.taken,
+        compensationType: 'SALDOFAVOR',
+        transitAmount: 0
+      });
+
+      premiums.push({
+        Installment: installment,
+        comContractId: policy.comContractId,
+        comContractName: policy.ComContract && policy.ComContract.name || '',
+        concept: installment.concept || 'Premium',
+        contractYear: policy.contractYear,
+        coveredUntil: policy.end,
+        created: policy.dateIncome,
+        currency: installment.currency || currency,
+        custom: false,
+        ...installment,
+        payerId: policy.holderId,
+        policyCode: policy.code,
+        policyHolderName: policy.Holder && policy.Holder.FullName || '',
+        sellerName: ''
+      });
+    });
+  });
+
   return {
     currency: input.currency || 'USD',
     InstallmentPremiums: installmentPremiums,
@@ -633,12 +786,12 @@ function buildPaymentAllocationEntity(input, workspaceId, amount, transfer, deta
     transactionDate: new Date().toISOString(),
     transferAmount: amount,
     fromTransitAmount: 0,
-    compensationAmount: 0,
+    compensationAmount: roundMoney(creditTotal || 0),
     premiumAmount: totals.appliedAmount,
     supplementaryAmount: totals.transitAmount,
     premiumDifferenceAmount: 0,
     transferWorkspaceId: workspaceId,
-    Transfers: [transfer],
+    Transfers: transfer ? [transfer] : [],
     Premiums: premiums
   };
 }
@@ -697,6 +850,12 @@ function getPositiveInteger(value) {
 function getMoney(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+// MSN-000175: negative installments and partly applied credits keep their sign.
+function getSignedMoney(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function roundMoney(value) {

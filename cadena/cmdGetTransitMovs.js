@@ -6,7 +6,7 @@
  * @email support@axxis-systems.com
  * @created 2026/08/12
  * @name cmdGetTransitMovs
- * @version 1.0
+ * @version 1.2
  * @purpose: Return paginated transit accounts and movements according to the selected filters.
  * @context: {
  *   page?: number,
@@ -17,9 +17,11 @@
  *   accountName?: string,
  *   accountCode?: string,
  *   currency?: string,
- *   name?: string,
+ *   name?: string,              (MSN-000176: accounts with a movement whose transaction contains it; was a prefix)
  *   cancellations?: boolean,
- *   onlyWithBalance?: boolean
+ *   onlyWithBalance?: boolean,
+ *   includeMovements?: boolean   (default true; MSN-000174: the master tab passes false and reads the lines of one
+ *                                 account from cmdTransitLines)
  * }
  */
 
@@ -83,7 +85,7 @@ OFFSET ${offset} ROWS FETCH NEXT ${input.size} ROWS ONLY;`;
     .map(row => toPositiveInteger(row && row.id))
     .filter(id => id > 0);
 
-  const movementsByAccount = loadMovements(accountIds, input);
+  const movementsByAccount = input.includeMovements ? loadMovements(accountIds, input) : {};
   const data = masterRows.map(row => ({
     ...row,
     ...clientBalance(row, clientAccounts),
@@ -128,6 +130,7 @@ function normalizeInput(source) {
     currency: normalizeText(value.currency).toUpperCase(),
     name: normalizeText(value.name),
     cancellations: value.cancellations === true,
+    includeMovements: value.includeMovements !== false,
     // A transfer search must include both sides of the movement, even when
     // one side has no positive balance after the transfer.
     onlyWithBalance: value.showAll !== true
@@ -203,7 +206,7 @@ function buildFilter(input, clientAccounts) {
 
   if (input.name) {
     const name = escapeSql(input.name);
-    conditions.push(`EXISTS (SELECT 1 FROM [AccountMov] at WHERE at.[accountId] = a.[id] AND ${movementPredicate('at', input)} AND at.[transaction] LIKE N'${name}%')`);
+    conditions.push(`EXISTS (SELECT 1 FROM [AccountMov] at WHERE at.[accountId] = a.[id] AND ${movementPredicate('at', input)} AND at.[transaction] LIKE N'%${name}%')`);
   }
 
   return conditions.join(" AND ");
