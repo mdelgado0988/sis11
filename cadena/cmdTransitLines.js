@@ -657,7 +657,11 @@ FROM [ClaimPayment] cp WHERE cp.[id] = ${input.opRequestId};`, 'No fue posible l
     }
   } else {
     const transfer = loadTransfers([input.opTransferId])[input.opTransferId];
-    if (!transfer || transfer.destinationAccountId !== account.id || transfer.amount >= 0) {
+    const leavesAccount = transfer && (
+      (transfer.destinationAccountId === account.id && transfer.amount < 0)
+      || (transfer.sourceAccountId === account.id && transfer.amount > 0)
+    );
+    if (!transfer || !leavesAccount) {
       throw new Error(`La transferencia ${input.opTransferId} no descuenta de la cuenta ${account.accNo}.`);
     }
     if (transfer.status === 2) {

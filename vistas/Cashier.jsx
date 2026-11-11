@@ -3054,7 +3054,7 @@
     setPpxaApplyVisible(true);
   }
 
-  async function submitPpxaApply(values) {
+  function submitPpxaApply(values) {
     const summary = getSelectedTransitAccountsSummary();
     const destinationAccountId = Number(values && values.destinationAccount);
     const amount = Number(values && values.amount);
@@ -3097,156 +3097,68 @@
       return;
     }
 
-    const ppxaIncomeType = incomeTypeOptions.find(item =>
-      getTrimmedString(item && item.internalType).toUpperCase() === 'PPXA'
-    );
-    if (!ppxaIncomeType) {
-      message.error(t('The PPXA income type is not configured.'));
-      return;
-    }
-
-    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
-    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
-      message.error(t('Select an open cash desk first.'));
-      return;
-    }
-
     setPpxaApplyLoading(true);
-    const date = getCurrentUtcDateTime();
-    const incomeType = getTrimmedString(ppxaIncomeType.value || ppxaIncomeType.code);
     const destinationName = getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo)) || String(destinationAccountId);
     const concept = buildClientReferenceText(reference, client);
-    const buildTransferEntity = (transferAmount, destinationId, destinationLabel, incomeForm) => ({
-      currency: currency,
-      amount: transferAmount,
-      sourceAccountId: null,
-      destinationAccountId: destinationId,
-      concept: concept,
-      paymentMethod: 'OT',
-      paymentMethodName: 'OT',
-      SplitPayments: [{
-        paymentMethod: 'OT',
-        paymentMethodName: 'OT',
-        amount: transferAmount,
-        currency: currency,
-        id: 0,
-        transferId: 0
-      }],
-      sourceName: null,
-      destinationName: destinationLabel,
-      source: null,
-      destination: null,
-      AllocationMovements: null,
-      id: 0,
-      transactionCode: null,
-      producer: null,
-      lifePolicyId: null,
-      date: date,
-      status: 0,
-      executed: false,
-      isExternal: true,
-      sourceExternal: null,
-      allocationId: null,
-      Allocation: null,
-      operatingAccountId: 0,
-      claimPaymentId: null,
-      ClaimPayment: null,
-      SourceAccount: null,
-      DestinationAccount: null,
-      Movements: null,
-      reversalDate: null,
-      incomeType: incomeType,
-      IncomeType: null,
-      jIncomeTypeForm: incomeForm || null,
-      transferWorkspaceId: workspaceId,
-      user: currentUserEmail || null
-    });
 
-    try {
-      // The amount is taken from the selected lines, oldest first, across the selected accounts.
-      const ppxaLines = distributeTransitLines(amount, getTransitLineSelectionEntries());
-      const ppxaLinesByAccount = groupTransitLinesByAccount(ppxaLines);
-      const sourceAccounts = summary.accounts.filter(account => ppxaLinesByAccount[String(account && account.id)]);
-      for (const account of sourceAccounts) {
-        const accountLines = ppxaLinesByAccount[String(account.id)];
-        await checkTransitLines(account.id, sumTransitLines(accountLines), accountLines);
-      }
+    // The amount is taken from the selected lines, oldest first, across the selected accounts.
+    const ppxaLines = distributeTransitLines(amount, getTransitLineSelectionEntries());
+    const ppxaLinesByAccount = groupTransitLinesByAccount(ppxaLines);
+    const sourceAccounts = summary.accounts.filter(account => ppxaLinesByAccount[String(account && account.id)]);
+    const createdTransfers = [];
 
-      /* Temporarily disabled: Transferencia entre cuentas in Montos en tránsito
-         has zero accounting/cash effect for this workflow. Keep the validation
-         above, but do not create RepoTransfer records, stamp transit lines, or
-         execute DoTransfer records until this operation is re-enabled. */
-      /*
-      const createdTransfers = [];
-      try {
-        for (const account of sourceAccounts) {
-          const accountLines = ppxaLinesByAccount[String(account.id)];
-          const transferAmount = sumTransitLines(accountLines);
-          if (transferAmount <= 0) continue;
+    const validateSources = sourceAccounts.reduce((chain, account) => chain.then(() => {
+      const accountLines = ppxaLinesByAccount[String(account.id)];
+      return checkTransitLines(account.id, sumTransitLines(accountLines), accountLines);
+    }), Promise.resolve());
 
-          const sourceId = Number(account && account.id);
-          const sourceName = getTrimmedString(account && (account.name || account.accNo)) || String(sourceId);
-          const outgoing = await exe('RepoTransfer', {
-            operation: 'ADD',
-            entity: buildTransferEntity(-transferAmount, sourceId, sourceName, getTransitLinesOwnerForm(accountLines)),
-            otherReceivables: [],
-            execute: false
-          });
-          if (!outgoing || outgoing.ok === false) {
-            throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The outgoing transfer could not be created.'));
-          }
+    const createAndStampTransfers = validateSources.then(() => ppxaLines.reduce((chain, line) => chain.then(() => {
+      const sourceId = Number(line && line.accountId);
+      const sourceAccount = sourceAccounts.find(account => Number(account && account.id) === sourceId) || {};
+      const transferAmount = Number(getAuditNumber(line && line.amount).toFixed(2));
+      if (sourceId <= 0 || transferAmount <= 0) return undefined;
 
-          const outgoingTransfer = getRows(outgoing)[0] || {};
-          const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
-          if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
-            throw new Error(t('The outgoing transfer was created, but its movement identifier could not be identified.'));
-          }
-          createdTransfers.push({ id: outgoingId, amount: -transferAmount });
-          await stampTransitLines(sourceId, 'PPXA', { transferId: outgoingId }, transferAmount, accountLines);
+      const sourceName = getTrimmedString(sourceAccount.name || sourceAccount.accNo) || String(sourceId);
+      return exe('DoRawTransfer', {
+        save: true,
+        transferInfo: {
+          currency: currency,
+          sourceAccountId: sourceId,
+          destAccountId: destinationAccountId,
+          amount: transferAmount,
+          af_amount: 0,
+          code: 'TRANSIT',
+          concept: concept,
+          producer: 'PPXA',
+          lifePolicyId: null,
+          sourceName: sourceName,
+          destinationName: destinationName
+        }
+      }).then(outgoing => {
+        if (!outgoing || outgoing.ok === false) {
+          throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The raw transfer could not be created.'));
         }
 
-        const response = await exe('RepoTransfer', {
-          operation: 'ADD',
-          entity: buildTransferEntity(amount, destinationAccountId, destinationName, buildClientReferenceForm(client)),
-          otherReceivables: [],
-          execute: false
-        });
-        if (!response || response.ok === false) {
-          throw new Error(response && response.msg ? response.msg : t('The incoming transfer could not be created.'));
+        const rawData = outgoing.outData || {};
+        const outgoingTransfer = rawData.Transfer || rawData.transfer || getRows(outgoing)[0] || rawData;
+        const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
+        if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
+          throw new Error(t('The raw transfer was created, but its movement identifier could not be identified.'));
         }
+        createdTransfers.push({ id: outgoingId, amount: transferAmount });
+        return stampTransitLines(sourceId, 'PPXA', { transferId: outgoingId }, transferAmount, [line]);
+      });
+    }), Promise.resolve()));
 
-        const createdTransfer = getRows(response)[0] || {};
-        const transferId = Number(createdTransfer.id || createdTransfer.transferId || 0);
-        if (!Number.isFinite(transferId) || transferId <= 0) {
-          throw new Error(t('The incoming transfer was created, but its movement identifier could not be identified.'));
-        }
-        createdTransfers.push({ id: transferId, amount: amount });
-      } catch (error) {
-        await deletePendingTransitTransfers(createdTransfers);
-        throw error;
-      }
-
-      for (const transfer of createdTransfers) {
-        const executeResponse = await exe('DoTransfer', {
-          transferId: transfer.id,
-          transfer: null
-        });
-        if (!executeResponse || executeResponse.ok === false) {
-          throw new Error(executeResponse && executeResponse.msg
-            ? executeResponse.msg
-            : t('The transfer movement could not be executed.'));
-        }
-      }
-      */
-
+    createAndStampTransfers.then(() => {
       closePpxaApplyModal();
       refreshTransitAfterOperation();
-      message.success(t('The transfer between accounts was processed without creating accounting movements.'));
-    } catch (error) {
+      message.success(t('The transfer between accounts was created successfully.'));
+    }).catch(error => {
       message.error(error && error.message ? error.message : String(error));
-    } finally {
+    }).finally(() => {
       setPpxaApplyLoading(false);
-    }
+    });
   }
 
   function openRefundMoneyModal() {
