@@ -313,6 +313,9 @@
   const [ppxaApplyAccountLoading, setPpxaApplyAccountLoading] = React.useState(false);
   const [ppxaApplyForm] = Form.useForm();
   const ppxaApplyAccountSearchTimer = React.useRef(null);
+  const [transitOtherIncomeVisible, setTransitOtherIncomeVisible] = React.useState(false);
+  const [transitOtherIncomeLoading, setTransitOtherIncomeLoading] = React.useState(false);
+  const [transitOtherIncomeSourceAccount, setTransitOtherIncomeSourceAccount] = React.useState(null);
   const [reversalVisible, setReversalVisible] = React.useState(false);
   const [reversalCatalogLoading, setReversalCatalogLoading] = React.useState(false);
   const [reversalLoading, setReversalLoading] = React.useState(false);
@@ -3054,6 +3057,219 @@
     setPpxaApplyVisible(true);
   }
 
+  function closeTransitOtherIncomeModal() {
+    setTransitOtherIncomeVisible(false);
+    setTransitOtherIncomeSourceAccount(null);
+    clearNewIncomeForm();
+  }
+
+  function getTransitIncomeTypeOptions() {
+    return incomeTypeOptions.filter(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'TRANSIT'
+    );
+  }
+
+  function openTransitOtherIncomeModal() {
+    const account = getSingleSelectedTransitAccount(t('Select lines of a single source account to apply a miscellaneous income.'));
+    if (!account) return;
+
+    const entries = getSelectedTransitLineEntries(account.id);
+    const total = getSelectedTransitLinesTotal(account.id);
+    const otherMethod = paymentMethodOptions.find(item => getTrimmedString(item && item.value).toUpperCase() === 'OT');
+    if (!otherMethod) {
+      message.error(t('The Other payment method is not configured.'));
+      return;
+    }
+    if (!entries.length || total <= 0) {
+      message.warning(t('Select at least one line with available balance.'));
+      return;
+    }
+    if (!getTransitIncomeTypeOptions().length) {
+      message.error(t('No income type with internalType TRANSIT is configured.'));
+      return;
+    }
+
+    clearNewIncomeForm();
+    setTransitOtherIncomeSourceAccount(account);
+    setTransitOtherIncomeVisible(true);
+    setTransitCollectionMode(false);
+    setCollectionChargeVisible(false);
+    setMovementEditRecord(null);
+    setNewIncomePayments([{ key: Date.now(), methodCode: otherMethod.value, amount: total.toFixed(2) }]);
+    newIncomeForm.setFieldsValue({
+      currency: getTrimmedString(account && account.currency).toUpperCase(),
+      incomeType: undefined,
+      destination: undefined
+    });
+  }
+
+  function getTransitOtherIncomeFormClient() {
+    const container = document.getElementById('cashier-income-type-form-transit-other');
+    return container && newIncomeTypeDynamicForm
+      ? getFormClient(getDynamicFormJson(newIncomeTypeDynamicForm, container))
+      : null;
+  }
+
+  function getTransitOtherIncomeTypeFormJson(client) {
+    const base = getIncomeTypeFormJson();
+    const clientId = Number(client && client.id);
+    const clientName = getTrimmedString(client && client.name);
+    if (!base || !Number.isFinite(clientId) || clientId <= 0 || !clientName) return base;
+
+    try {
+      const fields = JSON.parse(base);
+      if (!Array.isArray(fields)) return base;
+      const names = fields.map(field => getTrimmedString(field && field.name));
+      const next = fields.map(field => {
+        if (!field || !field.name) return field;
+        if (field.name === 'clientePA') return { ...field, userData: [clientName] };
+        if (field.name === 'hiddenCodigoCliente') return { ...field, userData: [String(clientId)] };
+        return field;
+      });
+      if (names.indexOf('clientePA') < 0) {
+        next.push({ type: 'text', name: 'clientePA', access: false, subtype: 'text', userData: [clientName] });
+      }
+      if (names.indexOf('hiddenCodigoCliente') < 0) {
+        next.push({ type: 'hidden', name: 'hiddenCodigoCliente', access: false, userData: [String(clientId)] });
+      }
+      return JSON.stringify(next);
+    } catch (error) {
+      return base;
+    }
+  }
+
+  async function submitTransitOtherIncome(values) {
+    if (!validateDynamicIncomeForms()) return;
+
+    const sourceAccount = transitOtherIncomeSourceAccount || getSingleSelectedTransitAccount();
+    const accountId = Number(sourceAccount && sourceAccount.id);
+    const destinationAccountId = Number(values && values.destination);
+    const currency = getTrimmedString(values && values.currency).toUpperCase();
+    const incomeType = getIncomeTypeOption(values && values.incomeType);
+    const client = getTransitOtherIncomeFormClient();
+    const availableTotal = getSelectedTransitLinesTotal(accountId);
+    const total = getNewIncomeTotal();
+    let lines = [];
+    const otherMethod = paymentMethodOptions.find(item => getTrimmedString(item && item.value).toUpperCase() === 'OT');
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+
+    if (!sourceAccount || accountId <= 0) return;
+    if (!Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
+      message.error(t('Select a destination account.'));
+      return;
+    }
+    if (!incomeType || getTrimmedString(incomeType.internalType).toUpperCase() !== 'TRANSIT') {
+      message.error(t('Select an income type with internalType TRANSIT.'));
+      return;
+    }
+    if (!client || Number(client.id) <= 0) {
+      message.error(t('Select a client.'));
+      return;
+    }
+    if (!otherMethod) {
+      message.error(t('The Other payment method is not configured.'));
+      return;
+    }
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.error(t('Select an open cash desk first.'));
+      return;
+    }
+    if (!Number.isFinite(total) || total <= 0) {
+      message.error(t('Enter an amount greater than zero.'));
+      return;
+    }
+    if (total > availableTotal + 0.005) {
+      message.error(t('The amount cannot exceed the available balance of the selected lines.'));
+      return;
+    }
+    try {
+      lines = distributeTransitLines(total, getSelectedTransitLineEntries(accountId));
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+      return;
+    }
+    if (!lines.length) {
+      message.error(t('Select at least one line with available balance.'));
+      return;
+    }
+    if (getTrimmedString(sourceAccount.currency).toUpperCase() !== currency) {
+      message.error(t('The currency does not match the source account.'));
+      return;
+    }
+
+    setTransitOtherIncomeLoading(true);
+    let transferId = 0;
+    let executionStarted = false;
+    try {
+      await checkTransitLines(accountId, total, lines);
+      const destinationOption = newIncomeDestinationAccountOptions.find(option => Number(option && option.value) === destinationAccountId);
+      const destinationAccount = destinationOption && destinationOption.account;
+      const destinationLabel = getTrimmedString(client.name)
+        || getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo))
+        || String(destinationAccountId);
+      const entity = {
+        currency: currency,
+        amount: total,
+        sourceAccountId: accountId,
+        sourceName: getTrimmedString(sourceAccount.name || sourceAccount.accNo) || String(accountId),
+        destinationAccountId: destinationAccountId,
+        destinationName: destinationLabel,
+        concept: 'Ingreso Vario',
+        paymentMethod: otherMethod.value,
+        paymentMethodName: getTrimmedString(otherMethod.label || otherMethod.name) || otherMethod.value,
+        SplitPayments: [{
+          paymentMethod: otherMethod.value,
+          paymentMethodName: getTrimmedString(otherMethod.label || otherMethod.name) || otherMethod.value,
+          amount: total,
+          currency: currency,
+          formId: 0,
+          id: 0,
+          transferId: 0,
+          jValues: null
+        }],
+        incomeType: incomeType.value,
+        jIncomeTypeForm: getTransitOtherIncomeTypeFormJson(client),
+        isExternal: true,
+        transferWorkspaceId: workspaceId,
+        user: currentUserEmail || null
+      };
+      const response = await exe('RepoTransfer', {
+        operation: 'ADD',
+        entity: entity,
+        otherReceivables: [],
+        execute: false
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The miscellaneous income could not be created.'));
+      }
+      const created = getRows(response)[0] || {};
+      transferId = Number(created.id || created.transferId || 0);
+      if (!Number.isFinite(transferId) || transferId <= 0) {
+        throw new Error(t('The miscellaneous income was created, but its movement identifier could not be identified.'));
+      }
+      await stampTransitLines(accountId, 'TRANSFER', { transferId: transferId }, total, lines);
+      executionStarted = true;
+      const execution = await exe('DoTransfer', { transferId: transferId, transfer: null });
+      if (!execution || execution.ok === false) {
+        throw new Error(execution && execution.msg ? execution.msg : t('The miscellaneous income could not be executed.'));
+      }
+      closeTransitOtherIncomeModal();
+      refreshTransitAfterOperation();
+      message.success(t('The miscellaneous income was registered successfully.'));
+    } catch (error) {
+      if (transferId > 0 && !executionStarted) {
+        try {
+          await exe('RepoTransfer', { operation: 'DELETE', entity: { id: transferId } });
+        } catch (cleanupError) {
+          console.error('Unable to clean up the miscellaneous income transfer.', cleanupError);
+        }
+      }
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setTransitOtherIncomeLoading(false);
+    }
+  }
+
   function submitPpxaApply(values) {
     const summary = getSelectedTransitAccountsSummary();
     const destinationAccountId = Number(values && values.destinationAccount);
@@ -3882,6 +4098,7 @@
   }
 
   function getNewIncomeDifference() {
+    if (transitOtherIncomeVisible) return 0;
     if (!collectionChargeVisible) return getNewIncomeTotal();
     return getNewIncomeTotal() - collectionExpectedAmount;
   }
@@ -4122,6 +4339,7 @@
 
   function searchNewIncomeDestinationAccounts(value) {
     const text = getTrimmedString(value);
+    const currency = getTrimmedString(newIncomeForm.getFieldValue('currency')).toUpperCase();
 
     if (newIncomeDestinationSearchTimer.current) {
       clearTimeout(newIncomeDestinationSearchTimer.current);
@@ -4137,14 +4355,15 @@
       setNewIncomeDestinationAccountLoading(true);
       exe('ExeChain', {
         chain: 'cmdSearchTransitAccounts',
-        context: JSON.stringify({ page: 1, size: 10, accountName: text, showAll: true })
+        context: JSON.stringify({ page: 1, size: 10, accountName: text, currency: currency, showAll: true })
       })
         .then(response => {
           if (!response || response.ok === false) {
             throw new Error(response && response.msg ? response.msg : t('Accounts could not be loaded.'));
           }
 
-          setNewIncomeDestinationAccountOptions(mapTransitAccountOptions(getAccountSearchRows(response)));
+          setNewIncomeDestinationAccountOptions(mapTransitAccountOptions(getAccountSearchRows(response))
+            .filter(option => getTrimmedString(option && option.account && option.account.currency).toUpperCase() === currency));
         })
         .catch(error => {
           setNewIncomeDestinationAccountOptions([]);
@@ -4337,6 +4556,58 @@
     });
   }
 
+  function applyTransitOtherIncomeClient(container) {
+    const source = transitOtherIncomeSourceAccount;
+    const entries = getSelectedTransitLineEntries(source && source.id);
+    const client = getSelectedTransitLinesDefaultClient(source ? [source] : [], entries);
+    if (!container || !client) return;
+
+    const contactInput = container.querySelector('#clientePA');
+    const contactCodeInput = container.querySelector('#hiddenCodigoCliente');
+    const identificationInput = container.querySelector('#identificacionPagador');
+    if (contactInput) {
+      contactInput.value = client.name;
+      contactInput.disabled = false;
+      contactInput.readOnly = false;
+      contactInput.removeAttribute('data-transit-contact-locked');
+      contactInput.removeAttribute('aria-disabled');
+      if (typeof $ !== 'undefined') {
+        $(contactInput).data('selectedItem', {
+          codigo: client.id,
+          nombreCompleto: client.name
+        });
+      }
+    }
+    if (contactCodeInput) {
+      contactCodeInput.value = String(client.id);
+      contactCodeInput.disabled = false;
+      contactCodeInput.removeAttribute('data-transit-contact-locked');
+      contactCodeInput.removeAttribute('aria-disabled');
+    }
+    if (identificationInput) {
+      identificationInput.disabled = false;
+      identificationInput.readOnly = false;
+      identificationInput.removeAttribute('data-transit-contact-locked');
+      identificationInput.removeAttribute('aria-disabled');
+    }
+
+    container.querySelectorAll('[name]').forEach(control => {
+      const normalizedName = getTrimmedString(control.getAttribute('name'))
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      if (!['contact', 'contactid', 'contactname', 'holderid', 'payerid'].includes(normalizedName)) return;
+      if (control.tagName.toLowerCase() === 'select'
+        && !Array.from(control.options).some(option => String(option.value) === String(client.id))) {
+        control.add(new Option(client.name, String(client.id)));
+      }
+      control.value = normalizedName === 'contactname' ? client.name : String(client.id);
+      control.disabled = false;
+      control.readOnly = false;
+      control.removeAttribute('data-transit-contact-locked');
+      control.removeAttribute('aria-disabled');
+    });
+  }
+
   function loadNewIncomeAccountSearch(values, pagination, targetOverride) {
     const source = values || newIncomeAccountSearchForm.getFieldsValue();
     const currentPage = Number(pagination && pagination.current) || 1;
@@ -4346,11 +4617,14 @@
     const contactId = isRefundAccountSearch
       ? Number(refundMoneyForm.getFieldValue('beneficiary'))
       : Number(source.contact);
-    const isTransitTransferSearch = searchTarget === 'ppxaDestinationAccount';
+    const isTransitTransferSearch = searchTarget === 'ppxaDestinationAccount'
+      || searchTarget === 'transitOtherIncomeDestination';
     const transferCurrency = isRefundAccountSearch
       ? getTrimmedString(refundMoneyForm.getFieldValue('currency')).toUpperCase()
       : isTransitTransferSearch
-        ? getTrimmedString(ppxaApplyForm.getFieldValue('currency')).toUpperCase()
+        ? getTrimmedString(searchTarget === 'transitOtherIncomeDestination'
+          ? newIncomeForm.getFieldValue('currency')
+          : ppxaApplyForm.getFieldValue('currency')).toUpperCase()
         : '';
 
     setNewIncomeAccountSearchLoading(true);
@@ -4511,6 +4785,25 @@
       ppxaApplyForm.setFieldsValue({ destinationAccount: id });
       setAccountTransferSearchTarget(null);
       setNewIncomeAccountSearchVisible(false);
+      return;
+    }
+
+    if (accountTransferSearchTarget === 'transitOtherIncomeDestination') {
+      const sourceId = Number(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.id);
+      if (sourceId === id) {
+        message.warning(t('The destination account cannot be the selected source account.'));
+        return;
+      }
+      const options = mapTransitAccountOptions([account]);
+      const selectedOption = options[0];
+      if (!selectedOption) return;
+
+      setNewIncomeDestinationAccountOptions(current => [selectedOption].concat(
+        current.filter(item => Number(item && item.value) !== id)
+      ));
+      newIncomeForm.setFieldsValue({ destination: selectedOption.value });
+      setNewIncomeAccountSearchVisible(false);
+      setAccountTransferSearchTarget(null);
       return;
     }
 
@@ -4916,6 +5209,7 @@
   }
 
   function getNewIncomeFormScope() {
+    if (transitOtherIncomeVisible) return 'transit-other';
     if (movementEditVisible) return 'edit';
     if (collectionChargeVisible) return 'premium';
     return 'new';
@@ -5226,11 +5520,19 @@
         container.innerHTML = '';
         $(container).formRender({ formData: formData });
         applyDynamicFormLayout(container);
-        applyNewIncomeTransitContact(container);
+        if (container.id === 'cashier-income-type-form-transit-other') {
+          applyTransitOtherIncomeClient(container);
+        } else {
+          applyNewIncomeTransitContact(container);
+        }
 
         try {
           evalNewIncomeFormLogic(config.form.logic, getPremiumContactFormContext(config.form));
-          applyNewIncomeTransitContact(container);
+          if (container.id === 'cashier-income-type-form-transit-other') {
+            applyTransitOtherIncomeClient(container);
+          } else {
+            applyNewIncomeTransitContact(container);
+          }
         } catch (error) {
           message.error(error && error.message ? error.message : String(error));
         }
@@ -5247,7 +5549,7 @@
       retryTimers.forEach(timer => clearTimeout(timer));
       clearTimeout(modalTimer);
     };
-  }, [newIncomeTypeDynamicForm, newIncomeTransitContact, collectionChargeVisible, movementEditVisible, activeTab]);
+  }, [newIncomeTypeDynamicForm, newIncomeTransitContact, collectionChargeVisible, movementEditVisible, transitOtherIncomeVisible, activeTab]);
 
   React.useEffect(() => {
     const config = reversalFormConfig;
@@ -9952,6 +10254,14 @@
           {t('Transfer between accounts')}
         </Button>
         <Button
+          type="primary"
+          icon={<NewIncomeIcon />}
+          disabled={transitSelectedAccountCount !== 1}
+          onClick={openTransitOtherIncomeModal}
+        >
+          {t('Apply miscellaneous income')}
+        </Button>
+        <Button
           className="cashier-supervisor-outline-button"
           icon={<ReloadOutlined />}
           loading={transitLineLoading}
@@ -10517,10 +10827,12 @@
         <Button
           type="primary"
           icon={<ExecuteMovementIcon />}
-          loading={editMode ? movementEditLoading : false}
-          onClick={collectionMode ? handleCollectionNext : (editMode ? handleMovementEditSave : handleNewIncomeExecute)}
+          loading={transitOtherIncomeVisible ? transitOtherIncomeLoading : (editMode ? movementEditLoading : false)}
+          onClick={transitOtherIncomeVisible
+            ? () => submitTransitOtherIncome(newIncomeForm.getFieldsValue())
+            : (collectionMode ? handleCollectionNext : (editMode ? handleMovementEditSave : handleNewIncomeExecute))}
         >
-          {t(collectionMode ? 'Next' : (editMode ? 'Save' : 'Execute'))}
+          {t(transitOtherIncomeVisible ? 'Execute' : (collectionMode ? 'Next' : (editMode ? 'Save' : 'Execute')))}
         </Button>
         {!collectionMode && (
           <Button
@@ -10536,7 +10848,7 @@
       <div className="cashier-supervisor-new-income-columns">
         <div className="cashier-supervisor-new-income-form">
         <div className="cashier-supervisor-section-title">{t('Payment method(s)')}</div>
-        {transitCollectionMode ? (
+        {transitCollectionMode || transitOtherIncomeVisible ? (
           <div className="cashier-supervisor-payment-entry">
             <div className="cashier-supervisor-payment-method-row">
               <Select
@@ -10594,12 +10906,14 @@
               showSearch
               optionFilterProp="label"
               filterOption={(input, option) => getTrimmedString(option && option.label).toLowerCase().indexOf(getTrimmedString(input).toLowerCase()) >= 0}
-              options={collectionChargeVisible
+              options={transitOtherIncomeVisible
+                ? getTransitIncomeTypeOptions()
+                : (collectionChargeVisible
                 ? incomeTypeOptions.filter(item => isVisibleNewIncomeType(item))
                 : incomeTypeOptions.filter(item =>
                   getTrimmedString(item && item.internalType).toUpperCase() !== 'PREMIUM'
                   && isVisibleNewIncomeType(item, true)
-                )}
+                ))}
               disabled={collectionChargeVisible || editMode}
               onChange={updateNewIncomeType}
             />
@@ -10636,7 +10950,9 @@
                   <Button
                     icon={<InstallmentsIcon />}
                     aria-label={t('Search accounts')}
-                    onClick={() => openNewIncomeAccountSearch('newIncomeDestination')}
+                      onClick={() => openNewIncomeAccountSearch(transitOtherIncomeVisible
+                        ? 'transitOtherIncomeDestination'
+                        : 'newIncomeDestination')}
                     style={{ width: 40 }}
                   />
                 </Input.Group>
@@ -10663,7 +10979,7 @@
             <Select
               style={{ width: '100%' }}
               options={currencyOptions}
-              disabled={Boolean(editMode)}
+              disabled={Boolean(editMode || transitOtherIncomeVisible)}
               onChange={value => {
                 const selectedIncomeType = getIncomeTypeOption(newIncomeTypeCode);
                 const internalType = getTrimmedString(selectedIncomeType && selectedIncomeType.internalType).toUpperCase();
@@ -11452,6 +11768,40 @@
               <Input />
             </Form.Item>
           </Form>
+        </Modal>
+
+        <Modal
+          title={t('Apply miscellaneous income')}
+          className="cashier-supervisor-collection-payment-modal"
+          open={transitOtherIncomeVisible}
+          onCancel={closeTransitOtherIncomeModal}
+          footer={null}
+          destroyOnClose={false}
+          width={980}
+        >
+          <div className="cashier-transit-lines-note">
+            <div>
+              <strong>{t('Source account')}:</strong>{' '}
+              {getTrimmedString(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.accNo) || '-'}{' · '}
+              {getTrimmedString(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.name) || '-'}
+            </div>
+            <div>
+              <strong>{t('Currency')}:</strong>{' '}
+              {getTrimmedString(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.currency) || '-'}{' · '}
+              <strong>{t('Selected lines')}:</strong>{' '}
+              {getSelectedTransitLineEntries(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.id).length}{' · '}
+              <strong>{t('Net amount')}:</strong>{' '}
+              {formatMoney(getSelectedTransitLinesTotal(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.id))}
+            </div>
+            <div style={{ marginTop: 6 }}>
+              {getSelectedTransitLineEntries(transitOtherIncomeSourceAccount && transitOtherIncomeSourceAccount.id).map(line => (
+                <span key={line.movId} style={{ marginRight: 14 }}>
+                  #{line.movId}: {formatMoney(line.available)}
+                </span>
+              ))}
+            </div>
+          </div>
+          {renderNewIncomeContent(false, false, 'transit-other')}
         </Modal>
 
         <Modal
