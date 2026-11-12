@@ -15,8 +15,8 @@ from tarifas t WITH (NOLOCK)
 inner join tarifasfor tf WITH (NOLOCK) on tf.ctarifa = t.ctarifa
 INNER JOIN macoberturas mc on mc.cramo = t.cramo and mc.ccobertura = t.ccober
 INNER JOIN maplancob pl ON pl.cramo = t.cramo and pl.cplan = t.cplan and pl.ccobertura = t.ccober
-where t.cramo = 6
-and t.cplan = 'GLA' 
+where t.cramo = 96
+--and t.cplan = 'GLA' 
 and t.cendoso = 36
 --and t.ccober = 25
 --and tf.formula<> '{Qanos6}=1'
@@ -26,7 +26,7 @@ GO
 
 --SELECT * FROM macoberturas where cramo = 6
 
-declare @ramoXY int = 6
+declare @ramoXY int = 96
 declare @plan varchar(15) = ''--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
@@ -63,7 +63,7 @@ order by cpregunta
 --select cramo, cplan, cpregunta, xpregunta, ctipo, rtrim(xsinonimo) xsinonimo from ccerti_preguntas where cramo = 6 order by cpregunta
 
 --SELECT ccodigo, xdescripcion_l FROM macodigos where xsinonimo = 'PORCENTAJE_PAGO'
---select * from tarifasvar where variable = 'TASAEG'
+--select * from tarifasvar where variable = 'DEDUCIBLEMONTO'
 
 return;
 

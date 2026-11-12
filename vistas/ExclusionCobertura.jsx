@@ -4,6 +4,7 @@
  * La informacion especial del endoso viaja en jAdditional del Change (endorsementType EXCLUSIONCOBERTURA).
  * MSN-000151 (AXX-7657): la pantalla se bloquea por producto con ExclusionCobertura en Main.disabledChanges; ChangeRemoveCoverage
  *   solo deshabilita la opcion nativa del menu de endosos.
+ * MSN-000184: las cuotas del endoso salen de cmdEndorsementPayPlanByPolicy (periodicidad y calendario de la poliza).
  */
 () => {
   const Tabs = A.Tabs;
@@ -583,55 +584,28 @@
 
   // Distribuye el total anual de facturación (prima e impuesto) entre las
   // cuotas vigentes, igual que el endoso de cambio de suma por cobertura.
-  const buildNativePayPlan = function (currentPlan, difference, effectiveDate) {
-    const rows = Array.isArray(currentPlan) ? currentPlan.map(function (item) { return Object.assign({}, item); }) : [];
-    let remainingCents = Math.round(money(difference) * 100);
-    if (!remainingCents) return rows;
-
-    let candidates = rows.map(function (row, index) {
-      const amount = Math.round(Number(row.minimum !== undefined ? row.minimum : row.expected || 0) * 100);
-      const paid = Math.round(Number(row.payed !== undefined ? row.payed : row.paid || 0) * 100);
-      return { row: row, index: index, amount: amount, paid: paid, weight: Math.max(amount, 1) };
-    }).filter(function (item) {
-      return !item.row.cancellationDate && item.amount > item.paid;
+  // MSN-000184: lo calcula el comando con la configuracion de la poliza; el saldo sin cuotas
+  // pendientes sigue el calendario de la poliza.
+  const distributePolicyPayPlan = async function (currentPlan, difference, effectiveDate) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdEndorsementPayPlanByPolicy',
+      context: JSON.stringify({
+        mode: 'DISTRIBUTE',
+        policyId: Number(policyId),
+        effectiveDate: effectiveDate,
+        difference: Number(difference || 0),
+        payPlan: Array.isArray(currentPlan) ? currentPlan : []
+      })
     });
-
-    while (candidates.length && remainingCents) {
-      const initialRemaining = remainingCents;
-      const totalWeight = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
-      let applied = 0;
-      const nextCandidates = [];
-      candidates.forEach(function (item, index) {
-        const portion = index === candidates.length - 1
-          ? initialRemaining - applied
-          : Math.round(initialRemaining * item.weight / totalWeight);
-        const nextAmount = item.amount + portion;
-        const limitedAmount = initialRemaining < 0 ? Math.max(item.paid, nextAmount) : nextAmount;
-        const actualPortion = limitedAmount - item.amount;
-        item.amount = limitedAmount;
-        item.row.minimum = money(limitedAmount / 100);
-        item.row.expected = money(limitedAmount / 100);
-        applied += actualPortion;
-        if (initialRemaining >= 0 || item.amount > item.paid) nextCandidates.push(item);
-      });
-      remainingCents -= applied;
-      if (!applied) break;
-      candidates = nextCandidates;
+    let data = response && response.outData;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (parseError) { data = null; }
     }
-
-    if (!remainingCents) return rows;
-    const last = rows[rows.length - 1] || {};
-    const lastNumber = rows.reduce(function (max, item) { return Math.max(max, Number(item && item.numberInYear || 0)); }, 0);
-    const contractYear = rows.reduce(function (max, item) { return Math.max(max, Number(item && item.contractYear || 0)); }, 0) || 1;
-    rows.push(Object.assign({}, last, {
-      id: 0, lifePolicyId: Number(policyId), concept: 'Prima',
-      expected: money(remainingCents / 100), minimum: money(remainingCents / 100),
-      payed: 0, payedDate: null, transferId: null, dueDate: effectiveDate, coveredUntil: effectiveDate,
-      allocationDate: null, contractYear: contractYear, final: false, finalDate: null,
-      numberInYear: lastNumber + 1, allocationId: null, cancellationDate: null,
-      compensationDate: null, created: null, normalDueDate: effectiveDate, changeId: null, PayPlanDetail: null
-    }));
-    return rows;
+    if (Array.isArray(data) && data.length === 1) data = data[0];
+    if (!response || response.ok === false || !data || data.ok === false || !Array.isArray(data.plan)) {
+      throw new Error((data && data.msg) || (response && response.msg) || t('No se pudo calcular el plan de pagos de la poliza'));
+    }
+    return data.plan;
   };
 
   // ------------------------------------------------------------- cotizacion
@@ -902,7 +876,7 @@
       // Las cuotas representan el importe actual más lo que realmente se
       // factura por el movimiento, no el total anual bruto del Bill.
       const finalBillTotal = money(currentPlanTotal + netProratedPremiumMovement + proratedTax);
-      const calculatedPayPlan = buildNativePayPlan(
+      const calculatedPayPlan = await distributePolicyPayPlan(
         payPlan,
         money(finalBillTotal - currentPlanTotal),
         effectiveDate.format('YYYY-MM-DD') + 'T12:00:00'
@@ -2028,11 +2002,24 @@
       const currentContributions = [];
       finalRows.forEach(function (row) {
         if (!inLine(row.lineId)) return;
+        // Se marca aunque no tenga movimiento para que su cesión vigente no
+        // vuelva a restarse abajo. La resta de cesiones queda reservada para
+        // coberturas que salieron del estado final, como la cobertura excluida.
+        seen[String(row.lineId) + '|' + up(row.coverageCode)] = true;
+        // El movimiento sintético debe mostrar solamente la diferencia del
+        // endoso. Las filas que permanecen iguales en el estado final (por
+        // ejemplo la cobertura principal 303 al excluir la 313) no deben
+        // agregarse como una nueva suma; de lo contrario el resultado queda
+        // positivo aunque la exclusión sea negativa. Las dependientes sí
+        // entran cuando su suma o prima fueron recalculadas.
+        const hasMovement = Math.abs(num(row.premiumMovement)) > 0.005
+          || Math.abs(num(row.sumInsuredMovement)) > 0.005
+          || Math.abs(num(row.sourceSumInsuredMovement)) > 0.005;
+        if (!hasMovement) return;
         // Una cobertura seleccionada para excluir no debe generar movimiento
         // positivo aunque todavía aparezca en una respuesta intermedia del
         // motor. Su cesión vigente se resta abajo como salida de cobertura.
         if (excludedCodes.indexOf(up(row.coverageCode)) >= 0) return;
-        seen[String(row.lineId) + '|' + up(row.coverageCode)] = true;
         if (row.counts !== false) total.sum += num(row[sumField]);
         const placement = line.retention ? num(row.proportionCed) : num(row.proportionRe);
         const premiumContribution = num(row.prorated) * placement;
@@ -2105,13 +2092,39 @@
         view: 'ExclusionCobertura', marker: 'synthetic-movement-debug', timestamp: new Date().toISOString(),
         request: {
           policyId: policyId, effectiveDate: effectiveDate && effectiveDate.format ? effectiveDate.format('YYYY-MM-DD') : effectiveDate,
+          lob: policy && policy.lob, productCode: policy && policy.productCode,
           selected: selected, surcharge: num(surcharge), discount: num(discount), adjustment: num(quote.adjustment), payload: quote.payload
         },
         response: {
           raw: quote.raw, billing: quote.billing, prorate: quote.prorate, rows: quote.rows,
           dependents: quote.dependents, changedRows: quote.changedRows,
           adjustmentByCoverage: quote.adjustmentByCoverage, adjustmentProratedByCoverage: quote.adjustmentProratedByCoverage,
-          synthetic: syntheticDebug, movementRows: rows, simRows: sim.rows, simFinalRows: sim.finalRows,
+          configuration: {
+            dependencyRows: depCfg,
+            coverageRows: (policy && policy.Coverages ? policy.Coverages : []).map(function (coverage) {
+              return { id: coverage.id, code: coverage.code, limit: coverage.limit || coverage.sumInsured,
+                premium: coverage.premium || coverage.annualPremium, counts: countsFor(coverage.code) };
+            })
+          },
+          synthetic: syntheticDebug, movementRows: rows,
+          simRows: (sim.rows || []).map(function (row) {
+            return { contractId: row.contractId, lineId: row.lineId, coverageCode: row.coverageCode,
+              counts: row.counts, sumInsuredMovement: row.sumInsuredMovement, sourceSumInsuredMovement: row.sourceSumInsuredMovement,
+              sumInsuredCedant: row.sumInsuredCedant, sumInsuredRe: row.sumInsuredRe,
+              premiumMovement: row.premiumMovement, prorated: row.prorated,
+              finalSum: row.finalSum, finalPremium: row.finalPremium };
+          }),
+          simFinalRows: sim.finalRows,
+          sourceCessionDiagnostics: (baseCessions || []).map(function (cession) {
+            const code = cessionCoverageCode(cession);
+            return { id: cession.id, contractId: cession.contractId, lineId: cession.lineId,
+              coverageId: cession.coverageId, rawCoverageCode: cession.coverageCode, rawCode: cession.code,
+              resolvedCoverageCode: code, counts: countsFor(code),
+              sumInsured: cession.sumInsured, sumInsuredCedant: cession.sumInsuredCedant,
+              sumInsuredRe: cession.sumInsuredRe, premium: cession.premium,
+              premiumCedant: cession.premiumCedant, premiumRe: cession.premiumRe,
+              proportionCed: cession.proportionCed, proportionRe: cession.proportionRe };
+          }),
           contractRows: contractRows, sourceCessions: baseCessions, sourceParticipants: baseParts
         }
       }, null, 2));

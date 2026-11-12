@@ -26,6 +26,7 @@ let insured;
 let resultado = {};
 let oaUserData;
 let limites;
+let cotizacionRamoTecnico = [];
 const objectDefinitionCode = 'DT_RAMO_TECNICO';
 const hoy = new Date();
 const hoyPanama = toPanamaDate(hoy);
@@ -63,6 +64,7 @@ setAcreedor();
 setCurrency(policy.currency);
 // MSN-000151: las correcciones de origen de datos aplican sólo a Ramos Técnicos (ramo 96).
 const esRamoTecnico = String(policy.lob ?? '').trim() == '96';
+if (esRamoTecnico) cotizacionRamoTecnico = calcularTarifasRamoTecnico();
 
 const dateIni = toPanamaDate(policy.start);
 const diaIni = dateIni.getUTCDate();
@@ -169,10 +171,12 @@ resultado.Coberturas = policy.Coverages
   .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "es", { sensitivity: "base" }))
   .map(({ code, name, limit, premium, deductible }) => {
     const findCoverage = tarifaEntrada.find(x => x.coverageCode == code);
+    const resultadoTarifa = cotizacionRamoTecnico.find(x => vEqual(x.code) == vEqual(code));
     const cov = {
       Codigo: code,
       Cobertura: name,
       Limite: n(limit),
+      LimiteTexto: resultadoTarifa?.description ?? "",
       Prima: n(premium),
       Moneda: policy.currency,
       DeductibleCov: montoODefault(deductible),
@@ -361,6 +365,22 @@ function setLimites() {
   limites = mapearTablaConfig(GetFullTable.outData ?? []);
   limites = limites.filter(x => vEqual(x.Ramo) == vEqual(policy.lob));
   
+}
+
+function calcularTarifasRamoTecnico() {
+  doCmd({
+    cmd: "ExeChain",
+    data: {
+      chain: "cmdCalculatePremiumTecnicos",
+      context: JSON.stringify({
+        poliza: policy,
+        action: "QUOTE",
+        extra: policy.jChangeDto
+      })
+    }
+  });
+
+  return Array.isArray(ExeChain.outData) ? ExeChain.outData : [];
 }
 
 function mapearTablaConfig(data) {

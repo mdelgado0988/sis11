@@ -15,6 +15,7 @@
  *   solo deshabilita la opcion nativa del menu de endosos.
  * MSN-000124 (AXX-7003): fechas de las coberturas con las funciones actuales del formulario 574 (las mismas de la
  *   cadena 755, que ahora lee jAdditional.cobtar en la inclusion) y hiddenCobtar con las fechas del endoso registrado.
+ * MSN-000184: las cuotas del endoso salen de cmdEndorsementPayPlanByPolicy (periodicidad y calendario de la poliza).
  */
 () => {
   const Tabs = A.Tabs;
@@ -620,55 +621,28 @@
   // Distribuye el total anual de facturación (prima e impuesto) entre las
   // cuotas vigentes. Es el mismo criterio usado en cambio de suma para que
   // el plan de pagos y el Bill del endoso siempre cuadren.
-  const buildNativePayPlan = function (currentPlan, difference, effectiveDate) {
-    const rows = Array.isArray(currentPlan) ? currentPlan.map(function (item) { return Object.assign({}, item); }) : [];
-    let remainingCents = Math.round(money(difference) * 100);
-    if (!remainingCents) return rows;
-
-    let candidates = rows.map(function (row, index) {
-      const amount = Math.round(Number(row.minimum !== undefined ? row.minimum : row.expected || 0) * 100);
-      const paid = Math.round(Number(row.payed !== undefined ? row.payed : row.paid || 0) * 100);
-      return { row: row, index: index, amount: amount, paid: paid, weight: Math.max(amount, 1) };
-    }).filter(function (item) {
-      return !item.row.cancellationDate && item.amount > item.paid;
+  // MSN-000184: lo calcula el comando con la configuracion de la poliza; el saldo sin cuotas
+  // pendientes sigue el calendario de la poliza.
+  const distributePolicyPayPlan = async function (currentPlan, difference, effectiveDate) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdEndorsementPayPlanByPolicy',
+      context: JSON.stringify({
+        mode: 'DISTRIBUTE',
+        policyId: Number(policyId),
+        effectiveDate: effectiveDate,
+        difference: Number(difference || 0),
+        payPlan: Array.isArray(currentPlan) ? currentPlan : []
+      })
     });
-
-    while (candidates.length && remainingCents) {
-      const initialRemaining = remainingCents;
-      const totalWeight = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
-      let applied = 0;
-      const nextCandidates = [];
-      candidates.forEach(function (item, index) {
-        const portion = index === candidates.length - 1
-          ? initialRemaining - applied
-          : Math.round(initialRemaining * item.weight / totalWeight);
-        const nextAmount = item.amount + portion;
-        const limitedAmount = initialRemaining < 0 ? Math.max(item.paid, nextAmount) : nextAmount;
-        const actualPortion = limitedAmount - item.amount;
-        item.amount = limitedAmount;
-        item.row.minimum = money(limitedAmount / 100);
-        item.row.expected = money(limitedAmount / 100);
-        applied += actualPortion;
-        if (initialRemaining >= 0 || item.amount > item.paid) nextCandidates.push(item);
-      });
-      remainingCents -= applied;
-      if (!applied) break;
-      candidates = nextCandidates;
+    let data = response && response.outData;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (parseError) { data = null; }
     }
-
-    if (!remainingCents) return rows;
-    const last = rows[rows.length - 1] || {};
-    const lastNumber = rows.reduce(function (max, item) { return Math.max(max, Number(item && item.numberInYear || 0)); }, 0);
-    const contractYear = rows.reduce(function (max, item) { return Math.max(max, Number(item && item.contractYear || 0)); }, 0) || 1;
-    rows.push(Object.assign({}, last, {
-      id: 0, lifePolicyId: Number(policyId), concept: 'Prima',
-      expected: money(remainingCents / 100), minimum: money(remainingCents / 100),
-      payed: 0, payedDate: null, transferId: null, dueDate: effectiveDate, coveredUntil: effectiveDate,
-      allocationDate: null, contractYear: contractYear, final: false, finalDate: null,
-      numberInYear: lastNumber + 1, allocationId: null, cancellationDate: null,
-      compensationDate: null, created: null, normalDueDate: effectiveDate, changeId: null, PayPlanDetail: null
-    }));
-    return rows;
+    if (Array.isArray(data) && data.length === 1) data = data[0];
+    if (!response || response.ok === false || !data || data.ok === false || !Array.isArray(data.plan)) {
+      throw new Error((data && data.msg) || (response && response.msg) || t('No se pudo calcular el plan de pagos de la poliza'));
+    }
+    return data.plan;
   };
 
   // ------------------------------------------------------------- cotizacion
@@ -973,7 +947,7 @@
       // debe usarse el total anterior más el movimiento neto recalculado, de
       // lo contrario queda incluido un impuesto que el descuento eliminó.
       const finalBillTotal = money(before.total + netPremiumMovement + taxMovement);
-      const calculatedPayPlan = buildNativePayPlan(
+      const calculatedPayPlan = await distributePolicyPayPlan(
         payPlan,
         money(finalBillTotal - currentPlanTotal),
         effectiveDate.format('YYYY-MM-DD') + 'T12:00:00'
