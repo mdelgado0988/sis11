@@ -7,8 +7,18 @@
   *@Autor: Michael Delgado
   *@Email: michael.delgado@axxis-systems.com
   *@Created: 20/04/2026
+  *@Modified: 11/11/2026 aiden_mission_configurator (MSN-000189 / AXX-8957): client and economic group
+  *           use the contractual accumulation from chain 830 cmdCumuloFianzasPorContacto, matching
+  *           view 43 and preserving consortium participation.
+  *           - Policy: full policy contractual amount.
+  *           - Client: contractual amount of its rows, including the applicable participation when
+  *             the contact is a consortium parent or member.
+  *           - Economic Group: full contractual accumulation of the parent consortium when the client
+  *             is a consortium member; otherwise it uses the client itself.
+  *           The current policy or offer is included with its contractual amount. Facultative portions,
+  *           100% retained or uninsured sureties, and sureties with status 0 are excluded.
   *@Input: {policyId, type}
-  *@Output: [{ accumulationType, limit, accumulation }]
+  *@Output: [{ accumulationType, limit, accumulation, excede }]
 */
 
 const policyId = context.policyId;
@@ -18,8 +28,7 @@ let policy;
 let accumulationByPolicy;
 let accumulationByClient;
 let accumulationByEconomicGroup;
-let currentPolicyIsValidSurety;
-const ramos = ["81", "82", "83", "84"]
+const filasPorContactos = {};
 let resultado = [];
 
 try {
@@ -65,109 +74,50 @@ try {
 }
 
 function setAccumulationByPolicy() {
-  accumulationByPolicy = getCurrentPolicySuretyAmount();
+  const filaPoliza = getFilasCumulo([Number(policy.holderId)])
+    .find(f => Number(f.polizaId) === Number(policyId));
+  accumulationByPolicy = filaPoliza ? d(filaPoliza.sumaContractualPoliza) : 0;
 }
 
 function setAccumulationByClient() {
-
-  const clientId = policy.holderId;
-  const filterRamos = ramos.map(x => `'${x}'`).join(',');
-
-  /*const query = `SELECT SUM(P.insuredSum) suma
-  FROM InsuredObject t
-  INNER JOIN LifePolicy p ON p.id = t.lifePolicyId
-  CROSS APPLY OPENJSON(t.jValues) WITH (
-      name NVARCHAR(100),
-      userData NVARCHAR(MAX) AS JSON
-  ) j
-  CROSS APPLY OPENJSON(j.userData) ud
-  WHERE t.objectDefinitionId = ${objectDefinitionId} AND j.name = 'rut'
-    AND ud.value = '${clientId}'
-    AND CAST(GETDATE() AS date) BETWEEN CAST(p.[start] AS DATE) AND CAST(p.[end] AS DATE)
-    AND p.activeDate IS NOT NULL AND p.active = 1;`*/
-
-  const query = `SELECT SUM(P.insuredSum) suma
-  FROM LifePolicy p
-  WHERE p.holderId = ${clientId} AND p.lob in (${filterRamos})
-    AND CAST(GETDATE() AS date) BETWEEN CAST(p.[start] AS DATE) AND CAST(p.[end] AS DATE)
-    AND p.activeDate IS NOT NULL AND p.active = 1
-    AND ${getValidSuretySql('p')};`
-  
-  doCmd({cmd: "DoQuery", data: { sql: query }});
-    
-  accumulationByClient = DoQuery.outData?.[0]?.suma ?? 0;
-  accumulationByClient += getCurrentPolicySuretyAmount(); //sumamos la oferta vigente para que forme parte del cúmulo
+  accumulationByClient = sumarContractual(getFilasCumulo([Number(policy.holderId)]));
 }
 
 function setAccumulationByEconomicGroup() {
-
   const clientId = policy.holderId;
-  const filterRamos = ramos.map(x => `'${x}'`).join(',');
-  doCmd({cmd: "LoadEntity", data: { entity: "Contact", fields: "jCustomForms", filter: `id = ${clientId}` }});
-  const jCustomForms = LoadEntity.outData?.jCustomForms;
-  const grupoEconomico = obtenerGrupoEconomico(jCustomForms);
+  const consorciosPadre = getConsorciosPadre(clientId);
+  const contactosCumulo = consorciosPadre.length ? consorciosPadre : [Number(clientId)];
 
-  if(!grupoEconomico){
-    setDefaultaccumulationByEconomicGroup();
-    return;
-  }
-
-  // La pertenencia al GEC se guarda en Información de Compañías.grupoEconomico.
-  // Se consulta el campo dinámico directamente para no depender del campo auxiliar grupoEconomicoTag.
-  const grupoEscapado = grupoEconomico.replace(/'/g, "''");
-  const queryContactos = `SELECT DISTINCT c.id
-  FROM Contact c
-  CROSS APPLY OPENJSON(c.jCustomForms) tabs
-  CROSS APPLY OPENJSON(tabs.value) fields
-  CROSS APPLY OPENJSON(JSON_QUERY(fields.value, '$.userData')) userData
-  WHERE tabs.[key] = N'Información de Compañías'
-    AND JSON_VALUE(fields.value, '$.name') = 'grupoEconomico'
-    AND LTRIM(RTRIM(CONVERT(NVARCHAR(4000), userData.value))) = N'${grupoEscapado}';`;
-  doCmd({cmd: "DoQuery", data: { sql: queryContactos }});
-
-  const integrantes = (DoQuery.outData ?? [])
-    .map(x => Number(x.id))
-    .filter(x => Number.isInteger(x) && x > 0);
-
-  if(!integrantes.includes(Number(clientId))) integrantes.push(Number(clientId));
-  if(integrantes.length == 0){
-    setDefaultaccumulationByEconomicGroup();
-    return;
-  }
-
-  const query = `SELECT SUM(P.insuredSum) suma
-  FROM LifePolicy p
-  WHERE p.holderId in  (${integrantes.join(',')}) AND p.lob in (${filterRamos})
-    AND CAST(GETDATE() AS date) BETWEEN CAST(p.[start] AS DATE) AND CAST(p.[end] AS DATE)
-    AND p.activeDate IS NOT NULL AND p.active = 1
-    AND ${getValidSuretySql('p')};`
-  
-  doCmd({cmd: "DoQuery", data: { sql: query }});
-
-  accumulationByEconomicGroup = DoQuery.outData?.[0]?.suma ?? 0;
-  accumulationByEconomicGroup += getCurrentPolicySuretyAmount(); //sumamos la oferta vigente para que forme parte del cúmulo
-  
+  // Use the same chain 830 calculation as the client.
+  // When the holder is a consortium member, query the parent to obtain the
+  // full consortium accumulation instead of the holder's participation only.
+  accumulationByEconomicGroup = sumarContractual(
+    getFilasCumulo(contactosCumulo)
+  );
 }
 
-function obtenerGrupoEconomico(jCustomForms) {
-  try {
-    const customForms = typeof jCustomForms === "string"
-      ? JSON.parse(jCustomForms || "{}")
-      : (jCustomForms || {});
-    const formulario = customForms["Información de Compañías"];
-    const campos = typeof formulario === "string"
-      ? JSON.parse(formulario || "[]")
-      : (formulario || []);
-    const campo = campos.find(x => x && x.name == "grupoEconomico");
-    return campo?.userData?.[0] ? String(campo.userData[0]).trim() : "";
-  } catch (error) {
-    return "";
-  }
-}
+function getConsorciosPadre(clientId) {
+  const id = Number(clientId);
+  if (!Number.isInteger(id) || id <= 0) return [];
 
-function setDefaultaccumulationByEconomicGroup() {
-  //if(!accumulationByClient) setAccumulationByClient();
-  accumulationByEconomicGroup = 0//accumulationByClient;
+  doCmd({cmd: "DoQuery", data: { sql: `
+SELECT DISTINCT c.id AS parentId
+FROM Contact c
+CROSS APPLY OPENJSON(c.jCustomForms) tabs
+CROSS APPLY OPENJSON(tabs.[value])
+  WITH (fname varchar(100) '$.name', userData nvarchar(max) '$.userData[0]') fld
+CROSS APPLY OPENJSON(fld.userData)
+  WITH (CodigoSis int '$.CodigoSis') m
+WHERE tabs.[key] = 'Consorcios'
+  AND fld.fname = 'hiddenValida'
+  AND ISJSON(fld.userData) = 1
+  AND m.CodigoSis = ${id};` }});
+  if (!DoQuery.ok)
+    throw new Error("No se pudo consultar el consorcio del cliente: " + DoQuery.msg);
+
+  return [...new Set((DoQuery.outData ?? [])
+    .map(x => Number(x.parentId))
+    .filter(x => Number.isInteger(x) && x > 0))];
 }
 
 function getValidSuretySql(policyAlias) {
@@ -181,16 +131,43 @@ function getValidSuretySql(policyAlias) {
   )`;
 }
 
-function getCurrentPolicySuretyAmount() {
-  if (currentPolicyIsValidSurety === undefined) {
-    const query = `SELECT CASE WHEN ${getValidSuretySql('p')} THEN 1 ELSE 0 END vigente
-    FROM LifePolicy p
-    WHERE p.id = ${policyId};`;
-    doCmd({cmd: "DoQuery", data: { sql: query }});
-    currentPolicyIsValidSurety = Number(DoQuery.outData?.[0]?.vigente ?? 1) === 1;
-  }
+// Filas de la cadena 830 (la de la vista 43) para los contactos, con la póliza u oferta en curso.
+function getFilasCumulo(contactIds) {
+  const clave = contactIds.join(",");
+  if (filasPorContactos[clave]) return filasPorContactos[clave];
 
-  return currentPolicyIsValidSurety ? d(policy.insuredSum) : 0;
+  doCmd({cmd: "ExeChain", data: { chain: "cmdCumuloFianzasPorContacto",
+    context: JSON.stringify({ row: { contactIds: contactIds, incluirPolizaId: Number(policyId) } }) }});
+  const salida = JSON.parse(JSON.stringify(ExeChain.outData ?? null));
+  if (!ExeChain.ok || !salida || salida.ok !== true)
+    throw new Error("No se pudo calcular el cúmulo de fianzas: " + (salida?.msg ?? ExeChain.msg));
+
+  // Una participación (póliza, contacto) cuenta una sola vez: con el consorcio y su integrante
+  // en la lista, la parte del integrante viene desde los dos.
+  const vistas = {};
+  const filas = (salida.data ?? []).filter(f => {
+    const k = `${f.polizaId}|${f.contactoFilaId}`;
+    if (vistas[k]) return false;
+    vistas[k] = true;
+    return true;
+  });
+  const noVigentes = getFianzasNoVigentes(filas.map(f => Number(f.polizaId)));
+  filasPorContactos[clave] = filas.filter(f => !noVigentes.includes(Number(f.polizaId)));
+  return filasPorContactos[clave];
+}
+
+// Fianzas con estado de fianza 0: no forman cúmulo (la vista 43 las descarta igual).
+function getFianzasNoVigentes(ids) {
+  const unicos = [...new Set(ids)].filter(x => x > 0);
+  if (!unicos.length) return [];
+  doCmd({cmd: "DoQuery", data: { sql: `SELECT p.id FROM LifePolicy p WHERE p.id IN (${unicos.join(",")}) AND NOT ${getValidSuretySql('p')};` }});
+  if (!DoQuery.ok)
+    throw new Error("No se pudo leer el estado de las fianzas: " + DoQuery.msg);
+  return JSON.parse(JSON.stringify(DoQuery.outData ?? [])).map(x => Number(x.id));
+}
+
+function sumarContractual(filas) {
+  return filas.reduce((a, f) => a + d(f.sumaContractual), 0);
 }
 
 function setPolicy() {

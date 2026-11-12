@@ -45,6 +45,9 @@
   const [reinsuranceRows, setReinsuranceRows] = useState([]);
   const [reinsuranceLoaded, setReinsuranceLoaded] = useState(false);
   const [reinsuranceLoading, setReinsuranceLoading] = useState(false);
+  const [coinsuranceRows, setCoinsuranceRows] = useState([]);
+  const [coinsuranceLoaded, setCoinsuranceLoaded] = useState(false);
+  const [coinsuranceLoading, setCoinsuranceLoading] = useState(false);
   const policyHref = policy && policy.id ? `/#/lifePolicy/${policy.id}` : '#/home';
 
   useEffect(() => {
@@ -286,10 +289,37 @@
     }
   }
 
+  async function loadCoinsurance(force) {
+    if (!policy || !policy.id || coinsuranceLoading) return;
+    if (coinsuranceLoaded && !force) return;
+
+    setCoinsuranceLoading(true);
+    try {
+      const response = await exe('ExeChain', {
+        chain: 'cmdCoaseguroMovimientos',
+        context: JSON.stringify({ policyId: policy.id, poliza: policy.code || '' })
+      });
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('No fue posible cargar el coaseguro.'));
+      }
+      const rows = response.outData && Array.isArray(response.outData.filas)
+        ? response.outData.filas
+        : [];
+      setCoinsuranceRows(rows);
+      setCoinsuranceLoaded(true);
+    } catch (error) {
+      setCoinsuranceRows([]);
+      message.error(error && error.message ? error.message : t('No fue posible cargar el coaseguro.'));
+    } finally {
+      setCoinsuranceLoading(false);
+    }
+  }
+
   function refreshPolicy() {
     if (policyId <= 0) return;
     loadPolicy(policyId);
     if (reinsuranceLoaded) loadReinsurance(true);
+    if (coinsuranceLoaded) loadCoinsurance(true);
   }
 
   function buildReceiptRows(loadedPolicy) {
@@ -1026,6 +1056,58 @@
     ];
   }
 
+  function translateCoinsuranceMovementType(value) {
+    return String(value || '').trim() === 'AJUSTE'
+      ? t('Ajuste de coaseguro')
+      : translateReinsuranceType(value);
+  }
+
+  function renderCoinsuranceText(value) {
+    const label = value || '-';
+    return <Tooltip title={label}><span className="policy-billing-ellipsis">{label}</span></Tooltip>;
+  }
+
+  function renderCoinsuranceTotals(rows) {
+    const totals = (rows || []).reduce((result, row) => {
+      result.insuredSum += Number(row && row.sumaAsegurada) || 0;
+      result.premium += Number(row && row.prima) || 0;
+      result.commission += Number(row && row.comision) || 0;
+      return result;
+    }, { insuredSum: 0, premium: 0, commission: 0 });
+
+    return (
+      <Table.Summary>
+        <Table.Summary.Row className="policy-billing-total-row">
+          <Table.Summary.Cell index={0} colSpan={8}><strong>{t('Total')}</strong></Table.Summary.Cell>
+          <Table.Summary.Cell index={8} align="right">{renderColoredMoney(totals.insuredSum)}</Table.Summary.Cell>
+          <Table.Summary.Cell index={9} />
+          <Table.Summary.Cell index={10} align="right">{renderColoredMoney(totals.premium)}</Table.Summary.Cell>
+          <Table.Summary.Cell index={11} align="right">{renderColoredMoney(totals.commission)}</Table.Summary.Cell>
+          <Table.Summary.Cell index={12} />
+        </Table.Summary.Row>
+      </Table.Summary>
+    );
+  }
+
+  function coinsuranceColumns() {
+    const money = value => renderColoredMoney(value);
+    return [
+      { title: 'N°', dataIndex: 'n', key: 'n', width: 60, align: 'center' },
+      { title: t('Endorsement'), dataIndex: 'changeId', key: 'changeId', width: 95, align: 'center', render: value => value || '-' },
+      { title: t('Type'), dataIndex: 'tipo', key: 'tipo', width: 150, ellipsis: true, render: value => renderCoinsuranceText(translateCoinsuranceMovementType(value)) },
+      { title: t('Start date'), dataIndex: 'fDesde', key: 'fDesde', width: 105, align: 'center', render: (value, record) => isLiteralCoverageTermReinsurance(record) ? formatDateWithoutTimezone(value) : formatDate(value) },
+      { title: t('End date'), dataIndex: 'fHasta', key: 'fHasta', width: 105, align: 'center', render: (value, record) => isLiteralProceedOrderEndDateReinsurance(record) ? formatDateWithoutTimezone(value) : formatDate(value) },
+      { title: t('Coinsurer'), dataIndex: 'coasegurador', key: 'coasegurador', width: 220, ellipsis: true, render: renderCoinsuranceText },
+      { title: t('Tipo coaseguro'), dataIndex: 'tipoCoaseguro', key: 'tipoCoaseguro', width: 190, ellipsis: true, render: renderCoinsuranceText },
+      { title: t('Aseguradora líder'), dataIndex: 'aseguradoraLider', key: 'aseguradoraLider', width: 200, ellipsis: true, render: renderCoinsuranceText },
+      { title: t('Insured sum'), dataIndex: 'sumaAsegurada', key: 'sumaAsegurada', width: 135, align: 'right', render: money },
+      { title: t('% Participación'), dataIndex: 'porcentaje', key: 'porcentaje', width: 110, align: 'right', render: value => formatMoney(value) },
+      { title: t('Premium'), dataIndex: 'prima', key: 'prima', width: 125, align: 'right', render: money },
+      { title: t('Comisión'), dataIndex: 'comision', key: 'comision', width: 115, align: 'right', render: money },
+      { title: t('Póliza líder'), dataIndex: 'polizaLider', key: 'polizaLider', width: 120, align: 'center', render: value => value || '-' }
+    ];
+  }
+
   function renderColoredMoney(value) {
     const amount = Number(value || 0);
     const color = amount > 0
@@ -1245,7 +1327,7 @@
       icon="file-text"
       extra={(
         <span className="policy-billing-actions">
-          <Button type="primary" onClick={refreshPolicy} loading={loading || reinsuranceLoading}>
+          <Button type="primary" onClick={refreshPolicy} loading={loading || reinsuranceLoading || coinsuranceLoading}>
             <RefreshIcon /> {t('Actualizar')}
           </Button>
           <Button type="default" className="policy-billing-back" href={policyHref}>
@@ -1259,6 +1341,7 @@
         onChange={key => {
           setActiveMainTab(key);
           if (key === 'reinsurance') loadReinsurance(false);
+          if (key === 'coinsurance') loadCoinsurance(false);
         }}
       >
         <TabPane key="movements" tab={t('Movements')}>
@@ -1300,6 +1383,24 @@
               scroll={{ x: 2500 }}
               summary={rows => renderReinsuranceTotals(rows)}
               locale={{ emptyText: t('No reinsurance movements to display.') }}
+            />
+          )}
+        </TabPane>
+        <TabPane key="coinsurance" tab={t('Coinsurance')}>
+          {!coinsuranceLoaded && !coinsuranceLoading ? (
+            <Empty description={t('Seleccione la pestaña para cargar el coaseguro.')} />
+          ) : (
+            <Table
+              rowKey={row => [row.movKey, row.esPropia ? 'propia' : row.contactId, row.n].join('-')}
+              columns={coinsuranceColumns()}
+              dataSource={coinsuranceRows}
+              loading={coinsuranceLoading}
+              size="small"
+              className="policy-billing-table"
+              pagination={{ pageSize: 25, showSizeChanger: false }}
+              scroll={{ x: 1730 }}
+              summary={() => coinsuranceRows.length > 0 ? renderCoinsuranceTotals(coinsuranceRows) : null}
+              locale={{ emptyText: t('Sin movimientos de coaseguro para mostrar.') }}
             />
           )}
         </TabPane>

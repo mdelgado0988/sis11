@@ -11,6 +11,8 @@
  *          ChangeCoverage / GotoStep / ExeChangeCoverage; el endoso actualiza la suma y la
  *          prima de la cobertura, las cuotas y el reaseguro (cmdApplyReaChangeCoverage).
  * Se abre con ?policyId=<id>.
+ * MSN-000184: las cuotas del endoso salen de cmdEndorsementPayPlanByPolicy (periodicidad y
+ * calendario de la poliza); el impuesto del movimiento se reparte entre las cuotas nuevas.
  */
 () => {
   const Tabs = A.Tabs;
@@ -1627,87 +1629,28 @@
     return Array.isArray(response.outData) ? response.outData : [];
   }
 
-  function buildNativePayPlan(oldPayPlan, difference, effectiveDate, lifePolicyId) {
-    const rows = Array.isArray(oldPayPlan)
-      ? oldPayPlan.map(function (item) { return Object.assign({}, item); })
-      : [];
-    let remainingCents = Math.round(money(difference) * 100);
-    if (!remainingCents) return rows;
-
-    // Una cuota parcialmente pagada sigue participando. Su importe puede
-    // crecer, pero nunca puede quedar por debajo de lo ya pagado.
-    let candidates = rows.map(function (row, index) {
-      const amount = Math.round(Number(row.minimum !== undefined ? row.minimum : row.expected || 0) * 100);
-      const paid = Math.round(Number(row.payed !== undefined ? row.payed : row.paid || 0) * 100);
-      return { row: row, index: index, amount: amount, paid: paid, weight: Math.max(amount, 1) };
-    }).filter(function (item) {
-      return !item.row.cancellationDate && item.amount > item.paid;
+  // MSN-000184: el movimiento se reparte entre las cuotas pendientes y el saldo sin cuotas pendientes
+  // sigue el calendario de la poliza; lo calcula el comando con la configuracion de la poliza.
+  async function distributePolicyPayPlan(oldPayPlan, difference, effectiveDate, lifePolicyId) {
+    const response = await exe('ExeChain', {
+      chain: 'cmdEndorsementPayPlanByPolicy',
+      context: JSON.stringify({
+        mode: 'DISTRIBUTE',
+        policyId: Number(lifePolicyId),
+        effectiveDate: effectiveDate,
+        difference: Number(difference || 0),
+        payPlan: Array.isArray(oldPayPlan) ? oldPayPlan : []
+      })
     });
-
-    // Para un descuento, las cuotas que alcanzan su mínimo pagado se sacan
-    // de la distribución y el remanente se reparte entre las demás.
-    while (candidates.length && remainingCents) {
-      const initialRemaining = remainingCents;
-      const totalWeight = candidates.reduce(function (sum, item) { return sum + item.weight; }, 0);
-      let applied = 0;
-      const nextCandidates = [];
-
-      candidates.forEach(function (item, index) {
-        const portion = index === candidates.length - 1
-          ? initialRemaining - applied
-          : Math.round(initialRemaining * item.weight / totalWeight);
-        const nextAmount = item.amount + portion;
-        const limitedAmount = initialRemaining < 0 ? Math.max(item.paid, nextAmount) : nextAmount;
-        const actualPortion = limitedAmount - item.amount;
-        item.amount = limitedAmount;
-        item.row.minimum = money(limitedAmount / 100);
-        item.row.expected = money(limitedAmount / 100);
-        applied += actualPortion;
-        if (initialRemaining >= 0 || item.amount > item.paid) nextCandidates.push(item);
-      });
-
-      remainingCents -= applied;
-      if (!applied) break;
-      candidates = nextCandidates;
+    let data = response && response.outData;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (parseError) { data = null; }
     }
-
-    // Sin cuotas con saldo pendiente, o si un descuento ya agotó todos los
-    // saldos disponibles, el remanente se registra como cuota de ajuste.
-    if (!remainingCents) return rows;
-
-    const last = rows[rows.length - 1] || {};
-    const lastNumber = rows.reduce(function (max, item) {
-      return Math.max(max, Number(item && item.numberInYear || 0));
-    }, 0);
-    const contractYear = rows.reduce(function (max, item) {
-      return Math.max(max, Number(item && item.contractYear || 0));
-    }, 0) || 1;
-
-    rows.push(Object.assign({}, last, {
-      id: 0,
-      lifePolicyId: Number(lifePolicyId),
-      concept: 'Prima',
-      expected: money(remainingCents / 100),
-      minimum: money(remainingCents / 100),
-      payed: 0,
-      payedDate: null,
-      transferId: null,
-      dueDate: effectiveDate,
-      coveredUntil: effectiveDate,
-      allocationDate: null,
-      contractYear: contractYear,
-      final: false,
-      finalDate: null,
-      numberInYear: lastNumber + 1,
-      allocationId: null,
-      cancellationDate: null,
-      compensationDate: null,
-      created: null,
-      normalDueDate: effectiveDate,
-      changeId: null,
-      PayPlanDetail: null
-    }));
-    return rows;
+    if (Array.isArray(data) && data.length === 1) data = data[0];
+    if (!response || response.ok === false || !data || data.ok === false || !Array.isArray(data.plan)) {
+      throw new Error((data && data.msg) || (response && response.msg) || t('No se pudo calcular el plan de pagos de la poliza'));
+    }
+    return data.plan;
   }
 
   // Abierta desde el menu no llega ?policyId=: se busca por numero o por codigo de poliza.
@@ -2092,37 +2035,6 @@
       });
     });
     return result;
-  }
-
-  function getCoverageParticipants(group, coverageCode) {
-    const grouped = {};
-    (group.participants || []).filter(function (participant) {
-      return participantCoverageCode(group, participant) === String(coverageCode || '');
-    }).forEach(function (participant) {
-      const participantKey = String(participant.contactId || '') + '|' + String(participant.brokerId || '');
-      if (!grouped[participantKey]) {
-        grouped[participantKey] = Object.assign({}, participant, {
-          _groupKey: String(group.contractId) + '-' + String(group.lineId),
-          split: Number(participant.split || 0),
-          sumInsured: 0,
-          premium: 0,
-          commission: 0,
-          tax: 0
-        });
-      }
-      grouped[participantKey].sumInsured += numberFrom(participant, ['sumInsured']);
-      grouped[participantKey].premium += numberFrom(participant, ['premium']);
-      grouped[participantKey].commission += numberFrom(participant, ['commission']);
-      grouped[participantKey].tax += numberFrom(participant, ['tax']);
-    });
-    return Object.keys(grouped).map(function (participantKey) {
-      const participant = grouped[participantKey];
-      participant.sumInsured = money(participant.sumInsured);
-      participant.premium = money(participant.premium);
-      participant.commission = money(participant.commission);
-      participant.tax = money(participant.tax);
-      return participant;
-    });
   }
 
   function initialContractPercentages(group) {
@@ -3142,7 +3054,8 @@
       const oldPayPlanTotal = oldPayPlan.reduce(function (total, item) {
         return total + Number(item && (item.minimum !== undefined ? item.minimum : item.expected) || 0);
       }, 0);
-      const newPayPlan = buildNativePayPlan(oldPayPlan, finalTotal - oldPayPlanTotal, effective + 'T12:00:00', policyId);
+      const newPayPlan = await distributePolicyPayPlan(oldPayPlan, finalTotal - oldPayPlanTotal, effective + 'T12:00:00', policyId);
+      if (calculationVersion !== requestVersion.calculation) return;
       const oldAmountsById = {};
       oldPayPlan.forEach(function (item) {
         oldAmountsById[String(item.id)] = money(item.minimum !== undefined ? item.minimum : item.expected);
@@ -3584,7 +3497,7 @@
       const newTotal = calc && calc.billing && calc.billing.total
         ? Number(calc.billing.total.after || 0)
         : oldTotal;
-      payload.jNewPayPlan = JSON.stringify(buildNativePayPlan(
+      payload.jNewPayPlan = JSON.stringify(await distributePolicyPayPlan(
         oldPayPlan,
         newTotal - oldTotal,
         dateAtNoon(calc.effectiveDate),
@@ -3619,6 +3532,17 @@
         throw new Error(t('El endoso fue creado pero no pudo ejecutarse') + ': ' + cleanMessage(executed));
       }
       reinsuranceExecuted = true;
+
+      // MSN-000169 (restituido en MSN-000187): la ejecucion nativa vuelve a emitir el coaseguro con la
+      // suma asegurada anterior (la poliza se actualiza despues). Se deja la linea vigente del endoso con
+      // los importes confirmados en la vista. No quitar al editar la vista.
+      if (reinsuranceSnapshot.coinsurance.length) {
+        try {
+          await runReinsuranceMode(changeId, 'SYNC_COINSURANCE');
+        } catch (coinsuranceError) {
+          failures.push(t('coaseguro del endoso') + ': ' + String(coinsuranceError && coinsuranceError.message ? coinsuranceError.message : coinsuranceError));
+        }
+      }
 
       // Once the endorsement is effective, refresh the policy insured sum
       // from the final coverages generated by the quotation.
@@ -3668,13 +3592,25 @@
           }
         }
 
-        const endorsementInstallments = plannedRows.filter(function (item) {
+        const newInstallments = plannedRows.filter(function (item) {
           return !Number(item && item.id || 0);
-        }).map(function (item) {
-          // Un remanente no distribuible conserva el detalle de prima e impuesto.
+        });
+        // Un remanente no distribuible conserva el detalle de prima e impuesto; con varias cuotas nuevas
+        // el impuesto del movimiento se reparte en proporcion a su importe.
+        const movementTax = calc && calc.billing && calc.billing.tax ? money(calc.billing.tax.after - calc.billing.tax.before) : 0;
+        const movementTaxCents = Math.round(movementTax * 100);
+        const newInstallmentsCents = newInstallments.reduce(function (total, item) {
+          return total + Math.round(money(item.minimum !== undefined ? item.minimum : item.expected) * 100);
+        }, 0);
+        let taxCentsLeft = movementTaxCents;
+        const endorsementInstallments = newInstallments.map(function (item, index) {
           const installmentAmount = money(item.minimum !== undefined ? item.minimum : item.expected);
-          const movementTax = calc && calc.billing && calc.billing.tax ? money(calc.billing.tax.after - calc.billing.tax.before) : 0;
-          const detailTax = Math.abs(movementTax) <= Math.abs(installmentAmount) ? movementTax : 0;
+          const taxCents = index === newInstallments.length - 1
+            ? taxCentsLeft
+            : (newInstallmentsCents ? Math.round(movementTaxCents * Math.round(installmentAmount * 100) / newInstallmentsCents) : 0);
+          taxCentsLeft -= taxCents;
+          const installmentTax = money(taxCents / 100);
+          const detailTax = Math.abs(installmentTax) <= Math.abs(installmentAmount) ? installmentTax : 0;
           const detailConcept = 'Detalle de cuota #' + (item.numberInYear || '');
           return Object.assign({}, item, { changeId: changeId, PayPlanDetail: [
             { amount: money(installmentAmount - detailTax), concept: detailConcept, detail: 'Prima Cobertura', order: 1, paid: 0 },
@@ -3943,23 +3879,6 @@
     { title: t('Cedido'), dataIndex: 'premiumRe', align: 'right', width: 130, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } }
   ];
 
-  const colsRea = [
-    { title: t('Cobertura'), dataIndex: 'coverageCode', width: 100 },
-    { title: t('Descripcion'), dataIndex: 'cover' },
-    { title: t('Suma para el contrato'), dataIndex: 'counts', width: 160, render: function (v) { return v ? <Tag color="blue">{t('Si')}</Tag> : <Tag>{t('No')}</Tag>; } },
-    { title: t('Suma movimiento'), dataIndex: 'sumInsuredMovement', align: 'right', width: 130, render: function (v, row) { return fmt(rowSumMovement(row)); } },
-    { title: t('Movimiento'), dataIndex: 'premiumMovement', align: 'right', width: 120, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
-    { title: t('Base prorrateada'), dataIndex: 'proratedMovement', align: 'right', width: 140, render: function (v) { return <span className={signo(v)}>{conSigno(v)}</span>; } },
-    { title: t('Pct. Retencion'), dataIndex: 'proportionCed', align: 'right', width: 120, render: function (v) { return placementPercentage(Number(v || 0) * 100).toFixed(10) + '%'; } },
-    { title: t('Suma retencion'), dataIndex: 'sumInsuredCedant', align: 'right', width: 130, render: function (v) { return fmt(v); } },
-    { title: t('Prima retencion'), dataIndex: 'premiumCedant', align: 'right', width: 130, render: function (v) { return fmt(v); } },
-    { title: t('Pct. Cedido'), dataIndex: 'proportionRe', align: 'right', width: 110, render: function (v) { return placementPercentage(Number(v || 0) * 100).toFixed(10) + '%'; } },
-    { title: t('Suma cedida'), dataIndex: 'sumInsuredRe', align: 'right', width: 130, render: function (v) { return fmt(v); } },
-    { title: t('Prima cedida'), dataIndex: 'premiumRe', align: 'right', width: 130, render: function (v) { return fmt(v); } },
-    { title: t('Comision'), dataIndex: 'commission', align: 'right', width: 120, render: function (v) { return fmt(v); } },
-    { title: t('Impuesto'), dataIndex: 'tax', align: 'right', width: 120, render: function (v) { return fmt(v); } }
-  ];
-
   const contractRows = (function () {
     const grouped = {};
     ((sim && sim.contracts) || []).forEach(function (group) {
@@ -4198,12 +4117,16 @@
       // se combinaban RET, Cuota Parte, FAC u otras lineas.
       const groupTotalPremium = Number(contract.movement || fallbackGroupTotalPremium);
       const groupTotalSum = Number(contract.sum || fallbackGroupTotalSum);
+      const coinsurance = definition.key === 'COASEGURO' ? contractCoinsuranceTotals(contract) : null;
+      // El coaseguro forma parte del total emitido, pero no participa en la
+      // distribución porcentual de reaseguro. Por eso los porcentajes deben
+      // calcularse sobre la base neta del contrato, sin coaseguro.
+      const reinsurancePercentageSum = Math.max(0, groupTotalSum - Number(coinsurance ? coinsurance.sum : 0));
       const groupKey = g ? String(g.contractId) + '-' + String(g.lineId) : String(contract.contractId) + '-' + definition.key;
       // Retencion puede reutilizar el grupo de Cuota Parte; la fila visual
       // necesita una clave propia para que React no mezcle sus valores.
       const lineKey = groupKey + '-' + definition.key;
       const isCoinsurance = definition.key === 'COASEGURO';
-      const coinsurance = isCoinsurance ? contractCoinsuranceTotals(contract) : null;
       const isCededLine = !isRetention && !isCoinsurance && definition.key !== 'NO TECNICA';
       const configuredRet = g && totals.distributionPercentageCed !== undefined
         ? Number(totals.distributionPercentageCed)
@@ -4289,7 +4212,7 @@
         percentageField: isRetention ? 'proportionCed' : 'proportionRe',
         percentageConfigured: isCoinsurance || (!routesMovementToFacultative && g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined),
         percentage: isCoinsurance ? 0 : (routesMovementToFacultative
-          ? ((isRetention ? finalSumRet : finalSumCed) / (groupTotalSum || 1) * 100)
+          ? ((isRetention ? finalSumRet : finalSumCed) / (reinsurancePercentageSum || 1) * 100)
           : (g && totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'] !== undefined
           ? Number(totals[isRetention ? 'distributionPercentageCed' : 'distributionPercentageRe'])
           : (g ? contractPercentage(g, isRetention ? 'proportionCed' : 'proportionRe') : 0))),
@@ -4324,7 +4247,10 @@
     }
     rows.forEach(function (row) {
       if (!row.percentageConfigured) {
-        row.percentage = totalSum ? placementPercentage(Number(row.sum || 0) / totalSum * 100) : 0;
+        const reinsuranceSum = rows.reduce(function (sum, item) {
+          return sum + (item.isCoinsurance ? 0 : Number(item.sum || 0));
+        }, 0);
+        row.percentage = reinsuranceSum ? placementPercentage(Number(row.sum || 0) / reinsuranceSum * 100) : 0;
       }
     });
     const hasFacultativeLine = rows.some(function (row) {
@@ -4565,24 +4491,6 @@
               <b>{t('Coberturas que suman')}:</b> {g.totals.coveragesCounted}/{groupRows.length}
             </div>
           </div>
-          {mode === 'coverage' ? (
-            <Table size="small" pagination={false} rowKey="coverageCode" scroll={{ x: 1700 }}
-              dataSource={groupRows} columns={colsRea}
-              expandable={{
-                expandedRowRender: function (row) {
-                  const participants = getCoverageParticipants(g, row.coverageCode);
-                  return <div className="axx-coverage-participants">
-                    <div className="axx-coverage-participants-title">{t('Aceptantes de la cobertura')}</div>
-                    <Table size="small" pagination={false} rowKey={function (item) {
-                      return String(item.contactId || '') + '-' + String(item.brokerId || '') + '-' + String(row.coverageCode);
-                    }} dataSource={participants} columns={colsCoberturaAceptantes} />
-                  </div>;
-                },
-                rowExpandable: function (row) {
-                  return getCoverageParticipants(g, row.coverageCode).length > 0;
-                }
-              }} />
-          ) : null}
           {mode === 'reinsurers' ? (
             <>
             <div className="axx-rea-actions">
@@ -4959,9 +4867,6 @@
                                 </Tabs.TabPane>
                                 <Tabs.TabPane tab={t('Coaseguro')} key="coinsurance">
                                   {renderCoinsuranceTab()}
-                                </Tabs.TabPane>
-                                <Tabs.TabPane tab={t('Cobertura')} key="coverage">
-                                  {renderSelectedLines(contract, 'coverage')}
                                 </Tabs.TabPane>
                               </Tabs>
                             );

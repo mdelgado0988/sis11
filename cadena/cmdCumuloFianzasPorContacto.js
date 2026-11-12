@@ -10,12 +10,26 @@ Description: Consulta de Cumulo de Fianzas. Devuelve, para un contacto, sus fian
              (contractual) de la cedida en lineas facultativas, y devuelve el Total cumulo
              contractual. SOLO LECTURA.
 Category: VIEW
-Version: 1.10
+Version: 1.11
 CreateDate: 2026-09-04
 Modified: 2026-11-06 aiden_mission_configurator (MSN-000167 / AXX-7868): sumaContractual,
           sumaFacultativa, conCesion por fila; totalCumuloContractual en total y por moneda.
+Modified: 2026-11-11 aiden_mission_configurator (MSN-000189 / AXX-8957): la reutiliza la cadena 753
+          cmdGetAcummulationSuretyBond (cumulo del formulario OA_FIANZASV3 y aviso del disparador 90).
+          Parametros opcionales row.contactIds y row.incluirPolizaId; por fila contactoFilaId y
+          sumaContractualPoliza. Con solo row.contactId (la vista 43) las filas y los totales no cambian.
 
-@param {number} row.contactId  Numero SIS (Contact.id) del contacto consultado.
+@param {number}   row.contactId       Numero SIS (Contact.id) del contacto consultado.
+@param {number[]} row.contactIds      Opcional. Varios contactos (grupo economico): devuelve la union
+                                      de las filas de cada uno. Una participacion puede venir dos veces
+                                      (el integrante visto desde su consorcio y desde si mismo) y los
+                                      totales no la deduplican: quien llama deduplica por
+                                      polizaId + contactoFilaId.
+@param {number}   row.incluirPolizaId Opcional. Poliza u oferta en curso que entra en el calculo aunque
+                                      no este emitida ni activa (misma regla de reparto y de cesion).
+Por fila, ademas: contactoFilaId = contacto al que corresponde la participacion (titular en
+DIRECTO y PADRE_CONSORCIO, integrante en INTEGRANTE y MIEMBRO_DE_CONSORCIO);
+sumaContractualPoliza = suma contractual de la poliza completa, sin ponderar por participacion.
 
 Reglas aplicadas:
  - Fianzas = lob 81, 82, 83, 84 (catalogo Lob de global1).
@@ -39,12 +53,16 @@ Reglas aplicadas:
 */
 const { row } = context;
 
-const contactId = parseInt(row.contactId, 10);
-if (!contactId || isNaN(contactId) || contactId <= 0) {
+const contactos = (Array.isArray(row.contactIds) && row.contactIds.length ? row.contactIds : [row.contactId])
+  .map(x => parseInt(x, 10));
+if (contactos.some(x => !x || isNaN(x) || x <= 0)) {
   return { ok: false, msg: 'contactId requerido', data: [], totalCumulo: 0, totalesPorMoneda: [] };
 }
+const listaContactos = [...new Set(contactos)].join(',');
+const incluirPolizaId = parseInt(row.incluirPolizaId, 10) > 0 ? parseInt(row.incluirPolizaId, 10) : 0;
 
 const VIGENCIA = 'p.active = 1 AND p.activeDate IS NOT NULL';
+const POBLACION = incluirPolizaId ? `((${VIGENCIA}) OR p.id = ${incluirPolizaId})` : VIGENCIA;
 const RAMOS_FIANZA = "'81','82','83','84'";
 
 const cte = `
@@ -53,7 +71,7 @@ WITH Fianza AS (
            p.currency, p.[start] AS fIni, p.[end] AS fFin, p.productCode
     FROM LifePolicy p
     WHERE p.lob IN (${RAMOS_FIANZA})
-      AND ${VIGENCIA}
+      AND ${POBLACION}
 ),
 MiembroRaw AS (
     SELECT c.id AS parentId,
@@ -87,7 +105,7 @@ Filas AS (
            CAST(0 AS decimal(18,6)) AS sumaAsegurada,
            CAST(0 AS decimal(18,6)) AS primaParticipacion
     FROM Fianza f
-    WHERE f.holderId = ${contactId}
+    WHERE f.holderId IN (${listaContactos})
       AND EXISTS (SELECT 1 FROM Miembro mm WHERE mm.parentId = f.holderId)
 
     UNION ALL
@@ -99,7 +117,7 @@ Filas AS (
            f.anualPremium * m.Porcentaje / 100.0
     FROM Fianza f
     JOIN Miembro m ON m.parentId = f.holderId
-    WHERE f.holderId = ${contactId}
+    WHERE f.holderId IN (${listaContactos})
 
     UNION ALL
 
@@ -107,7 +125,7 @@ Filas AS (
            f.holderId, f.insuredSum, f.anualPremium,
            f.holderId, NULL, 100.0, f.insuredSum, f.anualPremium
     FROM Fianza f
-    WHERE f.holderId = ${contactId}
+    WHERE f.holderId IN (${listaContactos})
       AND NOT EXISTS (SELECT 1 FROM Miembro mm WHERE mm.parentId = f.holderId)
 
     UNION ALL
@@ -118,8 +136,8 @@ Filas AS (
            f.insuredSum   * m.Porcentaje / 100.0,
            f.anualPremium * m.Porcentaje / 100.0
     FROM Fianza f
-    JOIN Miembro m ON m.parentId = f.holderId AND m.CodigoSis = ${contactId}
-    WHERE f.holderId <> ${contactId}
+    JOIN Miembro m ON m.parentId = f.holderId AND m.CodigoSis IN (${listaContactos})
+    WHERE f.holderId <> m.CodigoSis
 )`;
 
 const sqlFilas = `${cte}
@@ -138,7 +156,8 @@ SELECT fl.relacion, fl.polizaId, fl.numeroPoliza,
        CAST(fl.primaPoliza         AS decimal(18,2)) AS primaPoliza,
        CAST(fl.porcentaje          AS decimal(18,2)) AS porcentajeParticipacion,
        CAST(fl.sumaAsegurada       AS decimal(18,2)) AS sumaasegurada,
-       CAST(fl.primaParticipacion  AS decimal(18,2)) AS primaParticipacion
+       CAST(fl.primaParticipacion  AS decimal(18,2)) AS primaParticipacion,
+       fl.contactoFilaId
 FROM Filas fl
 JOIN Contact he ON he.id = fl.enteAseguradoId
 LEFT JOIN Contact hc ON hc.id = fl.contactoFilaId
@@ -172,6 +191,7 @@ filas.forEach(f => {
   f.conCesion = conCesion;
   f.sumaContractual = conCesion ? r2(suma * (r.retenido + r.contrato) / r.base) : 0;
   f.sumaFacultativa = conCesion ? r2(suma * r.facultativo / r.base) : 0;
+  f.sumaContractualPoliza = conCesion ? r2((Number(f.sumaAseguradaPoliza) || 0) * (r.retenido + r.contrato) / r.base) : 0;
 });
 totales.forEach(t => {
   t.totalCumuloContractual = r2(filas
