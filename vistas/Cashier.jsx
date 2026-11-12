@@ -313,6 +313,9 @@
   const [ppxaApplyAccountLoading, setPpxaApplyAccountLoading] = React.useState(false);
   const [ppxaApplyForm] = Form.useForm();
   const ppxaApplyAccountSearchTimer = React.useRef(null);
+  const [transitBankApplyVisible, setTransitBankApplyVisible] = React.useState(false);
+  const [transitBankApplyLoading, setTransitBankApplyLoading] = React.useState(false);
+  const [transitBankApplyForm] = Form.useForm();
   const [transitOtherIncomeVisible, setTransitOtherIncomeVisible] = React.useState(false);
   const [transitOtherIncomeLoading, setTransitOtherIncomeLoading] = React.useState(false);
   const [transitOtherIncomeSourceAccount, setTransitOtherIncomeSourceAccount] = React.useState(null);
@@ -3057,6 +3060,195 @@
     setPpxaApplyVisible(true);
   }
 
+  function getTransitBankDepositAccountOptions(currency) {
+    const selectedCurrency = getTrimmedString(currency).toUpperCase();
+    return depositAccountOptions.filter(option =>
+      !selectedCurrency || getTrimmedString(option && option.currency).toUpperCase() === selectedCurrency
+    );
+  }
+
+  function updateTransitBankDepositIncomeType(value) {
+    const selected = getDepositIncomeTypeOptions().find(item => item && item.value === value);
+    const typeNames = [
+      getTrimmedString(selected && (selected.name || selected.label)),
+      getTrimmedString(selected && selected.internalType)
+    ];
+    let destinationId = 0;
+    typeNames.some(typeName => {
+      const parts = typeName.split('-');
+      const candidate = Number(getTrimmedString(parts[parts.length - 1]));
+      if (Number.isFinite(candidate) && candidate > 0) {
+        destinationId = candidate;
+        return true;
+      }
+      return false;
+    });
+    const currency = getTrimmedString(transitBankApplyForm.getFieldValue('currency')).toUpperCase();
+    const destination = getTransitBankDepositAccountOptions(currency).find(item =>
+      getTrimmedString(item && item.code) === String(destinationId)
+    );
+    transitBankApplyForm.setFieldsValue({
+      incomeType: value,
+      destination: destination ? destination.value : undefined
+    });
+  }
+
+  function closeTransitBankApplyModal() {
+    setTransitBankApplyVisible(false);
+    transitBankApplyForm.resetFields();
+  }
+
+  function openTransitBankApplyModal() {
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select lines of a single transit account to apply to bank.'));
+    const entries = selectedAccount ? getSelectedTransitLineEntries(selectedAccount.id) : [];
+    const amount = Number(entries.reduce((total, entry) => total + getAuditNumber(entry.available), 0).toFixed(2));
+    const currency = getTrimmedString(selectedAccount && selectedAccount.currency).toUpperCase();
+    const incomeType = getDepositIncomeTypeOptions()[0];
+    const destination = getTransitBankDepositAccountOptions(currency)[0];
+
+    if (!selectedAccount || !entries.length || amount <= 0) {
+      message.warning(t('Select at least one line with available balance.'));
+      return;
+    }
+    if (!incomeType) {
+      message.error(t('No bank deposit income type is configured.'));
+      return;
+    }
+    if (!destination) {
+      message.error(t('No destination account is configured for this currency.'));
+      return;
+    }
+
+    transitBankApplyForm.resetFields();
+    transitBankApplyForm.setFieldsValue({
+      currency: currency,
+      amount: amount,
+      incomeType: incomeType.value,
+      destination: destination.value,
+      reference: ''
+    });
+    setTransitBankApplyVisible(true);
+  }
+
+  async function submitTransitBankApply(values) {
+    if (transitBankApplyLoading) return;
+
+    const selectedAccount = getSingleSelectedTransitAccount(t('Select lines of a single transit account to apply to bank.'));
+    const accountId = Number(selectedAccount && selectedAccount.id);
+    const lines = selectedAccount ? getSelectedTransitLineEntries(accountId) : [];
+    const amount = Number(lines.reduce((total, entry) => total + getAuditNumber(entry.available), 0).toFixed(2));
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    const currency = getTrimmedString(values && values.currency).toUpperCase();
+    const destinationAccountId = Number(values && values.destination);
+    const incomeType = getTrimmedString(values && values.incomeType);
+    const concept = getTrimmedString(values && values.reference);
+
+    if (!selectedAccount || accountId <= 0 || !lines.length || amount <= 0) return;
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.warning(t('Select an open cash desk first.'));
+      return;
+    }
+    if (!Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
+      message.warning(t('Select a destination account.'));
+      return;
+    }
+    if (!concept) {
+      message.warning(t('Enter a reference.'));
+      return;
+    }
+
+    setTransitBankApplyLoading(true);
+    let negativeTransferId = 0;
+    try {
+      const sourceName = getTrimmedString(selectedAccount.name || selectedAccount.accNo) || String(accountId);
+      const negativeResponse = await exe('RepoTransfer', {
+        operation: 'ADD',
+        entity: {
+          currency: currency,
+          amount: -amount,
+          sourceAccountId: null,
+          destinationAccountId: accountId,
+          concept: concept,
+          paymentMethod: 'DEP',
+          paymentMethodName: 'DEP',
+          SplitPayments: [{
+            paymentMethod: 'DEP',
+            paymentMethodName: 'DEP',
+            amount: -amount,
+            currency: currency,
+            id: 0,
+            transferId: 0
+          }],
+          sourceName: null,
+          destinationName: sourceName,
+          date: getCurrentUtcDateTime(),
+          status: 0,
+          executed: false,
+          isExternal: true,
+          incomeType: incomeType,
+          transferWorkspaceId: workspaceId,
+          user: currentUserEmail || null
+        },
+        otherReceivables: [],
+        execute: false
+      });
+
+      if (!negativeResponse || negativeResponse.ok === false) {
+        throw new Error(negativeResponse && negativeResponse.msg
+          ? negativeResponse.msg
+          : t('The negative transfer could not be created.'));
+      }
+      const negativeTransfer = getRows(negativeResponse)[0] || {};
+      negativeTransferId = Number(negativeTransfer.id || negativeTransfer.transferId || 0);
+      if (!Number.isFinite(negativeTransferId) || negativeTransferId <= 0) {
+        throw new Error(t('The negative transfer was created, but its movement identifier could not be identified.'));
+      }
+
+      await stampTransitLines(accountId, 'BANKDEPOSIT', { transferId: negativeTransferId }, amount, lines);
+
+      const negativeExecution = await exe('DoTransfer', {
+        transferId: negativeTransferId,
+        transfer: null
+      });
+      if (!negativeExecution || negativeExecution.ok === false) {
+        throw new Error(negativeExecution && negativeExecution.msg
+          ? negativeExecution.msg
+          : t('The negative transfer could not be executed.'));
+      }
+
+      const depositResponse = await exe('DepositCashierPayments', {
+        workspaceId: workspaceId,
+        incomeType: incomeType,
+        paymentMethod: 'DEP',
+        currency: currency,
+        // DepositCashierPayments reverses the sign internally. Send the same
+        // negative amount as the RepoTransfer so the resulting bank movement
+        // is recorded with the opposite, positive sign.
+        amountAtSight: -amount,
+        amount: -amount,
+        dif: 0,
+        destinationAccountId: destinationAccountId,
+        concept: concept,
+        externalSource: null
+      });
+      if (!depositResponse || depositResponse.ok === false) {
+        throw new Error(depositResponse && depositResponse.msg
+          ? depositResponse.msg
+          : t('The bank deposit could not be created.'));
+      }
+
+      message.success(t('The balance was applied to the bank successfully.'));
+      closeTransitBankApplyModal();
+      refreshTransitAfterOperation();
+      loadCashDeskBalances();
+      loadMovements({ pagination: { current: 1, pageSize: movementPagination.pageSize } });
+    } catch (error) {
+      message.error(error && error.message ? error.message : String(error));
+    } finally {
+      setTransitBankApplyLoading(false);
+    }
+  }
+
   function closeTransitOtherIncomeModal() {
     setTransitOtherIncomeVisible(false);
     setTransitOtherIncomeSourceAccount(null);
@@ -3313,9 +3505,55 @@
       return;
     }
 
+    const ppxaIncomeType = incomeTypeOptions.find(item =>
+      getTrimmedString(item && item.internalType).toUpperCase() === 'PPXA'
+    );
+    const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
+    if (!ppxaIncomeType) {
+      message.error(t('The PPXA income type is not configured.'));
+      return;
+    }
+    if (!Number.isFinite(workspaceId) || workspaceId <= 0) {
+      message.error(t('Select an open cash desk first.'));
+      return;
+    }
+
     setPpxaApplyLoading(true);
+    const date = getCurrentUtcDateTime();
+    const incomeType = getTrimmedString(ppxaIncomeType.value || ppxaIncomeType.code);
     const destinationName = getTrimmedString(destinationAccount && (destinationAccount.name || destinationAccount.accNo)) || String(destinationAccountId);
     const concept = buildClientReferenceText(reference, client);
+    const clientForm = buildClientReferenceForm(client);
+    const buildPpxaTransferEntity = (transferAmount, targetId, targetName, incomeForm) => ({
+      currency: currency,
+      amount: transferAmount,
+      // Transferencia entre cuentas: cada movimiento se registra como un
+      // ingreso hacia su cuenta destino, igual que en la implementación
+      // anterior. La aplicación de las líneas se mantiene por separado.
+      sourceAccountId: null,
+      destinationAccountId: targetId,
+      concept: concept,
+      paymentMethod: 'OT',
+      paymentMethodName: 'OT',
+      SplitPayments: [{
+        paymentMethod: 'OT',
+        paymentMethodName: 'OT',
+        amount: transferAmount,
+        currency: currency,
+        id: 0,
+        transferId: 0
+      }],
+      sourceName: null,
+      destinationName: targetName || null,
+      date: date,
+      status: 0,
+      executed: false,
+      isExternal: true,
+      incomeType: incomeType,
+      jIncomeTypeForm: incomeForm || null,
+      transferWorkspaceId: workspaceId,
+      user: currentUserEmail || null
+    });
 
     // The amount is taken from the selected lines, oldest first, across the selected accounts.
     const ppxaLines = distributeTransitLines(amount, getTransitLineSelectionEntries());
@@ -3328,49 +3566,71 @@
       return checkTransitLines(account.id, sumTransitLines(accountLines), accountLines);
     }), Promise.resolve());
 
-    const createAndStampTransfers = validateSources.then(() => ppxaLines.reduce((chain, line) => chain.then(() => {
-      const sourceId = Number(line && line.accountId);
+    const createAndStampTransfers = validateSources.then(() => Object.keys(ppxaLinesByAccount).reduce((chain, accountIdKey) => chain.then(() => {
+      const sourceId = Number(accountIdKey);
+      const accountLines = ppxaLinesByAccount[accountIdKey] || [];
       const sourceAccount = sourceAccounts.find(account => Number(account && account.id) === sourceId) || {};
-      const transferAmount = Number(getAuditNumber(line && line.amount).toFixed(2));
+      const transferAmount = sumTransitLines(accountLines);
       if (sourceId <= 0 || transferAmount <= 0) return undefined;
 
       const sourceName = getTrimmedString(sourceAccount.name || sourceAccount.accNo) || String(sourceId);
-      return exe('DoRawTransfer', {
-        save: true,
-        transferInfo: {
-          currency: currency,
-          sourceAccountId: sourceId,
-          destAccountId: destinationAccountId,
-          amount: transferAmount,
-          af_amount: 0,
-          code: 'TRANSIT',
-          concept: concept,
-          producer: 'PPXA',
-          lifePolicyId: null,
-          sourceName: sourceName,
-          destinationName: destinationName
+      return exe('RepoTransfer', {
+        operation: 'ADD',
+        entity: buildPpxaTransferEntity(
+          -transferAmount,
+          sourceId,
+          sourceName,
+          getTransitLinesOwnerForm(accountLines)
+        ),
+        otherReceivables: [],
+        execute: false
+      }).then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The negative transfer could not be created.'));
         }
-      }).then(outgoing => {
-        if (!outgoing || outgoing.ok === false) {
-          throw new Error(outgoing && outgoing.msg ? outgoing.msg : t('The raw transfer could not be created.'));
+        const transfer = getRows(response)[0] || {};
+        const transferId = Number(transfer.id || transfer.transferId || 0);
+        if (!Number.isFinite(transferId) || transferId <= 0) {
+          throw new Error(t('The negative transfer was created, but its movement identifier could not be identified.'));
         }
-
-        const rawData = outgoing.outData || {};
-        const outgoingTransfer = rawData.Transfer || rawData.transfer || getRows(outgoing)[0] || rawData;
-        const outgoingId = Number(outgoingTransfer.id || outgoingTransfer.transferId || 0);
-        if (!Number.isFinite(outgoingId) || outgoingId <= 0) {
-          throw new Error(t('The raw transfer was created, but its movement identifier could not be identified.'));
-        }
-        createdTransfers.push({ id: outgoingId, amount: transferAmount });
-        return stampTransitLines(sourceId, 'PPXA', { transferId: outgoingId }, transferAmount, [line]);
+        createdTransfers.push({ id: transferId, amount: -transferAmount });
+        return stampTransitLines(sourceId, 'PPXA', { transferId: transferId }, transferAmount, accountLines);
       });
-    }), Promise.resolve()));
+    }), Promise.resolve())).then(() => exe('RepoTransfer', {
+      operation: 'ADD',
+      entity: buildPpxaTransferEntity(amount, destinationAccountId, destinationName, clientForm),
+      otherReceivables: [],
+      execute: false
+    }).then(response => {
+      if (!response || response.ok === false) {
+        throw new Error(response && response.msg ? response.msg : t('The positive transfer could not be created.'));
+      }
+      const transfer = getRows(response)[0] || {};
+      const transferId = Number(transfer.id || transfer.transferId || 0);
+      if (!Number.isFinite(transferId) || transferId <= 0) {
+        throw new Error(t('The positive transfer was created, but its movement identifier could not be identified.'));
+      }
+      createdTransfers.push({ id: transferId, amount: amount });
+    }));
 
-    createAndStampTransfers.then(() => {
+    let executionStarted = false;
+    createAndStampTransfers.then(() => createdTransfers.reduce((chain, transfer) => chain.then(() => {
+      executionStarted = true;
+      return exe('DoTransfer', { transferId: transfer.id, transfer: null }).then(response => {
+        if (!response || response.ok === false) {
+          throw new Error(response && response.msg ? response.msg : t('The transfer movement could not be executed.'));
+        }
+      });
+    }), Promise.resolve())).then(() => {
       closePpxaApplyModal();
       refreshTransitAfterOperation();
-      message.success(t('The transfer between accounts was created successfully.'));
+      message.success(t('The transfer between accounts was executed successfully.'));
     }).catch(error => {
+      if (!executionStarted) {
+        deletePendingTransitTransfers(createdTransfers).catch(cleanupError => {
+          console.error('Unable to clean up pending transit transfers.', cleanupError);
+        });
+      }
       message.error(error && error.message ? error.message : String(error));
     }).finally(() => {
       setPpxaApplyLoading(false);
@@ -10044,6 +10304,7 @@
     REFUND: t('Return money'),
     PREMIUM: t('Collect premium'),
     PPXA: t('Transfer between accounts'),
+    BANKDEPOSIT: t('Apply balance to bank'),
     TRANSFER: t('Manual account transfer')
   };
 
@@ -10246,7 +10507,7 @@
           {t('Collect premium')}
         </Button>
         <Button
-          type="primary"
+          className="cashier-supervisor-success-button"
           icon={<TransferAccountIcon />}
           disabled={transitSelectedAccountCount === 0}
           onClick={openPpxaApplyModal}
@@ -10260,6 +10521,15 @@
           onClick={openTransitOtherIncomeModal}
         >
           {t('Apply miscellaneous income')}
+        </Button>
+        <Button
+          type="primary"
+          danger
+          icon={<CashierIcon />}
+          disabled={transitSelectedAccountCount !== 1}
+          onClick={openTransitBankApplyModal}
+        >
+          {t('Apply balance to bank')}
         </Button>
         <Button
           className="cashier-supervisor-outline-button"
@@ -11759,6 +12029,73 @@
               rules={[{ required: true, message: t('Select a client.') }]}
             >
               {renderOperationClientSelect()}
+            </Form.Item>
+            <Form.Item
+              label={t('Reference')}
+              name="reference"
+              rules={[{ required: true, message: t('Enter a reference.') }]}
+            >
+              <Input />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title={t('Apply balance to bank')}
+          className="cashier-supervisor-collection-payment-modal"
+          open={transitBankApplyVisible}
+          onCancel={closeTransitBankApplyModal}
+          onOk={() => transitBankApplyForm.submit()}
+          okText={t('Apply')}
+          cancelText={t('Cancel')}
+          confirmLoading={transitBankApplyLoading}
+          destroyOnClose={false}
+          width={620}
+        >
+          <Form form={transitBankApplyForm} layout="vertical" onFinish={submitTransitBankApply}>
+            <div className="cashier-transit-lines-note">
+              <div>
+                <strong>{t('Source account')}:</strong>{' '}
+                {getTrimmedString(transitDetailAccount && transitDetailAccount.accNo) || '-'}{' · '}
+                {getTrimmedString(transitDetailAccount && transitDetailAccount.name) || '-'}
+              </div>
+              <div>
+                <strong>{t('Selected lines')}:</strong>{' '}
+                {getSelectedTransitLineEntries().length}{' · '}
+                <strong>{t('Amount')}:</strong>{' '}
+                {formatMoney(getSelectedTransitLinesTotal())}
+              </div>
+            </div>
+            <Form.Item label={t('Currency')} name="currency">
+              <Select disabled options={currencyOptions} />
+            </Form.Item>
+            <Form.Item label={t('Amount')} name="amount">
+              <InputNumber disabled precision={2} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item
+              label={t('Income type')}
+              name="incomeType"
+              rules={[{ required: true, message: t('Select an income type.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={getDepositIncomeTypeOptions()}
+                placeholder={t('Select an income type')}
+                onChange={updateTransitBankDepositIncomeType}
+              />
+            </Form.Item>
+            <Form.Item
+              label={t('Destination account')}
+              name="destination"
+              rules={[{ required: true, message: t('Select a destination account.') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={getTransitBankDepositAccountOptions(transitBankApplyForm.getFieldValue('currency'))}
+                placeholder={t('Select a destination account')}
+              />
             </Form.Item>
             <Form.Item
               label={t('Reference')}

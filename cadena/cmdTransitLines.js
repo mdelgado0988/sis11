@@ -23,7 +23,7 @@
  *   accountId: number,
  *   page?: number, size?: number,
  *   holderId?: number, transferId?: number, name?: string, cancellations?: boolean, showAll?: boolean,
- *   operation?: 'REFUND' | 'PREMIUM' | 'PPXA' | 'TRANSFER',
+ *   operation?: 'REFUND' | 'PREMIUM' | 'PPXA' | 'BANKDEPOSIT' | 'TRANSFER',
  *   amount?: number,
  *   lines?: [{ movId: number, amount: number }],
  *   opTransferId?: number,
@@ -38,7 +38,7 @@
 
 const LINE_EPSILON = 0.005;
 const STAMP_PREFIX = 'TRANSIT_LINES|';
-const OPERATIONS = ['REFUND', 'PREMIUM', 'PPXA', 'TRANSFER'];
+const OPERATIONS = ['REFUND', 'PREMIUM', 'PPXA', 'BANKDEPOSIT', 'TRANSFER'];
 
 try {
   const input = normalizeInput(context);
@@ -621,7 +621,7 @@ function checkLines(account, input) {
 
 function stampLines(account, input) {
   if (OPERATIONS.indexOf(input.operation) < 0) {
-    throw new Error('Indique la operación: REFUND, PREMIUM, PPXA o TRANSFER.');
+    throw new Error('Indique la operación: REFUND, PREMIUM, PPXA, BANKDEPOSIT o TRANSFER.');
   }
   if (input.opTransferId <= 0 && input.opRequestId <= 0) {
     throw new Error('Indique la transferencia o la solicitud de la operación.');
