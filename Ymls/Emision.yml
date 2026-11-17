@@ -56,13 +56,13 @@ Lines:
     credit: '_commisiones < 0 ? -_commisiones : 0'
     comments: "'Honorarios de corredores de seguros ' + _anioMes"
     order: _lineNumber
-    condition: _reservasPorPagar != 0 && (!_cancelacion)
+    condition: _commisiones != 0 && (!_cancelacion)
   - account: _cuentaReservasxPagar
     debit: '_reservasPorPagar < 0 ? -_reservasPorPagar : 0'
     credit: '_reservasPorPagar > 0 ? _reservasPorPagar : 0'
     comments: "'Honorarios de corredores de seguros ' + _anioMes"
     order: _lineNumber
-    condition: _commisiones != 0 && (!_cancelacion)
+    condition: _reservasPorPagar != 0 && (!_cancelacion)
 # Reaseguro.
   - account: _cuentaReaseguroCedido
     debit: '_reaseguroCedido > 0 ? _reaseguroCedido : 0'

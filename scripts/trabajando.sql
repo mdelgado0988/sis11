@@ -26,8 +26,8 @@ GO
 
 --SELECT * FROM macoberturas where cramo = 6
 
-declare @ramoXY int = 96
-declare @plan varchar(15) = ''--'FIAMIS1' ;
+declare @ramoXY int = 6
+declare @plan varchar(15) = 'AULEGLU$'--'FIAMIS1' ;
 DROP TABLE IF EXISTS #Coberturas;
 
 select c.cramo, rtrim(c.cplan) cplan, rtrim(pl.xplan) xplan, rtrim(mc.ccobertura) ccobertura
@@ -85,6 +85,7 @@ where cramo = @ramo
 )  t
 LEFT JOIN adpoliza pol ON pol.cproces = t.EjemploOferta
 WHERE t.TienePolizas = 'Si' AND pol.fanopol >= 2025
+AND t.cplan = 'AULEGLU$'
 order by 2
 
 select xabreviatura, xdescripcion_l, cramo 

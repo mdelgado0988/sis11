@@ -13,8 +13,8 @@
   *           - Policy: full policy contractual amount.
   *           - Client: contractual amount of its rows, including the applicable participation when
   *             the contact is a consortium parent or member.
-  *           - Economic Group: full contractual accumulation of the parent consortium when the client
-  *             is a consortium member; otherwise it uses the client itself.
+  *           - Economic Group: contractual accumulation of every contact in the economic group,
+  *             including the current holder, calculated separately through chain 830.
   *           The current policy or offer is included with its contractual amount. Facultative portions,
   *           100% retained or uninsured sureties, and sureties with status 0 are excluded.
   *@Input: {policyId, type}
@@ -85,39 +85,61 @@ function setAccumulationByClient() {
 
 function setAccumulationByEconomicGroup() {
   const clientId = policy.holderId;
-  const consorciosPadre = getConsorciosPadre(clientId);
-  const contactosCumulo = consorciosPadre.length ? consorciosPadre : [Number(clientId)];
-
-  // Use the same chain 830 calculation as the client.
-  // When the holder is a consortium member, query the parent to obtain the
-  // full consortium accumulation instead of the holder's participation only.
-  accumulationByEconomicGroup = sumarContractual(
-    getFilasCumulo(contactosCumulo)
-  );
+  const contactos = getContactosGrupoEconomico(clientId);
+  accumulationByEconomicGroup = contactos.reduce(function (total, contactId) {
+    return total + sumarContractual(getFilasCumulo([contactId]));
+  }, 0);
 }
 
-function getConsorciosPadre(clientId) {
+function getContactosGrupoEconomico(clientId) {
   const id = Number(clientId);
   if (!Number.isInteger(id) || id <= 0) return [];
 
+  doCmd({cmd: "LoadEntity", data: {
+    entity: "Contact", fields: "jCustomForms", filter: `id = ${id}`, noTracking: true
+  }});
+  if (!LoadEntity.ok)
+    throw new Error("No se pudo consultar el grupo económico del cliente: " + LoadEntity.msg);
+
+  const grupoEconomico = obtenerGrupoEconomico(LoadEntity.outData?.jCustomForms);
+  if (!grupoEconomico) return [id];
+
+  const grupoEscapado = grupoEconomico.replace(/'/g, "''");
+
   doCmd({cmd: "DoQuery", data: { sql: `
-SELECT DISTINCT c.id AS parentId
+SELECT DISTINCT c.id
 FROM Contact c
 CROSS APPLY OPENJSON(c.jCustomForms) tabs
 CROSS APPLY OPENJSON(tabs.[value])
-  WITH (fname varchar(100) '$.name', userData nvarchar(max) '$.userData[0]') fld
-CROSS APPLY OPENJSON(fld.userData)
-  WITH (CodigoSis int '$.CodigoSis') m
-WHERE tabs.[key] = 'Consorcios'
-  AND fld.fname = 'hiddenValida'
-  AND ISJSON(fld.userData) = 1
-  AND m.CodigoSis = ${id};` }});
+  fields
+CROSS APPLY OPENJSON(JSON_QUERY(fields.[value], '$.userData')) userData
+WHERE tabs.[key] = N'Información de Compañías'
+  AND JSON_VALUE(fields.[value], '$.name') = 'grupoEconomico'
+  AND LTRIM(RTRIM(CONVERT(NVARCHAR(4000), userData.[value]))) = N'${grupoEscapado}';` }});
   if (!DoQuery.ok)
-    throw new Error("No se pudo consultar el consorcio del cliente: " + DoQuery.msg);
+    throw new Error("No se pudo consultar los contactos del grupo económico: " + DoQuery.msg);
 
-  return [...new Set((DoQuery.outData ?? [])
-    .map(x => Number(x.parentId))
-    .filter(x => Number.isInteger(x) && x > 0))];
+  const contactos = (DoQuery.outData ?? [])
+    .map(x => Number(x.id))
+    .filter(x => Number.isInteger(x) && x > 0);
+  if (!contactos.includes(id)) contactos.push(id);
+  return [...new Set(contactos)];
+}
+
+function obtenerGrupoEconomico(jCustomForms) {
+  try {
+    const customForms = typeof jCustomForms === "string"
+      ? JSON.parse(jCustomForms || "{}")
+      : (jCustomForms || {});
+    const formulario = customForms["Información de Compañías"];
+    const campos = typeof formulario === "string"
+      ? JSON.parse(formulario || "[]")
+      : (formulario || []);
+    const campo = campos.find(x => x && x.name === "grupoEconomico");
+    return campo?.userData?.[0] ? String(campo.userData[0]).trim() : "";
+  } catch (error) {
+    return "";
+  }
 }
 
 function getValidSuretySql(policyAlias) {
