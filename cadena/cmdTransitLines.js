@@ -6,7 +6,7 @@
  * @email support@axxis-systems.com
  * @created 2026/11/09
  * @name cmdTransitLines
- * @version 1.1
+ * @version 1.2
  * @purpose: Lines of one transit account with their own available balance, and the record of the lines each cashier
  *   operation takes (refund, premium payment, PPXA, transfer between accounts).
  *   A line is a positive movement (PREMIUMPAY excluded, as in cmdGetTransitMovs).
@@ -15,7 +15,9 @@
  *     reserved: refund requests in process and stamped transfers that are not executed yet.
  *   An operation started from the movement detail stamps its lines in a comment of the account
  *   (TRANSIT_LINES|{json}); the server keeps who and when. Operations without a stamp (older ones, or made elsewhere)
- *   take the oldest lines of the same client first and then the oldest lines of the account.
+ *   take the oldest lines of the same client first and then the oldest lines of the account, among the lines recorded
+ *   before them (MSN-000193: an outflow of 2026-11-07 showed applied on a line recorded on 2026-11-12). What the account
+ *   could not cover when the outflow was recorded (it was overdrawn) is taken by the next lines recorded.
  *   A transfer that leaves and returns to the same account (a refund paid back into it) moves nothing.
  *   A reversal counter-movement first takes the line it reverses.
  * @context: {
@@ -414,11 +416,13 @@ function computeLines(account, exclude) {
     }
   });
 
-  // 2. Everything else that left the account, oldest first.
+  // 2. Everything else that left the account, in the order it was recorded, with the lines in the order they were
+  //    recorded: an outflow only takes lines recorded before it, the oldest first. What it could not cover then (the
+  //    account was overdrawn) is owed, and the next lines recorded pay it before anything later uses them.
   const events = [];
   outflows.filter(outflow => !outflow.coveredBy).forEach(outflow => {
     events.push({
-      time: outflow.time,
+      seq: outflow.id,
       order: outflow.id,
       amount: roundMoney(-outflow.amount),
       ownerId: outflow.ownerId,
@@ -434,7 +438,7 @@ function computeLines(account, exclude) {
   });
   requests.filter(request => request.executed && !request.stamped).forEach(request => {
     events.push({
-      time: request.time,
+      seq: recordedAt(request, movements),
       order: request.id,
       amount: request.total,
       ownerId: request.contactId,
@@ -442,8 +446,28 @@ function computeLines(account, exclude) {
       reference: { type: 'REQUEST', requestId: request.id, state: request.state, date: request.date }
     });
   });
-  events.sort((left, right) => (left.time - right.time) || (left.order - right.order));
-  events.forEach(event => consumeOldest(state, event.amount, event.ownerId, event.preferredLineId, 'applied', event.reference));
+  lines.forEach(line => {
+    events.push({ seq: line.id, order: line.id, line });
+  });
+  events.sort((left, right) => (left.seq - right.seq)
+    || ((left.line ? 0 : 1) - (right.line ? 0 : 1))
+    || (left.order - right.order));
+  const arrived = [];
+  const owed = [];
+  events.forEach(event => {
+    if (event.line) {
+      addByDate(arrived, event.line);
+      settleOwed(event.line, owed);
+      return;
+    }
+    const remaining = takeOldest(arrived, lineById[event.preferredLineId], event.amount, event.ownerId, 'applied', event.reference);
+    if (remaining > LINE_EPSILON) {
+      owed.push({ amount: remaining, ownerId: event.ownerId, reference: event.reference });
+    }
+  });
+  owed.forEach(entry => {
+    deficit.applied = roundMoney(deficit.applied + entry.amount);
+  });
 
   // 3. Requests in process reserve what is left, oldest first.
   requests.filter(request => !request.executed && !request.stamped).forEach(request => {
@@ -506,25 +530,70 @@ function takeFromLine(line, amount, kind, reference) {
 
 // Oldest lines first: the line a reversal undoes, then the client's own lines, then any line of the account.
 function consumeOldest(state, amount, ownerId, preferredLineId, kind, reference) {
+  const remaining = takeOldest(state.lines, state.lineById[preferredLineId], amount, ownerId, kind, reference);
+  if (remaining > LINE_EPSILON) {
+    state.deficit[kind] = roundMoney(state.deficit[kind] + remaining);
+  }
+}
+
+// Takes from `pool` (lines ordered by date) and returns what it could not cover.
+function takeOldest(pool, preferredLine, amount, ownerId, kind, reference) {
   let remaining = roundMoney(amount);
-  if (preferredLineId > 0 && state.lineById[preferredLineId]) {
-    remaining = roundMoney(remaining - takeFromLine(state.lineById[preferredLineId], remaining, kind, reference));
+  if (preferredLine && pool.indexOf(preferredLine) >= 0) {
+    remaining = roundMoney(remaining - takeFromLine(preferredLine, remaining, kind, reference));
   }
   if (ownerId > 0) {
-    state.lines.forEach(line => {
+    pool.forEach(line => {
       if (remaining > LINE_EPSILON && line.ownerId === ownerId) {
         remaining = roundMoney(remaining - takeFromLine(line, remaining, kind, reference));
       }
     });
   }
-  state.lines.forEach(line => {
+  pool.forEach(line => {
     if (remaining > LINE_EPSILON) {
       remaining = roundMoney(remaining - takeFromLine(line, remaining, kind, reference));
     }
   });
-  if (remaining > LINE_EPSILON) {
-    state.deficit[kind] = roundMoney(state.deficit[kind] + remaining);
+  return remaining;
+}
+
+// A line recorded while earlier outflows are still owed pays them: the same client's first, then the oldest.
+function settleOwed(line, owed) {
+  const sameClient = owed.filter(entry => entry.ownerId === line.ownerId);
+  const others = owed.filter(entry => entry.ownerId !== line.ownerId);
+  sameClient.concat(others).forEach(entry => {
+    if (entry.amount > LINE_EPSILON) {
+      entry.amount = roundMoney(entry.amount - takeFromLine(line, entry.amount, 'applied', entry.reference));
+    }
+  });
+  for (let index = owed.length - 1; index >= 0; index--) {
+    if (owed[index].amount <= LINE_EPSILON) {
+      owed.splice(index, 1);
+    }
   }
+}
+
+// Where an executed refund request sits among the movements: at the movement that took its money out of the account,
+// or, without one, before the first movement dated after the request.
+function recordedAt(request, movements) {
+  const own = movements.find(movement => movement.claimPaymentId === request.id);
+  if (own) {
+    return own.id;
+  }
+  const next = movements
+    .filter(movement => movement.time > request.time)
+    .reduce((first, movement) => (first === 0 || movement.id < first ? movement.id : first), 0);
+  return next > 0 ? next - 0.5 : Number.MAX_SAFE_INTEGER;
+}
+
+// The lines already recorded stay ordered by date, the order in which they are taken.
+function addByDate(pool, line) {
+  let index = pool.length;
+  while (index > 0 && (pool[index - 1].time > line.time
+    || (pool[index - 1].time === line.time && pool[index - 1].id > line.id))) {
+    index--;
+  }
+  pool.splice(index, 0, line);
 }
 
 function reversedLineId(outflow, lines) {

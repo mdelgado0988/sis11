@@ -3088,7 +3088,7 @@
       getTrimmedString(item && item.code) === String(destinationId)
     );
     transitBankApplyForm.setFieldsValue({
-      incomeType: value,
+      depositIncomeType: value,
       destination: destination ? destination.value : undefined
     });
   }
@@ -3103,14 +3103,19 @@
     const entries = selectedAccount ? getSelectedTransitLineEntries(selectedAccount.id) : [];
     const amount = Number(entries.reduce((total, entry) => total + getAuditNumber(entry.available), 0).toFixed(2));
     const currency = getTrimmedString(selectedAccount && selectedAccount.currency).toUpperCase();
-    const incomeType = getDepositIncomeTypeOptions()[0];
+    const applicationIncomeType = getTransitIncomeTypeOptions()[0];
+    const depositIncomeType = getDepositIncomeTypeOptions()[0];
     const destination = getTransitBankDepositAccountOptions(currency)[0];
 
     if (!selectedAccount || !entries.length || amount <= 0) {
       message.warning(t('Select at least one line with available balance.'));
       return;
     }
-    if (!incomeType) {
+    if (!applicationIncomeType) {
+      message.error(t('No transit application income type is configured.'));
+      return;
+    }
+    if (!depositIncomeType) {
       message.error(t('No bank deposit income type is configured.'));
       return;
     }
@@ -3123,7 +3128,8 @@
     transitBankApplyForm.setFieldsValue({
       currency: currency,
       amount: amount,
-      incomeType: incomeType.value,
+      applicationIncomeType: applicationIncomeType.value,
+      depositIncomeType: depositIncomeType.value,
       destination: destination.value,
       reference: ''
     });
@@ -3140,7 +3146,8 @@
     const workspaceId = Number(selectedCashierRow && selectedCashierRow.id);
     const currency = getTrimmedString(values && values.currency).toUpperCase();
     const destinationAccountId = Number(values && values.destination);
-    const incomeType = getTrimmedString(values && values.incomeType);
+    const applicationIncomeType = getTrimmedString(values && values.applicationIncomeType);
+    const depositIncomeType = getTrimmedString(values && values.depositIncomeType);
     const concept = getTrimmedString(values && values.reference);
 
     if (!selectedAccount || accountId <= 0 || !lines.length || amount <= 0) return;
@@ -3150,6 +3157,14 @@
     }
     if (!Number.isFinite(destinationAccountId) || destinationAccountId <= 0) {
       message.warning(t('Select a destination account.'));
+      return;
+    }
+    if (!applicationIncomeType) {
+      message.warning(t('Select an application income type.'));
+      return;
+    }
+    if (!depositIncomeType) {
+      message.warning(t('Select a deposit income type.'));
       return;
     }
     if (!concept) {
@@ -3185,7 +3200,7 @@
           status: 0,
           executed: false,
           isExternal: true,
-          incomeType: incomeType,
+          incomeType: applicationIncomeType,
           transferWorkspaceId: workspaceId,
           user: currentUserEmail || null
         },
@@ -3218,7 +3233,7 @@
 
       const depositResponse = await exe('DepositCashierPayments', {
         workspaceId: workspaceId,
-        incomeType: incomeType,
+        incomeType: depositIncomeType,
         paymentMethod: 'DEP',
         currency: currency,
         // DepositCashierPayments reverses the sign internally. Send the same
@@ -12072,19 +12087,37 @@
             <Form.Item label={t('Amount')} name="amount">
               <InputNumber disabled precision={2} style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item
-              label={t('Income type')}
-              name="incomeType"
-              rules={[{ required: true, message: t('Select an income type.') }]}
-            >
-              <Select
-                showSearch
-                optionFilterProp="label"
-                options={getDepositIncomeTypeOptions()}
-                placeholder={t('Select an income type')}
-                onChange={updateTransitBankDepositIncomeType}
-              />
-            </Form.Item>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item
+                  label={t('Application type')}
+                  name="applicationIncomeType"
+                  rules={[{ required: true, message: t('Select an application income type.') }]}
+                >
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    options={getTransitIncomeTypeOptions()}
+                    placeholder={t('Application type')}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  label={t('Deposit type')}
+                  name="depositIncomeType"
+                  rules={[{ required: true, message: t('Select a deposit income type.') }]}
+                >
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    options={getDepositIncomeTypeOptions()}
+                    placeholder={t('Deposit type')}
+                    onChange={updateTransitBankDepositIncomeType}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
             <Form.Item
               label={t('Destination account')}
               name="destination"
