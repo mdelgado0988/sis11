@@ -6,13 +6,17 @@
  * @email support@axxis-systems.com
  * @created 2026/09/01
  * @name cmdUpdateMergedRequestData
- * @version 1.0
+ * @version 1.1
  * @purpose: Copy payment data from merged claim payments to the parent request.
- * @context: number[] | { ids: number[] }
+ * @context: number[] | { ids: number[], skipDocumentGeneration?: boolean }
+ *          MSN-000136: when the merged requests belong to no claim (e.g. policy requests) the data is still copied;
+ *          there is no claim to register «Solicitud Fusión No. X» in, the request document is generated from the
+ *          request itself (view Fusion-de-Solicitudes, cmdGenerateClaimDocument without claimId).
  */
 
 try {
-  const ids = getRequestIds(context);
+  const options = getRequestOptions(context);
+  const ids = options.ids;
   if (ids.length === 0) {
     return buildResult(false, 'No se recibió un arreglo de solicitudes válido.');
   }
@@ -46,9 +50,6 @@ ORDER BY child.id;`
   const claimIds = childClaimIds.length > 0 ? childClaimIds : parentClaimId > 0 ? [parentClaimId] : [];
   if (requestId <= 0) {
     return buildResult(false, 'No se encontró un parentId válido en las solicitudes recibidas.');
-  }
-  if (claimIds.length === 0) {
-    return buildResult(false, `La solicitud principal ${requestId} no tiene un reclamo asociado válido.`);
   }
 
   doCmd({
@@ -103,6 +104,13 @@ WHERE parentId = ${requestId};`
       : 'No fue posible actualizar la solicitud principal.');
   }
 
+  // MergePayments can invoke this chain before the caller has persisted the
+  // final reference. When requested, defer document generation until a later
+  // explicit call. Omitting the flag preserves the normal behavior.
+  if (options.skipDocumentGeneration) {
+    return buildResult(true, `Solicitud ${requestId} actualizada; generación del documento diferida.`);
+  }
+
   const template = 'Solcitud de Pago.docx';
 
   const reportName = `Solicitud Fusión No. ${requestId}`;
@@ -135,7 +143,9 @@ WHERE parentId = ${requestId};`
     }
   }
 
-  return buildResult(true, `Solicitud ${requestId} actualizada y generada para ${claimIds.length} reclamo(s).`);
+  return buildResult(true, claimIds.length > 0
+    ? `Solicitud ${requestId} actualizada y generada para ${claimIds.length} reclamo(s).`
+    : `Solicitud ${requestId} actualizada. Sus solicitudes no pertenecen a un reclamo: el documento se genera desde la solicitud.`);
 } catch (error) {
   return buildResult(false, error && error.message ? error.message : String(error));
 }
@@ -159,6 +169,13 @@ function getRequestIds(value) {
   return source
     .map(toPositiveInteger)
     .filter((id, index, list) => id > 0 && list.indexOf(id) === index);
+}
+
+function getRequestOptions(value) {
+  return {
+    ids: getRequestIds(value),
+    skipDocumentGeneration: Boolean(value && !Array.isArray(value) && value.skipDocumentGeneration === true)
+  };
 }
 
 function getFirstRow(value) {

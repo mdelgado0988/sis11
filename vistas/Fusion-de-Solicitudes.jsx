@@ -32,6 +32,7 @@
   const [mergeVisible, setMergeVisible] = React.useState(false);
   const [mergeError, setMergeError] = React.useState('');
   const [merging, setMerging] = React.useState(false);
+  const [mergeReference, setMergeReference] = React.useState('');
   const mounted = React.useRef(true);
   const queryVersion = React.useRef(0);
   const mergeLock = React.useRef(false);
@@ -46,6 +47,7 @@
   const [documentError, setDocumentError] = React.useState('');
   const documentLock = React.useRef(false);
   const documentVersion = React.useRef(0);
+  const forceDocumentGeneration = React.useRef(new Set());
   const documentWindowRef = React.useRef(null);
   const DOCUMENT_UPLOAD_ENDPOINT = 'https://sisos-api-latest.axxis-systems.net/proxy/upload';
   const closeUnusedDocumentWindow = () => {
@@ -430,6 +432,36 @@
   };
   const selectedRows = rows.filter(row => selectedRowKeys.includes(String(row.id)));
   const mergeSummary = validateMerge(selectedRows);
+  const defaultMergeReference = selected => {
+    const row = Array.isArray(selected) ? selected.find(item => item) : null;
+    const concept = String(row && row.concept || '').trim();
+    const reference = String(row && row.reference || '').trim();
+    return concept || reference;
+  };
+  const saveMergedReference = (paymentIds, reference) => {
+    const ids = paymentIds.map(Number).filter(positiveId);
+    if (!ids.length) return Promise.reject(new Error('No se pudieron identificar las solicitudes fusionadas.'));
+    return exe('RepoClaimPayment', {
+      operation: 'GET', custom: true, filter: 'id IN (' + ids.join(',') + ')', size: 0, page: 0
+    }).then(response => {
+      if (!response || response.ok !== true || !Array.isArray(response.outData)) {
+        throw new Error(message(response, 'No se pudo localizar la solicitud fusionada.'));
+      }
+      const parentIds = Array.from(new Set(response.outData.map(row => Number(row && row.parentId)).filter(positiveId)));
+      if (!parentIds.length) throw new Error('La fusión fue creada, pero no se pudo identificar la solicitud padre.');
+      const escapedConcept = reference.replace(/'/g, "''");
+      return Promise.all(parentIds.map(parentId => exe('SetField', {
+        entity: 'ClaimPayment', entityId: parentId,
+        fieldValue: "concept=N'" + escapedConcept + "'", raw: true
+      }).then(update => {
+        if (!update || update.ok !== true) throw new Error(message(update, 'No se pudo guardar el concepto de la solicitud fusionada.'));
+        return update;
+      }))).then(updates => {
+        parentIds.forEach(parentId => forceDocumentGeneration.current.add(parentId));
+        return updates;
+      });
+    });
+  };
   const confirmMerge = () => {
     if (mergeLock.current || exportLock.current || documentLock.current || loadingRef.current || !mergeVisible || !mounted.current) return;
     if (mergeNeedsRefresh.current) {
@@ -441,16 +473,27 @@
       setMergeError(validation.error || 'La selección ya no pertenece al listado actual.');
       return;
     }
+    const reference = String(mergeReference || '').trim();
+    if (!reference) {
+      setMergeError('Ingrese la descripción de la solicitud fusionada.');
+      return;
+    }
     mergeLock.current = true;
     setMerging(true);
     setMergeError('');
     setNotice('');
     return Promise.resolve().then(() => {
       if (!mounted.current) return null;
-      return exe('MergePayments', { paymentIds: selectedRows.map(row => Number(row.id)) });
+      const paymentIds = selectedRows.map(row => Number(row.id));
+      return exe('MergePayments', {
+        paymentIds: paymentIds,
+        skipDocumentGeneration: true
+      }).then(response => {
+        if (!response || response.ok !== true) throw new Error(message(response, 'No se pudo confirmar la fusión.'));
+        return saveMergedReference(paymentIds, reference).then(() => response);
+      });
     }).then(response => {
       if (!mounted.current) return;
-      if (!response || response.ok !== true) throw new Error(message(response, 'No se pudo confirmar la fusión.'));
       setNotice(message(response, 'Pagos fusionados.'));
       return loadPayments(1);
     }).catch(failure => {
@@ -509,6 +552,7 @@
     documentLock.current = version;
     const operation = { window: documentWindow, version: version, opened: false };
     documentWindowRef.current = operation;
+    const forceGeneration = forceDocumentGeneration.current.has(paymentId);
     const reportName = 'Solicitud No. ' + paymentId;
     const template = 'Solcitud de Pago.docx';
     const current = () => mounted.current && documentVersion.current === version;
@@ -543,6 +587,7 @@
         const objectUrl = window.URL.createObjectURL(blob);
         documentWindow.location.href = objectUrl;
         operation.opened = true;
+        if (forceGeneration) forceDocumentGeneration.current.delete(paymentId);
         if (documentWindowRef.current === operation) documentWindowRef.current = null;
         window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60000);
         setNotice(reportName + ' abierto.');
@@ -590,12 +635,15 @@
     const opening = !hasClaim ? generateDocument().then(generated => navigate(generated)) : loadClaimDocuments().then(documents => {
       const exactDocuments = documents.filter(exactDocument);
       const existing = exactDocuments.find(document => documentUrl(document.url));
-      if (existing) return navigate(existing);
-      if (exactDocuments.length) throw new Error('El documento existente no tiene una URL válida.');
-      return generateDocument().then(() => loadClaimDocuments()).then(documentsAfterGeneration => {
-        const generated = documentsAfterGeneration.find(document => exactDocument(document) && documentUrl(document.url));
-        if (!generated) throw new Error('El documento se generó, pero no se encontró registrado para abrirlo.');
-        return navigate(generated);
+      if (existing && !forceGeneration) return navigate(existing);
+      if (exactDocuments.length && !forceGeneration) throw new Error('El documento existente no tiene una URL válida.');
+      return generateDocument().then(generated => {
+        if (forceGeneration) return navigate(generated);
+        return loadClaimDocuments().then(documentsAfterGeneration => {
+          const generatedDocument = documentsAfterGeneration.find(document => exactDocument(document) && documentUrl(document.url));
+          if (!generatedDocument) throw new Error('El documento se generó, pero no se encontró registrado para abrirlo.');
+          return navigate(generatedDocument);
+        });
       });
     });
     return opening.catch(failure => {
@@ -843,7 +891,7 @@
         <div className="fusion-requests-title"><span className="fusion-requests-title-mark" aria-hidden="true" />Fusión de solicitudes</div>
       } extra={
         <div className="fusion-requests-header-actions" role="group" aria-label="Acciones de solicitudes">
-          <Button type="primary" className="fusion-requests-action" disabled={loading || merging || exporting || documentOpening} onClick={() => { if (exportLock.current || documentLock.current) return; setMergeError(''); setMergeVisible(true); }}><ActionIcon name="merge" />Fusionar pagos</Button>
+          <Button type="primary" className="fusion-requests-action" disabled={loading || merging || exporting || documentOpening} onClick={() => { if (exportLock.current || documentLock.current) return; setMergeError(''); setMergeReference(defaultMergeReference(selectedRows)); setMergeVisible(true); }}><ActionIcon name="merge" />Fusionar pagos</Button>
           <Button type="primary" className="fusion-requests-action" aria-controls="fusion-requests-filters" aria-expanded={filtersVisible}
             disabled={loading || merging || mergeVisible} onClick={() => { setDraftFilters(Object.assign({}, appliedFilters.current)); setFilterError(''); setFiltersVisible(true); loadFilterCatalogs(true); }}><ActionIcon name="filter" />Filtrar</Button>
         </div>
@@ -937,6 +985,13 @@
             <div className="fusion-requests-merge-field">
               <label htmlFor="fusion-merge-count">Elementos seleccionados:</label>
               <Input id="fusion-merge-count" className="fusion-requests-merge-count" readOnly value={selectedRows.length} />
+            </div>
+            <div className="fusion-requests-merge-field">
+              <label htmlFor="fusion-merge-reference">Descripción de la solicitud fusionada:</label>
+              <Input.TextArea id="fusion-merge-reference" maxLength={500} value={mergeReference}
+                rows={7} autoSize={{ minRows: 6, maxRows: 8 }} disabled={merging}
+                placeholder="Ingrese la descripción de la solicitud fusionada"
+                onChange={event => setMergeReference(event.target.value)} />
             </div>
           </div>
         </Modal>

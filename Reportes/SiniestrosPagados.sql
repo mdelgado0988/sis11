@@ -33,7 +33,7 @@ SELECT
     CAST(ISNULL(cp.grossAmount, ISNULL(cp.total, 0)) - ISNULL(cp.total, 0) AS decimal(18,2)) AS [DEDUCCION],
     CAST(ISNULL(cp.total, 0) AS decimal(18,2)) AS [MONTO_NETO],
     COALESCE(NULLIF(cp.concept, ''), CASE WHEN ISJSON(cp.jDetail) = 1 THEN JSON_VALUE(cp.jDetail, '$[0].description') END, po.concept, '') AS [CONCEPTO],
-    CONVERT(VARCHAR(10), CAST(cp.date AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS [Fecha de pago],
+    CONVERT(VARCHAR(10), CAST(po.date AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103) AS [Fecha de pago],
     -- COBERTURA Y REASEGURO --
     ISNULL(cv.code, '') AS [NOCOBERTURA],
     ISNULL(cv.name, '') AS [XCOBERTURA],
@@ -45,7 +45,8 @@ SELECT
     CAST(ISNULL(cp.total, 0) * ISNULL(ri.pCuota, 0) AS decimal(18,2)) AS [Monto Cedido],
     CAST(ISNULL(cp.total, 0) * ISNULL(ri.pExced, 0) AS decimal(18,2)) AS [Excedente]
 FROM ClaimPayment cp
-INNER JOIN Claim cl ON cp.claimId = cl.id
+LEFT JOIN LifeCoveragePayout po ON po.id = cp.payoutId
+INNER JOIN Claim cl ON cl.id = COALESCE(cp.claimId, po.claimId)
 INNER JOIN LifePolicy lp ON cl.lifePolicyId = lp.id
 LEFT JOIN Contact con ON cl.contactId = con.id -- Cliente/Asegurado
 LEFT JOIN Contact bcon ON cp.contactId = bcon.id -- Beneficiario del pago
@@ -53,7 +54,6 @@ LEFT JOIN Contact bcon ON cp.contactId = bcon.id -- Beneficiario del pago
 LEFT JOIN Contact acon ON lp.cessionBeneficiary = acon.id
 LEFT JOIN Lob lb ON lp.lob = lb.code
 LEFT JOIN ClaimStage cst ON cst.code = cl.stageCode
-LEFT JOIN LifeCoveragePayout po ON po.id = cp.payoutId
 LEFT JOIN LifeCoverage cv ON cv.id = ISNULL(cp.coverageId, po.lifeCoverageId)
 OUTER APPLY (SELECT
     CAST(ISNULL(SUM(CASE WHEN p.reserveType = 'EX' THEN 0 ELSE p.reserved END), 0) AS decimal(18,2)) AS resPago,
@@ -85,8 +85,8 @@ OUTER APPLY (SELECT
           AND lc.lifeCoveragePayoutId = cp.payoutId
     ) x
 ) ri
-WHERE CAST((cp.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' AS date) >= CAST(@FechaDesde AS date)
-  AND CAST((cp.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' AS date) <= CAST(@FechaHasta AS date)
+WHERE CAST((po.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' AS date) >= CAST(@FechaDesde AS date)
+  AND CAST((po.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' AS date) <= CAST(@FechaHasta AS date)
   AND ISNULL(cp.entityState, '') NOT IN ('REJECTED', 'REVERTED')
   AND (ISNULL(@estado, '') = '' OR @estado = CASE WHEN cst.code IS NULL THEN 'SIN ESTADO' ELSE UPPER(cst.name) END)
   AND (
@@ -97,4 +97,4 @@ WHERE CAST((cp.date AT TIME ZONE 'UTC') AT TIME ZONE 'SA Pacific Standard Time' 
       OR ISNULL(con.nif, '') LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
       OR ISNULL(con.passport, '') LIKE '%' + LTRIM(RTRIM(@cliente)) + '%'
   )
-ORDER BY cp.date DESC;
+ORDER BY po.date DESC;

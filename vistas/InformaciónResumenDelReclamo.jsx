@@ -1704,8 +1704,13 @@
     summary.total = roundMoney(summary.payment + summary.expense);
     return summary;
   };
-  // A reversal is displayed for audit purposes, but neither side affects valuation totals.
-  const effectiveIndemnityMovement = (row) => ![2, '2'].includes(row.status);
+  // Payment reversals remain part of the payment balance: the original payment,
+  // its negative reversal and any replacement payment must net together. Expense
+  // reversals stay excluded from valuation totals.
+  const effectiveIndemnityMovement = (row) => {
+    const bucket = String(row && row.reserveType || '').trim().toUpperCase();
+    return bucket === 'IN' || ![2, '2'].includes(row && row.status);
+  };
   const activeReserveMovements = (claim, coverageId) => {
     const requestedClaimId = claim && Number(claim.id);
     return Array.isArray(claim && claim.Payouts) ? claim.Payouts.filter((item) => {

@@ -45,8 +45,10 @@ FROM (
   CONVERT(VARCHAR(10), CAST(op.fecha AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time', 103), op.solicitud,
   CAST(ISNULL(op.deduccion, 0) AS decimal(18,2)), CAST(ISNULL(op.monto, 0) AS decimal(18,2)),
   CASE WHEN op.solicitud IS NOT NULL THEN
-         CASE op.estado WHEN 'EXECUTED' THEN 'Ejecutada' WHEN 'APROVED' THEN 'Aprobada' WHEN 'APPROVED' THEN 'Aprobada'
-           WHEN 'REVERTED' THEN 'Reversada' WHEN 'REJECTED' THEN 'Rechazada' WHEN 'CLOSED' THEN 'Cerrada' ELSE 'Pendiente' END
+         CASE WHEN op.parentId IS NOT NULL OR UPPER(ISNULL(op.estado, '')) IN ('MERGED', 'FUSIONADA') THEN 'Fusionada'
+              ELSE CASE op.estado WHEN 'EXECUTED' THEN 'Ejecutada' WHEN 'APROVED' THEN 'Aprobada' WHEN 'APPROVED' THEN 'Aprobada'
+                WHEN 'REVERTED' THEN 'Reversada' WHEN 'REJECTED' THEN 'Rechazada' WHEN 'CLOSED' THEN 'Cerrada' ELSE 'Pendiente' END
+         END
        WHEN ISNULL(p.payed, 0) <> 0 THEN 'Sin Solicitud' END,
   1, cl.id, p.id, CAST(p.date AS datetime2)
  FROM LifeCoveragePayout p
@@ -55,7 +57,7 @@ FROM (
  LEFT JOIN LifeCoverage lc ON lc.id = p.lifeCoverageId
  LEFT JOIN Contact c ON c.id = cl.contactId
  LEFT JOIN Product pd ON pd.code = lp.productCode
- OUTER APPLY (SELECT TOP 1 cp.id AS solicitud, cp.date AS fecha, cp.entityState AS estado,
+ OUTER APPLY (SELECT TOP 1 cp.id AS solicitud, cp.date AS fecha, cp.entityState AS estado, cp.parentId AS parentId,
     (SELECT SUM(ISNULL(c2.deductions, 0)) FROM ClaimPayment c2 WHERE c2.payoutId = p.id) AS deduccion,
     (SELECT SUM(ISNULL(c2.total, 0)) FROM ClaimPayment c2 WHERE c2.payoutId = p.id) AS monto
    FROM ClaimPayment cp WHERE cp.payoutId = p.id ORDER BY cp.id DESC) op

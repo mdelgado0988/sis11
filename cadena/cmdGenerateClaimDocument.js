@@ -6,10 +6,10 @@
  * Description: Generates a claim document from a template, filling it with the DTO returned by the
  *              template's context command (e.g. cmdContexDocReciboPago for 'Solcitud de Pago.docx'),
  *              and registers it in the claim's documents so it can be viewed from the claim.
- * Mission: MSN-000041 (globaluat)
+ * Mission: MSN-000041 (globaluat); MSN-000136: requests that belong to no claim
  * Creation Date: 06/10/2026
  * Input: {
- *   claimId,            // claim where the document is generated (required)
+ *   claimId,            // claim where the document is generated (required unless the context carries a paymentId)
  *   template,           // template file name, e.g. 'Solcitud de Pago.docx' (required)
  *   reportName,         // optional display name used when registering the document in the claim
  *   context,            // context sent to the DTO command, object or JSON string, e.g. { claimId: 265 } or { paymentId: 259 }
@@ -17,17 +17,26 @@
  * }
  *   The DTO command receives the context as sent. When the context has no 'row', it is also exposed as
  *   row (row.reclamo = claimId), which is the shape cmdContexDocReciboPago reads.
- * Output: { ok, msg, claimDocumentId, fileName, url, template, contextChain }
+ *   Without claimId, the claim is taken from the request (context.paymentId / row.solicitud). When the request
+ *   belongs to no claim (e.g. a merge of requests from several claims), contextChain is required: the DTO
+ *   command receives row.solicitud = row.paymentId = the request, without row.reclamo, and the document is
+ *   generated from the request alone and returned without being registered in any claim (claimDocumentId null).
+ * Output: { ok, msg, claimDocumentId, fileName, url, template, contextChain, paymentId }
  */
 
 const input = context || {};
 const template = String(input.template || '').trim();
 const reportName = String(input.reportName || '').trim();
 const callerContext = parseContext(input.context);
-const claimId = resolveClaimId(input, callerContext);
+const paymentId = resolvePaymentId(input, callerContext);
+const claimId = resolveClaimId(input, callerContext, paymentId);
 
 if (!template) {
     fail("No se recibió el nombre de la plantilla (template)");
+}
+
+if (!claimId) {
+    return generateRequestDocument(paymentId);
 }
 
 const claim = getClaim(claimId);
@@ -86,18 +95,76 @@ function parseContext(raw) {
     return toPlain(raw);
 }
 
-function resolveClaimId(data, ctx) {
+function resolveClaimId(data, ctx, requestId) {
     const candidates = [data.claimId, ctx.claimId, ctx.row && ctx.row.reclamo]
         .map(Number)
         .filter(v => Number.isInteger(v) && v > 0);
 
     if (!candidates.length) {
-        fail("No se recibió el claimId");
+        if (!requestId) {
+            fail("No se recibió el claimId ni la solicitud (paymentId)");
+        }
+        // 0 = the request belongs to no claim
+        return getPaymentClaimId(requestId);
     }
     if (candidates.some(v => v !== candidates[0])) {
         fail(`El claimId ${candidates[0]} no coincide con el reclamo del contexto (${candidates.join(', ')})`);
     }
     return candidates[0];
+}
+
+function resolvePaymentId(data, ctx) {
+    const row = ctx.row && typeof ctx.row === 'object' ? ctx.row : {};
+    const candidates = [data.paymentId, ctx.paymentId, ctx.solicitud, row.solicitud, row.paymentId]
+        .map(Number)
+        .filter(v => Number.isInteger(v) && v > 0);
+    return candidates.length ? candidates[0] : 0;
+}
+
+function getPaymentClaimId(id) {
+    doCmd({
+        cmd: "LoadEntity",
+        data: {
+            entity: "ClaimPayment",
+            fields: "id, claimId",
+            filter: `id = ${id}`
+        }
+    });
+
+    const payment = LoadEntity.outData;
+    if (!payment || !payment.id) {
+        fail(`No se encontró la solicitud ${id}`);
+    }
+    const value = Number(payment.claimId);
+    return Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+// The request belongs to no claim: the document comes from the request alone and is not registered in any claim.
+function generateRequestDocument(id) {
+    const chain = String(input.contextChain || '').trim();
+    if (!chain) {
+        fail(`La solicitud ${id} no pertenece a un reclamo: envíe contextChain con el comando de contexto de la plantilla ${template}`);
+    }
+
+    const row = Object.assign({}, callerContext.row && typeof callerContext.row === 'object' ? callerContext.row : {}, { solicitud: id, paymentId: id });
+    delete row.reclamo;
+
+    const dto = getDto(chain, Object.assign({}, callerContext, { row }));
+    if (!Object.keys(dto).some(key => key !== 'ok' && key !== 'msg')) {
+        fail(`El comando de contexto ${chain} no devolvió datos para la solicitud ${id}`);
+    }
+    const generated = generateDoc(template, { custom: dto });
+
+    return {
+        ok: true,
+        msg: `Documento ${template} generado para la solicitud ${id}, que no pertenece a un reclamo (no se registra en ningún reclamo)`,
+        claimDocumentId: null,
+        fileName: generated.fileName,
+        url: generated.url,
+        template,
+        contextChain: chain,
+        paymentId: id
+    };
 }
 
 function getClaim(id) {

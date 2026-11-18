@@ -6,31 +6,38 @@
  * @email support@axxis-systems.com
  * @created 2026/01/07
  * @name cmdContexDocReciboPago
- * @version 1.1
+ * @version 1.2
  * @purpose Builds the payment receipt document context for a claim payment.
  * @context Receives the claim identifier through _row.reclamo and, optionally,
  *          the payment request identifier through _row.solicitud.
+ *          MSN-000136: with _row.solicitud and no _row.reclamo (a request that belongs to
+ *          no claim, e.g. a merge of requests from several claims), the context is built
+ *          from the request alone.
  * @output Returns the payment data enriched with document and user information.
  */
 
 const claimId = context.row.reclamo;
 const requestedPaymentId = getRequestedPaymentId(context && context.row);
+// Solicitud sin reclamo: el documento sale completo de la solicitud (MSN-000136).
+const requestOnly = !claimId && requestedPaymentId !== null;
 
 /*==================
   Obtener Pago PayClaim
 =================*/
 
-doCmd({
-  cmd:"RepoClaim",
-  data: {
-    operation:"GET",
-    filter:`id = '${claimId}'`,
-    include:["Payments","Process"]
-  }
-});
+if (!requestOnly) {
+  doCmd({
+    cmd:"RepoClaim",
+    data: {
+      operation:"GET",
+      filter:`id = '${claimId}'`,
+      include:["Payments","Process"]
+    }
+  });
+}
 
 // return RepoClaim
-if (!claimId) {
+if (!claimId && !requestOnly) {
   return { ok: true, msg: ''};
 }
 
@@ -43,11 +50,11 @@ doCmd({
 
 const catPayment = RepoPaymentTypeCatalog.outData;
 
-if (!(RepoClaim.total > 0) || !RepoClaim.outData) {
+if (!requestOnly && (!(RepoClaim.total > 0) || !RepoClaim.outData)) {
   return { ok: true, msg: '', cumulo: 0 };
 }
 
-const claim = RepoClaim.outData[0]
+const claim = requestOnly ? null : RepoClaim.outData[0]
 const paymentClaim = requestedPaymentId ? { id: requestedPaymentId } : getLatestClaimPayment(claim);
 
 if (!paymentClaim) {
@@ -79,17 +86,18 @@ const payment = RepoClaimPayment.outData[0];
 if (!payment) {
   return { ok: true, msg: '@No se encontró la solicitud de pago indicada', cumulo: 0 };
 }
-const mergedChildrenForClaim = Number(payment.id) > 0
+const mergedChildrenForClaim = !requestOnly && Number(payment.id) > 0
   ? loadPaymentsByParent(payment.id).filter(child => Number(child && child.claimId) === Number(claimId))
   : [];
 const isMergedRequestForClaim = mergedChildrenForClaim.length > 0;
-if (Number(payment.claimId) !== Number(claimId) && !isMergedRequestForClaim) {
+if (!requestOnly && Number(payment.claimId) !== Number(claimId) && !isMergedRequestForClaim) {
   return { ok: true, msg: '@La solicitud de pago no pertenece al reclamo indicado', cumulo: 0 };
 }
 
 doCmd({"cmd":"GetContacts","data":{"filter":`id = ${payment.contactId}`}})
 
-if (!processId) {
+const documentProcessId = requestOnly ? (payment.processId || (payment.Process && payment.Process.id)) : processId;
+if (!documentProcessId) {
   return { ok: true, msg: '@Proceso no encontrado en el pago', cumulo: 0 };
 }
 
@@ -102,7 +110,7 @@ if (additionalBeneficiary) {
 }
 // dataContex.transaccion = catPayment.filter(x=>x.code == dataContex.paymentType)[0].name;
 const isMerged = isMergedPayment(dataContex) || isMergedPayment(payment);
-dataContex.transaccion = payment.payoutId || (isMerged ? dataContex.processId || processId : null);
+dataContex.transaccion = payment.payoutId || (isMerged || requestOnly ? dataContex.processId || documentProcessId : null);
 const today = new Date(dataContex.date);
 dataContex.cedula = GetContacts.outData[0].cnp || GetContacts.outData[0].nif
 
@@ -127,11 +135,13 @@ const mergedChildConcept = getMeaningfulPaymentText(mergedChild);
 if (isMerged) {
   dataContex.reference = '';
 }
-if (mergedChildConcept && (isMerged || mergedChild)) {
+const parentConcept = getMeaningfulConcept(payment);
+if (mergedChildConcept && !parentConcept && (isMerged || mergedChild)) {
   dataContex.concept = mergedChildConcept;
-  if (!isMerged) {
-    dataContex.reference = mergedChildConcept;
-  }
+}
+if (!isMerged && mergedChildConcept) {
+  dataContex.concept = mergedChildConcept;
+  dataContex.reference = mergedChildConcept;
 }
 
 formatOutputAmounts(dataContex);
@@ -218,7 +228,7 @@ function getLatestClaimPayment(claim) {
       cmd: 'LoadEntities',
       data: {
         entity: 'ClaimPayment',
-        fields: 'id,date,created,claimId,parentId,producer,entityState,reference,concept',
+        fields: 'id,date,claimId,parentId,producer,entityState,reference,concept',
         filter: `claimId = ${claimId}`,
         noTracking: true
       }
@@ -256,7 +266,7 @@ function getLatestClaimPayment(claim) {
       cmd: 'LoadEntities',
       data: {
         entity: 'ClaimPayment',
-        fields: 'id,date,created,claimId,parentId,producer,entityState,reference,concept',
+        fields: 'id,date,claimId,parentId,producer,entityState,reference,concept',
         filter: `id IN (${uniqueMergedPaymentIds.join(',')}) OR parentId IN (${uniqueMergedPaymentIds.join(',')})`,
         noTracking: true
       }
@@ -309,7 +319,7 @@ function loadPaymentsByParent(parentId) {
     cmd: 'LoadEntities',
     data: {
       entity: 'ClaimPayment',
-      fields: 'id,date,created,claimId,parentId,producer,entityState,reference,concept',
+      fields: 'id,date,claimId,parentId,producer,entityState,reference,concept',
       filter: `parentId = ${Number(parentId)}`,
       noTracking: true
     }
@@ -345,6 +355,11 @@ function getMeaningfulPaymentText(payment) {
     .map(value => String(value === undefined || value === null ? '' : value).trim())
     .filter(value => value && value.toUpperCase() !== 'MERGED');
   return values[0] || '';
+}
+
+function getMeaningfulConcept(payment) {
+  const value = String(payment?.concept ?? '').trim();
+  return value && value.toUpperCase() !== 'MERGED' ? value : '';
 }
 
 function comparePayments(left, right) {
