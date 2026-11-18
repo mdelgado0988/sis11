@@ -351,15 +351,23 @@ function getLatestInsuranceTax(rows) {
 
 /**
  * MSN-000203: Impuesto de Auto de la misma cotizacion que el Impuesto de Seguros que se
- * contabiliza (su renglon es posterior al de Seguros); 0 si esa cotizacion no lo tiene.
+ * contabiliza; 0 si esa cotizacion no lo tiene. El id no sirve para ordenarlos: los
+ * renglones de un mismo guardado reciben ids en cualquier orden. La regla de Auto corre
+ * despues de la de Seguros, asi que su renglon se crea despues (campo created).
  */
 function getIssuanceAutoTax(policy, rows) {
   if (isSurety(policy)) return 0;
   const auto = getLatestQuotationTaxRow(rows, AUTO_TAX_NAME);
   if (!auto) return 0;
   const insurance = getLatestQuotationTaxRow(rows, 'IMPUESTO DE SEGUROS');
-  if (insurance && toPositiveInteger(auto.id) < toPositiveInteger(insurance.id)) return 0;
+  if (insurance && getCreatedKey(auto) < getCreatedKey(insurance)) return 0;
   return toDecimal(auto.amount);
+}
+
+function getCreatedKey(row) {
+  const created = row && row.created;
+  if (created instanceof Date) return created.toISOString();
+  return String(created || '');
 }
 
 function getLatestQuotationTaxRow(rows, taxName) {

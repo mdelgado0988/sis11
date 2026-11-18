@@ -9,6 +9,7 @@
   *@Created: 15/07/2026
   *@Input: {policyId}
   *@Output: [{ resultado }]
+  *@Changes: MSN-000206 - ComentariosExtrasLineas: las Descripciones Extras del vehículo línea por línea, con sus espacios, para la oferta y la póliza.
 */
 
 const policyId = toValidNumber(context?.policyId);
@@ -210,6 +211,8 @@ resultado.userData = enrichAutoUserData(oaUserData, configCobtarAuto, {
   cmbUsoAutoText: resultado.Uso
 });
 resultado.Tarifas = parseJsonArray(resultado.userData.hiddenCobtar);
+// MSN-000206: las plantillas imprimen las Descripciones Extras línea por línea, con los espacios tal como se escribieron.
+resultado.ComentariosExtrasLineas = lineasTexto(oaUserData?.tbextras);
 
 //Fecha actual
 resultado.DiaFecha = dia;
@@ -662,6 +665,12 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+// Texto multilínea -> una entrada por línea; sin líneas vacías al principio ni espacios al final.
+function lineasTexto(valor) {
+  const texto = String(valor ?? '').replace(/\r\n?/g, '\n').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '');
+  return texto ? texto.split('\n').map(linea => linea.replace(/\s+$/, '')) : [];
 }
 
 function normalizeObject(value) {

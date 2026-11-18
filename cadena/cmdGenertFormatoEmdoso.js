@@ -9,6 +9,8 @@
  * @summary This command makes Endosos Template Data Builder + GeneratePolicyDoc
  * @changes MSN-000151 - ramo 96: marca y modelo por ramo y marca, provincia y ciudad de la dirección del tomador, límite de la cobertura incluida. Los demás ramos no cambian.
  * @changes MSN-000160 - ramo 6: plantillas FormatoEndososAuto / FormatoEndososSinCoberturaAuto (el aumento de suma sigue con AdendoAumentoAUTO), dirección completa, ciudad y provincia del tomador, suma asegurada y descripciones extras del vehículo, tasa de impuesto de la póliza. Los demás ramos no cambian.
+ * @changes MSN-000190 - fianzas (ramos 81-84): en el endoso de inclusión, «Límites de Responsabilidad» muestra el límite de la cobertura incluida (antes 0.00). Los demás ramos no cambian.
+ * @changes MSN-000206 - ramo 6: Descripciones Extras línea por línea (Riesgo.ComentariosExtrasLineas), nombres con un solo espacio entre palabras y suma asegurada 0.00 cuando el vehículo no la tiene, como en la póliza. Los demás ramos no cambian.
 */
 
 const changeId = context.changeId;
@@ -1734,8 +1736,9 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     custom.Address.NombreDistrito = ciudadAuto;
     custom.Address.NombreCiudad = ciudadAuto;
     const sumaVehiculo = String(riesgo.SumaAsegurada ?? '').trim();
-    riesgo.SumaAseguradaTexto = sumaVehiculo ? n(sumaVehiculo) : '';
+    riesgo.SumaAseguradaTexto = n(sumaVehiculo || 0);
     riesgo.ComentariosExtras = String(suretyValue(insuredData, ['tbextras']) ?? '').trim();
+    riesgo.ComentariosExtrasLineas = lineasTexto(suretyValue(insuredData, ['tbextras']));
     const primaPoliza = numericValue(policy?.anualPremium);
     const tasaImpuesto = primaPoliza ? Math.round(numericValue(policy?.tax) / primaPoliza * 1000) / 10 : 0;
     custom.EtiquetaImpuesto = tasaImpuesto > 0 ? `Impuesto ${tasaImpuesto}%:` : 'Impuesto:';
@@ -1766,6 +1769,12 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
     actualizarEntidad(row, custom.ProductorAnterior);
     
   });
+
+  // MSN-000206: en Automóvil los nombres van con un solo espacio entre palabras (sin segundo nombre quedaban dos).
+  if (isAutoPolicy(policy)) {
+    [custom.Tomador, custom.Asegurado, custom.Acreedor, custom.AcreedorAnterior, custom.Productor, custom.ProductorAnterior]
+      .forEach(entidad => { entidad.NombreCompleto = String(entidad.NombreCompleto ?? '').replace(/\s+/g, ' ').trim(); });
+  }
 
   if (true) {
 
@@ -1838,8 +1847,9 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
       }
 
       // MSN-000151: en una inclusión del ramo 96 la cobertura incluida no existía antes: su límite anterior es 0.
-      const incluidaRamoTecnico = isRamoTecnico96(policy) && !isCoverageRemoval && !oldChangeCov;
-      const oldLimit = incluidaRamoTecnico ? 0 : (oldChangeCov?.limit ?? source?.limit ?? 0);
+      // MSN-000190: lo mismo en las fianzas (ramos 81-84).
+      const incluidaSinLimiteAnterior = (isRamoTecnico96(policy) || isSuretyPolicy(policy)) && !isCoverageRemoval && !oldChangeCov;
+      const oldLimit = incluidaSinLimiteAnterior ? 0 : (oldChangeCov?.limit ?? source?.limit ?? 0);
       const newLimit = isCoverageRemoval
         ? 0
         : (changeCov?.limit ?? source?.limit ?? oldLimit);
@@ -1898,6 +1908,12 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   }
 
   return custom;
+}
+
+// Texto multilínea -> una entrada por línea; sin líneas vacías al principio ni espacios al final.
+function lineasTexto(valor) {
+  const texto = String(valor ?? '').replace(/\r\n?/g, '\n').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '');
+  return texto ? texto.split('\n').map(linea => linea.replace(/\s+$/, '')) : [];
 }
 
 function getNombreCompleto(row){

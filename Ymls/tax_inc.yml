@@ -1,190 +1,1953 @@
 Rules:
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTE",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: QUOTE
-        
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTE",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTE",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: QUOTE
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTE",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTE",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: QUOTE
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTECERT",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
-    event: QUOTECERT  
-    
+    event: QUOTECERT
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTECERT",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTECERT",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: QUOTECERT
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTECERT",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"QUOTECERT",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: QUOTECERT
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"Anniversary",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: Anniversary
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"Anniversary",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"Anniversary",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: Anniversary
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"Anniversary",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"Anniversary",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: Anniversary
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ANNIVERSARY",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ANNIVERSARY
-    
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ANNIVERSARY",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ANNIVERSARY",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ANNIVERSARY
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ANNIVERSARY",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ANNIVERSARY",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ANNIVERSARY
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"PREQUOTE",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
-    event: PREQUOTE    
-  
+    event: PREQUOTE
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"PREQUOTE",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"PREQUOTE",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: PREQUOTE
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"PREQUOTE",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"PREQUOTE",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: PREQUOTE
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicyCapital",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangePolicyCapital
-    
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicyCapital",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicyCapital",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangePolicyCapital
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicyCapital",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicyCapital",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangePolicyCapital
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeAddCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeAddCoverage
-    
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeAddCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeAddCoverage",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeAddCoverage
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeAddCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeAddCoverage",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeAddCoverage
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeRemoveCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeRemoveCoverage
-      
-  - name: Impuesto de Seguros
-    amount: >
+
+  - name: Impuesto Coaseguro
+    amount: |-
       /*block*/
-      /* AXX-253 / GLOB-1209 - Endoso de Prima Incobrable.
-         Para ese endoso el impuesto se interpreta como estado final de la poliza,
-         por lo tanto debe quedar en cero. Para cualquier otra cancelacion se conserva
-         el calculo nativo (cmdCalculateISCancellation), sin cambios.
-         CUIDADO: el preprocesador de formulas reemplaza todo guion bajo por "context.", tambien
-         dentro de los literales de texto: ninguna variable ni cadena de aqui puede llevarlo. */
-      
-      const n2 = (value) => Number((Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100).toFixed(2));
-      
-      let tipoEndoso = "";
-      
-      try {
-        const jAdicional = (_change && _change.jAdditional) ? String(_change.jAdditional) : "";
-        if (jAdicional.length > 0) tipoEndoso = String(JSON.parse(jAdicional).endorsementType || "");
-      } catch (errorMarca) {
-        tipoEndoso = "";
-      }
-      
-      let impuestoCancelacion = 0;
-      
-      if (tipoEndoso === "UNCOLLECTIBLEPREMIUM") {
-        impuestoCancelacion = 0;
-      } else {
-        const contextoInterno = JSON.stringify({
-          policyId: _pol.id,
-          effectiveDate: _change.effectiveDate
-        });
-      
-        doCmd({
-          cmd: "ExeChain",
-          data: {
-            chain: "cmdCalculateISCancellation",
-            context: contextoInterno
-          }
-        });
-      
-        impuestoCancelacion = n2(ExeChain.outData || 0);
-      }
-      
-      impuestoCancelacion
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeRemoveCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeRemoveCoverage",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeRemoveCoverage
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeRemoveCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeRemoveCoverage",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeRemoveCoverage
+
+  - name: Impuesto de Seguros
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCancellation",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeCancellation
-  - name: Impuesto de Seguros
-    amount: >
-      /*block*/
-      /* Endoso de orden de proceder: mover la vigencia no debe modificar el impuesto.
-         Se conserva exactamente el impuesto vigente de la poliza. */
-      let tipoEndoso = "";
-      try {
-        const datosCambio = (_pol && _pol.jChangeDto && _pol.jChangeDto.data)
-          ? _pol.jChangeDto.data
-          : {};
-        const jAdicional = (_change && _change.jAdditional)
-          ? String(_change.jAdditional)
-          : (datosCambio.jAdditional ? String(datosCambio.jAdditional) : "");
-        if (jAdicional.length > 0) tipoEndoso = String(JSON.parse(jAdicional).endorsementType || "");
-      } catch (errorMarca) {
-        tipoEndoso = "";
-      }
-      
-      const resultado =( tipoEndoso === "PROCEEDORDER"
-        ? Number(Number(_pol.tax || 0).toFixed(2))
-        : Number((0.05*_pol.anualPremium).toFixed(2)))
 
-      resultado
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCancellation",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCancellation",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeCancellation
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCancellation",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCancellation",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeCancellation
+
+  - name: Impuesto de Seguros
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeTerm",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeTerm
 
-  - name: Impuesto de Seguros
-    amount: >
+  - name: Impuesto Coaseguro
+    amount: |-
       /*block*/
-      /* Endoso de orden de proceder: ChangeCoverage solo mueve vigencias.
-         Se conserva exactamente el impuesto vigente de la poliza. */
-      let tipoEndoso = "";
-      try {
-        const datosCambio = (_pol && _pol.jChangeDto && _pol.jChangeDto.data)
-          ? _pol.jChangeDto.data
-          : {};
-        const jAdicional = (_change && _change.jAdditional)
-          ? String(_change.jAdditional)
-          : (datosCambio.jAdditional ? String(datosCambio.jAdditional) : "");
-        if (jAdicional.length > 0) tipoEndoso = String(JSON.parse(jAdicional).endorsementType || "");
-      } catch (errorMarca) {
-        tipoEndoso = "";
-      }
-      tipoEndoso === "PROCEEDORDER"
-        ? Number(Number(_pol.tax || 0).toFixed(2))
-        : Number((0.05*_pol.anualPremium).toFixed(2))
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeTerm",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeTerm",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeTerm
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeTerm",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeTerm",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeTerm
+
+  - name: Impuesto de Seguros
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeCoverage
-    
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverage",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeCoverage
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverage",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverage",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeCoverage
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeReinstatement",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeReinstatement
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeReinstatement",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeReinstatement",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeReinstatement
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeReinstatement",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeReinstatement",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeReinstatement
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"FrequencyChange",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: FrequencyChange
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"FrequencyChange",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"FrequencyChange",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: FrequencyChange
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"FrequencyChange",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"FrequencyChange",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: FrequencyChange
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicySurcharge",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangePolicySurcharge
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicySurcharge",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicySurcharge",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangePolicySurcharge
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicySurcharge",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePolicySurcharge",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangePolicySurcharge
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeExclusion",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeExclusion
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeExclusion",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeExclusion",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeExclusion
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeExclusion",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeExclusion",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeExclusion
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeInsuredObject",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeInsuredObject
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeInsuredObject",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeInsuredObject",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeInsuredObject
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeInsuredObject",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeInsuredObject",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeInsuredObject
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeIntermediary",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeIntermediary
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeIntermediary",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeIntermediary",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeIntermediary
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeIntermediary",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeIntermediary",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeIntermediary
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverageTechData",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeCoverageTechData
 
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverageTechData",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverageTechData",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeCoverageTechData
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverageTechData",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeCoverageTechData",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeCoverageTechData
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePaymentMethod",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangePaymentMethod
 
-    #Estaba pendiente GLOB-742
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePaymentMethod",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePaymentMethod",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangePaymentMethod
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePaymentMethod",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangePaymentMethod",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangePaymentMethod
+
   - name: Impuesto de Seguros
-    amount: Number((0.05*_pol.anualPremium).toFixed(2))
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeLoading",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iva:0).toFixed(2))
     condition: 1==1
     event: ChangeLoading
-    
+
+  - name: Impuesto Coaseguro
+    amount: |-
+      /*block*/
+      /* MSN-000006: punto unico de calculo. Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeLoading",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.icoa:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000006: el renglon ICOA solo existe cuando hay coasegurador con rol de
+         banco en un ramo de Fianzas. El modo CHECK responde eso sin calcular totales. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeLoading",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.applies:false)===true
+    event: ChangeLoading
+
+  - name: Impuesto de Auto
+    amount: |-
+      /*block*/
+      /* MSN-000203: Impuesto de Auto (1 %, hoy solo ramo 6). Toda la logica vive en la cadena
+         cmdCalculateGeneralTax; esta regla solo toma su parte del resultado. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeLoading",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      Number(Number((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.iauto:0).toFixed(2))
+    condition: |-
+      /*block*/
+      /* MSN-000203: el renglon de Auto solo existe en los ramos con tasa de Auto; en cancelacion
+         y orden de proceder, solo si la poliza ya lo tiene. El modo CHECK responde eso. */
+      doCmd({cmd:"ExeChain",data:{chain:"cmdCalculateGeneralTax",
+      context:JSON.stringify({
+        action:"ChangeLoading",
+        mode:"CHECK",
+        policyId:_pol.id,
+        lob:_pol.lob,
+        anualPremium:_pol.anualPremium,
+        policyTax:_pol.tax,
+        effectiveDate:(_change&&_change.effectiveDate)?_change.effectiveDate:"",
+        changeAdditional:(_change&&_change.jAdditional)?String(_change.jAdditional):((_pol.jChangeDto&&_pol.jChangeDto.data&&_pol.jChangeDto.data.jAdditional)?String(_pol.jChangeDto.data.jAdditional):""),
+        coinsurance:(_pol&&_pol.CoinsuranceCessions)?_pol.CoinsuranceCessions:[]
+      })
+      }});
+      ((ExeChain&&ExeChain.ok&&ExeChain.outData)?ExeChain.outData.appliesAuto:false)===true
+    event: ChangeLoading
+
   - name: LIQCLAIMS
-    amount: 0.0*_pay.total
+    amount: |-
+      0.0*_pay.total
     condition: _ben.isPerson==false
     event: ClaimPayment
 
   - name: LIQCLAIMS
-    amount: 0*_pay.total
+    amount: |-
+      0*_pay.total
     condition: _ben.isPerson==true
-    event: ClaimPayment    
+    event: ClaimPayment
+

@@ -613,38 +613,74 @@
                 jAdditional: JSON.stringify({ endorsementType:'LOADING' })
             };
         };
+        async function requestLoadingQuote(){
+            // ChangeLoading without operation ADD calculates the endorsement
+            // in memory and returns the resulting coverages without saving.
+            const response = await exe('ChangeLoading', buildLoadingSimulationPayload());
+            if(!response || response.ok === false) throw errorText(response, 'No fue posible calcular la prima.');
+            let quoted = response.outData;
+            if(typeof quoted === 'string') quoted = JSON.parse(quoted);
+            quoted = quoted && (quoted.quote || quoted.calculation || quoted);
+            let quotedCoverages = quoted && (quoted.jNewCoverages || quoted.coverages || quoted);
+            if(typeof quotedCoverages === 'string') quotedCoverages = JSON.parse(quotedCoverages);
+            if(Array.isArray(quotedCoverages) && quotedCoverages.length === 1 && Array.isArray(quotedCoverages[0])) quotedCoverages = quotedCoverages[0];
+            if(!Array.isArray(quotedCoverages)) quotedCoverages = [];
+            if(!quotedCoverages.length) throw 'ChangeLoading no retornó coberturas calculadas.';
+            return quotedCoverages;
+        }
+        const findSameCoverage = function(rows, coverage){
+            return (rows || []).find(function(row){ return Number(row.id || 0) > 0 && Number(row.id) === Number(coverage.id); })
+                || (rows || []).find(function(row){ return String(row.code || '') === String(coverage.code || ''); });
+        };
+        // A loading endorsement only changes the loading percentage of each coverage:
+        // the premium must end at current base premium x (1 + total %) and the sum
+        // assured must not move. The quote re-rates the policy with its current data,
+        // so incomplete data (e.g. a vehicle without its risk value) changes sums or
+        // base premiums and the billed amount no longer matches the percentage.
+        const expectedLoadingPremium = function(original){
+            const edited = (coverages || []).find(function(item){ return Number(item.id) === Number(original.id); }) || original;
+            const activeLoadings = (edited.Loadings || []).filter(function(item){ return !item.toRemove; });
+            return roundMoney(Number(original.basePremium || 0) * (1 + getTotalLoading(activeLoadings) / 100));
+        };
+        const loadingQuoteDeviations = function(quotedCoverages){
+            return (Coverages || []).map(function(original){
+                const quote = findSameCoverage(quotedCoverages, original);
+                return {
+                    code:String(original.code || ''), name:original.name || original.description || '',
+                    previousLimit:roundMoney(original.limit), quotedLimit:quote ? roundMoney(quote.limit) : 0,
+                    expectedPremium:expectedLoadingPremium(original), quotedPremium:quote ? roundMoney(quote.premium) : 0
+                };
+            }).filter(function(row){
+                return Math.abs(row.quotedLimit - row.previousLimit) > 0.015 || Math.abs(row.quotedPremium - row.expectedPremium) > 0.015;
+            });
+        };
         async function calculatePremiumPreview(){
             setPremiumPreviewLoading(true);
             try {
-                // ChangeLoading without operation ADD calculates the endorsement
-                // in memory and returns the resulting coverages without saving.
-                const response = await exe('ChangeLoading', buildLoadingSimulationPayload());
-                if(!response || response.ok === false) throw errorText(response, 'No fue posible calcular la prima.');
-                let quoted = response.outData;
-                if(typeof quoted === 'string') quoted = JSON.parse(quoted);
-                quoted = quoted && (quoted.quote || quoted.calculation || quoted);
-                let quotedCoverages = quoted && (quoted.jNewCoverages || quoted.coverages || quoted);
-                if(typeof quotedCoverages === 'string') quotedCoverages = JSON.parse(quotedCoverages);
-                if(Array.isArray(quotedCoverages) && quotedCoverages.length === 1 && Array.isArray(quotedCoverages[0])) quotedCoverages = quotedCoverages[0];
-                if(!Array.isArray(quotedCoverages)) quotedCoverages = [];
-                if(!quotedCoverages.length) throw 'ChangeLoading no retornó coberturas calculadas.';
+                const quotedCoverages = await requestLoadingQuote();
                 const details = (coverages || []).map(function(coverage){
-                    const quote = quotedCoverages.find(function(row){ return String(row.code || '') === String(coverage.code || ''); });
-                    const original = (Coverages || []).find(function(row){ return String(row.code || '') === String(coverage.code || ''); }) || coverage;
+                    const quote = findSameCoverage(quotedCoverages, coverage);
+                    const original = findSameCoverage(Coverages, coverage) || coverage;
                     const previousPremium = Number(original.premium || original.basePremium || 0);
                     const calculatedPremium = Number(quote && quote.premium !== undefined ? quote.premium : 0);
-                    return { code:String(coverage.code || ''), name:coverage.name || coverage.description || '', previousPremium:Number(previousPremium.toFixed(2)), basePremium:Number(calculatedPremium.toFixed(2)), loadingAmount:Number((calculatedPremium - previousPremium).toFixed(2)), calculatedPremium:Number(calculatedPremium.toFixed(2)), variation:Number((calculatedPremium - previousPremium).toFixed(2)) };
+                    return { code:String(coverage.code || ''), name:coverage.name || coverage.description || '', previousPremium:Number(previousPremium.toFixed(2)), expectedPremium:expectedLoadingPremium(original), basePremium:Number(calculatedPremium.toFixed(2)), loadingAmount:Number((calculatedPremium - previousPremium).toFixed(2)), calculatedPremium:Number(calculatedPremium.toFixed(2)), variation:Number((calculatedPremium - previousPremium).toFixed(2)) };
                 });
                 const total = details.reduce(function(result, row){
                     result.previousPremium += row.previousPremium;
+                    result.expectedPremium += row.expectedPremium;
                     result.basePremium += row.basePremium;
                     result.loadingAmount += row.loadingAmount;
                     result.calculatedPremium += row.calculatedPremium;
                     result.variation += row.variation;
                     return result;
-                }, { previousPremium:0, basePremium:0, loadingAmount:0, calculatedPremium:0, variation:0 });
+                }, { previousPremium:0, expectedPremium:0, basePremium:0, loadingAmount:0, calculatedPremium:0, variation:0 });
                 Object.keys(total).forEach(function(key){ total[key] = Number(total[key].toFixed(2)); });
-                setPremiumPreview({ details:details, total:total, chain:'ChangeLoading' });
+                const deviations = loadingQuoteDeviations(quotedCoverages);
+                setPremiumPreview({ details:details, total:total, chain:'ChangeLoading', deviations:deviations });
+                if(deviations.length){
+                    showLoadingQuoteBlocked(deviations);
+                    return false;
+                }
                 return true;
             } catch(error) {
                 setPremiumPreview(null);
@@ -1729,6 +1765,14 @@
             try {
                 if(isPolicyActive && baseCessions.length && !reinsuranceConfirmed){
                     message.error('Debe calcular y confirmar el reaseguro antes de ejecutar el endoso.');
+                    return;
+                }
+                // Execution bills this same quote, so check it right before saving:
+                // policies without reinsurance never go through Calcular Endoso.
+                const quoteDeviations = loadingQuoteDeviations(await requestLoadingQuote());
+                if(quoteDeviations.length){
+                    setPremiumPreview(null);
+                    showLoadingQuoteBlocked(quoteDeviations);
                     return;
                 }
                 const covId = coverages.map( item => item.id);
@@ -3132,9 +3176,16 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
                 <Alert type='info' showIcon message='Resumen neto de facturación de la póliza' />
                 <div className='lem-premium-preview-summary'>
                     <span>Prima anterior: <b>{renderNumber(premiumPreview.total.previousPremium)}</b></span>
+                    <span>Prima esperada según el porcentaje: <b>{renderNumber(premiumPreview.total.expectedPremium)}</b></span>
                     <span>Prima calculada: <b>{renderNumber(premiumPreview.total.calculatedPremium)}</b></span>
                     <span className={premiumPreview.total.variation < 0 ? 'lem-negative' : premiumPreview.total.variation > 0 ? 'lem-positive' : 'lem-zero'}>Variación neta: <b>{renderNumber(premiumPreview.total.variation)}</b></span>
                 </div>
+                {(premiumPreview.deviations || []).length ? <Alert type='error' showIcon
+                    message='La recotización no corresponde al porcentaje ingresado: el endoso no se puede ejecutar.'
+                    description={<div>
+                        {premiumPreview.deviations.map(function(row){ return <div key={row.code}>{loadingQuoteDeviationLine(row)}</div>; })}
+                        <div>{loadingQuoteBlockHint()}</div>
+                    </div>} /> : null}
             </div> : null}
         </div>
     }
@@ -3642,6 +3693,22 @@ body:has(.loading-endorsement-manager) .ant-page-header-heading { padding-bottom
             placement: 'top',
             duration: 2
         })
+    }
+    function loadingQuoteDeviationLine(row){
+        const money = function(value){ return Number(value || 0).toLocaleString('en-us', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+        return row.code + ' ' + row.name + ': suma asegurada ' + money(row.previousLimit) + ' → ' + money(row.quotedLimit)
+            + ', prima esperada ' + money(row.expectedPremium) + ', prima recotizada ' + money(row.quotedPremium) + '.';
+    }
+    function loadingQuoteBlockHint(){
+        return 'Un recargo/descuento solo cambia el porcentaje: revise los datos de la póliza y de su objeto asegurado (por ejemplo, el Valor de Riesgo del vehículo) y vuelva a calcular.';
+    }
+    function showLoadingQuoteBlocked(deviations){
+        notification.error({
+            message: 'La recotización no corresponde al porcentaje ingresado: el endoso no se puede ejecutar.',
+            description: deviations.map(loadingQuoteDeviationLine).join(' ') + ' ' + loadingQuoteBlockHint(),
+            placement: 'top',
+            duration: 0
+        });
     }
 
 }
