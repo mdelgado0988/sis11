@@ -31,6 +31,12 @@ Lines:
     comments: "'Impuesto sobre primas emitidas ' + _anioMes"
     order: _lineNumber
     condition: _impuestoPrimasIncendio != 0 && (!_cancelacion)
+  - account: _cuentaImpuestoAuto
+    debit: '_impuestoAuto < 0 ? -_impuestoAuto : 0'
+    credit: '_impuestoAuto > 0 ? _impuestoAuto : 0'
+    comments: "'Impuesto de automóvil sobre primas emitidas ' + _anioMes"
+    order: _lineNumber
+    condition: _impuestoAuto != 0 && (!_cancelacion)
   - account: _cuentaCoaseguro
     debit: '_coaseguroPorPagar < 0 ? -_coaseguroPorPagar : 0'
     credit: '_coaseguroPorPagar > 0 ? _coaseguroPorPagar : 0'
@@ -102,6 +108,12 @@ Lines:
     comments: "'Impuesto sobre primas emitidas ' + _anioMes"
     order: _lineNumber
     condition: _impuestoPrimasIncendio != 0 && (_cancelacion)
+  - account: _cuentaImpuestoAuto
+    debit: '_impuestoAuto < 0 ? -_impuestoAuto : 0'
+    credit: '_impuestoAuto > 0 ? _impuestoAuto : 0'
+    comments: "'Impuesto de automóvil sobre primas emitidas ' + _anioMes"
+    order: _lineNumber
+    condition: _impuestoAuto != 0 && (_cancelacion)
   - account: _cuentaCoaseguro
     debit: '_coaseguroPorPagar < 0 ? -_coaseguroPorPagar : 0'
     credit: '_coaseguroPorPagar > 0 ? _coaseguroPorPagar : 0'

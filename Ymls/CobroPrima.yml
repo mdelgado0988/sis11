@@ -13,41 +13,60 @@ entityId: _id
 Lines:
 # COBRO DE PRIMA - Asiento N°1
   -	account: _cuentaFondosFijos
-    debit: _prima
-    credit: 0
+    debit: '_prima > 0 ? _prima : 0'
+    credit: '_prima < 0 ? -_prima : 0'
+    condition: _prima != 0
     currency: _currency
     comments: "'Registra cobro de prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
     order: _lineNumber
   -	account: _cuentaPrima
-    debit: 0
-    credit: _prima
+    debit: '_prima < 0 ? -_prima : 0'
+    credit: '_prima > 0 ? _prima : 0'
+    condition: _prima != 0
     currency: _currency
     comments: "'Registra cobro de prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
     order: _lineNumber
 ### COBRO DE PRIMA - Asiento N°2 - IMPUESTO POR RECAUDACION DE PRIMAS DE INCENDIO 5%
   -	account: _cuentaImpuestoPrimas
-    debit: _impuesto
-    credit: 0
+    debit: '_impuesto > 0 ? _impuesto : 0'
+    credit: '_impuesto < 0 ? -_impuesto : 0'
+    condition: _impuesto != 0
     currency: _currency
     comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
     order: _lineNumber
   -	account: _cuentaImpuestoPrimasCredito
-    debit: 0
-    credit: _impuesto
+    debit: '_impuesto < 0 ? -_impuesto : 0'
+    credit: '_impuesto > 0 ? _impuesto : 0'
+    condition: _impuesto != 0
     currency: _currency
     comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
     order: _lineNumber
+### COBRO DE PRIMA - Asiento N°2b - IMPUESTO SOBRE PRIMAS DE AUTOMOVIL 1% (MSN-000203)
+  -	account: _cuentaImpuestoAuto
+    debit: '_impuestoAuto > 0 ? _impuestoAuto : 0'
+    credit: '_impuestoAuto < 0 ? -_impuestoAuto : 0'
+    condition: _impuestoAuto != 0
+    currency: _currency
+    comments: "'Impuesto de automóvil sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
+  -	account: _cuentaImpuestoAutoCredito
+    debit: '_impuestoAuto < 0 ? -_impuestoAuto : 0'
+    credit: '_impuestoAuto > 0 ? _impuestoAuto : 0'
+    condition: _impuestoAuto != 0
+    currency: _currency
+    comments: "'Impuesto de automóvil sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
+    order: _lineNumber
 ### COBRO DE PRIMA - Asiento N°3 - IMPUESTO POR RECAUDACION DE PRIMAS DE DAÑOS 2%
   -	account: _cuentaDaniosxPagar
-    debit: _primaxpagar
-    credit: 0
+    debit: '_primaxpagar > 0 ? _primaxpagar : 0'
+    credit: '_primaxpagar < 0 ? -_primaxpagar : 0'
     condition: _primaxpagar != 0
     currency: _currency
     comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
     order: _lineNumber
   -	account: _cuentaDaniosxPagarCredito
-    debit: 0
-    credit: _primaxpagar
+    debit: '_primaxpagar < 0 ? -_primaxpagar : 0'
+    credit: '_primaxpagar > 0 ? _primaxpagar : 0'
     condition: _primaxpagar != 0
     currency: _currency
     comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"

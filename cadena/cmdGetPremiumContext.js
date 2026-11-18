@@ -4,7 +4,7 @@
  * @author Noel Obando
  * @name cmdGetPremiumContext
  * @summary Obtiene el contexto para la plantilla contable de cobro de primas
- * @version 1.3
+ * @version 1.4
  * @created 2026-01-06
  * @changes 1.1 (MSN-000057) Resolves the accounts of every template line from the table
  *          CuentasCobroPrimasxLob: the column "<ramo>-<producto>" when it has a value for
@@ -17,6 +17,10 @@
  * @changes 1.3 (MSN-000175) Las lineas de la asignacion se leen tambien directamente de
  *          AllocationInstallment para soportar cuotas negativas y aplicaciones sin transferencia
  *          PREMIUMPAY. El signo original se conserva para la contabilizacion.
+ * @changes 1.4 (MSN-000203) Impuesto de Auto (1 %) separado del IVA: el impuesto cobrado de la
+ *          cuota se reparte entre IVA (impuesto) e Impuesto de Auto (impuestoAuto) en la proporcion
+ *          de los impuestos vigentes de la poliza (sus renglones TaxGenerated habilitados). Una
+ *          poliza sin renglon "Impuesto de Auto" da impuestoAuto 0 y el asiento de siempre.
  */
 const { id } = context;
 const round2 = n =>
@@ -33,6 +37,7 @@ if(!InstallmentPremiums || InstallmentPremiums.length === 0) throw '@Detalle de 
 
 const tablaCuentas = getTablaCuentas();
 let impuestosDetalle = null;
+const participacionAuto = {};
 
 return InstallmentPremiums.map( premium =>{
   const poliza = getPolicyInfo(premium);
@@ -57,6 +62,7 @@ return InstallmentPremiums.map( premium =>{
 
   const taxAmount = round2(montoPrima * tasaImpuesto);
   const taxIncAmount = round2(montoPrima * impuestosPorDanios);
+  const impuestoAuto = round2(taxAmount * getParticipacionAuto(poliza));
                              
   montoPrima = montoPrima + (montoCobrado - (montoPrima + taxAmount));
   
@@ -64,7 +70,8 @@ return InstallmentPremiums.map( premium =>{
       id,
       prima: montoCobrado,
       moneda: premium.currency,
-      impuesto: taxAmount,
+      impuesto: round2(taxAmount - impuestoAuto),
+      impuestoAuto,
       primaxpagar: taxIncAmount,
       reference: `TX-CobroPrimas#${ id } ${tipoRiesgo} #${ poliza.code }`,
       poliza,
@@ -149,6 +156,27 @@ function getInstallmentTaxDetails(id) {
 }
 
 /**
+ * MSN-000203: parte del impuesto de la poliza que es Impuesto de Auto, segun sus impuestos
+ * vigentes (renglones TaxGenerated habilitados). 0 si la poliza no tiene ese renglon.
+ */
+function getParticipacionAuto(poliza) {
+  const lifePolicyId = Number(poliza?.id ?? 0);
+  if (!(lifePolicyId > 0)) return 0;
+  if (participacionAuto[lifePolicyId] === undefined) {
+    doCmd({ cmd: 'DoQuery', data: { sql: `SELECT SUM(t.amount) total,
+    SUM(CASE WHEN t.taxName = 'Impuesto de Auto' THEN t.amount ELSE 0 END) auto
+    FROM TaxGenerated t
+    WHERE t.lifePolicyId = ${ lifePolicyId }
+    AND (t.disabled = 0 OR t.disabled IS NULL)` } });
+    const fila = (DoQuery?.outData ?? [])[0] || {};
+    const total = Number(fila.total ?? 0);
+    const auto = Number(fila.auto ?? 0);
+    participacionAuto[lifePolicyId] = Math.abs(total) > 0.005 && Math.abs(auto) > 0.005 ? auto / total : 0;
+  }
+  return participacionAuto[lifePolicyId];
+}
+
+/**
  * Reads CuentasCobroPrimasxLob once per run. Rows are the template lines (column
  * "Cuenta"); columns are the ramo code ("52") or a product of that ramo ("52-FRAUDE").
  */
@@ -174,7 +202,9 @@ function getCuentasContables(rows, poliza) {
     cuentaImpuestoPrimas: 'ImpuestoPrimas',
     cuentaImpuestoPrimasCredito: 'ImpuestoPrimasCredito',
     cuentaDaniosxPagar: 'DaniosxPagar',
-    cuentaDaniosxPagarCredito: 'DaniosxPagarCredito'
+    cuentaDaniosxPagarCredito: 'DaniosxPagarCredito',
+    cuentaImpuestoAuto: 'ImpuestoAuto',
+    cuentaImpuestoAutoCredito: 'ImpuestoAutoCredito'
   };
   const key = v => String(v == null ? '' : v).trim().toUpperCase();
   const header = rows[0].map(key);

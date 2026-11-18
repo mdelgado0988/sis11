@@ -5,7 +5,7 @@
  * @author Noel Obando
  * @created 2025-12-26
  * @name cmdEmisionIncendioContext
- * @version 1.3
+ * @version 1.4
  * @purpose Builds accounting context data for fire issuance and endorsements.
  * @param context.id Policy, change or anniversary identifier.
  * @param context.tipo 0: issuance, 1: cancellation, 2: renewal, 3: insured sum change,
@@ -17,7 +17,15 @@
  *          the refunded premium (not the endorsement difference, which counts the premium
  *          twice when the bond was paid), the issuance tax rule (5 %) and the coinsurance
  *          share of the cession rows of the cancellation itself. Other ramos are unchanged.
+ * @changes 1.4 (MSN-000203) Impuesto de Auto (1 %, renglon "Impuesto de Auto" del esquema
+ *          tax_inc) en su propio campo impuestoAuto, con la cuenta ImpuestoAuto de
+ *          CuentasEmisionGeneral: emision y renovacion toman el renglon de la misma cotizacion
+ *          que el Impuesto de Seguros, los endosos su parte de la diferencia de factura y la
+ *          cancelacion su renglon menos el Auto vigente antes del endoso. impuestoPrimasIncendio
+ *          queda sin el Auto y primaPorCobrar lo incluye. Sin renglon de Auto todo sale igual.
  */
+
+const AUTO_TAX_NAME = 'IMPUESTO DE AUTO';
 
 try {
   const input = context || {};
@@ -85,6 +93,7 @@ try {
     primaPorCobrar,
     prima,
     impuestoPrimasIncendio,
+    impuestoAuto,
     coaseguroPorPagar,
     coaseguroPrima,
     gastoPrimaIncendio,
@@ -103,7 +112,7 @@ try {
     cessions.reduce((total, item) => total + toNumber(item.comissionCedant), 0)
   );
   const reaseguroPorPagar = toDecimal(reaseguroCedido - reaseguroComision);
-  const hasPremiumMovement = [primaPorCobrar, prima, impuestoPrimasIncendio, gastoPrimaIncendio, coaseguroPorPagar]
+  const hasPremiumMovement = [primaPorCobrar, prima, impuestoPrimasIncendio, impuestoAuto, gastoPrimaIncendio, coaseguroPorPagar]
     .some((value) => toDecimal(value) !== 0);
   const hasReinsuranceMovement = [reaseguroCedido, reaseguroComision, reaseguroPorPagar]
     .some((value) => toDecimal(value) !== 0);
@@ -143,6 +152,7 @@ try {
     primaPorCobrar: toDecimal(primaPorCobrar),
     prima: toDecimal(prima),
     impuestoPrimasIncendio: toDecimal(impuestoPrimasIncendio),
+    impuestoAuto: toDecimal(impuestoAuto),
     coaseguroPorPagar: toDecimal(coaseguroPorPagar),
     gastoPrimaIncendio: toDecimal(gastoPrimaIncendio),
     cancellationTax: toDecimal(cancellationTax),
@@ -180,18 +190,40 @@ function getCancellationAmounts(policy, change) {
   const taxRows = asArray(policy.TaxGenerated);
   const cancellationTax = sumTaxRows(taxRows, true);
   const nonCancellationTax = sumTaxRows(taxRows, false);
-  const impuestoPrimasIncendio = toDecimal(baseCoverages.taxDif);
+  const impuestoTotal = toDecimal(baseCoverages.taxDif);
+  const impuestoAuto = getCancellationAutoTax(taxRows, change);
 
   return {
     prima: prima,
-    impuestoPrimasIncendio: impuestoPrimasIncendio,
+    impuestoPrimasIncendio: toDecimal(impuestoTotal - impuestoAuto),
+    impuestoAuto: impuestoAuto,
     gastoPrimaIncendio: getGastoPrima(policy, prima),
-    primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
+    primaPorCobrar: toDecimal(prima + impuestoTotal),
     cancelacion: true,
     renovacion: false,
     cancellationTax: cancellationTax,
     nonCancellationTax: nonCancellationTax
   };
+}
+
+/**
+ * MSN-000203: Impuesto de Auto de la cancelacion, con la misma regla que taxDif (impuesto nuevo
+ * menos el vigente): el renglon de Auto del endoso menos el Auto vigente antes del endoso, que es
+ * el de la foto de la poliza guardada en el endoso. 0 si la poliza no tiene Impuesto de Auto.
+ */
+function getCancellationAutoTax(taxRows, change) {
+  const changeId = toPositiveInteger(change && change.id);
+  if (changeId === 0 || !taxRows.some(row => row && normalizeKey(row.taxName) === AUTO_TAX_NAME)) return 0;
+  const current = sumTaxRowsByName(
+    taxRows.filter(row => row && toPositiveInteger(row.changeId) === changeId),
+    AUTO_TAX_NAME
+  );
+  const snapshot = safeJson(change.jSnapshot, {});
+  const previous = sumTaxRowsByName(
+    asArray(snapshot.TaxGenerated).filter(row => row && !row.disabled),
+    AUTO_TAX_NAME
+  );
+  return toDecimal(current - previous);
 }
 
 /**
@@ -280,12 +312,14 @@ function getIssuanceOrRenewalAmounts(policy, tipo) {
   const prima = sumCoveragePremiums(policy.Coverages, policy.coverages);
   const taxRows = asArray(policy.TaxGenerated);
   const impuestoPrimasIncendio = getIssuanceInsuranceTax(policy, prima, taxRows);
+  const impuestoAuto = getIssuanceAutoTax(policy, taxRows);
 
   return {
     prima: prima,
     impuestoPrimasIncendio: impuestoPrimasIncendio,
+    impuestoAuto: impuestoAuto,
     gastoPrimaIncendio: getGastoPrima(policy, prima),
-    primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
+    primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio + impuestoAuto),
     cancelacion: false,
     renovacion: tipo === 2,
     cancellationTax: 0,
@@ -311,13 +345,31 @@ function getIssuanceInsuranceTax(policy, grossPremium, rows) {
 }
 
 function getLatestInsuranceTax(rows) {
+  const row = getLatestQuotationTaxRow(rows, 'IMPUESTO DE SEGUROS');
+  return row ? toNumber(row.amount) : 0;
+}
+
+/**
+ * MSN-000203: Impuesto de Auto de la misma cotizacion que el Impuesto de Seguros que se
+ * contabiliza (su renglon es posterior al de Seguros); 0 si esa cotizacion no lo tiene.
+ */
+function getIssuanceAutoTax(policy, rows) {
+  if (isSurety(policy)) return 0;
+  const auto = getLatestQuotationTaxRow(rows, AUTO_TAX_NAME);
+  if (!auto) return 0;
+  const insurance = getLatestQuotationTaxRow(rows, 'IMPUESTO DE SEGUROS');
+  if (insurance && toPositiveInteger(auto.id) < toPositiveInteger(insurance.id)) return 0;
+  return toDecimal(auto.amount);
+}
+
+function getLatestQuotationTaxRow(rows, taxName) {
   const quotationRows = asArray(rows)
     .filter(row => row
       && ['QUOTE', 'PREQUOTE', 'ANNIVERSARY'].includes(String(row.action || '').toUpperCase())
-      && normalizeKey(row.taxName) === 'IMPUESTO DE SEGUROS')
+      && normalizeKey(row.taxName) === taxName)
     .sort((left, right) => toPositiveInteger(right.id) - toPositiveInteger(left.id));
 
-  return quotationRows.length > 0 ? toNumber(quotationRows[0].amount) : 0;
+  return quotationRows.length > 0 ? quotationRows[0] : null;
 }
 
 function applyCoinsuranceAccounting(policy, tipo, changeId, amounts, distribution) {
@@ -332,8 +384,12 @@ function applyCoinsuranceAccounting(policy, tipo, changeId, amounts, distributio
   }
   const netPremium = toDecimal(grossPremium - coinsurance.premium);
   const movementTax = toDecimal(amounts.impuestoPrimasIncendio);
+  const autoTax = toDecimal(amounts.impuestoAuto);
   const coTax = grossPremium !== 0
     ? toDecimal(movementTax * coinsurance.premium / grossPremium)
+    : 0;
+  const coAutoTax = grossPremium !== 0
+    ? toDecimal(autoTax * coinsurance.premium / grossPremium)
     : 0;
   const insuranceTax = toDecimal(movementTax - coTax);
 
@@ -341,9 +397,10 @@ function applyCoinsuranceAccounting(policy, tipo, changeId, amounts, distributio
     ...amounts,
     prima: netPremium,
     impuestoPrimasIncendio: insuranceTax,
+    impuestoAuto: toDecimal(autoTax - coAutoTax),
     gastoPrimaIncendio: getGastoPrima(policy, netPremium),
-    primaPorCobrar: toDecimal(grossPremium + movementTax),
-    coaseguroPorPagar: toDecimal(coinsurance.premium + coTax),
+    primaPorCobrar: toDecimal(grossPremium + movementTax + autoTax),
+    coaseguroPorPagar: toDecimal(coinsurance.premium + coTax + coAutoTax),
     coaseguroPrima: toDecimal(coinsurance.premium)
   };
 }
@@ -409,6 +466,7 @@ function getEndorsementAmounts(policy, change, id, tipo) {
       return {
         prima: 0,
         impuestoPrimasIncendio: 0,
+        impuestoAuto: 0,
         gastoPrimaIncendio: 0,
         primaPorCobrar: 0,
         cancelacion: false,
@@ -418,13 +476,16 @@ function getEndorsementAmounts(policy, change, id, tipo) {
       };
     }
     const prima = toNumber(policy.coverages);
-    const impuestoPrimasIncendio = sumTaxRows(asArray(policy.TaxGenerated), null);
+    const taxRows = asArray(policy.TaxGenerated);
+    const impuestoTotal = sumTaxRows(taxRows, null);
+    const impuestoAuto = toDecimal(sumTaxRowsByName(taxRows, AUTO_TAX_NAME));
 
     return {
       prima: prima,
-      impuestoPrimasIncendio: impuestoPrimasIncendio,
+      impuestoPrimasIncendio: impuestoTotal - impuestoAuto,
+      impuestoAuto: impuestoAuto,
       gastoPrimaIncendio: getGastoPrima(policy, prima),
-      primaPorCobrar: toDecimal(prima + impuestoPrimasIncendio),
+      primaPorCobrar: toDecimal(prima + impuestoTotal),
       cancelacion: false,
       renovacion: false,
       cancellationTax: 0,
@@ -434,10 +495,12 @@ function getEndorsementAmounts(policy, change, id, tipo) {
 
   const billCoverages = toNumber(billDiff.coverages);
   const billTax = toNumber(billDiff.tax);
+  const billAutoTax = toDecimal(sumTaxRowsByName(safeJson(billDiff.jTaxes, []), AUTO_TAX_NAME));
 
   return {
     prima: toDecimal(billCoverages),
-    impuestoPrimasIncendio: toDecimal(billTax),
+    impuestoPrimasIncendio: toDecimal(billTax - billAutoTax),
+    impuestoAuto: billAutoTax,
     gastoPrimaIncendio: getGastoPrima(policy, billCoverages),
     primaPorCobrar: toDecimal(billCoverages + billTax),
     cancelacion: billCoverages < 0,
@@ -504,6 +567,7 @@ function getCuentasContables(policy) {
     cuentaPrimaxCobrar: 'PrimaxCobrar',
     cuentaPrima: 'Prima',
     cuentaImpuestoPrimas: 'ImpuestoPrimas',
+    cuentaImpuestoAuto: 'ImpuestoAuto',
     cuentaCoaseguro: 'Coaseguro',
     cuentaGastosPrimas: 'GastosPrimas',
     cuentaDaniosxPagar: 'DaniosxPagar',
@@ -760,6 +824,12 @@ function sumTaxRows(rows, cancellationOnly) {
     .filter(row => row && (cancellationOnly === null ||
       (cancellationOnly && row.action === 'ChangeCancellation') ||
       (!cancellationOnly && row.action !== 'ChangeCancellation')))
+    .reduce((total, row) => total + toNumber(row.amount), 0);
+}
+
+function sumTaxRowsByName(rows, taxName) {
+  return asArray(rows)
+    .filter(row => row && normalizeKey(row.taxName) === taxName)
     .reduce((total, row) => total + toNumber(row.amount), 0);
 }
 
