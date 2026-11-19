@@ -32,11 +32,17 @@
   *        Sin ese detalle, o si la base calculada se aparta de la del motor (SumaMotor) mas que el redondeo posible,
   *        reparte por cobertura como antes. En los dos caminos CP = base - RET (antes se redondeaban por separado y
   *        podian sumar un centavo de mas o de menos).
+  *@Note MSN-000198 (2026-11-16): entrada opcional IdContrato = id de la generacion (vigencia) del contrato que se esta
+  *        aplicando. Con IdContrato las bandas son las filas de cfgContratoReaseguroPorSuma con ese IdContrato (cada
+  *        renovacion tiene las suyas); sin IdContrato, las del CodigoContrato como antes.
+  *@Note MSN-000217 (2026-11-19): las bandas se leen de cfgLimiteContratoReaseguro (antes cfgContratoReaseguroPorSuma);
+  *        la Capacidad de cada banda es su columna Limite.
   *@Output: { pret, pcp, msret, mscp, mpret, mpcp, mccp, micp, pfp, msfp, mpfp, mcfp, mifp, SumaEvaluada, Capacidad,
   *          factorContrato, base, basePrima, reparto }
 */
 
 const CodigoContrato = context.CodigoContrato;
+const IdContrato = Number(context.IdContrato ?? context.idContrato ?? 0) || 0;
 const PolizaId = context.PolizaId || "n/d";
 const CoberturaId = context.CoberturaId || "n/d";
 
@@ -286,18 +292,24 @@ function cents(value) {
 
 function setReaConfig() {
 
-  doCmd({cmd :"GetFullTable", data: {table: "cfgContratoReaseguroPorSuma"}});
+  doCmd({cmd :"GetFullTable", data: {table: "cfgLimiteContratoReaseguro"}});
 
    if(!GetFullTable.ok)
       console.error("Error leyendo configuración de contrato");
 
   reaConfig = mapearTablaConfig(GetFullTable.outData ?? []);
-  reaConfig = reaConfig.filter(x => x.CodigoContrato == CodigoContrato);
+  //MSN-000198: cada generacion (vigencia) del contrato tiene sus bandas, identificadas por IdContrato
+  reaConfig = IdContrato > 0
+    ? reaConfig.filter(x => toNumber(x.IdContrato) === IdContrato)
+    : reaConfig.filter(x => x.CodigoContrato == CodigoContrato);
+  if (IdContrato > 0 && !reaConfig.length)
+    throw "cmdConfiguracionReaseguroPorSuma: no hay bandas en cfgLimiteContratoReaseguro para IdContrato " + IdContrato +
+          " (contrato " + CodigoContrato + "). Copie las bandas de la vigencia anterior con este IdContrato.";
 
   reaConfig.forEach(x => {
     x["PorcentajeRet"] = toNumber(x["PorcentajeRet"]);
     x["PorcentajeCP"] = toNumber(x["PorcentajeCP"]);
-    x["Capacidad"] = toNumber(x["Capacidad"]);
+    x["Capacidad"] = toNumber(x["Limite"]);
     x["PorcentajeComision"] = toNumber(x["PorcentajeComision"]);
     x["PorcentajeImpuesto"] = toNumber(x["PorcentajeImpuesto"]);
     x["RangoSumaInicial"] = toNumber(x["RangoSumaInicial"]);

@@ -8,6 +8,8 @@
  * @Purpose Reinsurance fire distribution command.
  * @Input { _pol, cov, context }
  * @Output { ok, msg, outData }
+ * @Note MSN-000217: retencion y cuota parte de la generacion del contrato desde cfgLimiteContratoReaseguro (context.cfg, que
+ *       pasa el contrato desde su Calculations; sin cfg se lee por contractId con cmdConfiguracionContratoReaseguro)
  */
 //doCmd({cmd: "GetPing", data: {contexto: JSON.stringify(context)}});
 
@@ -22,11 +24,15 @@ if (!pol || !cov) {
   throw new Error("El contexto debe incluir pol y cov");
 }
 
+//MSN-000217: porcentajes de la generacion del contrato (cfgLimiteContratoReaseguro)
+const cfg = context?.cfg ?? leerConfiguracionContrato(context?.contractId, pol.currency);
+
 const coverageConfig = loadCoverageConfig(pol);
 const sumaCoberturasRiesgoReaseguro = sumReinsuranceRiskCoverages(pol?.Coverages, coverageConfig);
 // Suma de las coberturas que conforman el riesgo de reaseguro.
 
-const contextoCumulo = JSON.stringify({ policyId: pol.id });
+//MSN-000198: la capacidad del cúmulo es la de la generación (vigencia) del contrato que se aplica
+const contextoCumulo = JSON.stringify({ policyId: pol.id, contractId: context?.contractId ?? null });
 
 doCmd({
   cmd: "ExeChain",
@@ -41,6 +47,8 @@ if (!ExeChain?.ok) {
 }
 
 const resultado = ExeChain?.outData ?? {};
+//MSN-000198: si el cúmulo no se pudo calcular (p. ej. sin capacidad para esta generación del contrato) se detiene con su motivo
+if (resultado.ok === false) throw new Error(resultado.msg || "No fue posible calcular el cúmulo del contrato");
 
 resultado.coverageCode = cov.code;
 resultado.sumaCoberturasRiesgoReaseguro = sumaCoberturasRiesgoReaseguro;
@@ -59,11 +67,11 @@ resultado.proporcionContrato = 1.00 - resultado.proporcionFac;
 //resultado.proporcionDistribuye = (resultado.sumaDistribuye / resultado.suma);
 resultado.primaContrato = n2(resultado.proporcionContrato * resultado.primaTecnica);
 resultado.sumaContrato = n2(resultado.suma * resultado.proporcionContrato);
-resultado.re = n2(resultado.sumaContrato * 0.65);
+resultado.re = n2(resultado.sumaContrato * cfg.pcp);
 resultado.ced = n2(resultado.sumaContrato - resultado.re);
 
 //calculos finales
-resultado.cedantPremium = n2(resultado.primaContrato * 0.35);
+resultado.cedantPremium = n2(resultado.primaContrato * cfg.pret);
 resultado.reinsurerPremium = n2(resultado.primaContrato - (resultado.cedantPremium));
 resultado.primaFac = n2(resultado.primaTecnica - (resultado.cedantPremium + resultado.reinsurerPremium));
 resultado.sumaFac = n2(resultado.suma - (resultado.re + resultado.ced));
@@ -150,6 +158,12 @@ function mapearTablaConfig(data) {
 
 function normalizeCondition(value) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+function leerConfiguracionContrato(contractId, currency) {
+  doCmd({ cmd: "ExeChain", data: { chain: "cmdConfiguracionContratoReaseguro", context: JSON.stringify({ IdContrato: contractId, CodigoContrato: "CP1", Moneda: currency }) } });
+  if (!ExeChain?.ok) throw new Error(ExeChain?.msg || "No fue posible leer cfgLimiteContratoReaseguro");
+  return ExeChain.outData;
 }
 
 function safeDivide(numerator, denominator) {

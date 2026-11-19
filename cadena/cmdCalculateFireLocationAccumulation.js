@@ -6,7 +6,8 @@
   *@Purpose: Calculates fire location accumulation using the insured object and a direct query over the selected location.
   *@Author: Michael Delgado
   *@Created: 2026/07/07
-  *@Input: { policyId }
+  *@Input: { policyId, contractId? }  MSN-000198: con contractId usa solo las filas de tblCapacidadEdificios de esa generación del contrato
+  *@Note: MSN-000217: la capacidad (Limite) se lee de cfgLimiteContratoReaseguro, por IdContrato y Moneda (antes tblCapacidadEdificios)
   *@Output: { ok, msg, outData }
 */
 
@@ -14,6 +15,8 @@ let inicio = Date.now();
 
 try {
   const policyId = validateInput(context);
+  //MSN-000198: id de la generación (vigencia) del contrato que se aplica; la capacidad se lee de sus filas
+  const contractId = Number(context?.contractId ?? 0) || 0;
   const policy = loadPolicyData(policyId);
   const fDesde = policy.start;
   const currency = policy.currency;
@@ -33,12 +36,12 @@ try {
     throw new Error("No se seleccionó edificio ni barriada");
   }
 
-  const configuracionCumulo = loadConfiguracionCumulo(currency);
+  const configuracionCumulo = loadConfiguracionCumulo(currency, contractId);
   if (!configuracionCumulo.length) {
-    throw new Error("No se encontró configuración de cúmulo para la moneda y contrato indicados");
+    throw new Error(`No se encontró configuración de cúmulo en cfgLimiteContratoReaseguro para la moneda ${currency}${contractId ? " y el contrato " + contractId : ""}`);
   }
 
-  const limite = parseFloat(configuracionCumulo?.[0]?.capacity ?? 0);
+  const limite = parseFloat(configuracionCumulo?.[0]?.Limite ?? 0);
   const currentYear = new Date(fDesde).getFullYear();
   const cumuloQuery = buildCumuloQuery(cumulusField, fieldValue, currentYear, currency, lob, posicion.objectDefinitionId);
 
@@ -145,10 +148,10 @@ function validateInput(source) {
   return policyId;
 }
 
-function loadConfiguracionCumulo(currency) {
+function loadConfiguracionCumulo(currency, contractId) {
   doCmd({
     cmd: "GetFullTable",
-    data: { table: "tblCapacidadEdificios" }
+    data: { table: "cfgLimiteContratoReaseguro" }
   });
 
   if (!GetFullTable?.ok) {
@@ -156,7 +159,8 @@ function loadConfiguracionCumulo(currency) {
   }
 
   return mapearTablaConfig(GetFullTable.outData ?? [])
-    .filter(x => String(x.currency ?? "").trim() === String(currency).trim());
+    .filter(x => String(x.Moneda ?? "").trim() === String(currency).trim())
+    .filter(x => !contractId || Number(x.IdContrato ?? 0) === contractId);
 }
 
 function buildCumuloQuery(campo, valor, currentYear, currency, lob, objectDefinitionId) {

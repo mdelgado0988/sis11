@@ -17,10 +17,7 @@ const { policyId, fDesde, currency, insuredSum, contractId, lob} = context;
 
 doCmd({ cmd: "RepoInsuredObject", data: { operation: "GET", filter: `lifePolicyId = ${policyId}`, include: ["ObjectDefinition"] } });
 const definitions = ['DT_INCENDIO_V3','1_9_DT_INCENDIO','DTINCENDIO_SUMA'];
-const edificio = RepoInsuredObject.outData.find(item => definitions.includes(item.ObjectDefinition?.code));
-if (!edificio || !edificio.userData) {
-  throw '@No se encontró un objeto asegurado válido para calcular el cúmulo';
-}
+const edificio = RepoInsuredObject.outData.find(item => definitions.includes(item.ObjectDefinition.code));
 const { cmbEdificios, cmbBarriadas } = edificio.userData;
 const cumulusField = hasValue(cmbEdificios) ? 'cmbEdificios' : 'cmbBarriadas';
 let configuracionCumulo;
@@ -35,7 +32,7 @@ setConfiguracion();
 
 // log(`Cargado tabla configuraciÃ³n, tiempo: ${Date.now() - inicio }`);
 
-const limite = parseFloat(configuracionCumulo?.[0].capacity ?? 0);
+const limite = parseFloat(configuracionCumulo?.[0].Limite ?? 0);
 
 const fechaEvaluar = new Date(fDesde);
 const currentYear = fechaEvaluar.getFullYear();
@@ -88,13 +85,14 @@ return {
 
 function setConfiguracion() {
 
-  doCmd({cmd :"GetFullTable", data: {table: "tblCapacidadEdificios"}});
+  //MSN-000217: la capacidad (Limite) se lee de cfgLimiteContratoReaseguro (antes tblCapacidadEdificios)
+  doCmd({cmd :"GetFullTable", data: {table: "cfgLimiteContratoReaseguro"}});
 
    if(!GetFullTable.ok)
       console.error("Error leyendo configuraciÃ³n de cÃºmulo");
 
   configuracionCumulo = mapearTablaConfig(GetFullTable.outData ?? []);
-  configuracionCumulo = configuracionCumulo.filter(x => x.contractId == contractId && x.currency == currency);
+  configuracionCumulo = configuracionCumulo.filter(x => x.IdContrato == contractId && x.Moneda == currency);
   
 }
 

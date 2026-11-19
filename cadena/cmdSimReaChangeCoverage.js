@@ -21,6 +21,9 @@
  * cedida, la de su contrato y linea; solo una linea sin prima cedida toma los
  * importes del contrato (capacidad: mccp/micp para CP, mcfp/mifp para FAC).
  *
+ * Porcentajes de CPCAR y bandas de fianza (MSN-000217): se leen por IdContrato de cfgLimiteContratoReaseguro
+ * (cmdConfiguracionContratoReaseguro y cmdConfiguracionReaseguroPorSuma), la generacion del contrato de la cesion.
+ *
  * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement, finalPremium, finalSum}], participants:[{cessionId, contactId, split}], movementType?: 'LOADING', facultativeMovementOnly?: boolean}
  */
 const money = function (v) { return Number(Number(v).toFixed(2)); };
@@ -362,6 +365,7 @@ if (useSuretyContractCapacity) {
     if (!allCoverages.length || !item.coverageId) return;
     const capacityRequest = {
       CodigoContrato: contractCodeById[item.contractId],
+      IdContrato: item.contractId,
       PolizaId: policyId,
       CoberturaId: item.coverageId,
       ProductoCodigo: policy.productCode,
@@ -380,7 +384,11 @@ if (useSuretyContractCapacity) {
       capacityRequest.PorcentajeRetenido = coinsuranceRetained;
     }
     let rea;
+    let cpcarCfg = null;
     if (isCpcar) {
+      const cfgRes = doCmd({ cmd: 'ExeChain', data: { chain: 'cmdConfiguracionContratoReaseguro', context: JSON.stringify({ IdContrato: item.contractId, CodigoContrato: contractCodeById[item.contractId], productCode: policy.productCode }) } });
+      cpcarCfg = cfgRes && cfgRes.ok !== false ? cfgRes.outData : null;
+      if (!cpcarCfg || cpcarCfg.pret === undefined) throw 'No fue posible leer la configuracion del contrato ' + contractCodeById[item.contractId] + ' (' + item.contractId + ') en cfgLimiteContratoReaseguro: ' + (cfgRes && cfgRes.msg ? cfgRes.msg : 'sin respuesta valida');
       const cpcarContext = {
         pol: {
           id: policy.id,
@@ -403,7 +411,7 @@ if (useSuretyContractCapacity) {
         contrato: contractCode,
         IdContrato: item.contractId,
         productCode: policy.productCode,
-        pret: 0.10
+        pret: cpcarCfg.pret
       };
       rea = doCmd({ cmd: 'ExeChain', data: {
         chain: 'cmdCoverageAccumulationSum',
@@ -422,19 +430,19 @@ if (useSuretyContractCapacity) {
       const cpcarFacPremium = Number(result.primaFac || 0);
       const cpcarCededPremium = Number(result.reinsurerPremium || 0);
       result = {
-        pret: 0.10,
-        pcp: 0.90,
+        pret: cpcarCfg.pret,
+        pcp: cpcarCfg.pcp,
         msret: Number(result.ced || 0),
         mscp: Number(result.re || 0),
         mpret: Number(result.cedantPremium || 0),
         mpcp: cpcarCededPremium,
-        mccp: money(cpcarCededPremium * 0.35),
-        micp: money(cpcarCededPremium * 0.02),
+        mccp: money(cpcarCededPremium * cpcarCfg.pcomi),
+        micp: money(cpcarCededPremium * cpcarCfg.ptax),
         pfp: Number(result.suma || 0) ? Number((Number(result.sumaFac || 0) / Number(result.suma || 0)).toFixed(6)) : 0,
         msfp: Number(result.sumaFac || 0),
         mpfp: cpcarFacPremium,
         mcfp: 0,
-        mifp: money(cpcarFacPremium * 0.02),
+        mifp: money(cpcarFacPremium * cpcarCfg.ptax),
         SumaEvaluada: Number(result.sumaPoliza || 0),
         Capacidad: Number(result.limite || 0),
         factorContrato: Number(result.sumaPoliza || 0) ? Number((Number(result.sumaDistribuye || 0) / Number(result.sumaPoliza || 0)).toFixed(6)) : 0,

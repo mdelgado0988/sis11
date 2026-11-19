@@ -2,14 +2,14 @@
 //noreplace
 /*
  * @name cmdCoverageAccumulationSum
- * @Purpose Suma de la póliza según cfgCoberturaProductoReaTecnicos, capacidad del contrato (cfgLimiteContratoColectivo)
+ * @Purpose Suma de la póliza según cfgCoberturaProductoReaTecnicos, capacidad del contrato (cfgLimiteContratoReaseguro)
  *          y excedente FAC proporcional por cobertura, cuadrado al centavo con el total de la póliza.
  * @Input { pol, cov, contrato? (CPCAR), IdContrato?, productCode?, pret? (% de retención del contrato) }
  * @Output { sumaPoliza, limite, sumaDistribuye, excedente, suma, prima, sumaContrato, sumaFac, primaContrato, primaFac,
  *           ced, re, cedantPremium, reinsurerPremium }
  */
 const TABLA_COBERTURAS = "cfgCoberturaProductoReaTecnicos";
-const TABLA_LIMITES = "cfgLimiteContratoColectivo";
+const TABLA_LIMITES = "cfgLimiteContratoReaseguro"; //MSN-000217: antes cfgLimiteContratoColectivo
 
 const pol = context.pol;
 const cov = context.cov;

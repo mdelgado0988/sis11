@@ -85,18 +85,19 @@ function setInsuredObject() {
 
 function getTasaRiesgo() {
 
-  doCmd({cmd: "GetFullTable", data: { table: "cfgLimiteContratoColectivo", filter: "1=1" }});
+  //MSN-000217: la tasa de riesgo se lee de cfgLimiteContratoReaseguro (antes cfgLimiteContratoColectivo)
+  doCmd({cmd: "GetFullTable", data: { table: "cfgLimiteContratoReaseguro", filter: "1=1" }});
   const rows = GetFullTable?.outData ?? [];
   const head = (rows[0] ?? []).map(h => String(h ?? "").trim().toUpperCase());
   const iId = head.indexOf("IDCONTRATO"), iProduct = head.indexOf("PRODUCTCODE"), iTasa = head.indexOf("TASARIESGO");
   if (iId < 0 || iProduct < 0 || iTasa < 0)
-    throw new Error("cfgLimiteContratoColectivo debe incluir IdContrato, productCode y TasaRiesgo");
+    throw new Error("cfgLimiteContratoReaseguro debe incluir IdContrato, productCode y TasaRiesgo");
   const idContrato = resolveContractId(context.IdContrato ?? context.idContrato);
   const candidatas = rows.slice(1).filter(r => toNumber(r[iId]) === idContrato);
   const fila = candidatas.find(r => String(r[iProduct] ?? "").trim().toUpperCase() === productCode.toUpperCase())
     || candidatas.find(r => String(r[iProduct] ?? "").trim() === "*");
   if (!fila)
-    throw new Error(`No existe TasaRiesgo para IdContrato ${idContrato} y producto ${productCode || "(vacío)"} en cfgLimiteContratoColectivo`);
+    throw new Error(`No existe TasaRiesgo para IdContrato ${idContrato} y producto ${productCode || "(vacío)"} en cfgLimiteContratoReaseguro`);
 
   return toNumber(fila[iTasa]);
 }
