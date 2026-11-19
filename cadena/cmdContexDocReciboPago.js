@@ -6,13 +6,15 @@
  * @email support@axxis-systems.com
  * @created 2026/01/07
  * @name cmdContexDocReciboPago
- * @version 1.2
+ * @version 1.3
  * @purpose Builds the payment receipt document context for a claim payment.
  * @context Receives the claim identifier through _row.reclamo and, optionally,
  *          the payment request identifier through _row.solicitud.
  *          MSN-000136: with _row.solicitud and no _row.reclamo (a request that belongs to
  *          no claim, e.g. a merge of requests from several claims), the context is built
  *          from the request alone.
+ *          MSN-000212: retentions and deductions are formatted like the other amounts, and the request's
+ *          deductions (taxType DED, e.g. «Cobro de deducible») are listed one by one in deductionLines.
  * @output Returns the payment data enriched with document and user information.
  */
 
@@ -145,6 +147,10 @@ if (!isMerged && mergedChildConcept) {
 }
 
 formatOutputAmounts(dataContex);
+const deductionLines = getDeductionLines(dataContex.Taxes);
+if (deductionLines.length > 0) {
+  dataContex.deductionLines = deductionLines;
+}
 
 // La referencia no debe repetirse en el recibo cuando describe el mismo concepto.
 const normalizedReference = String(dataContex.reference ?? '').trim().toLocaleLowerCase();
@@ -188,6 +194,17 @@ function getRequestedPaymentId(row) {
   return Number.isInteger(paymentId) && paymentId > 0 ? paymentId : null;
 }
 
+// MSN-000212: one { name, amount } per deduction of the request, in the order they were added.
+function getDeductionLines(taxes) {
+  return (Array.isArray(taxes) ? taxes : [])
+    .filter(tax => String(tax && tax.taxType || '').trim().toUpperCase() === 'DED' && Number(tax.amount) !== 0)
+    .sort((left, right) => Number(left.id || 0) - Number(right.id || 0))
+    .map(tax => ({
+      name: String(tax.taxName || tax.valueAddedCode || '').trim(),
+      amount: formatAmount(Math.abs(Number(tax.amount)))
+    }));
+}
+
 function formatOutputAmounts(output) {
   const amountFields = [
     'grossAmount',
@@ -196,6 +213,8 @@ function formatOutputAmounts(output) {
     'netAmount',
     'tax',
     'taxes',
+    'retentions',
+    'deductions',
     'fee',
     'fees',
     'expenses',

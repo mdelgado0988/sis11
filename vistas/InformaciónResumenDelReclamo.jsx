@@ -273,12 +273,104 @@
       }
     };
     const providerSubType = (config) => config && config.Main ? config.Main.repairOrderProviderSubType : undefined;
+    // MSN-000214: double-processing guard of purchase order requests, kept in the view (no triggers). Each request is
+    // sent with a requestId generated here; a marker per claim (localStorage, so it outlives the dialog, the tab and a
+    // page reload) stays until every order of the request has an answer. When an answer never arrives (connection cut
+    // while the server kept working, as on claim 458 on 12/11/2026 after 350 s), a new request is held until the server
+    // shows the pending order or REQUEST_PENDING_MINUTES pass. A retry reuses the requestId and skips the orders already
+    // created, and a recent identical order (same coverage, provider and articles) is refused.
+    const REQUEST_PENDING_MINUTES = 10;
+    const DUPLICATE_WINDOW_MINUTES = 10;
+    const requestsInFlight = {};
+    const memoryMarkers = {};
+    const requestMarkerKey = (claimId) => 'resumen.repairOrderRequest.' + ((window.localStorage && window.localStorage.organizationCode) || '') + '.' + claimId;
+    const readRequestMarker = (claimId) => {
+      try {
+        const raw = window.localStorage.getItem(requestMarkerKey(claimId));
+        return raw ? JSON.parse(raw) : (memoryMarkers[claimId] || null);
+      } catch (failure) {
+        return memoryMarkers[claimId] || null;
+      }
+    };
+    const writeRequestMarker = (claimId, marker) => {
+      if (marker) memoryMarkers[claimId] = marker;
+      else delete memoryMarkers[claimId];
+      try {
+        if (marker) window.localStorage.setItem(requestMarkerKey(claimId), JSON.stringify(marker));
+        else window.localStorage.removeItem(requestMarkerKey(claimId));
+      } catch (failure) {
+        // Storage unavailable (private mode): the in-memory copy still guards this page.
+      }
+    };
+    const newRequestId = () => {
+      const bytes = new Uint8Array(16);
+      if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+      else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      return Array.from(bytes).map((b) => ('0' + b.toString(16)).slice(-2)).join('');
+    };
+    const clockTime = (ms) => moment(ms).utcOffset(PANAMA_OFFSET_MINUTES).format('HH:mm');
+    const parseOrderLines = (order) => {
+      try { return order && order.jLines ? JSON.parse(order.jLines) : []; } catch (failure) { return []; }
+    };
+    const linesSignature = (lines) => (lines || []).map((line) => line.cptCode + ' x ' + Number(line.qty || 0)).sort().join(' | ');
+    const pendingRequestText = (marker) => {
+      const names = (marker.providers || []).filter((p) => p.code === marker.pending).map((p) => p.name).join(', ');
+      return 'Hay una solicitud de orden de compra enviada a las ' + clockTime(marker.sentAt || marker.started)
+        + (names ? ' (' + names + ')' : '') + ' sin respuesta del servidor. Al guardar se verificará primero si quedó registrada, para no duplicarla.';
+    };
+    // MSN-000214: a cancelled order is re-issued as a DRAFT copy with the same request, coverage, provider, articles,
+    // quantities and prices (new RO number). Nothing is created when a later order of the same request and provider exists.
+    const reissueInFlight = {};
+    const sqlText = (value) => String(value).replace(/'/g, "''");
+    const reissueOrder = (source) => {
+      if (reissueInFlight[source.id]) return Promise.resolve({ ok: false, busy: true });
+      reissueInFlight[source.id] = true;
+      const done = (result) => { delete reissueInFlight[source.id]; return result; };
+      const sameRequest = source.requestId ? "requestId='" + sqlText(source.requestId) + "'" : 'requestId IS NULL';
+      return exe('RepoRepairOrder', { operation: 'GET', filter: 'claimId=' + source.claimId + ' AND ' + sameRequest
+        + " AND providerCode='" + sqlText(source.providerCode) + "' AND id>" + source.id }).then((r) => {
+        if (!r.ok) return done(r);
+        if (r.outData.length > 0) return done({ ok: true, existing: true, order: r.outData[0] });
+        const entity = { claimId: source.claimId, coverageId: source.coverageId, providerCode: source.providerCode,
+          requestId: source.requestId, jLines: source.jLines, notes: source.notes };
+        return exe('RepoRepairOrder', { operation: 'ADD', entity: entity })
+          .then((added) => done(added.ok ? { ok: true, order: added.outData[0], msg: added.msg } : added));
+      });
+    };
+
+    // ITBMS (MSN-000216, 2026-11-19): like the legacy quote screen («Aplica ITBM»), an order can add the 7% ITBMS to its total.
+    // The tax travels as one more line with the catalog item ITBMS (category IMPUESTOS): the server totals every line, so the
+    // quoted total, the approved amount and the purchase-order payment include it. The editor keeps that line out of the table,
+    // recomputes it on every change and shows Sub-total / ITBMS / Total. A tax line of 0 only keeps the option ticked; it is never saved.
+    const RO_TAX = { code: 'ITBMS', category: 'IMPUESTOS', rate: 0.07, label: 'ITBMS 7%' };
+    const roRound = (value) => {
+      const amount = Number(value) || 0;
+      const rounded = Math.round(Number(Math.abs(amount).toFixed(8) + 'e2')) / 100;
+      return amount < 0 ? -rounded : rounded;
+    };
+    const roIsTaxLine = (line) => !!line && line.cptCode === RO_TAX.code;
+    const roItemLines = (lines) => (lines || []).filter((line) => !roIsTaxLine(line));
+    const roSubtotal = (lines) => roRound(roItemLines(lines).reduce((sum, line) => sum + (Number(line.total) || 0), 0));
+    const roWithTax = (lines, applies) => {
+      const items = roItemLines(lines);
+      if (!applies) return items;
+      const base = roSubtotal(items);
+      const tax = roRound(base * RO_TAX.rate);
+      return items.concat([{ categoryCode: RO_TAX.category, cptCode: RO_TAX.code, description: RO_TAX.label, qty: 1, quotedPrice: tax,
+        publicPrice: null, agreedPrice: null, priceSource: 'MANUAL', overAgreed: false, overPublic: false, total: tax,
+        taxRate: RO_TAX.rate, taxBase: base }]);
+    };
+    const roLinesToSave = (lines) => roWithTax(lines, (lines || []).some(roIsTaxLine)).filter((line) => !roIsTaxLine(line) || line.total > 0);
 
     // Editable quote lines: category -> article cascade of the provider subtype catalog, prices from GetRepairOrderPrice.
     const RepairLinesEditor = function RepairLinesEditor(props) {
       const [categories, setCategories] = React.useState([]);
       const [articles, setArticles] = React.useState({});
-      const lines = props.value || [];
+      const allLines = props.value || [];
+      const lines = roItemLines(allLines);
+      const appliesTax = allLines.some(roIsTaxLine);
       const currency = props.currency;
       React.useEffect(() => {
         // Untagged parent categories belong to the default MEDICAL root.
@@ -286,7 +378,7 @@
           ? props.subType === 'MEDICAL' ? "(category='MEDICAL' OR category IS NULL OR category='')" : "category='" + props.subType + "'"
           : '1=1';
         exe('RepoCpt', { operation: 'GET', filter: 'level=1 AND ' + subTypeFilter }).then((r) => {
-          if (r.ok) setCategories(r.outData);
+          if (r.ok) setCategories(r.outData.filter((p) => p.code !== RO_TAX.category));
           else message.error(r.msg);
         });
       }, [props.subType]);
@@ -297,7 +389,7 @@
           else message.error(r.msg);
         });
       };
-      const emit = (updated) => { if (props.onChange) props.onChange(updated); };
+      const emit = (updated, applies) => { if (props.onChange) props.onChange(roWithTax(updated, applies === undefined ? appliesTax : applies)); };
       const change = (index, patch) => emit(lines.map((line, i) => (i === index ? Object.assign({}, line, patch) : line)));
       const recompute = (line) => {
         const qty = line.qty || 0;
@@ -335,7 +427,10 @@
       };
       const onQtyChange = (index, qty) => change(index, recompute(Object.assign({}, lines[index], { qty: qty })));
       const onQuotedChange = (index, quotedPrice) => change(index, recompute(Object.assign({}, lines[index], { quotedPrice: quotedPrice, priceSource: 'MANUAL' })));
-      const total = lines.reduce((sum, line) => sum + (line.total || 0), 0);
+      const subtotal = roSubtotal(lines);
+      const taxLine = allLines.find(roIsTaxLine);
+      const tax = taxLine ? roRound(taxLine.total) : 0;
+      const total = roRound(subtotal + tax);
       const readOnly = props.disabled;
       return (
         <div className={props.className || ''}>
@@ -369,7 +464,14 @@
                 <Button type="link" icon={<RoIcon name="delete" />} aria-label="Eliminar artículo" />
               </Popconfirm>)} /> : null}
           </Table>
-          <div style={{ textAlign: 'right', marginTop: 5, fontWeight: 'bold' }}>Total: {money(total, currency)}</div>
+          <div className="resumen-repair-order-totals" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: 30, marginTop: 5 }}>
+            <Checkbox checked={appliesTax} disabled={readOnly} onChange={(e) => emit(lines, e.target.checked)}>Aplica ITBMS (7%)</Checkbox>
+            <div style={{ textAlign: 'right' }}>
+              <div>Sub-total: {money(subtotal, currency)}</div>
+              <div>{RO_TAX.label}: {money(tax, currency)}</div>
+              <div style={{ fontWeight: 'bold' }}>Total: {money(total, currency)}</div>
+            </div>
+          </div>
         </div>
       );
     };
@@ -383,6 +485,8 @@
       const [linesByProvider, setLinesByProvider] = React.useState({});
       const [searching, setSearching] = React.useState(false);
       const [saving, setSaving] = React.useState(false);
+      const [requestId, setRequestId] = React.useState();
+      const [pendingNotice, setPendingNotice] = React.useState();
       const subType = providerSubType(props.config);
       const currency = props.claim && props.claim.Policy ? props.claim.Policy.currency : undefined;
       React.useEffect(() => {
@@ -390,6 +494,9 @@
           setCoverageId(undefined);
           setSelectedProviders([]);
           setLinesByProvider({});
+          setRequestId(undefined);
+          const marker = props.claim ? readRequestMarker(props.claim.id) : null;
+          setPendingNotice(marker ? pendingRequestText(marker) : undefined);
         }
       }, [props.visible]);
       // Coverages with remaining reserve > 0 (sum of reserved over the claim's indemnity payouts).
@@ -421,41 +528,109 @@
       const onSave = () => {
         if (!coverageId) { message.error('Seleccione una cobertura con reserva disponible'); return; }
         if (selectedProviders.length === 0) { message.error('Seleccione al menos un proveedor'); return; }
-        const missing = selectedProviders.filter((p) => !(linesByProvider[p.code] || []).length);
+        const missing = selectedProviders.filter((p) => !roItemLines(linesByProvider[p.code]).length);
         if (missing.length > 0) {
           message.error('Agregue al menos un artículo para ' + missing.map((p) => p.name).join(', '));
           return;
         }
+        const claimId = props.claim.id;
+        // Synchronous guard: a second click, or the dialog reopened, never starts a second request of this claim.
+        if (requestsInFlight[claimId]) {
+          message.warning('Ya hay una solicitud de orden de compra en proceso para este reclamo. Espere a que termine.');
+          return;
+        }
+        requestsInFlight[claimId] = true;
         setSaving(true);
-        // Sequential ADDs so every quote of the request shares the first response's requestId.
-        const save = (index, requestId) => {
-          if (index === selectedProviders.length) {
-            setSaving(false);
-            message.success('Solicitud de cotización guardada');
-            if (props.onCreated) props.onCreated();
-            return;
+        const finish = () => { delete requestsInFlight[claimId]; setSaving(false); };
+        sendRequest(claimId).then(finish, (failure) => {
+          finish();
+          message.error(String((failure && failure.message) || failure));
+        });
+      };
+      const sendRequest = (claimId) => exe('RepoRepairOrder', { operation: 'GET', filter: 'claimId=' + claimId }).then((r) => {
+        if (!r.ok) { message.error(r.msg); return undefined; }
+        const orders = r.outData || [];
+        const marker = readRequestMarker(claimId);
+        if (marker) {
+          const landed = orders.filter((p) => p.requestId === marker.requestId);
+          const waiting = !!marker.pending && !landed.some((p) => p.providerCode === marker.pending);
+          const sentAt = marker.sentAt || marker.started;
+          if (waiting && (Date.now() - sentAt) / 60000 < REQUEST_PENDING_MINUTES) {
+            setPendingNotice(pendingRequestText(marker));
+            message.warning('La solicitud enviada a las ' + clockTime(sentAt) + ' todavía no aparece registrada y puede seguir procesándose. '
+              + 'Para no duplicarla, intente de nuevo a partir de las ' + clockTime(sentAt + REQUEST_PENDING_MINUTES * 60000) + '.', 10);
+            return undefined;
           }
-          const provider = selectedProviders[index];
+          writeRequestMarker(claimId, null);
+          setPendingNotice(undefined);
+          if (marker.requestId !== requestId && landed.length > 0) {
+            // The earlier request reached the server: show it instead of creating another one.
+            const lost = (marker.providers || []).filter((p) => !landed.some((o) => o.providerCode === p.code));
+            message.info('La solicitud enviada a las ' + clockTime(marker.started) + ' quedó registrada: '
+              + landed.map((o) => 'RO-' + o.id).join(', ') + (lost.length ? '. No llegó a enviarse: ' + lost.map((p) => p.name).join(', ') : '')
+              + '. No se creó otra para evitar un doble procesamiento; revise la lista. Si necesita una nueva, guarde nuevamente.', 12);
+            if (props.onRefresh) props.onRefresh();
+            return undefined;
+          }
+        }
+        const rid = requestId || newRequestId();
+        const toSend = selectedProviders.filter((p) => !orders.some((o) => o.requestId === rid && o.providerCode === p.code));
+        const duplicates = toSend.map((provider) => {
+          const signature = linesSignature(roItemLines(linesByProvider[provider.code]));
+          const twin = orders.find((o) => o.providerCode === provider.code && o.coverageId === coverageId
+            && (o.status === 'DRAFT' || o.status === 'ACTIVE') && moment().diff(moment.utc(o.created), 'minutes', true) < DUPLICATE_WINDOW_MINUTES
+            && linesSignature(roItemLines(parseOrderLines(o))) === signature);
+          return twin ? 'RO-' + twin.id + ' de ' + provider.name + ' (creada ' + dateTime(twin.created) + ')' : null;
+        }).filter(Boolean);
+        if (duplicates.length > 0) {
+          message.error('Ya existe una orden con el mismo proveedor, cobertura y artículos: ' + duplicates.join(', ')
+            + '. Para evitar un doble procesamiento no se creó otra; abra esa orden y edítela si necesita cambios.', 12);
+          return undefined;
+        }
+        setRequestId(rid);
+        const base = { requestId: rid, started: Date.now(), providers: toSend.map((p) => ({ code: p.code, name: p.name })) };
+        // Sequential ADDs with the same requestId; the marker names the order whose answer is awaited.
+        const sendAt = (index) => {
+          if (index === toSend.length) {
+            writeRequestMarker(claimId, null);
+            setPendingNotice(undefined);
+            message.success('Solicitud de orden de compra guardada');
+            if (props.onCreated) props.onCreated();
+            return undefined;
+          }
+          const provider = toSend[index];
+          writeRequestMarker(claimId, Object.assign({}, base, { pending: provider.code, sentAt: Date.now() }));
           const entity = {
-            claimId: props.claim.id, coverageId: coverageId, providerCode: provider.code, requestId: requestId,
-            jLines: JSON.stringify(linesByProvider[provider.code] || [])
+            claimId: claimId, coverageId: coverageId, providerCode: provider.code, requestId: rid,
+            jLines: JSON.stringify(roLinesToSave(linesByProvider[provider.code]))
           };
-          exe('RepoRepairOrder', { operation: 'ADD', entity: entity }).then((r) => {
-            if (r.ok) save(index + 1, r.outData[0].requestId);
-            else { setSaving(false); message.error(provider.name + ': ' + r.msg); }
+          return exe('RepoRepairOrder', { operation: 'ADD', entity: entity }).then((added) => {
+            if (added.ok) return sendAt(index + 1);
+            if (index > 0 && props.onRefresh) props.onRefresh();
+            if (added.error) {
+              // No answer (connection cut): the server may still create the order, so the marker stays.
+              setPendingNotice(pendingRequestText(readRequestMarker(claimId)));
+              message.warning('No llegó la respuesta del servidor para ' + provider.name + '. La solicitud puede seguir procesándose: '
+                + 'espere unos minutos y presione Guardar de nuevo; se verificará lo registrado y no se duplicará.', 12);
+              return undefined;
+            }
+            writeRequestMarker(claimId, null);
+            message.error(provider.name + ': ' + added.msg);
+            return undefined;
           });
         };
-        save(0, undefined);
-      };
+        return sendAt(0);
+      });
       return (
-        <Modal title="Nueva solicitud de cotización de orden de reparación" visible={props.visible} onCancel={props.onCancel}
-          onOk={onSave} okText="Guardar cotizaciones" cancelText="Cancelar"
+        <Modal title="Nueva solicitud de orden de compra" visible={props.visible} onCancel={props.onCancel}
+          onOk={onSave} okText="Guardar órdenes de compra" cancelText="Cancelar"
           okButtonProps={{ disabled: eligibleCoverages.length === 0, loading: saving }} width={1150}
           wrapClassName="resumen-repair-order-request-modal">
           {!subType ? <Alert type="warning" showIcon style={{ marginBottom: 10 }}
             message="Configure Main.repairOrderProviderSubType en el producto para habilitar el catálogo de talleres" /> : null}
+          {pendingNotice ? <Alert type="warning" showIcon style={{ marginBottom: 10 }} message={pendingNotice} /> : null}
           {eligibleCoverages.length === 0
-            ? <Alert type="error" showIcon message="Se requiere una cobertura con reserva activa y saldo disponible para crear una cotización" />
+            ? <Alert type="error" showIcon message="Se requiere una cobertura con reserva activa y saldo disponible para crear una orden de compra" />
             : <div>
               <div style={{ marginBottom: 10 }}>
                 <div>Cobertura</div>
@@ -477,7 +652,7 @@
               {selectedProviders.length > 0 ? <Tabs>
                 {selectedProviders.map((provider) => <Tabs.TabPane tab={provider.name} key={provider.code}>
                   <RepairLinesEditor claimId={props.claim.id} providerCode={provider.code} currency={currency} subType={subType}
-                    value={linesByProvider[provider.code] || []}
+                    value={linesByProvider[provider.code] || roWithTax([], true)}
                     onChange={(lines) => setLinesByProvider((state) => { const next = Object.assign({}, state); next[provider.code] = lines; return next; })}
                     className="resumen-repair-order-request-lines" tableClassName="resumen-repair-order-lines-table" />
                 </Tabs.TabPane>)}
@@ -499,6 +674,8 @@
       const [invoiceDate, setInvoiceDate] = React.useState();
       const [closeAction, setCloseAction] = React.useState();
       const [closeReason, setCloseReason] = React.useState();
+      const [reissueCopy, setReissueCopy] = React.useState(true);
+      const [documentGenerating, setDocumentGenerating] = React.useState(false);
       const subType = providerSubType(props.config);
       const load = (orderId) => {
         setLoading(true);
@@ -530,11 +707,18 @@
         });
       };
       const onSaveDraft = () => run('RepoRepairOrder',
-        { operation: 'UPDATE', entity: Object.assign({}, order, { jLines: JSON.stringify(lines), Provider: undefined }) },
+        { operation: 'UPDATE', entity: Object.assign({}, order, { jLines: JSON.stringify(roLinesToSave(lines)), Provider: undefined }) },
         (r) => message.success(r.msg));
       const onConfirm = () => run('ConfirmRepairOrder', { repairOrderId: order.id }, (r) => message.success(r.msg));
-      const onPrint = () => run('GenerateRepairOrderDoc', { repairOrderIds: [order.id] },
-        () => message.success('PDF de la cotización generado en la pestaña Documentos del siniestro'));
+      const onPrint = () => {
+        if (documentGenerating || !order) return;
+        setDocumentGenerating(true); setLoading(true);
+        exe('GenerateRepairOrderDoc', { repairOrderIds: [order.id] }).then((r) => {
+          if (r.ok) message.success('PDF de la orden de compra generado en la pestaña Documentos del siniestro');
+          else message.error(r.msg);
+        }).catch((error) => message.error(error && error.message || 'No se pudo generar el documento de la orden de compra.'))
+          .then(() => { setLoading(false); setDocumentGenerating(false); });
+      };
       const onAddSettlement = () => {
         if (!amount || !invoiceNumber || !invoiceDate) {
           message.error('Capture el monto, el número de factura y la fecha de factura');
@@ -548,11 +732,47 @@
       };
       const onConfirmSettlement = (settlementId) => run('SettleRepairOrder', { operation: 'CONFIRM', settlementId: settlementId }, (r) => message.success(r.msg));
       const onDeleteSettlement = (settlementId) => run('SettleRepairOrder', { operation: 'DELETE', settlementId: settlementId }, (r) => message.success(r.msg));
+      const openOrder = (orderId) => {
+        if (props.onOpenOrder) props.onOpenOrder(orderId);
+        else load(orderId);
+      };
+      // Cancelling re-issues the order (MSN-000214): after CloseRepairOrder CANCEL a DRAFT copy is created and opened.
       const onClose = () => {
         if (!closeReason) { message.error('El motivo es obligatorio'); return; }
-        run('CloseRepairOrder', { repairOrderId: order.id, action: closeAction, reason: closeReason }, (r) => {
+        if (loading) return;
+        const source = order;
+        const reissue = closeAction === 'CANCEL' && reissueCopy;
+        setLoading(true);
+        exe('CloseRepairOrder', { repairOrderId: source.id, action: closeAction, reason: closeReason }).then((r) => {
+          if (!r.ok) { setLoading(false); message.error(r.msg); return undefined; }
           message.success(r.msg);
           setCloseAction(undefined); setCloseReason(undefined);
+          if (!reissue) { setLoading(false); changed(); return undefined; }
+          return reissueOrder(source).then((copy) => {
+            setLoading(false);
+            if (props.onChanged) props.onChanged();
+            if (copy.ok && copy.order) {
+              message.success('Se creó RO-' + copy.order.id + ' en borrador con el mismo contenido de RO-' + source.id + ' para editarla');
+              openOrder(copy.order.id);
+            } else {
+              load(source.id);
+              message.error('RO-' + source.id + ' quedó cancelada, pero no se pudo crear su copia: ' + copy.msg + '. Use Generar copia en la orden.', 12);
+            }
+            return undefined;
+          });
+        });
+      };
+      const onReissue = () => {
+        const source = order;
+        setLoading(true);
+        reissueOrder(source).then((copy) => {
+          setLoading(false);
+          if (copy.busy) return;
+          if (!copy.ok) { message.error(copy.msg); return; }
+          message.success(copy.existing ? 'RO-' + source.id + ' ya tiene su copia: RO-' + copy.order.id
+            : 'Se creó RO-' + copy.order.id + ' en borrador con el mismo contenido de RO-' + source.id + ' para editarla');
+          if (props.onChanged) props.onChanged();
+          openOrder(copy.order.id);
         });
       };
       const settlementStatus = (r) => (r.status === 'CONFIRMED' ? <Tag color="green">Confirmada</Tag> : <Tag color="orange">Pendiente</Tag>);
@@ -569,9 +789,16 @@
         wrapClassName="resumen-repair-order-drawer">{null}</Drawer>;
       const isDraft = order.status === 'DRAFT';
       const isActive = order.status === 'ACTIVE';
+      const isCancelled = order.status === 'CANCELLED';
+      const sameRequestOrders = (props.orders || []).filter((p) => p.id !== order.id && p.requestId === order.requestId && p.providerCode === order.providerCode);
+      const successor = sameRequestOrders.filter((p) => p.id > order.id).sort((a, b) => a.id - b.id)[0];
+      const predecessor = sameRequestOrders.filter((p) => p.id < order.id && p.status === 'CANCELLED').sort((a, b) => b.id - a.id)[0];
       return (
         <Drawer title={'Orden de reparación RO-' + order.id} visible={props.visible} onClose={props.onClose} width={1150}
           wrapClassName="resumen-repair-order-drawer">
+          {documentGenerating ? <div className="resumen-document-generation-mask resumen-repair-order-generation-mask" role="status" aria-live="polite">
+            <div><A.Spin size="large" /><span>Generando documento de la orden de compra...</span></div>
+          </div> : null}
           <Descriptions className="resumen-repair-order-summary" size="small" column={4} bordered>
             <Descriptions.Item label="Estado">{statusTag(order.status)}</Descriptions.Item>
             <Descriptions.Item label="Proveedor">{order.Provider ? order.Provider.name : order.providerCode}</Descriptions.Item>
@@ -582,17 +809,23 @@
             <Descriptions.Item label="Saldo disponible">{order.approvedAmount == null ? '-' : <b>{money(order.balance, order.currency)}</b>}</Descriptions.Item>
             <Descriptions.Item label="Confirmada">{order.confirmedOn ? dateTime(order.confirmedOn) + ' (' + order.confirmedBy + ')' : '-'}</Descriptions.Item>
             {order.closeReason ? <Descriptions.Item label="Motivo de cierre">{order.closeReason}</Descriptions.Item> : null}
+            {isCancelled && successor ? <Descriptions.Item label="Reemplazada por">RO-{successor.id}</Descriptions.Item> : null}
+            {predecessor ? <Descriptions.Item label="Reemplaza a">RO-{predecessor.id} (cancelada)</Descriptions.Item> : null}
           </Descriptions>
           <div className="resumen-repair-order-actions">
             <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={() => load(order.id)}>Recargar</Button>
-            <Button size="small" type="primary" icon={<RoIcon name="pdf" />} onClick={onPrint}>Imprimir cotización</Button>
+            <Button size="small" type="primary" icon={<RoIcon name="pdf" />} loading={documentGenerating} disabled={documentGenerating} onClick={onPrint}>Imprimir orden de compra</Button>
             {isDraft ? <Button size="small" type="primary" icon={<RoIcon name="save" />} onClick={onSaveDraft}>Guardar borrador</Button> : null}
             {isDraft ? <Popconfirm title="Al confirmar, la orden de reparación se activa y el monto aprobado queda fijo. ¿Continuar?"
               onConfirm={onConfirm} okText="Sí" cancelText="No">
               <Button size="small" type="primary" icon={<RoIcon name="check" />}>Confirmar orden</Button>
             </Popconfirm> : null}
-            {isActive && !hasConfirmedPayments ? <Button size="small" danger icon={<RoIcon name="stop" />} onClick={() => setCloseAction('CANCEL')}>Cancelar orden</Button> : null}
+            {isActive && !hasConfirmedPayments ? <Button size="small" danger icon={<RoIcon name="stop" />} onClick={() => { setReissueCopy(true); setCloseAction('CANCEL'); }}>Cancelar orden</Button> : null}
             {isActive && hasConfirmedPayments ? <Button size="small" danger icon={<RoIcon name="stop" />} onClick={() => setCloseAction('WRITE_OFF')}>Cancelar saldo restante</Button> : null}
+            {isCancelled && !successor ? <Popconfirm title="Se creará una orden nueva en borrador con el mismo proveedor, cobertura y detalle. ¿Continuar?"
+              onConfirm={onReissue} okText="Sí" cancelText="No">
+              <Button size="small" type="primary" icon={<RoIcon name="plus" />} loading={loading}>Generar copia</Button>
+            </Popconfirm> : null}
           </div>
           <RepairLinesEditor claimId={order.claimId} providerCode={order.providerCode} currency={order.currency} subType={subType}
             value={lines} onChange={setLines} disabled={!isDraft} className="resumen-repair-order-lines"
@@ -652,6 +885,11 @@
               : 'El saldo restante quedará en cero y la orden se liquidará. No se generará ningún pago.'}</p>
             <div>Motivo</div>
             <Input.TextArea value={closeReason} onChange={(e) => setCloseReason(e.target.value)} rows={3} />
+            {closeAction === 'CANCEL' ? <div style={{ marginTop: 10 }}>
+              <Checkbox checked={reissueCopy} onChange={(e) => setReissueCopy(e.target.checked)}>
+                Crear una copia editable de la orden (nuevo número, mismo contenido y detalle)
+              </Checkbox>
+            </div> : null}
           </Modal>
         </Drawer>
       );
@@ -665,7 +903,7 @@
         order: order, provider: order.Provider ? order.Provider.name : order.providerCode,
         lines: order.jLines ? JSON.parse(order.jLines) : []
       }));
-      const cptCodes = Array.from(new Set(parsed.reduce((all, p) => all.concat(p.lines.map((l) => l.cptCode)), [])));
+      const cptCodes = Array.from(new Set(parsed.reduce((all, p) => all.concat(roItemLines(p.lines).map((l) => l.cptCode)), [])));
       const rows = cptCodes.map((cptCode) => {
         const byOrder = parsed.map((p) => p.lines.find((l) => l.cptCode === cptCode) || null);
         const baseline = Math.min.apply(null, byOrder.filter((l) => l).map((l) => l.quotedPrice || 0));
@@ -674,6 +912,7 @@
         return row;
       });
       const totals = parsed.map((p) => p.lines.reduce((sum, l) => sum + (l.total || 0), 0));
+      const taxes = parsed.map((p) => roRound(p.lines.filter(roIsTaxLine).reduce((sum, l) => sum + (Number(l.total) || 0), 0)));
       const minTotal = Math.min.apply(null, totals);
       const renderCell = (line, row) => {
         if (!line) return <Tag>No cotizado</Tag>;
@@ -688,7 +927,7 @@
         );
       };
       return (
-        <Modal title="Comparación de cotizaciones" visible={props.visible} onCancel={props.onClose} onOk={props.onClose} width={1150} footer={null}>
+        <Modal title="Comparación de órdenes de compra" visible={props.visible} onCancel={props.onClose} onOk={props.onClose} width={1150} footer={null}>
           <Table dataSource={rows} pagination={false} size="small" scroll={{ x: true }}>
             <Table.Column dataIndex="cptCode" title="Artículo" fixed="left" />
             <Table.Column dataIndex="description" title="Descripción" />
@@ -696,7 +935,7 @@
               render={(line, row) => renderCell(line, row)} />)}
           </Table>
           <div style={{ marginTop: 12, display: 'flex', gap: 25, flexWrap: 'wrap' }}>
-            {parsed.map((p, i) => <div key={i}><b>{p.provider}</b>: {money(totals[i], currency)}{' '}
+            {parsed.map((p, i) => <div key={i}><b>{p.provider}</b>: {money(totals[i], currency)}{taxes[i] > 0 ? ' (incluye ' + RO_TAX.label + ': ' + money(taxes[i], currency) + ')' : ''}{' '}
               {totals[i] === minTotal ? <Tag color="green">Menor total</Tag> : null}</div>)}
           </div>
         </Modal>
@@ -711,6 +950,7 @@
       const [detailOrderId, setDetailOrderId] = React.useState();
       const [selectedRows, setSelectedRows] = React.useState([]);
       const [compareVisible, setCompareVisible] = React.useState(false);
+      const [documentGenerating, setDocumentGenerating] = React.useState(false);
       const load = () => {
         if (!props.claim) return;
         setLoading(true);
@@ -732,17 +972,19 @@
         });
       };
       const onPrint = (record) => {
+        if (documentGenerating) return;
+        setDocumentGenerating(true);
         setLoading(true);
         exe('GenerateRepairOrderDoc', { repairOrderIds: [record.id] }).then((r) => {
-          setLoading(false);
-          if (r.ok) message.success('PDF de la cotización generado en la pestaña Documentos del siniestro');
+          if (r.ok) message.success('PDF de la orden de compra generado en la pestaña Documentos del siniestro');
           else message.error(r.msg);
-        });
+        }).catch((error) => message.error(error && error.message || 'No se pudo generar el documento de la orden de compra.'))
+          .then(() => { setLoading(false); setDocumentGenerating(false); });
       };
       const onCompare = () => {
-        if (selectedRows.length < 2) { message.error('Seleccione al menos dos cotizaciones de la misma solicitud'); return; }
+        if (selectedRows.length < 2) { message.error('Seleccione al menos dos órdenes de compra de la misma solicitud'); return; }
         if (Array.from(new Set(selectedRows.map((p) => p.requestId))).length > 1) {
-          message.error('Solo se pueden comparar cotizaciones de la misma solicitud');
+          message.error('Solo se pueden comparar órdenes de compra de la misma solicitud');
           return;
         }
         setCompareVisible(true);
@@ -761,9 +1003,12 @@
       const allSelected = data.length > 0 && selectedRows.length === data.length;
       return (
         <div className="resumen-repair-orders">
+          {documentGenerating ? <div className="resumen-document-generation-mask resumen-repair-order-generation-mask" role="status" aria-live="polite">
+            <div><A.Spin size="large" /><span>Generando documento de la orden de compra...</span></div>
+          </div> : null}
           <div className="resumen-coverage-toolbar">
             <div className="resumen-reserve-actions">
-              <Button size="small" type="primary" icon={<RoIcon name="plus" />} onClick={() => setRequestVisible(true)}>Nueva solicitud de cotización</Button>
+              <Button size="small" type="primary" icon={<RoIcon name="plus" />} onClick={() => setRequestVisible(true)}>Nueva solicitud de orden de compra</Button>
               <Button size="small" type="primary" icon={<RoIcon name="compare" />} onClick={onCompare} disabled={selectedRows.length < 2}>Comparar</Button>
               <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={load}>Recargar</Button>
             </div>
@@ -802,7 +1047,7 @@
                     <Button type="link" icon={<RoIcon name="edit" />} aria-label={'Abrir RO-' + record.id}
                       onClick={(event) => { event.stopPropagation(); setDetailOrderId(record.id); }} />
                     <Button type="link" icon={<RoIcon name="pdf" />} aria-label={'PDF RO-' + record.id}
-                      onClick={(event) => { event.stopPropagation(); onPrint(record); }} />
+                      disabled={documentGenerating} onClick={(event) => { event.stopPropagation(); onPrint(record); }} />
                     <Popconfirm title={CONFIRM_DELETE} onConfirm={() => onDelete(record)} disabled={record.status !== 'DRAFT'} okText="Sí" cancelText="No">
                       <Button type="link" icon={<RoIcon name="delete" />} aria-label={'Eliminar RO-' + record.id} disabled={record.status !== 'DRAFT'}
                         onClick={(event) => event.stopPropagation()} />
@@ -813,9 +1058,10 @@
             </table>
           </div>
           <RepairOrderRequest claim={props.claim} config={props.config} visible={requestVisible}
-            onCancel={() => setRequestVisible(false)} onCreated={() => { setRequestVisible(false); load(); }} />
-          <RepairOrderDetail claim={props.claim} config={props.config} orderId={detailOrderId} visible={!!detailOrderId}
+            onCancel={() => setRequestVisible(false)} onCreated={() => { setRequestVisible(false); load(); }} onRefresh={load} />
+          <RepairOrderDetail claim={props.claim} config={props.config} orderId={detailOrderId} visible={!!detailOrderId} orders={data}
             onClose={() => { setDetailOrderId(undefined); load(); }}
+            onOpenOrder={(orderId) => { setDetailOrderId(orderId); load(); }}
             onChanged={() => (props.onChanged ? props.onChanged() : undefined)} />
           <RepairOrderCompare orders={selectedRows} visible={compareVisible} onClose={() => setCompareVisible(false)} />
         </div>
@@ -999,6 +1245,7 @@
   const [paymentError, setPaymentError] = React.useState('');
   const [paymentReserveModalOpen, setPaymentReserveModalOpen] = React.useState(false);
   const [checkRequestModalOpen, setCheckRequestModalOpen] = React.useState(false);
+  const [paymentConceptEdit, setPaymentConceptEdit] = React.useState(null);
   const [paymentRequestDetail, setPaymentRequestDetail] = React.useState(null);
   const [paymentRequestCatalogs, setPaymentRequestCatalogs] = React.useState({ methods: [], types: [] });
   const paymentStaticCatalogRef = React.useRef({ value: null, pending: null });
@@ -1203,6 +1450,7 @@
     setPaymentError('');
     setPaymentReserveModalOpen(false);
     setCheckRequestModalOpen(false);
+    setPaymentConceptEdit(null);
     setSelectedPaymentReserveId(null);
     setExpenseError('');
     setExpenseReserveModalOpen(false);
@@ -2080,8 +2328,10 @@
       if (request.entityState !== 'StartEvent_1' || !requestTreasuryUnexecuted(request) || requestHasCheque(request)
         || typeof request.total !== 'number' || !Number.isFinite(request.total) || request.total <= 0)
         return 'Solicitud ejecutada, con cheque, terminal o estado de tesorería no verificado. No se puede revertir.';
+      // MSN-000212: with taxes or deductions the request total is the net; the movement's requestedAmount keeps the gross.
+      const requestGross = typeof request.grossAmount === 'number' && Number.isFinite(request.grossAmount) ? request.grossAmount : request.total;
       if (payout.requestedAmount !== undefined && (typeof payout.requestedAmount !== 'number'
-        || !Number.isFinite(payout.requestedAmount) || payout.requestedAmount < request.total
+        || !Number.isFinite(payout.requestedAmount) || payout.requestedAmount < requestGross
         || payout.requestedAmount > numericValue(payout.payed)))
         return 'El monto solicitado del movimiento es incompatible. Refresque y solicite revisión antes de revertir.';
       const others = requests.filter((row) => row !== request && paymentRequestPayoutIds(row).includes(references[0]));
@@ -2170,6 +2420,8 @@
       const amount = reserved === null ? numericValue(payout.amount) : reserved;
       const paid = numericValue(payout.payed);
       const payoutId = Number(payout.id);
+      const coverage = coverages.find((item) => Number(item && item.id) === Number(payout.lifeCoverageId));
+      const deductible = numericValue(payout.deductible);
       const payment = payments.find((item) => paymentPayoutId(item) === payoutId) || null;
       const paymentContactId = numericValue(payment && payment.contactId);
       const policyBeneficiary = paymentContactId === null ? null : beneficiaries.find((beneficiary) => {
@@ -2186,6 +2438,7 @@
         concept: firstValue(payout.concept, payout.description, null),
         amount: roundMoney(amount === null ? 0 : amount),
         paid: roundMoney(paid === null ? 0 : paid),
+        deductible: roundMoney(deductible === null ? numericValue(coverage && coverage.deductible) || 0 : deductible),
         available: financialRowAvailable(claim, payout),
         status: payout.status,
         date: firstValue(payment && payment.date, payment && payment.created,
@@ -3379,14 +3632,19 @@ END CATCH;`;
       return Promise.reject(error);
     }
   };
-  const loadFinancialObjects = (coverageId) => {
+  const loadFinancialObjects = (coverageId, autoSelectSingle) => {
     const claim = currentClaimRef.current, version = ++financialObjects.version;
     Object.assign(financialObjects, { claim, coverageId: Number(coverageId), rows: [], selectedId: null, loading: !!coverageId, error: '' });
     notifyFinancialObjects();
     if (!coverageId) return Promise.resolve(false);
     return readFinancialObjects(claim, coverageId).then((rows) => {
       if (financialObjects.version !== version || !affectedCurrent(claim)) return false;
-      financialObjects.rows = rows; return true;
+      financialObjects.rows = rows;
+      if (autoSelectSingle && rows.length === 1) {
+        financialObjects.selectedId = rows[0].key;
+        financialObjects.error = collectiveDeathPaymentError(claim, rows[0]) || '';
+      }
+      return true;
     }).catch((error) => {
       if (financialObjects.version === version && affectedCurrent(claim)) financialObjects.error = error.message;
       return false;
@@ -3411,7 +3669,7 @@ END CATCH;`;
       const available = paymentSpendingAvailable(claim, coverageId, 'IN');
       setPaymentAmount(Number.isFinite(available) && available > 0 ? String(available) : '');
     }
-    return loadFinancialObjects(coverageId);
+    return loadFinancialObjects(coverageId, true);
   };
   const selectExpenseFinancialCoverage = (coverageId) => {
     setExpenseCoverageId(coverageId);
@@ -3645,6 +3903,7 @@ END CATCH;`;
         requestedAmount: 0,
         deductible: numericValue(original.deductible) || 0,
         parentCode: original.parentCode || null,
+        reversalOfId: Number(original.id),
         reserveType: bucket,
         expenseType: original.expenseType || null,
         jAffectedObjects: original.jAffectedObjects || null
@@ -3665,11 +3924,22 @@ END CATCH;`;
             if (!approval || approval.ok !== true) {
               throw new Error(approval && approval.msg || 'No fue posible contabilizar el movimiento de reversión.');
             }
-            return readPaymentActionSnapshot(claim, current, payoutId, action);
+            // DoPayment may mark the compensating movement as approved; keep
+            // reversals explicitly in the Reverted state after accounting.
+            return repositoryRequest('SetField', {
+              entity: 'LifeCoveragePayout',
+              entityId: reversalId,
+              fieldValue: 'status=2',
+              raw: true
+            }, undefined, current).then((statusUpdate) => {
+              if (!statusUpdate || statusUpdate.ok !== true) {
+                throw new Error(statusUpdate && statusUpdate.msg || 'No se pudo conservar la reversión en estado Reverted.');
+              }
+              return readPaymentActionSnapshot(claim, current, payoutId, action);
+            });
           }).then((snapshot) => {
             const reversal = snapshot.claim.Payouts.find((row) => Number(row.id) === reversalId);
-            // DoPayment may transition the accounting entry to Approved while the original stays Reverted.
-            if (!reversal || ![1, '1', 2, '2'].includes(reversal.status)
+            if (!reversal || ![2, '2'].includes(reversal.status)
               || numericValue(reversal.reserved) !== entity.reserved || numericValue(reversal.payed) !== entity.payed
               || Number(reversal.claimId) !== claimId || Number(reversal.lifeCoverageId) !== lifeCoverageId
               || String(reversal.reserveType || '').trim().toUpperCase() !== bucket) {
@@ -3789,6 +4059,7 @@ END CATCH;`;
     if (!context) return Promise.resolve(false);
     let createdId = null;
     const objectClaim = currentClaimRef.current;
+    const autoApprove = String(objectClaim && objectClaim.Policy && objectClaim.Policy.lob || '').trim() === '6';
     const selectedObjectId = financialObjects.selectedId;
     return readFinancialObjects(objectClaim, entity.lifeCoverageId).then((objects) => {
       if (!affectedCurrent(objectClaim) || paymentOperationRef.current !== context.operationId) throw new Error('El siniestro cambió. Recargue la información.');
@@ -3824,6 +4095,19 @@ END CATCH;`;
         return refreshFinancialData(context.claimId).then(() => {
           if (!mountedRef.current || paymentOperationRef.current !== context.operationId
             || routeClaimId() !== context.claimId) return false;
+          if (autoApprove) {
+            // Release the registration operation before starting the approval operation.
+            finishPaymentOperation(context, true);
+            return approvePaymentMovement(createdId, 'IN').then((approved) => {
+              if (approved && A.message && typeof A.message.success === 'function') {
+                A.message.success('Pago registrado y aprobado');
+              }
+              if (!approved && A.message && typeof A.message.warning === 'function') {
+                A.message.warning('Pago registrado; la aprobación automática falló. Puede aprobarlo manualmente.');
+              }
+              return true;
+            });
+          }
           if (A.message && typeof A.message.success === 'function') A.message.success('Reserva de pago registrada');
           return true;
         });
@@ -4106,9 +4390,11 @@ END CATCH;`;
       error: '', sourceAccountError: '', methodsError: '', method: claim.paymentMethodCode || null, reserveType: requestedReserveType,
       paymentType: null, sourceAccountId: null, additionalBeneficiary: '', managementType: 'DIRECT',
       purchaseOrdersEnabled: false, purchaseOrderMode: false, purchaseOrdersLoading: false,
-      purchaseOrdersError: '', purchaseOrders: [], purchaseOrderIds: [] };
+      purchaseOrdersError: '', purchaseOrders: [], purchaseOrderIds: [],
+      taxCatalog: [], taxCatalogLoading: false, taxCatalogError: '', taxLines: [], adjustmentType: null };
     paymentCatalogRef.current = session;
     notifyPaymentCatalog();
+    if (payoutId != null && requestedReserveType === 'IN') loadPaymentTaxCatalog(session);
     return Promise.resolve().then(() => {
       session.config = paymentConfig();
       session.purchaseOrdersEnabled = requestedReserveType === 'IN' && !!(session.config.Main && session.config.Main.claimRepairOrdersTabVisible)
@@ -4163,9 +4449,18 @@ END CATCH;`;
       if (!/^[A-Z]{3}$/.test(currency)) throw new Error('La moneda del siniestro no es válida.');
       session.policyAccounts = session.type === 'BEN' && Number(policy.holderId) === session.contactId
         && !(session.config.Claim && session.config.Claim.beneficiaryAllAccounts);
-      const filter = 'holderId=' + session.contactId + " AND currency='" + currency + "'"
-        + (session.policyAccounts ? ' AND lifePolicyId=' + Number(policy.id) : '');
-      return Promise.all([repositoryRequest('RepoAccount', { operation: 'GET', filter: filter }),
+      const holderCurrencyFilter = 'holderId=' + session.contactId + " AND currency='" + currency + "'";
+      const filter = holderCurrencyFilter + (session.policyAccounts ? ' AND lifePolicyId=' + Number(policy.id) : '');
+      const loadBeneficiaryAccounts = () => repositoryRequest('RepoAccount', { operation: 'GET', filter: filter }).then((result) => {
+        if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar las cuentas.');
+        // Some legacy beneficiary accounts have no lifePolicyId; preserve the policy filter when possible,
+        // but fall back to the beneficiary and currency so the account is still selectable.
+        if (session.policyAccounts && result.outData.length === 0) {
+          return repositoryRequest('RepoAccount', { operation: 'GET', filter: holderCurrencyFilter });
+        }
+        return result;
+      });
+      return Promise.all([loadBeneficiaryAccounts(),
         session.type === 'PRO' ? repositoryRequest('GetContacts', { filter: 'ID=' + session.contactId }) : Promise.resolve(null)
       ]).then((results) => {
         if (!paymentCatalogCurrent(session) || session.accountVersion !== version) return null;
@@ -4181,7 +4476,8 @@ END CATCH;`;
       if (!paymentCatalogCurrent(session) || session.accountVersion !== version) return;
       if (!result || result.ok !== true || !Array.isArray(result.outData)) throw new Error('No fue posible cargar las cuentas.');
       session.accounts = result.outData.filter((account) => numericValue(account.id) > 0 && Number(account.holderId) === session.contactId
-        && account.currency === currency && (!session.policyAccounts || Number(account.lifePolicyId) === Number(policy.id)));
+        && String(account.currency || '').trim().toUpperCase() === currency
+        && (!session.policyAccounts || Number(account.lifePolicyId) === Number(policy.id) || account.lifePolicyId == null));
     }).catch((caught) => { if (paymentCatalogCurrent(session) && session.accountVersion === version) session.error = caught.message; })
     .then(() => { if (paymentCatalogCurrent(session) && session.accountVersion === version) { session.accountLoading = false; notifyPaymentCatalog(); } });
   };
@@ -4276,6 +4572,113 @@ END CATCH;`;
       sourceAccountId: session.sourceAccountId, additionalBeneficiary: session.additionalBeneficiary,
       managementType: session.managementType, amount: session.amount, reference: reference } : {};
   };
+  // MSN-000212: Pagos «Solicitud de cheque» takes taxes, withholdings and deductions from the tax catalog, as Egresos does.
+  // The lines travel with DoClaimPayment as paymentTaxes; trigger trgImpuestosSolicitudChequeDoClaimPayment applies them
+  // with chain cmdApplyClaimPaymentTaxes (total = net) before it generates the request document. Gastos is unchanged.
+  const PAYMENT_ADJUSTMENTS = [
+    { type: 'TAX', label: 'Impuestos', add: 'Agregar impuesto' },
+    { type: 'RET', label: 'Retenciones', add: 'Agregar retención' },
+    { type: 'DED', label: 'Deducciones', add: 'Agregar deducción' }
+  ];
+  const paymentEditableTaxTypes = () => {
+    const config = window.global && window.global.configProfile;
+    const configured = config && config.Payment && config.Payment.editableTaxTypes;
+    return (Array.isArray(configured) ? configured : ['DED', 'RETSALV', 'ADDSALV'])
+      .map((type) => String(type || '').trim().toUpperCase());
+  };
+  const loadPaymentTaxCatalog = (session) => {
+    session.taxCatalogLoading = true;
+    session.taxCatalogError = '';
+    return repositoryRequest('RepoValueAddedCatalog', { operation: 'GET' }).then((result) => {
+      if (!paymentCatalogCurrent(session)) return;
+        session.taxCatalog = responseRows(result, 'el catálogo de impuestos').filter((row) => row && row.code != null
+        && String(row.code).trim() !== '' && String(row.name || '').trim() !== ''
+        && PAYMENT_ADJUSTMENTS.some((entry) => entry.type === String(row.taxType || '').trim().toUpperCase()))
+        .map((row) => ({ code: String(row.code).trim(), name: String(row.name).trim(), rate: numericValue(row.rate) || 0,
+          taxType: String(row.taxType).trim().toUpperCase() }));
+    }).catch(() => {
+      if (paymentCatalogCurrent(session)) session.taxCatalogError = 'No se pudo cargar el catálogo de impuestos, retenciones y deducciones.';
+    }).then(() => {
+      if (paymentCatalogCurrent(session)) { session.taxCatalogLoading = false; notifyPaymentCatalog(); }
+    });
+  };
+  const paymentAdjustmentSummary = (session) => {
+    const editableTypes = paymentEditableTaxTypes();
+    const gross = session ? numericValue(session.amount) || 0 : 0;
+    const totals = { TAX: 0, RET: 0, DED: 0 };
+    const lines = (session && Array.isArray(session.taxLines) ? session.taxLines : []).map((line) => {
+      const editable = editableTypes.indexOf(line.taxType) !== -1;
+      const value = editable ? numericValue(line.amount) : roundMoney(line.rate * gross);
+      if (value !== null) totals[line.taxType] = roundMoney(totals[line.taxType] + value);
+      return Object.assign({}, line, { editable: editable, value: value });
+    });
+    return { lines: lines, totals: totals, gross: gross, net: roundMoney(gross + totals.TAX - totals.RET - totals.DED) };
+  };
+  const paymentAdjustmentIssue = (session) => {
+    if (!session || !Array.isArray(session.taxLines) || !session.taxLines.length) return '';
+    const summary = paymentAdjustmentSummary(session);
+    const invalid = summary.lines.find((line) => !(line.value > 0));
+    if (invalid) return 'Indique un monto mayor que cero para «' + invalid.name + '».';
+    if (!(summary.net > 0)) return 'El monto neto a pagar debe ser mayor que cero.';
+    return '';
+  };
+  const paymentTaxesPayload = (session) => paymentAdjustmentSummary(session).lines
+    .map((line) => ({ valueAddedCode: line.code, amount: line.value }));
+  const paymentRetainedDeductible = (session) => {
+    const payout = session && session.payoutId != null
+      ? (session.claim.Payouts || []).find((row) => Number(row.id) === Number(session.payoutId)) : null;
+    const coverage = payout && session.claim.Policy && Array.isArray(session.claim.Policy.Coverages)
+      ? session.claim.Policy.Coverages.find((row) => Number(row && row.id) === Number(payout.lifeCoverageId)) : null;
+    const deductible = payout ? numericValue(payout.deductible) : null;
+    const effectiveDeductible = deductible !== null && deductible > 0
+      ? deductible : numericValue(coverage && coverage.deductible);
+    return effectiveDeductible !== null && effectiveDeductible > 0 ? effectiveDeductible : 0;
+  };
+  const changePaymentAdjustments = (change) => {
+    const session = paymentCatalogRef.current;
+    if (!session || !paymentCatalogCurrent(session) || paymentSavingRef.current) return;
+    change(session);
+    notifyPaymentCatalog();
+  };
+  const openPaymentAdjustment = (type) => changePaymentAdjustments((session) => { session.adjustmentType = type; });
+  const closePaymentAdjustment = () => {
+    const session = paymentCatalogRef.current;
+    if (session) { session.adjustmentType = null; notifyPaymentCatalog(); }
+  };
+  const addPaymentAdjustment = (code) => changePaymentAdjustments((session) => {
+    const entry = session.taxCatalog.find((row) => row.code === String(code));
+    if (!entry || session.taxLines.some((line) => line.code === entry.code)) return;
+    const initial = paymentEditableTaxTypes().indexOf(entry.taxType) !== -1
+      ? roundMoney(entry.rate * (numericValue(session.amount) || 0)) : 0;
+    session.taxLines = session.taxLines.concat([{ code: entry.code, name: entry.name, rate: entry.rate,
+      taxType: entry.taxType, amount: initial > 0 ? String(initial) : '' }]);
+  });
+  const changePaymentAdjustmentAmount = (code, value) => changePaymentAdjustments((session) => {
+    session.taxLines = session.taxLines.map((line) => (line.code === code ? Object.assign({}, line, { amount: value }) : line));
+  });
+  const removePaymentAdjustment = (code) => changePaymentAdjustments((session) => {
+    const targetCode = String(code);
+    session.taxLines = session.taxLines.filter((line) => String(line.code) !== targetCode);
+  });
+  // Trigger trgImpuestosSolicitudChequeDoClaimPayment runs cmdApplyClaimPaymentTaxes as a command; its ExeChain DTO comes back in
+  // hooks: outData is the chain result ({ ok, msg, outData: { paymentTaxesApplied, documentGenerated, documentMsg } }).
+  const paymentTaxesHookIssue = (result) => {
+    const hook = (result && Array.isArray(result.hooks) ? result.hooks : [])
+      .find((item) => item && typeof item === 'object' && item.cmd === 'ExeChain'
+        && item.data && item.data.chain === 'cmdApplyClaimPaymentTaxes');
+    const applied = hook && hook.ok === true && hook.outData && typeof hook.outData === 'object' ? hook.outData : null;
+    const sentence = (text) => String(text).replace(/\.?\s*$/, '.');
+    if (applied && applied.ok === true) {
+      const detail = applied.outData && typeof applied.outData === 'object' ? applied.outData : {};
+      return detail.documentGenerated === false
+        ? 'La solicitud de cheque se registró con sus impuestos, retenciones y deducciones, pero su documento no se generó'
+          + (detail.documentMsg ? ': ' + sentence(detail.documentMsg) : '.')
+        : '';
+    }
+    const reason = applied && applied.msg ? applied.msg : hook && hook.msg ? hook.msg : '';
+    return 'La solicitud de cheque se creó por el monto bruto, pero no se aplicaron sus impuestos, retenciones y deducciones'
+      + (reason ? ': ' + sentence(reason) : '.') + ' Corríjala en Egresos antes de pagarla; su documento no se generó.';
+  };
 
   const nativePaymentGuidance = (paid, status, bucket = 'IN') => {
     if (bucket === 'IN' && [2, '2'].includes(status)) return 'Este pago está revertido. Se conserva como historial y no puede volver a aprobarse.';
@@ -4291,7 +4694,7 @@ END CATCH;`;
     const guidance = nativePaymentGuidance(payout.payed, payout.status, payout.reserveType);
     if (guidance) throw new Error(guidance);
     const movements = (claim.Payouts || []).filter((row) => row && Number(row.claimId) === Number(claim.id) && Number(row.lifeCoverageId) === Number(payout.lifeCoverageId)
-      && [1, 3].indexOf(Number(row.status)) !== -1);
+      && [1, 3].indexOf(Number(row.status)) !== -1 && Number(row.payed) > 0);
     if (movements.some((row) => numericValue(row.payed) === null)) throw new Error('Los importes de esta cobertura requieren verificación en la vista nativa.');
     const history = (claim.Payments || []).filter((row) => {
       if (row.claimId != null && Number(row.claimId) !== Number(claim.id)) return false;
@@ -4390,6 +4793,9 @@ END CATCH;`;
     if (!currency) throw new Error('La moneda del siniestro no está disponible.');
     if (form.paymentMethodCode !== session.method || (session.method && !session.methods.some((row) => row.code === session.method))) throw new Error('El método de pago no es válido.');
     const coverageId = Number(coverage.id);
+    const adjustmentIssue = requestedReserveType === 'IN' ? paymentAdjustmentIssue(session) : '';
+    if (adjustmentIssue) throw new Error(adjustmentIssue);
+    const paymentTaxes = requestedReserveType === 'IN' && session.taxLines.length ? paymentTaxesPayload(session) : null;
     return {
       operation: 'ADD',
       cmd: 'DoClaimPayment',
@@ -4407,6 +4813,7 @@ END CATCH;`;
         claimId: claimId,
         currency: currency,
         total: total,
+        ...(paymentTaxes ? { paymentTaxes: paymentTaxes } : {}),
         jDetail: JSON.stringify([{
           num: 1,
           payoutId: Number(payout.id),
@@ -4518,6 +4925,7 @@ END CATCH;`;
     if (!context) return Promise.resolve(false);
     return repositoryRequest('DoClaimPayment', payload.data, { operation: payload.operation }).then((result) => {
       confirmedCommandResult(result, 'No fue posible ejecutar la solicitud de pago.');
+      const taxesIssue = payload.data.paymentTaxes ? paymentTaxesHookIssue(result) : '';
       if (!mountedRef.current || paymentOperationRef.current !== context.operationId
         || routeClaimId() !== context.claimId) return false;
       return persistClaimPaymentFields(result, form, context.claimId, payoutId).then(() => refreshFinancialData(context.claimId)).then(() => {
@@ -4525,6 +4933,7 @@ END CATCH;`;
           || routeClaimId() !== context.claimId) return false;
         setCheckRequestModalOpen(false);
         setPaymentReference('');
+        if (taxesIssue) { setPaymentError(taxesIssue); return true; }
         if (A.message && typeof A.message.success === 'function') A.message.success('Solicitud de pago registrada');
         return true;
       });
@@ -4878,13 +5287,22 @@ END CATCH;`;
   };
 
   const EXTRA_SECTION = 'InformacionResumenDelReclamo';
-  const EXTRA_FIELDS = [{"name":"culpable","type":"checkbox-group","label":"Culpable","required":false,"className":"form-control","values":[{"label":"Culpable","value":"true","selected":false}]},{"name":"posibleRecupero","type":"checkbox-group","label":"Posible Recupero","required":false,"className":"form-control","values":[{"label":"Posible Recupero","value":"true","selected":false}]},{"name":"perdidaTotal","type":"checkbox-group","label":"Pérdida Total","required":false,"className":"form-control","values":[{"label":"Pérdida Total","value":"true","selected":false}]},{"name":"formatoTransito","type":"text","label":"Formato Tránsito","required":false,"className":"form-control"},{"name":"conductor","type":"text","label":"Conductor","required":false,"className":"form-control"},{"name":"asegurador","type":"checkbox-group","label":"Asegurador","required":false,"className":"form-control","values":[{"label":"Asegurador","value":"true","selected":false}]},{"name":"pagador","type":"checkbox-group","label":"Pagador","required":false,"className":"form-control","values":[{"label":"Pagador","value":"true","selected":false}]},{"name":"otro","type":"checkbox-group","label":"Otro","required":false,"className":"form-control","values":[{"label":"Otro","value":"true","selected":false}]},{"name":"edadConductor","type":"text","label":"Edad del Conductor","required":false,"className":"form-control"},{"name":"cmbProvincia","type":"select","label":"Provincia","required":false,"className":"form-control","values":[]},{"name":"cmbMunicipio","type":"select","label":"Ciudad","required":false,"className":"form-control","values":[]},{"name":"lugar","type":"text","label":"Lugar","required":false,"className":"form-control"},{"name":"fechaAudiencia","type":"date","label":"Fecha de audiencia","required":false,"className":"form-control"},{"name":"lugarAudiencia","type":"text","label":"Lugar de audiencia","required":false,"className":"form-control"},{"name":"fechaVencimientoLicencia","type":"date","label":"Fecha Vencimiento Licencia","required":false,"className":"form-control"},{"name":"numeroLicencia","type":"text","label":"Número de Licencia","required":false,"className":"form-control"}];
+  const EXTRA_FIELDS = [{"name":"culpable","type":"checkbox-group","label":"Culpable","required":false,"className":"form-control","values":[{"label":"Culpable","value":"true","selected":false}]},{"name":"posibleRecupero","type":"checkbox-group","label":"Posible Recupero","required":false,"className":"form-control","values":[{"label":"Posible Recupero","value":"true","selected":false}]},{"name":"perdidaTotal","type":"checkbox-group","label":"Pérdida Total","required":false,"className":"form-control","values":[{"label":"Pérdida Total","value":"true","selected":false}]},{"name":"tipoPerdida","type":"select","label":"Tipo de pérdida","required":false,"className":"form-control","values":[]},{"name":"formatoTransito","type":"text","label":"Formato Tránsito","required":false,"className":"form-control"},{"name":"conductor","type":"text","label":"Conductor","required":false,"className":"form-control"},{"name":"asegurador","type":"checkbox-group","label":"Asegurador","required":false,"className":"form-control","values":[{"label":"Asegurador","value":"true","selected":false}]},{"name":"pagador","type":"checkbox-group","label":"Pagador","required":false,"className":"form-control","values":[{"label":"Pagador","value":"true","selected":false}]},{"name":"otro","type":"checkbox-group","label":"Otro","required":false,"className":"form-control","values":[{"label":"Otro","value":"true","selected":false}]},{"name":"edadConductor","type":"text","label":"Edad del Conductor","required":false,"className":"form-control"},{"name":"cmbProvincia","type":"select","label":"Provincia","required":false,"className":"form-control","values":[]},{"name":"cmbMunicipio","type":"select","label":"Ciudad","required":false,"className":"form-control","values":[]},{"name":"lugar","type":"text","label":"Lugar","required":false,"className":"form-control"},{"name":"fechaAudiencia","type":"date","label":"Fecha de audiencia","required":false,"className":"form-control"},{"name":"lugarAudiencia","type":"text","label":"Lugar de audiencia","required":false,"className":"form-control"},{"name":"fechaVencimientoLicencia","type":"date","label":"Fecha Vencimiento Licencia","required":false,"className":"form-control"},{"name":"numeroLicencia","type":"text","label":"Número de Licencia","required":false,"className":"form-control"}];
   const extraDefinitionRef = React.useRef(null);
   const [, setExtraDefinitionRevision] = React.useState(0);
   const [extraGeo, setExtraGeo] = React.useState({ provinces: [], cities: [], loading: false, error: '' });
   const extraGeoOperation = React.useRef(0);
+  // Tipo de pérdida: opciones del catálogo genérico Claims/TipoPerdida, en el orden de alta.
+  const LOSS_TYPE_CATALOG_FILTER = "[module]=N'Claims' AND [catalog]=N'TipoPerdida'";
+  const LOSS_TYPE_REQUIRED = 'Seleccione el Tipo de pérdida: es obligatorio cuando el siniestro es Pérdida Total.';
+  const [lossTypes, setLossTypes] = React.useState({ options: [], loading: true, error: '' });
   const extraMotor = (claim) => !!claim && !!claim.Policy && String(claim.Policy.lob).trim() === '6';
   const extraCommon = (name) => ['cmbProvincia', 'cmbMunicipio', 'lugar'].includes(name);
+  // La lectura previa al guardado no trae la póliza: el ramo sale del siniestro abierto en pantalla (mismo id).
+  const extraPolicyClaim = (claim) => (claim && claim.Policy) || !claim || !currentClaimRef.current
+    || Number(currentClaimRef.current.id) !== Number(claim.id) ? claim : currentClaimRef.current;
+  const lossTypeMissing = (claim, values) => extraMotor(claim) && !!values
+    && values.extra_perdidaTotal === true && !String(values.extra_tipoPerdida || '').trim();
   const extraRead = (raw) => {
     const outer = customFormOuter(raw);
     let stored = outer[EXTRA_SECTION];
@@ -4907,10 +5325,17 @@ END CATCH;`;
     return { outer, stored, values };
   };
   const extraMerge = (raw, claim, values, touched) => {
+    const policyClaim = extraPolicyClaim(claim);
+    if (lossTypeMissing(policyClaim, values)) throw new Error(LOSS_TYPE_REQUIRED);
     const changed = EXTRA_FIELDS.filter((f) => touched && touched['extra_' + f.name]);
     if (!changed.length) return raw;
     if (!extraDefinitionRef.current) throw new Error('Espere a que se verifique el formulario de información adicional.');
-    if (changed.some((f) => f.type === 'select')) {
+    const lossType = values.extra_tipoPerdida;
+    if (changed.some((f) => f.name === 'tipoPerdida') && lossType
+      && (lossTypes.loading || lossTypes.error || !lossTypes.options.some((option) => option.value === lossType))) {
+      throw new Error('Seleccione un Tipo de pérdida del catálogo.');
+    }
+    if (changed.some((f) => f.name === 'cmbProvincia' || f.name === 'cmbMunicipio')) {
       if (extraGeo.loading || extraGeo.error) throw new Error('Espere a que se carguen Provincia y Ciudad antes de guardar.');
       const province = values.extra_cmbProvincia;
       const city = values.extra_cmbMunicipio;
@@ -4923,7 +5348,7 @@ END CATCH;`;
       if (!Array.isArray(f.userData)) f.userData = f.type === 'checkbox-group' ? [] : [''];
     });
     changed.forEach((f) => {
-      if (!extraCommon(f.name) && !extraMotor(claim)) throw new Error('El campo ' + f.label + ' sólo puede modificarse en ramo 6.');
+      if (!extraCommon(f.name) && !extraMotor(policyClaim)) throw new Error('El campo ' + f.label + ' sólo puede modificarse en ramo 6.');
       const value = values['extra_' + f.name];
       if (f.type === 'checkbox-group' ? typeof value !== 'boolean' : typeof value !== 'string') throw new Error('Valor adicional incompatible.');
       if (f.type === 'date' && value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) !== value)) throw new Error('Fecha no válida: ' + f.label);
@@ -4937,6 +5362,7 @@ END CATCH;`;
     if (!extraDefinitionRef.current || !extraCommon(name) && !extraMotor(currentClaimRef.current)) return;
     changeDraft('extra_' + name, value);
     if (name === 'cmbProvincia') changeDraft('extra_cmbMunicipio', '');
+    if (name === 'perdidaTotal' && !value) changeDraft('extra_tipoPerdida', '');
   };
   React.useEffect(() => {
     const operation = ++extraGeoOperation.current;
@@ -4958,11 +5384,37 @@ END CATCH;`;
     }).catch(() => { if (current()) setExtraGeo({ provinces: [], cities: [], loading: false, error: 'No se pudieron cargar Provincia/Ciudad. Recargue antes de editarlas.' }); });
     return () => { extraGeoOperation.current += 1; };
   }, [claimId, newClaimCatalogSeq, draft && draft.extra_cmbProvincia]);
+  React.useEffect(() => {
+    let active = true;
+    repositoryRequest('RepoGenericCatalog', { operation: 'GET', filter: LOSS_TYPE_CATALOG_FILTER, size: 0, page: 0 })
+      .then((result) => {
+        if (!active || !mountedRef.current) return;
+        const options = strictOutData(result, 'Tipo de pérdida').slice()
+          .filter((row) => row && row.value !== null && row.value !== undefined && String(row.value).trim() !== '')
+          .sort((left, right) => Number(left.id) - Number(right.id))
+          .map((row) => ({ value: String(row.value).trim(), label: String(row.display || row.value).trim() }));
+        setLossTypes({ options: options, loading: false,
+          error: options.length ? '' : 'El catálogo «Tipo de pérdida» no tiene opciones.' });
+      })
+      .catch(() => {
+        if (active && mountedRef.current) {
+          setLossTypes({ options: [], loading: false, error: 'No se pudo cargar el catálogo «Tipo de pérdida». Recargue la página.' });
+        }
+      });
+    return () => { active = false; };
+  }, []);
   const extraControl = (name) => {
     const f = EXTRA_FIELDS.find((field) => field.name === name);
     const disabled = !generalEditable || !extraDefinitionRef.current || !extraCommon(name) && !extraMotor(currentClaimRef.current);
     const value = draft ? draft['extra_' + name] : f.type === 'checkbox-group' ? false : '';
     if (f.type === 'checkbox-group') return <Checkbox aria-label={f.label} disabled={disabled} checked={!!value} onChange={(e) => extraChange(name, e.target.checked)}>{f.label}</Checkbox>;
+    if (f.type === 'select' && name === 'tipoPerdida') {
+      const lossOptions = value && !lossTypes.options.some((item) => item.value === value)
+        ? [{ value, label: value }].concat(lossTypes.options) : lossTypes.options;
+      return <Select aria-label={f.label} size="small" allowClear placeholder="Seleccione el tipo de pérdida" value={value || undefined}
+        options={lossOptions} loading={lossTypes.loading} status={!value && !disabled && !lossTypes.loading ? 'error' : undefined}
+        disabled={disabled || lossTypes.loading || !!lossTypes.error} onChange={(v) => extraChange(name, v || '')} />;
+    }
     if (f.type === 'select') {
       const list = name === 'cmbProvincia' ? extraGeo.provinces : extraGeo.cities;
       const options = value && !list.some((item) => item.value === value) ? [{ value, label: value }].concat(list) : list;
@@ -5147,7 +5599,7 @@ END CATCH;`;
         const rows = strictOutData(result, 'Formulario adicional');
         if (rows.length !== 1) throw new Error('Formulario adicional no encontrado.');
         const definition = JSON.parse(rows[0].json);
-        if (!Array.isArray(definition) || definition.length !== EXTRA_FIELDS.length || EXTRA_FIELDS.some((field) => definition.filter((f) => f.name === field.name && f.type === field.type).length !== 1)) throw new Error('La definición de los 16 campos adicionales no es compatible.');
+        if (!Array.isArray(definition) || definition.length !== EXTRA_FIELDS.length || EXTRA_FIELDS.some((field) => definition.filter((f) => f.name === field.name && f.type === field.type).length !== 1)) throw new Error('La definición de los ' + EXTRA_FIELDS.length + ' campos adicionales no es compatible.');
         extraDefinitionRef.current = definition;
         // El ref no genera render por sí solo: reevalúa los campos de ubicación
         // tan pronto se valida la definición adicional.
@@ -6392,6 +6844,10 @@ END CATCH;`;
         ? validationError.message : 'Revise los formularios personalizados.');
       return Promise.resolve();
     }
+    if (lossTypeMissing(currentClaimRef.current, draftRef.current)) {
+      setError(LOSS_TYPE_REQUIRED);
+      return Promise.resolve();
+    }
     const recoverCanceledCatalog = catalogLoadingRef.current && !eventCatalogRef.current;
     cancelClaimantSearch();
     cancelCatalogLoad();
@@ -7051,6 +7507,14 @@ END CATCH;`;
       </svg>
     </span>
   );
+  const InfoOutlinedIcon = () => (
+    <span role="img" aria-label="Información" className="resumen-info-icon">
+      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 10.5v5M12 7.5h.01" />
+      </svg>
+    </span>
+  );
 
   const DocumentIcon = ({ name }) => {
     const paths = {
@@ -7174,6 +7638,61 @@ END CATCH;`;
     setCheckRequestModalOpen(true);
   };
   const submitCheckRequest = () => submitClaimPayment(selectedPaymentReserveId, nativePaymentForm(paymentReference));
+  // MSN-000211: «Modificar concepto» changes only the payment movement's concept, through chain cmdUpdateClaimPaymentConcept,
+  // while no check request (egreso) exists for it; the chain repeats every rule on the server.
+  const paymentConceptIssue = (row) => {
+    if (!row) return 'Seleccione un pago.';
+    if (row.checkRequestId != null) return 'El pago ya tiene la solicitud de cheque ' + row.checkRequestId + ': su concepto no se puede modificar.';
+    if (!(Number(row.paid) > 0)) return 'Solo se modifica el concepto de un pago registrado, no el de una reversión.';
+    if ([2, '2'].includes(row.status)) return 'El pago está revertido: su concepto ya no se modifica.';
+    if ([3, '3'].includes(row.status)) return 'El pago ya está aplicado a una solicitud de cheque: su concepto no se puede modificar.';
+    if (![0, '0', 1, '1'].includes(row.status)) return 'El estado del pago no permite modificar su concepto.';
+    return '';
+  };
+  const openPaymentConceptEdit = () => {
+    const issue = paymentConceptIssue(selectedPayment);
+    if (issue) { setPaymentError(issue); return; }
+    const current = selectedPayment.concept == null ? '' : String(selectedPayment.concept);
+    setPaymentError('');
+    setPaymentConceptEdit({ payoutId: selectedPayment.id, current: current, value: current, error: '' });
+  };
+  const closePaymentConceptEdit = () => {
+    if (!paymentSavingRef.current) setPaymentConceptEdit(null);
+  };
+  const changePaymentConcept = (value) => setPaymentConceptEdit((state) => state
+    ? Object.assign({}, state, { value: value, error: '' }) : state);
+  const submitPaymentConceptEdit = () => {
+    const edit = paymentConceptEdit;
+    if (!edit) return Promise.resolve(false);
+    const concept = String(edit.value || '').trim();
+    const report = (message) => setPaymentConceptEdit((state) => state && state.payoutId === edit.payoutId
+      ? Object.assign({}, state, { error: message }) : state);
+    if (!concept) { report('El concepto no puede quedar vacío.'); return Promise.resolve(false); }
+    if (concept === edit.current.trim()) { report('El concepto no cambió.'); return Promise.resolve(false); }
+    const context = startPaymentOperation(report);
+    if (!context) return Promise.resolve(false);
+    return Promise.resolve().then(() => exe('ExeChain', {
+      chain: 'cmdUpdateClaimPaymentConcept',
+      context: JSON.stringify({ claimId: context.claimId, payoutId: Number(edit.payoutId), concept: concept })
+    })).then((result) => {
+      if (!mountedRef.current || routeClaimId() !== context.claimId || paymentOperationRef.current !== context.operationId) return false;
+      const outcome = result && result.outData && typeof result.outData === 'object' ? result.outData : null;
+      if (!result || result.ok !== true || !outcome || outcome.ok !== true) {
+        throw new Error(outcome && outcome.msg || result && result.msg || 'No fue posible modificar el concepto del pago.');
+      }
+      return refreshFinancialData(context.claimId).then(() => {
+        if (!mountedRef.current || paymentOperationRef.current !== context.operationId || routeClaimId() !== context.claimId) return false;
+        setPaymentConceptEdit(null);
+        if (A.message && A.message.success) A.message.success(outcome.msg || 'Concepto del pago actualizado.');
+        return true;
+      });
+    }).catch((error) => {
+      if (mountedRef.current && paymentOperationRef.current === context.operationId && routeClaimId() === context.claimId) {
+        report(error && error.message ? error.message : String(error));
+      }
+      return false;
+    }).then((outcome) => finishPaymentOperation(context, outcome));
+  };
   const openExpenseCheckRequest = () => {
     if (!selectedExpense || nativePaymentGuidance(selectedExpense.paid, selectedExpense.status, 'EX')) {
       setExpenseError(selectedExpense ? nativePaymentGuidance(selectedExpense.paid, selectedExpense.status, 'EX') || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
@@ -7384,6 +7903,64 @@ END CATCH;`;
       <span className="resumen-financial-text">{text}</span>
     </A.Tooltip>;
   };
+  const requiredLabel = (text) => <React.Fragment>{text} <span className="resumen-required-mark" aria-hidden="true">*</span></React.Fragment>;
+  // MSN-000212: Impuestos / Retenciones / Deducciones of the Pagos check request, each with its detail (+), and the net.
+  const renderPaymentAdjustments = (session) => {
+    if (!session) return null;
+    const summary = paymentAdjustmentSummary(session);
+    const issue = paymentAdjustmentIssue(session);
+    const active = PAYMENT_ADJUSTMENTS.find((entry) => entry.type === session.adjustmentType) || null;
+    const locked = paymentSaving || session.taxCatalogLoading || !!session.taxCatalogError || !session.contactId;
+    return <React.Fragment>
+      {PAYMENT_ADJUSTMENTS.map((entry) => <div key={entry.type} className="resumen-reserve-input resumen-payment-adjustment">
+        <label>{entry.label}</label>
+        <div className="resumen-payment-adjustment-field">
+          <Input size="small" className="resumen-adjustment-value" readOnly value={formatAmount(summary.totals[entry.type])} />
+          <Button size="small" aria-label={'Detalle de ' + entry.label.toLowerCase()} title={'Detalle de ' + entry.label.toLowerCase()}
+            loading={session.taxCatalogLoading} disabled={locked} onClick={() => openPaymentAdjustment(entry.type)}>+</Button>
+        </div>
+      </div>)}
+      <div className="resumen-reserve-input"><label>Monto neto a pagar</label>
+        <div className="resumen-input-with-info"><Input size="small" className="resumen-adjustment-value" readOnly value={formatAmount(summary.net)} />
+          <A.Tooltip title="Monto de la solicitud + impuestos − retenciones − deducciones." placement="top">
+            <button type="button" className="resumen-info-button" aria-label="Información del monto neto a pagar"><InfoOutlinedIcon /></button>
+          </A.Tooltip>
+        </div></div>
+      {session.taxCatalogError ? <div className="resumen-reserve-error">{session.taxCatalogError}{' '}
+        <Button size="small" disabled={paymentSaving} onClick={() => loadPaymentTaxCatalog(session)}>Reintentar</Button></div> : null}
+      {issue ? <div className="resumen-reserve-error">{issue}</div> : null}
+      <Modal title={active ? 'Detalle de ' + active.label.toLowerCase() : ''} visible={!!active} destroyOnClose
+        wrapClassName="resumen-reserve-modal resumen-payment-adjustment-modal" onCancel={closePaymentAdjustment}
+        footer={<div className="resumen-reserve-actions"><Button size="small" type="primary" onClick={closePaymentAdjustment}>Aceptar</Button></div>}>
+        {active ? <div className="resumen-reserve-form">
+          <div className="resumen-reserve-input resumen-adjustment-catalog"><label>{active.add}</label>
+            <Select key={'add-' + active.type + '-' + session.taxLines.length} size="small" showSearch disabled={paymentSaving}
+              placeholder="Seleccione del catálogo" notFoundContent="No hay más opciones en el catálogo"
+              options={session.taxCatalog.filter((row) => row.taxType === active.type
+                && !session.taxLines.some((line) => line.code === row.code)).map((row) => ({ value: row.code, label: row.name }))}
+              filterOption={(input, option) => String(option.label || '').toLowerCase().indexOf(input.toLowerCase()) !== -1}
+              onChange={addPaymentAdjustment} /></div>
+          <A.Table size="small" rowKey="code" pagination={false} locale={{ emptyText: 'Sin líneas' }}
+            className="resumen-adjustment-table"
+            dataSource={summary.lines.filter((line) => line.taxType === active.type)}
+            columns={[
+              { title: 'Código', dataIndex: 'code' },
+              { title: 'Nombre', dataIndex: 'name' },
+              { title: 'Tasa', dataIndex: 'rate', render: (rate) => (rate ? roundMoney(rate * 100) + ' %' : EMPTY_VALUE) },
+              { title: 'Monto', dataIndex: 'value', render: (value, line) => (line.editable
+                ? <Input size="small" inputMode="decimal" aria-label={'Monto de ' + line.name} disabled={paymentSaving}
+                  value={formatMoneyInput(line.amount)}
+                  onChange={(event) => changeMoneyInput(event, (text) => changePaymentAdjustmentAmount(line.code, text))} />
+                : formatAmount(value)) },
+              { title: '', key: 'remove', render: (value, line) => <Button size="small" htmlType="button" disabled={paymentSaving}
+                onClick={(event) => { event.preventDefault(); event.stopPropagation(); removePaymentAdjustment(line.code); }}>Quitar</Button> }
+            ]} />
+          <div className="resumen-reserve-input"><label>Total de {active.label.toLowerCase()}</label>
+            <Input size="small" disabled value={formatAmount(summary.totals[active.type])} /></div>
+        </div> : null}
+      </Modal>
+    </React.Fragment>;
+  };
   const renderFinancialSection = (config) => (
     <section className={'resumen-' + config.key} aria-label={config.ariaLabel}>
       <div className="resumen-coverage-toolbar">
@@ -7391,6 +7968,10 @@ END CATCH;`;
         <div className="resumen-reserve-actions">
           <Button size="small" type="primary" disabled={!editable || paymentSaving || config.coverages.length === 0}
             onClick={config.openReserve}>{config.registerLabel}</Button>
+          {config.key === 'payments' ? <Button size="small" className="resumen-payment-concept-edit"
+            title={paymentConceptIssue(config.selected) || undefined}
+            disabled={!editable || paymentSaving || !!paymentConceptIssue(config.selected)}
+            onClick={openPaymentConceptEdit}>Modificar concepto</Button> : null}
           <Popconfirm title="¿Aprobar este movimiento de pago?" okText="Aprobar" cancelText="Cancelar"
             disabled={!editable || paymentSaving || !config.selected || config.selected.paid <= 0 || !(config.key === 'payments' ? [0, '0'] : [0, '0', 2, '2']).includes(config.selected.status)}
             onConfirm={() => approvePaymentMovement(config.selectedId, config.key === 'expenses' ? 'EX' : 'IN')}>
@@ -7423,6 +8004,7 @@ END CATCH;`;
       <div className="resumen-table-wrap"><table className="resumen-data-table">
         <thead><tr><th className="resumen-financial-payment-id">No.</th><th className="resumen-financial-coverage">Cobertura</th><th className="resumen-financial-concept">Concepto</th>{['payments', 'expenses'].includes(config.key) ? <th className="resumen-financial-affected">Objeto afectado</th> : null}
           <th className="resumen-cell-number">{config.appliedLabel}</th>
+          {config.key === 'payments' ? <th className="resumen-financial-deductible resumen-cell-number">Deducible</th> : null}
           <th className="resumen-cell-number">Disponible</th>
           <th className="resumen-financial-date">Fecha</th><th className="resumen-financial-beneficiary">Beneficiario</th><th className="resumen-financial-check-request">Solicitud de cheque</th><th className="resumen-financial-reference">Referencia</th><th className="resumen-financial-status">Estado</th><th className="resumen-financial-reinsurance">Reaseguro</th></tr></thead>
         <tbody>{config.rows.length ? config.rows.map((row) => (
@@ -7434,7 +8016,11 @@ END CATCH;`;
             }}>
             <td className="resumen-financial-payment-id">{displayValue(row.id)}</td><td className="resumen-financial-coverage">{financialText(row.coverage)}</td><td className="resumen-financial-concept">{financialText(row.concept)}</td>
             {['payments', 'expenses'].includes(config.key) ? <td className="resumen-financial-affected">{financialText(row.affectedObject)}</td> : null}
-            <td className="resumen-cell-number">{formatGridAmount(row.paid)}</td>
+            <td className="resumen-cell-number">{formatGridAmount(config.key === 'payments'
+              ? row.paid + (row.paid > 0 ? row.deductible : 0) : row.paid)}</td>
+            {config.key === 'payments' ? <td className="resumen-financial-deductible resumen-cell-number resumen-valuation-expense">
+              {formatGridAmount(row.deductible > 0 ? -row.deductible : row.deductible)}
+            </td> : null}
             <td className="resumen-cell-number">{formatGridAmount(row.available)}</td>
             <td className="resumen-financial-date">{financialText(formatDate(row.date))}</td><td className="resumen-financial-beneficiary">{financialText(row.beneficiary)}</td>
             <td className="resumen-financial-check-request">
@@ -7452,7 +8038,7 @@ END CATCH;`;
             <td className="resumen-financial-reinsurance"><Button size="small"
               onClick={(event) => { event.stopPropagation(); openMovementReinsurance(row.id); }}>Ver Reaseguro</Button></td>
           </tr>
-        )) : <tr><td className="resumen-empty-row" colSpan="12">{config.emptyText}</td></tr>}</tbody>
+        )) : <tr><td className="resumen-empty-row" colSpan={config.key === 'payments' ? 13 : 12}>{config.emptyText}</td></tr>}</tbody>
       </table></div>
       {config.selected && nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') ? <div role="status">{nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN')}</div> : null}
       {!config.reserveOpen && !config.checkOpen && config.error
@@ -7519,15 +8105,36 @@ END CATCH;`;
           </div>
         </div>
       </Modal>
+      {config.key === 'payments' ? <Modal title={paymentConceptEdit ? 'Modificar concepto del pago ' + paymentConceptEdit.payoutId : 'Modificar concepto'}
+        visible={!!paymentConceptEdit} footer={null} destroyOnClose
+        maskClosable={!paymentSaving} closable={!paymentSaving} wrapClassName="resumen-reserve-modal"
+        onCancel={closePaymentConceptEdit}>
+        {paymentConceptEdit ? <div className="resumen-reserve-form">
+          <div className="resumen-reserve-input resumen-payment-concept"><label>Concepto actual</label>
+            <TextArea rows={3} disabled value={paymentConceptEdit.current} /></div>
+          <div className="resumen-reserve-input resumen-payment-concept"><label>Nuevo concepto</label>
+            <TextArea rows={3} maxLength={250} disabled={!editable || paymentSaving} value={paymentConceptEdit.value}
+              onChange={(event) => changePaymentConcept(event.target.value)} /></div>
+          {paymentConceptEdit.error ? <div className="resumen-reserve-error">{paymentConceptEdit.error}</div> : null}
+          <div className="resumen-reserve-actions">
+            <Button size="small" disabled={paymentSaving} onClick={closePaymentConceptEdit}>Cancelar</Button>
+            <Button size="small" type="primary" loading={paymentSaving}
+              disabled={!editable || paymentSaving || !String(paymentConceptEdit.value || '').trim()
+                || String(paymentConceptEdit.value || '').trim() === paymentConceptEdit.current.trim()}
+              onClick={submitPaymentConceptEdit}>Guardar</Button>
+          </div>
+        </div> : null}
+      </Modal> : null}
       <Modal title={config.checkTitle} visible={config.checkOpen} footer={null} destroyOnClose
         maskClosable={!paymentSaving} closable={!paymentSaving} wrapClassName="resumen-reserve-modal"
         onCancel={() => closeCheckModal(config)}>
-        <div className="resumen-reserve-form">
-          <div className="resumen-reserve-input"><label>Tipo de beneficiario</label><Select size="small"
+        <div className="resumen-reserve-form resumen-check-form">
+          <div className="resumen-check-section-title">Beneficiario</div>
+          <div className="resumen-reserve-input"><label>{requiredLabel('Tipo de beneficiario')}</label><Select size="small"
             disabled={paymentSaving} value={paymentCatalog && paymentCatalog.type} options={paymentTypeOptions()}
             onChange={(value) => loadPaymentBeneficiaries(value)} /></div>
-          <div className="resumen-reserve-input"><label>{paymentCatalog && paymentCatalog.type === 'OTH' ? 'Beneficiario'
-            : (PAYMENT_TYPES.find((item) => item.value === (paymentCatalog && paymentCatalog.type)) || {}).label}</label><Select size="small"
+          <div className="resumen-reserve-input"><label>{requiredLabel(paymentCatalog && paymentCatalog.type === 'OTH' ? 'Beneficiario'
+            : (PAYMENT_TYPES.find((item) => item.value === (paymentCatalog && paymentCatalog.type)) || {}).label)}</label><Select size="small"
             showSearch allowClear loading={paymentCatalog && paymentCatalog.loading}
             disabled={paymentSaving || !paymentCatalog} filterOption={paymentCatalog && paymentCatalog.type === 'OTH' ? false
               : (input, option) => String(option.label || '').toLowerCase().indexOf(input.toLowerCase()) !== -1}
@@ -7536,42 +8143,55 @@ END CATCH;`;
             placeholder="Seleccione o busque un beneficiario" options={beneficiaryOptions}
             onSearch={(query) => { if (paymentCatalog && paymentCatalog.type === 'OTH') loadPaymentBeneficiaries('OTH', query); }}
             onChange={selectPaymentBeneficiary} /></div>
-          <div className="resumen-reserve-input"><label>Beneficiario adicional</label><Input size="small" maxLength={250}
+          <div className="resumen-reserve-input"><label>{requiredLabel('Beneficiario adicional')}</label><Input size="small" maxLength={250}
             disabled={paymentSaving || !paymentCatalog || !paymentCatalog.contactId}
             value={paymentCatalog ? paymentCatalog.additionalBeneficiary : ''}
             onChange={(event) => { if (paymentCatalog) { paymentCatalog.additionalBeneficiary = event.target.value; notifyPaymentCatalog(); } }} /></div>
-          <div className="resumen-reserve-input"><label>Cobertura</label><Input size="small" disabled
+          <div className="resumen-reserve-input"><label>Cobertura</label><Input size="small" className="resumen-readonly-field" readOnly
             value={config.selected ? config.selected.coverage : ''} /></div>
-          <div className="resumen-reserve-input"><label>Monto de la solicitud</label><Input size="small" inputMode="decimal"
-            disabled={paymentSaving || !paymentCatalog || !paymentCatalog.contactId} value={formatMoneyInput(paymentCatalog ? paymentCatalog.amount : '')}
-            onChange={(event) => changeMoneyInput(event, (value) => { if (paymentCatalog) { paymentCatalog.amount = value; notifyPaymentCatalog(); } })} />
-            <small>Disponible para este movimiento y beneficiario: {formatAmount(paymentCatalog && paymentCatalog.maximum || 0)}</small></div>
+          <div className="resumen-check-section-title">Detalle del pago</div>
+          <div className="resumen-reserve-input"><label>{requiredLabel('Monto de la solicitud')}</label>
+            <div className="resumen-input-with-info"><Input size="small" inputMode="decimal"
+              disabled={paymentSaving || !paymentCatalog || !paymentCatalog.contactId} value={formatMoneyInput(paymentCatalog ? paymentCatalog.amount : '')}
+              onChange={(event) => changeMoneyInput(event, (value) => { if (paymentCatalog) { paymentCatalog.amount = value; notifyPaymentCatalog(); } })} />
+              <A.Tooltip title={<div className="resumen-payment-info-tooltip">
+                <div>Disponible para este movimiento y beneficiario: {formatAmount(paymentCatalog && paymentCatalog.maximum || 0)}</div>
+                {paymentRetainedDeductible(paymentCatalog) > 0 ? <div className="resumen-payment-info-tooltip-warning">
+                  Al registrar este pago el sistema ya descontó un deducible de {formatAmount(paymentRetainedDeductible(paymentCatalog))}. Para no cobrarlo dos veces, no agregue «Cobro de deducible» por ese deducible.
+                </div> : null}
+              </div>} placement="top">
+                <button type="button" className="resumen-info-button" aria-label="Información del monto disponible"><InfoOutlinedIcon /></button>
+              </A.Tooltip>
+            </div></div>
+          {config.key === 'payments' ? <div className="resumen-check-section-title">Ajustes financieros</div> : null}
+          {config.key === 'payments' ? renderPaymentAdjustments(paymentCatalog) : null}
           {paymentCatalog && paymentCatalog.type === 'PRO' ? <div className="resumen-reserve-input"><label>Contacto proveedor</label>
             <Input size="small" disabled value={paymentCatalog.contactName || ''} /></div> : null}
-          <div className="resumen-reserve-input"><label>Cuenta del beneficiario</label><Select size="small"
+          <div className="resumen-check-section-title">Datos de transferencia</div>
+          <div className="resumen-reserve-input"><label>{requiredLabel('Cuenta del beneficiario')}</label><Select size="small"
             loading={paymentCatalog && paymentCatalog.accountLoading}
             disabled={paymentSaving || !paymentCatalog || paymentCatalog.accountLoading || !paymentCatalog.contactId}
             value={paymentCatalog && paymentCatalog.accountId != null ? String(paymentCatalog.accountId) : undefined}
             placeholder="Seleccione una cuenta" options={beneficiaryAccountOptions} onChange={(value) => selectPaymentAccount(value, paymentReference)} /></div>
-          <div className="resumen-reserve-input"><label>Cuenta de origen</label><Select size="small" showSearch allowClear filterOption={false}
+          <div className="resumen-reserve-input"><label>{requiredLabel('Cuenta de origen')}</label><Select size="small" showSearch allowClear filterOption={false}
             loading={paymentCatalog && paymentCatalog.sourceAccountLoading}
             disabled={paymentSaving || !paymentCatalog}
             value={paymentCatalog && paymentCatalog.sourceAccountId != null ? String(paymentCatalog.sourceAccountId) : undefined}
             placeholder="Busque una cuenta" options={sourceAccountOptions} onSearch={searchPaymentSourceAccounts}
             onChange={selectPaymentSourceAccount} /></div>
-          <div className="resumen-reserve-input"><label>Método de pago</label><Select size="small" allowClear
+          <div className="resumen-reserve-input"><label>{requiredLabel('Método de pago')}</label><Select size="small" allowClear
             disabled={paymentSaving || !paymentCatalog || paymentCatalog.methodsLoading || !!paymentCatalog.claim.paymentMethodCode}
             value={paymentCatalog && paymentCatalog.method || undefined} placeholder="Seleccione un método de pago"
             options={paymentCatalog ? paymentCatalog.methods.map((row) => ({ value: row.code, label: row.name })) : []}
             onChange={(value) => selectPaymentMethod(value, paymentReference)} /></div>
-          <div className="resumen-reserve-input"><label>Tipo de pago</label><Select size="small" allowClear
+          <div className="resumen-reserve-input"><label>{requiredLabel('Tipo de pago')}</label><Select size="small" allowClear
             disabled={paymentSaving || !paymentCatalog || paymentCatalog.methodsLoading}
             value={paymentCatalog && paymentCatalog.paymentType != null ? paymentCatalog.paymentType : undefined}
             placeholder="Seleccione un tipo de pago"
             options={paymentCatalog ? paymentCatalog.paymentTypes.map((row) => ({ value: row.code, label: row.name })) : []}
             onChange={(value) => { if (paymentCatalog) { paymentCatalog.paymentType = value; notifyPaymentCatalog(); } }} /></div>
           {paymentCatalog && paymentCatalog.info ? <div role="status">{paymentCatalog.info}</div> : null}
-          {paymentCatalog && paymentCatalog.type === 'PRO' ? <div className="resumen-reserve-input"><label>Tipo de gestión</label>
+          {paymentCatalog && paymentCatalog.type === 'PRO' ? <div className="resumen-reserve-input"><label>{requiredLabel('Tipo de gestión')}</label>
             <Select size="small" disabled={paymentSaving} value={paymentCatalog.managementType}
               options={[{ value: 'DIRECT', label: 'Pago directo' }, { value: 'SO', label: 'Orden de servicio' }]}
               onChange={(value) => { paymentCatalog.managementType = value; notifyPaymentCatalog(); }} /></div> : null}
@@ -7580,7 +8200,7 @@ END CATCH;`;
             {paymentCatalog.error || paymentCatalog.methodsError || paymentCatalog.sourceAccountError}
             <Button size="small" disabled={paymentSaving} onClick={() => openPaymentCatalogs(paymentCatalog.coverageId,
               paymentCatalog.payoutId, paymentCatalog.reserveType)}>Reintentar</Button></div> : null}
-          <div className="resumen-reserve-input"><label>Referencia</label><Input size="small" maxLength={250}
+          <div className="resumen-reserve-input resumen-check-reference"><label>{requiredLabel('Referencia')}</label><Input size="small" maxLength={250}
             disabled={paymentSaving} value={paymentReference}
             onChange={(event) => setPaymentReference(event.target.value)} /></div>
           {config.error ? <div className="resumen-reserve-error">{config.error}</div> : null}
@@ -7592,7 +8212,8 @@ END CATCH;`;
                 || !!paymentCatalog.error || !!paymentCatalog.methodsError || !!paymentCatalog.sourceAccountError
                 || !!paymentCatalog.settlementError || !(Number(paymentCatalog.amount) > 0) || Number(paymentCatalog.amount) > paymentCatalog.maximum
                 || !paymentCatalog.contactId || !paymentCatalog.accountId || !paymentCatalog.sourceAccountId
-                || paymentCatalog.paymentType == null || !paymentCatalog.additionalBeneficiary.trim() || !paymentReference.trim()}
+                || paymentCatalog.paymentType == null || !paymentCatalog.additionalBeneficiary.trim() || !paymentReference.trim()
+                || config.key === 'payments' && !!paymentAdjustmentIssue(paymentCatalog)}
               onClick={config.submitCheck}>Ejecutar solicitud</Button>
           </div>
         </div>
@@ -7634,7 +8255,13 @@ END CATCH;`;
             <div><span>Beneficiario adicional</span><strong>{displayValue(detail.additionalBeneficiary)}</strong></div>
             <div><span>Cobertura</span><strong>{displayValue(detail.coverage)}</strong></div>
             <div><span>Objeto afectado</span><strong>{displayValue(detail.affectedObject)}</strong></div>
-            <div><span>Monto de la solicitud</span><strong>{formatGridAmount(firstValue(payment.total, payment.amount, detail.paid))}</strong></div>
+            <div><span>Monto de la solicitud</span><strong>{formatGridAmount(firstValue(payment.grossAmount, payment.total, payment.amount, detail.paid))}</strong></div>
+            {[payment.taxes, payment.retentions, payment.deductions].some((value) => numericValue(value)) ? <React.Fragment>
+              <div><span>Impuestos</span><strong>{formatAmount(numericValue(payment.taxes) || 0)}</strong></div>
+              <div><span>Retenciones</span><strong>{formatAmount(numericValue(payment.retentions) || 0)}</strong></div>
+              <div><span>Deducciones</span><strong>{formatAmount(numericValue(payment.deductions) || 0)}</strong></div>
+              <div><span>Monto neto a pagar</span><strong>{formatGridAmount(payment.total)}</strong></div>
+            </React.Fragment> : null}
             <div><span>Cuenta del beneficiario</span><strong>{displayValue(firstValue(payment.accountNo, payment.accountNumber,
               payment.accountId != null ? '#' + payment.accountId : null))}</strong></div>
             <div><span>Cuenta de origen</span><strong>{displayValue(firstValue(payment.sourceAccountNo, payment.sourceAccountNumber,
@@ -8013,6 +8640,8 @@ END CATCH;`;
       .resumen-shell .ant-input[disabled]::placeholder,.resumen-shell .ant-picker-disabled .ant-picker-input>input::placeholder{color:#b6bfc9;-webkit-text-fill-color:#b6bfc9;opacity:1}
       .resumen-shell .resumen-checks{display:flex;align-items:center;gap:16px;min-height:24px}
       .resumen-shell .resumen-checks .ant-checkbox-wrapper{color:var(--rz-muted);font-size:12px}
+      .resumen-shell .resumen-loss-type .ant-checkbox-wrapper{flex:0 0 auto;white-space:nowrap}
+      .resumen-shell .resumen-loss-type .ant-select{flex:1 1 auto;min-width:150px;max-width:280px}
       .resumen-shell .ant-checkbox-wrapper-disabled,.resumen-shell .ant-checkbox-disabled+span{color:#b6bfc9!important;opacity:1}
       .resumen-shell .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-inner{width:16px;height:16px;border:1px solid #8f9aa7!important;border-radius:3px;background:#fff}
       .resumen-shell .ant-checkbox:hover .ant-checkbox-inner,.resumen-shell .ant-checkbox-wrapper:hover .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox:hover .ant-checkbox-inner,.resumen-affected-modal .ant-checkbox-wrapper:hover .ant-checkbox-inner{border-color:#8da9c2!important}
@@ -8069,6 +8698,7 @@ END CATCH;`;
       .resumen-shell .resumen-financial-coverage{width:160px;max-width:160px}
       .resumen-shell .resumen-financial-concept{width:170px;max-width:170px}
       .resumen-shell .resumen-financial-affected{width:170px;max-width:170px}
+      .resumen-shell .resumen-financial-deductible{width:96px;max-width:96px}
       .resumen-shell .resumen-financial-date{width:94px;max-width:94px}
       .resumen-shell .resumen-financial-beneficiary{width:160px;max-width:160px}
       .resumen-shell .resumen-financial-check-request{width:128px;max-width:128px;text-align:center}
@@ -8161,14 +8791,33 @@ END CATCH;`;
       .resumen-repair-order-request-lines>.ant-btn-link{height:28px;margin-bottom:5px;padding:4px 8px}
       .resumen-shell .resumen-reserve-panel{flex:0 0 auto;display:flex;justify-content:flex-end}
       .resumen-shell .resumen-reserve-actions{display:flex;gap:7px;white-space:nowrap}
+      .resumen-shell .resumen-payment-concept-edit.ant-btn{border:1.5px solid #1677ff}
+      .resumen-shell .resumen-payment-concept-edit.ant-btn:not([disabled]){color:#0958d9;background:#f0f7ff}
+      .resumen-shell .resumen-payment-concept-edit.ant-btn:not([disabled]):hover,.resumen-shell .resumen-payment-concept-edit.ant-btn:not([disabled]):focus{color:#003eb3;background:#e6f4ff;border-color:#0958d9}
       .resumen-shell .resumen-financial-approve.ant-btn:not([disabled]){color:#fff;background:#389e0d;border-color:#389e0d}
       .resumen-shell .resumen-financial-approve.ant-btn:not([disabled]):hover,.resumen-shell .resumen-financial-approve.ant-btn:not([disabled]):focus{color:#fff;background:#237804;border-color:#237804}
       .resumen-shell .resumen-financial-warning.ant-btn:not([disabled]){color:#fff;background:#d97706;border-color:#d97706}
       .resumen-shell .resumen-financial-warning.ant-btn:not([disabled]):hover,.resumen-shell .resumen-financial-warning.ant-btn:not([disabled]):focus{color:#fff;background:#b45309;border-color:#b45309}
       .resumen-shell .resumen-reserve-error{padding:7px 10px;color:#9f2d2d;background:#fff1f0;border:1px solid #ffccc7;border-radius:5px;font-size:12px}
       .resumen-reserve-modal .resumen-reserve-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}
+      .resumen-reserve-modal .resumen-check-form{gap:12px 16px}
+      .resumen-reserve-modal .resumen-check-section-title{grid-column:1/-1;margin-top:2px;padding:4px 8px;color:#183153;background:#dbeafe;border:1px solid #b7c9e2;border-radius:4px;font-size:12px;font-weight:700;line-height:18px;box-shadow:inset 2px 0 0 #5b8fd8}
+      .resumen-reserve-modal .resumen-check-reference{grid-column:1/-1}
+      .resumen-reserve-modal .resumen-check-form>.resumen-reserve-actions{position:sticky;bottom:-12px;z-index:2;margin:2px -8px -12px;padding:10px 8px;background:rgba(255,255,255,.96);border-top:1px solid #d9e2ec}
+      .resumen-reserve-modal .resumen-input-with-info{display:flex;align-items:center;gap:6px;min-width:0}
+      .resumen-reserve-modal .resumen-input-with-info>.ant-input{flex:1;min-width:0;border-color:#aebfd4!important;border-radius:5px}
+      .resumen-reserve-modal .resumen-input-with-info>.ant-input:hover{border-color:#8da9c2!important}
+      .resumen-reserve-modal .resumen-input-with-info>.ant-input:focus{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.12)!important}
+      .resumen-reserve-modal .resumen-readonly-field{color:#183153!important;background:#f7faff!important;border-color:#8da9c2!important;font-weight:600}
+      .resumen-reserve-modal .resumen-info-button{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;color:#1677ff;background:transparent;border:0;border-radius:50%;cursor:pointer}
+      .resumen-reserve-modal .resumen-info-button:hover,.resumen-reserve-modal .resumen-info-button:focus{color:#0958d9;background:#e6f4ff;outline:0;box-shadow:0 0 0 2px rgba(22,119,255,.12)}
+      .resumen-reserve-modal .resumen-info-icon{display:inline-flex;width:15px;height:15px}
+      .resumen-reserve-modal .resumen-info-icon svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .resumen-reserve-modal .resumen-payment-info-tooltip{max-width:320px;line-height:18px}
+      .resumen-reserve-modal .resumen-payment-info-tooltip-warning{margin-top:6px;color:#ffe58f}
       .resumen-reserve-modal .resumen-payment-concept{grid-column:1/-1}
       .resumen-reserve-modal .resumen-reserve-input label{display:block;margin-bottom:5px;color:#60708a;font-size:12px;font-weight:600}
+      .resumen-reserve-modal .resumen-required-mark{color:#cf1322;font-weight:700}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input,.resumen-reserve-modal .resumen-reserve-input>.ant-select{width:100%}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input,.resumen-reserve-modal .resumen-reserve-input>.ant-select .ant-select-selector{border-color:#aebfd4!important;border-radius:5px}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input:hover,.resumen-reserve-modal .resumen-reserve-input>.ant-select:hover .ant-select-selector{border-color:#8da9c2!important}
@@ -8183,6 +8832,23 @@ END CATCH;`;
       .resumen-purchase-order-option span{color:#60708a;font-size:11px}
       .resumen-reserve-modal .resumen-reserve-error{grid-column:1/-1;padding:7px 10px;color:#9f2d2d;background:#fff1f0;border:1px solid #ffccc7;border-radius:5px;font-size:12px}
       .resumen-reserve-modal .resumen-reserve-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;padding-top:4px}
+      .resumen-reserve-modal .resumen-payment-adjustment-field{display:flex;gap:6px}
+      .resumen-reserve-modal .resumen-payment-adjustment-field>.ant-input{flex:1;min-width:0;border-color:#aebfd4!important;border-radius:5px}
+      .resumen-reserve-modal .resumen-adjustment-value{color:#183153!important;background:#fff!important;font-weight:600;font-variant-numeric:tabular-nums}
+      .resumen-reserve-modal .resumen-payment-adjustment-notice{grid-column:1/-1;padding:7px 10px;color:#8a5300;background:#fffbe6;border:1px solid #ffe58f;border-radius:5px;font-size:12px}
+      .resumen-reserve-modal .resumen-reserve-form>.ant-table-wrapper{grid-column:1/-1}
+      .resumen-payment-adjustment-modal .ant-modal-content{border:1px solid #b8c4d1;border-radius:6px;overflow:hidden}
+      .resumen-payment-adjustment-modal .ant-modal-header{padding:10px 16px;border-bottom:1px solid #cbd5e1;background:#f8fbff}
+      .resumen-payment-adjustment-modal .ant-modal-body{padding:16px;background:#fff}
+      .resumen-payment-adjustment-modal .resumen-reserve-form{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}
+      .resumen-payment-adjustment-modal .resumen-adjustment-catalog{grid-column:1/-1}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table{width:100%;grid-column:1/-1}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table{border:1px solid #b8c4d1;border-radius:5px;overflow:hidden}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table-thead>tr>th{padding:8px 10px;color:#183153;background:#e8eef6;border-right:1px solid #cbd5e1;border-bottom:1px solid #aebfd4;font-weight:700}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table-tbody>tr>td{padding:8px 10px;border-right:1px solid #d5dee9;border-bottom:1px solid #d5dee9}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table-tbody>tr:last-child>td{border-bottom:0}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table-thead>tr>th:last-child,.resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table-tbody>tr>td:last-child{border-right:0}
+      .resumen-payment-adjustment-modal .resumen-adjustment-table .ant-table-tbody>tr:hover>td{background:#f5f9ff}
       .resumen-reinsurance-modal .ant-modal-content{border:1px solid #b8c4d1;border-radius:6px;overflow:hidden}
       .resumen-reinsurance-modal .ant-modal-header{padding:10px 16px;border-bottom:1px solid #d9e2ec;background:#f8fbff}
       .resumen-reinsurance-modal .ant-modal-title{color:#183153;font-size:14px;font-weight:600}
@@ -8223,6 +8889,15 @@ END CATCH;`;
       .resumen-shell .resumen-history .resumen-table-wrap{flex:1 1 auto;min-height:220px;max-height:none;overflow:auto}
       .resumen-shell .resumen-history .resumen-history-table-wrap{min-height:220px}
       .resumen-shell .resumen-history .resumen-data-table{min-width:820px}
+      .resumen-shell .resumen-coverage .resumen-coverage-table{width:100%;table-layout:fixed;font-size:11px}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th,.resumen-shell .resumen-coverage .resumen-coverage-table td{padding:4px 5px}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(1){width:5%}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(2){width:16%;text-align:left}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(3),.resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(4){width:8%}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(n+5):nth-child(-n+12){width:7.5%}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(13){width:3%}
+      .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(2),.resumen-shell .resumen-coverage .resumen-coverage-table td:nth-child(2){overflow:hidden;text-overflow:ellipsis}
+      .resumen-shell .resumen-coverage .resumen-coverage-table-wrap{overflow:hidden}
        .resumen-shell .resumen-custom{display:flex;flex:1 1 auto;min-height:180px;flex-direction:column}
        .resumen-shell .resumen-custom-preload{display:none}
       .resumen-shell .resumen-affected{gap:7px}
@@ -8290,6 +8965,15 @@ END CATCH;`;
     total: valuationBalance(claimSummary.valuation.reserves, claimSummary.valuation.payments,
       claimSummary.valuation.expenses, claimSummary.valuation.recoveries)
   };
+  const paymentValuationDetail = paymentRows.reduce((summary, row) => {
+    const paid = numericValue(row && row.paid) || 0;
+    if (paid > 0) summary.deductible += numericValue(row && row.deductible) || 0;
+    summary.paid += paid;
+    return summary;
+  }, { paid: 0, deductible: 0 });
+  paymentValuationDetail.paid = roundMoney(paymentValuationDetail.paid);
+  paymentValuationDetail.deductible = roundMoney(paymentValuationDetail.deductible);
+  paymentValuationDetail.gross = roundMoney(paymentValuationDetail.paid + paymentValuationDetail.deductible);
 
   return (
     <div ref={shellRef} className="resumen-shell">
@@ -8444,6 +9128,14 @@ END CATCH;`;
                     </A.Descriptions>}>
                     <button type="button" className="resumen-amount resumen-balance resumen-valuation-detail-link"
                       title="Ver desglose de saldo">{formatAmount(claimSummary.valuation[field[1]])}</button>
+                  </A.Popover> : field[1] === 'payments' ? <A.Popover title="Desglose de pagos" trigger="click" placement="bottomRight"
+                    content={<A.Descriptions bordered size="small" column={1} className="resumen-reserve-breakdown">
+                      <A.Descriptions.Item label="Pagado + deducible">{formatAmount(paymentValuationDetail.gross)}</A.Descriptions.Item>
+                      <A.Descriptions.Item label="Menos deducible"><span className="resumen-valuation-expense">{formatAmount(-paymentValuationDetail.deductible)}</span></A.Descriptions.Item>
+                      <A.Descriptions.Item label="Pago real"><strong>{formatAmount(paymentValuationDetail.paid)}</strong></A.Descriptions.Item>
+                    </A.Descriptions>}>
+                    <button type="button" className="resumen-amount resumen-valuation-expense resumen-valuation-detail-link"
+                      title="Ver desglose de pagos">{formatAmount(claimSummary.valuation[field[1]])}</button>
                   </A.Popover> : <span className={'resumen-amount ' + (field[1] === 'balance' ? 'resumen-balance'
                     : ['recoveries'].includes(field[1]) ? 'resumen-valuation-income'
                     : ['payments', 'expenses'].includes(field[1]) ? 'resumen-valuation-expense' : '')}>
@@ -8527,7 +9219,9 @@ END CATCH;`;
                   <Button size="small" onClick={() => loadClaimCatalogs(claimId)}>Reintentar catálogos</Button></div> : null}
                 {isAutoClaim ? <React.Fragment>
                   <Field label="Culpable"><div className="resumen-checks">{extraControl("culpable")}{extraControl("posibleRecupero")}</div></Field>
-                  <Field label="Pérdida Total">{extraControl("perdidaTotal")}</Field>
+                  <Field label="Pérdida Total"><div className="resumen-checks resumen-loss-type">{extraControl("perdidaTotal")}
+                    {draft && draft.extra_perdidaTotal ? extraControl("tipoPerdida") : null}</div></Field>
+                  {draft && draft.extra_perdidaTotal && lossTypes.error ? <Alert type="warning" message={lossTypes.error} /> : null}
                   <Field label="Formato Tránsito">{extraControl("formatoTransito")}</Field>
                   <Field label="Conductor"><div className="resumen-driver">
                     {extraControl("conductor")}
@@ -8651,11 +9345,12 @@ END CATCH;`;
                 onClick={() => refreshSection(() => refreshReserveData(claimId), setReserveError)}><ReloadOutlinedIcon /> Refrescar</Button>
             </div>
             <div className="resumen-table-wrap resumen-coverage-table-wrap">
-              <table className="resumen-data-table">
+              <table className="resumen-data-table resumen-coverage-table">
                 <thead><tr>
                   <th>Código</th><th>Cobertura</th><th>Desde</th><th>Hasta</th>
                   <th className="resumen-cell-number">Monto</th>
                   <th className="resumen-cell-number">Disponible</th>
+                  <th className="resumen-cell-number">Deducible</th>
                   <th className="resumen-cell-number">R. de pago</th>
                   <th className="resumen-cell-number">R. de gasto</th>
                   <th className="resumen-cell-number">Total reserva</th>
@@ -8673,6 +9368,7 @@ END CATCH;`;
                     <td>{row.code}</td><td>{row.name}</td><td>{displayValue(row.start)}</td><td>{displayValue(row.end)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.limit)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.available)}</td>
+                    <td className="resumen-cell-number">{formatGridAmount(row.deductible)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.paymentReserve)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.expenseReserve)}</td>
                     <td className="resumen-cell-number">{formatGridAmount(row.totalReserve)}</td>
@@ -8686,7 +9382,7 @@ END CATCH;`;
                       </span> {row.affectedObjects}</React.Fragment> : '0'}
                     </td>
                   </tr>
-                )) : <tr><td className="resumen-empty-row" colSpan="12">No hay coberturas disponibles para este siniestro.</td></tr>}</tbody>
+                )) : <tr><td className="resumen-empty-row" colSpan="13">No hay coberturas disponibles para este siniestro.</td></tr>}</tbody>
               </table>
             </div>
 
@@ -8787,7 +9483,14 @@ END CATCH;`;
           reserveOpen: paymentReserveModalOpen, setReserveOpen: setPaymentReserveModalOpen,
           checkOpen: checkRequestModalOpen, setCheckOpen: setCheckRequestModalOpen,
           openReserve: () => {
-            const coverageId = selectedCoverage ? selectedCoverage.id : coverageRows.length === 1 ? coverageRows[0].id : null;
+            const availablePaymentCoverages = coverageRows.map((row) => ({
+              id: row.id,
+              available: paymentSpendingAvailable(currentClaimRef.current, row.id, 'IN')
+            })).filter((row) => row.available !== null && row.available > 0);
+            const selectedHasBalance = selectedCoverage
+              && availablePaymentCoverages.some((row) => row.id === selectedCoverage.id);
+            const coverageId = selectedHasBalance ? selectedCoverage.id
+              : availablePaymentCoverages.length === 1 ? availablePaymentCoverages[0].id : null;
             selectFinancialCoverage(coverageId);
             if (coverageId != null) openPaymentCatalogs(coverageId, null, 'IN');
             setPaymentError('');

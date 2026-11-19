@@ -15,6 +15,7 @@ let configCoverages = [];
 let productCoverages = [];
 let coberturasSeleccionadas = [];
 let polizaConfirmada = false;
+let marcasCargadas = false; // MSN-000209: la lista de marcas ya se pidió
 function polizaEmitidaParaUbicacion() {
     const active = policy?.active;
     const activeDate = policy?.activeDate;
@@ -77,11 +78,14 @@ async function cargarUbicacionAsegurado() {
 }
 
 
-const changeMarca = async () => {
+const changeMarca = async (event) => {
   try {
      const Modelo = $("#cmbModelo").val();
      const Marca = $("#cmbMarca").val();
-     await loadDataTableModelo({reference:'#cmbModelo',tableName:'tbModelos',indexCode:2,indexDisplay:3,indexMarca:1,valMarca:Marca,indexRamo:0,valRamo:policy.lob});
+     // MSN-000209: si la persona cambia la marca, el modelo guardado no se vuelve a
+     // elegir solo (el mismo código de modelo existe en otras marcas): queda vacío.
+     const cambioDeLaPersona = !!(event && !event.isTrigger);
+     await loadDataTableModelo({reference:'#cmbModelo',tableName:'tbModelos',indexCode:2,indexDisplay:3,indexMarca:1,valMarca:Marca,indexRamo:0,valRamo:policy.lob,ordenar:true,restaurarGuardado:!cambioDeLaPersona});
   } catch (error) {
     console.error(`Error seleccionando la Marca: ${error.toString()}`)
   }   
@@ -281,6 +285,19 @@ const onDocumentReady = async() => {
     prepareTabContainer();
     moveFieldsToTabHome();
     setEstadoCargaInicial(true);
+    // MSN-000209: Marca y Modelo con búsqueda al escribir.
+    activarBuscadorDeLista('#cmbMarca', {
+        ayuda: 'Escriba para buscar la marca',
+        obligatorio: 'Seleccione una marca de la lista.',
+        vacio: 'No hay marcas para elegir.',
+        cargando: function () { return !marcasCargadas; }
+    });
+    activarBuscadorDeLista('#cmbModelo', {
+        ayuda: 'Escriba para buscar el modelo',
+        obligatorio: 'Seleccione un modelo de la lista.',
+        vacio: function () { return $('#cmbMarca').val() ? 'La marca elegida no tiene modelos.' : 'Elija primero la marca.'; },
+        cargando: function () { return !!loadDataTableModelo.cargando; }
+    });
 
     try {
       await loadPolicy();
@@ -293,7 +310,7 @@ const onDocumentReady = async() => {
       // loading remains below because it must use the selected brand.
       const initialLoads = await Promise.allSettled([
           cargarUbicacionAsegurado(),
-          loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2}),
+          loadDataTable({reference:'#cmbMarca',tableName:'tbMarcas',indexCode:1,indexDisplay:2,ordenar:true}),
           loadDataTable({reference:'#cmbtipo',tableName:'tblTipoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob}),
           loadDataTable({reference:'#cmbUsoAuto',tableName:'tblUsoPorRamo',indexCode:1,indexDisplay:2,filter:policy.lob})
       ]);
@@ -316,6 +333,7 @@ const onDocumentReady = async() => {
       console.error('No se pudo inicializar el formulario de automóvil.', error);
       if (me.message && me.message.error) me.message.error('No se pudo cargar completamente el formulario de automóvil.');
     } finally {
+      marcasCargadas = true;
       setEstadoCargaInicial(false);
     }
 
@@ -331,6 +349,7 @@ async function loadDataTable ({
     indexCode,
     indexDisplay,
     filter,
+    ordenar,
 }) {
     $(reference).empty().append('<option value="">Seleccione una opción</option>');;
     const result = await me.exe("GetFullTable", { table: tableName });
@@ -341,7 +360,8 @@ async function loadDataTable ({
         ? data
         : data.filter(item => String(item && item[0] !== undefined ? item[0] : '').trim() === String(filter).trim());
 
-    filteredData.forEach(item => {
+    // MSN-000209: con ordenar, la lista se muestra en orden alfabético.
+    (ordenar ? ordenarPorNombre(filteredData, indexDisplay) : filteredData).forEach(item => {
         $(reference).append('<option value="' + item[indexCode] + '">' + item[indexDisplay] + '</option>');
     });
 
@@ -360,25 +380,41 @@ async function loadDataTableModelo ({
     indexMarca,
     valMarca,
     indexRamo,
-    valRamo
+    valRamo,
+    ordenar,
+    restaurarGuardado = true
 }) {
+    // MSN-000209: sólo la última carga llena la lista. Si la marca cambia otra vez
+    // antes de que llegue la tabla, la carga anterior no agrega sus modelos.
+    const turno = loadDataTableModelo.turno = (loadDataTableModelo.turno || 0) + 1;
+    loadDataTableModelo.cargando = true;
     $(reference).empty().append('<option value="">Seleccione una opción</option>');;
-    const result = await me.exe("GetFullTable", { table: tableName });
+    let result;
+    try {
+        result = await me.exe("GetFullTable", { table: tableName });
+    } finally {
+        if (turno === loadDataTableModelo.turno) loadDataTableModelo.cargando = false;
+    }
+    if (turno !== loadDataTableModelo.turno) return [];
     const data = result.outData && result.outData.length > 0 ? result.outData : [];
   
     data.splice(0, 1);
+    const modelos = [];
     data.forEach(item => {
       const matchesMarca = String(item && item[indexMarca] !== undefined ? item[indexMarca] : '').trim() === String(valMarca == null ? '' : valMarca).trim();
       const matchesRamo = valRamo === undefined || valRamo === null || String(valRamo).trim() === ''
         || String(item && item[indexRamo] !== undefined ? item[indexRamo] : '').trim() === String(valRamo).trim();
 
       if (matchesMarca && matchesRamo){
-        $(reference).append('<option value="' + item[indexCode] + '">' + item[indexDisplay] + '</option>');
+        modelos.push(item);
       }
+    });
+    (ordenar ? ordenarPorNombre(modelos, indexDisplay) : modelos).forEach(item => {
+        $(reference).append('<option value="' + item[indexCode] + '">' + item[indexDisplay] + '</option>');
     });
 
     const dataValue = $(reference).attr('user-data');
-    if(!!dataValue){
+    if(restaurarGuardado && !!dataValue){
         $(reference).val(String(dataValue).trim()).trigger('change');
     }
     return data;
@@ -588,16 +624,22 @@ async function loadPolicy() {
         const currentSAIsEmptyOrZero = currentSA === '' ||
             (currentSANormalized !== '' && Number(currentSANormalized) === 0);
 
-        // Solo cargar la suma de la póliza la primera vez. Si el campo ya
-        // contiene un valor distinto de vacío o cero, se debe respetar.
-        if (currentSAIsEmptyOrZero) {
+        const polizaEmitida = esPolizaEmitidaCoberturas();
+
+        // Solo cargar la suma de la póliza la primera vez, mientras se cotiza. Si el
+        // campo ya contiene un valor distinto de vacío o cero, se debe respetar. En
+        // una póliza emitida la suma de la póliza es el total de sus coberturas, no
+        // el valor del vehículo, así que no se usa para completar este campo.
+        if (currentSAIsEmptyOrZero && !polizaEmitida) {
             $txtSA.val(policy?.insuredSum || '0');
         }
 
-        // La suma es editable mientras la póliza no esté emitida. Al emitirse,
-        // bloquearCamposPolizaEmitida() la deja bloqueada junto con el resto.
-        const polizaEmitida = esPolizaEmitidaCoberturas();
-        $txtSA.prop('disabled', polizaEmitida).prop('readonly', polizaEmitida);
+        // La suma es editable mientras la póliza no esté emitida. Al emitirse queda
+        // de solo lectura, nunca deshabilitada: un campo deshabilitado no se guarda
+        // y el endoso de objeto asegurado dejaba vacío el valor del vehículo, con lo
+        // que el siguiente endoso que recotiza ponía en 0 las coberturas que dependen
+        // de él. bloquearCamposPolizaEmitida() la bloquea junto con el resto.
+        $txtSA.prop('disabled', false).prop('readonly', polizaEmitida);
         
     } catch (error) {
         console.error(error);
@@ -673,6 +715,8 @@ function bloquearCamposPolizaEmitida() {
             '#txtColorAuto',
             '#tbplaca',
             '#cmbCombustibleAuto',
+            '#cmbMarca',
+            '#cmbModelo',
             '#tbVIN',
             '#tbseriechasis',
             '#tbseriemotor',
@@ -1314,3 +1358,404 @@ function syncVINSelectWhenReady() {
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////////////////////////
+// MSN-000209: Marca y Modelo en orden alfabético y con búsqueda al escribir.
+// El select original sigue siendo el campo que se guarda y se valida (código).
+// Mientras se puede editar queda oculto y en su lugar hay un cuadro de texto:
+// al escribir se filtra la lista por cualquier parte del nombre, sin distinguir
+// mayúsculas ni acentos, y sólo se acepta un valor de la lista. Un clic en el
+// campo muestra la lista completa y la "x" limpia el valor. Si el select está
+// bloqueado (póliza emitida, endoso) se muestra el select de siempre.
+//////////////////////////////////////////////////////////////////////////////
+
+function ordenarPorNombre(filas, indexDisplay) {
+    const orden = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+    const nombre = function (fila) {
+        return String(fila && fila[indexDisplay] !== undefined && fila[indexDisplay] !== null ? fila[indexDisplay] : '').trim();
+    };
+    return filas.slice().sort(function (a, b) { return orden.compare(nombre(a), nombre(b)); });
+}
+
+function normalizarTextoBusqueda(texto) {
+    return String(texto === undefined || texto === null ? '' : texto)
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function coincideBusqueda(texto, consulta) {
+    const nombre = normalizarTextoBusqueda(texto);
+    return normalizarTextoBusqueda(consulta).split(' ').filter(Boolean).every(function (palabra) {
+        return nombre.indexOf(palabra) !== -1;
+    });
+}
+
+function instalarEstilosBuscadorLista() {
+    const STYLE_ID = 'msn209-buscador-lista';
+    if (document.getElementById(STYLE_ID)) return;
+    const css = `
+        .msn209-buscador { position: relative; display: block; width: 100% !important; max-width: 100%; box-sizing: border-box; margin: 0; }
+        .msn209-buscador .msn209-texto { display: block; width: 100% !important; max-width: 100%; box-sizing: border-box; padding-right: 52px !important; text-overflow: ellipsis; margin: 0; }
+        .msn209-buscador .msn209-limpiar { position: absolute; right: 26px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: rgba(0,0,0,.45); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
+        .msn209-buscador .msn209-limpiar:hover { color: rgba(0,0,0,.85); }
+        .msn209-buscador .msn209-flecha { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: rgba(0,0,0,.45); font-size: 10px; pointer-events: none; }
+        select.msn209-oculto { display: none !important; }
+        .msn209-lista { position: fixed; z-index: 2000; box-sizing: border-box; overflow-y: auto; padding: 4px 0; background: #fff; border-radius: 6px; font-size: 14px;
+            box-shadow: 0 6px 16px 0 rgba(0,0,0,.08), 0 3px 6px -4px rgba(0,0,0,.12), 0 9px 28px 8px rgba(0,0,0,.05); }
+        .msn209-lista .msn209-opcion { padding: 5px 12px; line-height: 22px; cursor: pointer; color: rgba(0,0,0,.85); }
+        .msn209-lista .msn209-opcion.msn209-activa { background: #f5f5f5; }
+        .msn209-lista .msn209-opcion.msn209-elegida { background: #e6f7ff; font-weight: 600; }
+        .msn209-lista .msn209-opcion.msn209-elegida.msn209-activa { background: #bae7ff; }
+        .msn209-lista .msn209-sin-opciones { padding: 5px 12px; line-height: 22px; color: rgba(0,0,0,.45); cursor: default; }
+    `;
+    $('<style>', { id: STYLE_ID, type: 'text/css' }).html(css).appendTo('head');
+}
+
+function activarBuscadorDeLista(selector, opciones) {
+    try {
+        const select = $(selector)[0];
+        if (!select || select.tagName !== 'SELECT' || select.multiple) return;
+        if (select.getAttribute('data-msn209') === '1') return;
+        select.setAttribute('data-msn209', '1');
+        instalarEstilosBuscadorLista();
+
+        const cfg = opciones || {};
+        const texto = function (valor) { return typeof valor === 'function' ? String(valor() || '') : String(valor || ''); };
+        const clave = select.id || select.name || 'lista';
+
+        const caja = document.createElement('div');
+        caja.className = 'msn209-buscador';
+        const entrada = document.createElement('input');
+        entrada.type = 'text';
+        // Mantener las mismas clases visuales de los campos normales del objeto
+        // asegurado, por ejemplo tbseriemotor: ant-input ptab.
+        entrada.className = 'ant-input ptab msn209-texto';
+        entrada.placeholder = texto(cfg.ayuda) || 'Escriba para buscar';
+        entrada.setAttribute('autocomplete', 'off');
+        entrada.setAttribute('role', 'combobox');
+        entrada.setAttribute('aria-autocomplete', 'list');
+        entrada.setAttribute('aria-expanded', 'false');
+        entrada.setAttribute('data-msn209-campo', clave);
+        const limpiar = document.createElement('button');
+        limpiar.type = 'button';
+        limpiar.className = 'msn209-limpiar';
+        limpiar.tabIndex = -1;
+        limpiar.title = 'Limpiar y ver toda la lista';
+        limpiar.setAttribute('aria-label', limpiar.title);
+        limpiar.textContent = '\u00d7';
+        const flecha = document.createElement('span');
+        flecha.className = 'msn209-flecha';
+        flecha.setAttribute('aria-hidden', 'true');
+        flecha.textContent = '\u25bc';
+        caja.appendChild(entrada);
+        caja.appendChild(limpiar);
+        caja.appendChild(flecha);
+        select.parentNode.insertBefore(caja, select.nextSibling);
+
+        let lista = null;
+        let visibles = [];
+        let activa = -1;
+        let consulta = '';
+        let firma = '';
+        let cambiosDeOpciones = 0;
+        let seleccionarAlSoltar = false;
+        let navegoConTeclado = false;
+
+        const bloqueado = function () {
+            return select.disabled
+                || select.getAttribute('aria-disabled') === 'true'
+                || $(select).hasClass('auto-issued-readonly')
+                || $(select).closest('fieldset[disabled], .disabled').length > 0;
+        };
+        const opcionesReales = function () {
+            return Array.prototype.filter.call(select.options, function (o) { return o.value !== '' && !o.disabled; });
+        };
+        const cargando = function () { return typeof cfg.cargando === 'function' && !!cfg.cargando(); };
+        const elegida = function () {
+            const o = select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+            return o && o.value !== '' ? o : null;
+        };
+        const etiqueta = function () {
+            const o = elegida();
+            return o ? o.text : '';
+        };
+        const avisar = function () {
+            select.dispatchEvent(new Event('input', { bubbles: true }));
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        const actualizarValidez = function () {
+            const falta = select.required && !bloqueado() && !elegida();
+            entrada.setCustomValidity(falta ? (texto(cfg.obligatorio) || 'Seleccione un valor de la lista.') : '');
+        };
+
+        const marcarActiva = function (indice) {
+            activa = indice;
+            if (!lista) return;
+            Array.prototype.forEach.call(lista.children, function (nodo) {
+                nodo.classList.toggle('msn209-activa', Number(nodo.getAttribute('data-i')) === activa);
+            });
+            const nodo = lista.querySelector('[data-i="' + activa + '"]');
+            if (!nodo) {
+                entrada.removeAttribute('aria-activedescendant');
+                return;
+            }
+            entrada.setAttribute('aria-activedescendant', nodo.id);
+            const arriba = nodo.offsetTop;
+            const abajo = arriba + nodo.offsetHeight;
+            if (arriba < lista.scrollTop) lista.scrollTop = arriba;
+            else if (abajo > lista.scrollTop + lista.clientHeight) lista.scrollTop = abajo - lista.clientHeight;
+        };
+
+        const cerrar = function () {
+            if (lista && lista.parentNode) lista.parentNode.removeChild(lista);
+            lista = null;
+            visibles = [];
+            activa = -1;
+            navegoConTeclado = false;
+            entrada.setAttribute('aria-expanded', 'false');
+            entrada.removeAttribute('aria-activedescendant');
+        };
+
+        const posicionar = function () {
+            if (!lista) return;
+            const r = entrada.getBoundingClientRect();
+            const altoVentana = window.innerHeight;
+            const anchoVentana = window.innerWidth;
+            if (!r.width || r.bottom < 0 || r.top > altoVentana) {
+                cerrar();
+                return;
+            }
+            const libreAbajo = altoVentana - r.bottom - 8;
+            const libreArriba = r.top - 8;
+            lista.style.width = Math.round(r.width) + 'px';
+            lista.style.left = Math.round(Math.max(4, Math.min(r.left, anchoVentana - r.width - 4))) + 'px';
+            lista.style.maxHeight = '264px';
+            const natural = Math.min(lista.scrollHeight, 264);
+            const haciaAbajo = libreAbajo >= natural || libreAbajo >= libreArriba;
+            const maximo = Math.max(80, Math.min(264, haciaAbajo ? libreAbajo : libreArriba));
+            lista.style.maxHeight = maximo + 'px';
+            lista.style.top = Math.round(haciaAbajo ? r.bottom + 2 : Math.max(4, r.top - 2 - Math.min(natural, maximo))) + 'px';
+        };
+
+        const pintar = function () {
+            if (!lista) return;
+            const actual = elegida();
+            visibles = consulta.trim()
+                ? opcionesReales().filter(function (o) { return coincideBusqueda(o.text, consulta); })
+                : opcionesReales();
+            lista.textContent = '';
+            if (!visibles.length) {
+                const vacio = document.createElement('div');
+                vacio.className = 'msn209-sin-opciones';
+                vacio.textContent = cargando() ? 'Cargando...'
+                    : consulta.trim() ? 'Sin coincidencias para "' + consulta.trim() + '"'
+                    : (texto(cfg.vacio) || 'No hay opciones para elegir.');
+                lista.appendChild(vacio);
+            }
+            const fragmento = document.createDocumentFragment();
+            visibles.forEach(function (o, i) {
+                const nodo = document.createElement('div');
+                nodo.className = 'msn209-opcion' + (o === actual ? ' msn209-elegida' : '');
+                nodo.id = 'msn209-' + clave + '-' + i;
+                nodo.setAttribute('role', 'option');
+                nodo.setAttribute('aria-selected', o === actual ? 'true' : 'false');
+                nodo.setAttribute('data-i', String(i));
+                nodo.textContent = o.text;
+                fragmento.appendChild(nodo);
+            });
+            lista.appendChild(fragmento);
+            posicionar();
+            if (activa >= visibles.length) activa = visibles.length - 1;
+            marcarActiva(activa);
+        };
+
+        const elegir = function (o) {
+            if (!o || bloqueado()) return;
+            const cambia = select.selectedIndex !== o.index;
+            o.selected = true;
+            consulta = '';
+            entrada.value = o.text;
+            cerrar();
+            if (cambia) avisar();
+            if (document.activeElement === entrada) entrada.select();
+            sincronizar();
+        };
+
+        const abrir = function () {
+            if (bloqueado()) return;
+            if (lista) {
+                pintar();
+                return;
+            }
+            lista = document.createElement('div');
+            lista.className = 'msn209-lista';
+            lista.id = 'msn209-lista-' + clave;
+            lista.setAttribute('role', 'listbox');
+            lista.addEventListener('mousedown', function (e) { e.preventDefault(); });
+            lista.addEventListener('click', function (e) {
+                const nodo = e.target && e.target.closest ? e.target.closest('.msn209-opcion') : null;
+                if (nodo) elegir(visibles[Number(nodo.getAttribute('data-i'))]);
+            });
+            lista.addEventListener('mousemove', function (e) {
+                const nodo = e.target && e.target.closest ? e.target.closest('.msn209-opcion') : null;
+                if (nodo && Number(nodo.getAttribute('data-i')) !== activa) marcarActiva(Number(nodo.getAttribute('data-i')));
+            });
+            document.body.appendChild(lista);
+            entrada.setAttribute('aria-expanded', 'true');
+            entrada.setAttribute('aria-controls', lista.id);
+            activa = -1;
+            pintar();
+            if (!consulta.trim() && elegida()) marcarActiva(visibles.indexOf(elegida()));
+        };
+
+        // Al salir del campo sólo queda un valor de la lista: el que coincide
+        // exactamente o el único que cumple lo escrito; si no, el que ya estaba.
+        const conciliar = function () {
+            const escrito = normalizarTextoBusqueda(entrada.value);
+            if (escrito && escrito !== normalizarTextoBusqueda(etiqueta())) {
+                const todas = opcionesReales();
+                const exactas = todas.filter(function (o) { return normalizarTextoBusqueda(o.text) === escrito; });
+                const candidatas = exactas.length ? exactas : todas.filter(function (o) { return coincideBusqueda(o.text, escrito); });
+                if (candidatas.length === 1) {
+                    elegir(candidatas[0]);
+                    return;
+                }
+            }
+            consulta = '';
+            entrada.value = etiqueta();
+            actualizarValidez();
+        };
+
+        const sincronizar = function () {
+            if (!document.body.contains(select)) {
+                detener();
+                return;
+            }
+            const quieto = bloqueado();
+            select.classList.toggle('msn209-oculto', !quieto);
+            caja.style.display = quieto ? 'none' : '';
+            if (quieto && lista) cerrar();
+            const enUso = document.activeElement === entrada;
+            const nueva = cambiosDeOpciones + '|' + select.options.length + '|' + select.selectedIndex + '|' + etiqueta() + '|' + quieto + '|' + cargando();
+            if (nueva !== firma) {
+                firma = nueva;
+                entrada.title = etiqueta();
+                if (lista) pintar();
+            }
+            if (!enUso && entrada.value !== etiqueta()) entrada.value = etiqueta();
+            limpiar.style.display = !quieto && (entrada.value || elegida()) ? '' : 'none';
+            actualizarValidez();
+        };
+
+        // Un clic que abre la lista empieza una búsqueda nueva: muestra todo y lo
+        // que se escriba reemplaza el texto. Con la lista abierta, el clic sólo
+        // ubica el cursor dentro de lo escrito.
+        entrada.addEventListener('mousedown', function () {
+            if (bloqueado()) return;
+            if (document.activeElement !== entrada || !lista) seleccionarAlSoltar = true;
+            if (!lista) {
+                consulta = '';
+                abrir();
+            }
+        });
+        entrada.addEventListener('mouseup', function (e) {
+            if (!seleccionarAlSoltar) return;
+            seleccionarAlSoltar = false;
+            e.preventDefault();
+            entrada.select();
+        });
+        entrada.addEventListener('focus', function () {
+            if (!bloqueado()) entrada.select();
+        });
+        entrada.addEventListener('blur', function () {
+            seleccionarAlSoltar = false;
+            conciliar();
+            cerrar();
+            sincronizar();
+        });
+        entrada.addEventListener('input', function () {
+            if (bloqueado()) return;
+            consulta = entrada.value;
+            navegoConTeclado = false;
+            if (!lista) abrir();
+            else pintar();
+            marcarActiva(visibles.length ? 0 : -1);
+            limpiar.style.display = entrada.value || elegida() ? '' : 'none';
+        });
+        entrada.addEventListener('keydown', function (e) {
+            if (bloqueado()) return;
+            const tecla = e.key;
+            if (tecla === 'ArrowDown' || tecla === 'ArrowUp' || tecla === 'PageDown' || tecla === 'PageUp') {
+                e.preventDefault();
+                if (!lista) {
+                    consulta = '';
+                    abrir();
+                    if (activa < 0 && visibles.length) marcarActiva(0);
+                    return;
+                }
+                if (!visibles.length) return;
+                const paso = tecla === 'ArrowDown' ? 1 : tecla === 'ArrowUp' ? -1 : tecla === 'PageDown' ? 8 : -8;
+                marcarActiva(Math.max(0, Math.min(visibles.length - 1, (activa < 0 ? (paso > 0 ? -1 : visibles.length) : activa) + paso)));
+                navegoConTeclado = true;
+            } else if (tecla === 'Tab') {
+                // Tab elige la opción a la que se llegó con las flechas; si no, al salir se concilia.
+                if (lista && navegoConTeclado && activa >= 0) elegir(visibles[activa]);
+            } else if (tecla === 'Enter') {
+                e.preventDefault();
+                if (lista && activa >= 0) elegir(visibles[activa]);
+                else if (!lista) abrir();
+            } else if (tecla === 'Escape' && lista) {
+                e.preventDefault();
+                e.stopPropagation();
+                cerrar();
+                consulta = '';
+                entrada.value = etiqueta();
+                entrada.select();
+            }
+        });
+
+        limpiar.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        limpiar.addEventListener('click', function (e) {
+            e.preventDefault();
+            if (bloqueado()) return;
+            const habia = !!elegida();
+            const vacia = Array.prototype.find.call(select.options, function (o) { return o.value === ''; });
+            if (vacia) vacia.selected = true;
+            else select.selectedIndex = -1;
+            consulta = '';
+            entrada.value = '';
+            if (habia) avisar();
+            if (document.activeElement !== entrada) entrada.focus();
+            abrir();
+            sincronizar();
+        });
+
+        if (select.id) {
+            $('label[for="' + select.id + '"]').off('click.msn209').on('click.msn209', function (e) {
+                if (bloqueado()) return;
+                e.preventDefault();
+                entrada.focus();
+            });
+        }
+
+        const observador = new MutationObserver(function () { cambiosDeOpciones += 1; });
+        observador.observe(select, { childList: true });
+        const alDesplazar = function (e) {
+            if (lista && e.target !== lista) posicionar();
+        };
+        const temporizador = setInterval(sincronizar, 250);
+        const detener = function () {
+            clearInterval(temporizador);
+            observador.disconnect();
+            window.removeEventListener('scroll', alDesplazar, true);
+            window.removeEventListener('resize', posicionar);
+            cerrar();
+            if (caja.parentNode) caja.parentNode.removeChild(caja);
+        };
+        window.addEventListener('scroll', alDesplazar, true);
+        window.addEventListener('resize', posicionar);
+        sincronizar();
+    } catch (error) {
+        console.error(`Error activando la búsqueda en ${selector}: ${error.toString()}`);
+    }
+}

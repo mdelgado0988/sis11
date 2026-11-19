@@ -15,6 +15,12 @@
  * (incluye recargos y descuentos). El importe prorateado se conserva como dato
  * informativo, pero no puede ser la base porque omite esos ajustes manuales.
  *
+ * Comision e impuesto de reaseguro (MSN-000213, AXX-10555): el endoso conserva
+ * las tasas de la cesion vigente de cada contrato y linea (la de la emision o la
+ * del ultimo endoso). Primero la tasa de la propia cesion; si no tiene prima
+ * cedida, la de su contrato y linea; solo una linea sin prima cedida toma los
+ * importes del contrato (capacidad: mccp/micp para CP, mcfp/mifp para FAC).
+ *
  * context: {policyId, rows:[{code, variation, prorated, sumInsuredMovement, finalPremium, finalSum}], participants:[{cessionId, contactId, split}], movementType?: 'LOADING', facultativeMovementOnly?: boolean}
  */
 const money = function (v) { return Number(Number(v).toFixed(2)); };
@@ -532,6 +538,9 @@ if (useSuretyContractCapacity) {
       }
       next.sumInsuredRe = 0; next.premiumRe = 0;
       next.proportionRe = 0;
+      // MSN-000213: la copia de la plantilla no hereda comision ni impuesto; una
+      // linea nueva no tiene saldo vigente de ninguno de los dos.
+      next.comissionCedant = 0; next.participantCommission = 0; next.tax = 0;
       synthetic.push(next);
     };
     const retentionOwnerLine = retentionPlacementLineByCoverage[key];
@@ -584,6 +593,31 @@ if (baseIds.length) {
     partsByCession[cid].push(parts[i]);
   }
 }
+// MSN-000213 (AXX-10555): tasas de comision e impuesto de la cesion vigente por
+// contrato y linea. Antes el impuesto no se calculaba (el endoso lo guardaba en 0)
+// y el cambio de suma con capacidad tomaba la comision del contrato (FAC en 0)
+// en lugar de la vigente de la poliza.
+const lineRateTotals = {};
+for (let i = 0; i < base.length; i++) {
+  const b = base[i];
+  const rateKey = txt(b.contractId) + '|' + txt(b.lineId);
+  if (!lineRateTotals[rateKey]) lineRateTotals[rateKey] = { premiumRe: 0, commission: 0, tax: 0 };
+  lineRateTotals[rateKey].premiumRe += Number(b.premiumRe || 0);
+  lineRateTotals[rateKey].commission += Number(b.comissionCedant == null ? b.participantCommission : b.comissionCedant) || 0;
+  lineRateTotals[rateKey].tax += Number(b.tax || 0);
+}
+// Tasa = importe / prima cedida de la cesion; si la cesion no tiene prima cedida, la
+// de su contrato y linea. null = ninguna de las dos tiene prima cedida: decide el contrato.
+const vigentRate = function (c, field) {
+  const own = Number(c.premiumRe || 0);
+  const ownValue = field === 'tax'
+    ? Number(c.tax || 0)
+    : (Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0);
+  if (Math.abs(own) > 0.01) return ownValue / own;
+  const totals = lineRateTotals[txt(c.contractId) + '|' + txt(c.lineId)];
+  if (totals && Math.abs(totals.premiumRe) > 0.01) return totals[field] / totals.premiumRe;
+  return null;
+};
 // participaciones editadas en la pantalla, si las hay
 const overrides = {};
 const addedByCession = {};
@@ -625,7 +659,7 @@ for (let i = 0; i < base.length; i++) {
       facultative: lineUp === 'FAC' || lineUp === 'FRO',
       currency: txt(c.currency) || txt(policy.currency),
       rows: [], participants: [],
-      totals: { movement: 0, prorated: 0, sumMovement: 0, cedant: 0, re: 0, commission: 0, nonTechnical: 0, sumInsuredCounted: 0, coveragesCounted: 0, participantSplit: 0 }
+      totals: { movement: 0, prorated: 0, sumMovement: 0, cedant: 0, re: 0, commission: 0, tax: 0, nonTechnical: 0, sumInsuredCounted: 0, coveragesCounted: 0, participantSplit: 0 }
     };
     order.push(key);
   }
@@ -652,15 +686,17 @@ for (let i = 0; i < base.length; i++) {
     ? Number(c.premiumCedant || 0) / premiumBase : pCed;
   const premiumPRe = isCpexCcv && premiumBase !== 0
     ? Number(c.premiumRe || 0) / premiumBase : pRe;
-  const commissionBase = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
+  // MSN-000213: tasas de comision e impuesto de la cesion vigente (ver vigentRate).
   // La comision de reaseguro se calcula sobre la prima cedida, no sobre la
   // prima total de la cobertura. `premium` es la prima bruta y `premiumRe`
   // es su porcion cedida; dividir contra `premium` y luego multiplicar por
   // `premiumRe` aplicaria la participacion cedida dos veces y subestimaria la
   // comision del movimiento. Esta base debe mantenerse alineada con
   // cmdChangeLoadingReinsuranceAdjustment y cmdRedistribuyeReaseguroEndoso.
-  const commissionBasePremium = Number(c.premiumRe || 0);
-  const commissionRate = commissionBasePremium === 0 ? 0 : commissionBase / commissionBasePremium;
+  const vigentCommissionRate = vigentRate(c, 'commission');
+  const vigentTaxRate = vigentRate(c, 'tax');
+  const commissionRate = vigentCommissionRate === null ? 0 : vigentCommissionRate;
+  const taxRate = vigentTaxRate === null ? 0 : vigentTaxRate;
   const counts = sums[code] === true;
   const facultativeLine = facultativeLineByCoverage[txt(c.contractId) + '|' + code];
   const routesMovementToFacultative = !!facultativeLine;
@@ -686,8 +722,9 @@ for (let i = 0; i < base.length; i++) {
   // La variacion final incluye el recargo/descuento aplicado a la cobertura.
   let cedant = retentionOnlyLoadingPremium ? lineDv : (routesMovementToFacultative ? Number(facultativeMovement.premiumCedant || 0) : money(distributedPremium * premiumPCed));
   let re = retentionOnlyLoadingPremium ? 0 : (routesMovementToFacultative ? Number(facultativeMovement.premiumRe || 0) : money(distributedPremium * premiumPRe));
-  // Sin prima cedida en el movimiento tampoco se mueve comision de aceptantes.
+  // Sin prima cedida en el movimiento tampoco se mueve comision ni impuesto de aceptantes.
   let commission = retentionOnlyLoadingPremium ? 0 : money(re * commissionRate);
+  let tax = retentionOnlyLoadingPremium ? 0 : money(re * taxRate);
   let nonTechnical = retentionOnlyLoadingPremium ? 0 : money(lineDv - cedant - re);
   let sourcePremiumMovement = routesMovementToFacultative ? dv : lineDv;
   let sourceSumInsuredMovement = routesMovementToFacultative ? sv : lineSv;
@@ -696,6 +733,7 @@ for (let i = 0; i < base.length; i++) {
   let finalSumCedant = money(sv * pCed);
   let finalSumRe = money(sv * pRe);
   let finalCommission = commission;
+  let finalTax = tax;
   let obsoleteRetentionLine = false;
   if (capacityAllocation) {
     const isRetention = capacityLine === 'RET' || capacityLine.indexOf('RETEN') >= 0;
@@ -707,11 +745,13 @@ for (let i = 0; i < base.length; i++) {
     const targetSumRe = isRetention ? 0 : (isFacultative ? Number(capacity.msfp || 0) : Number(capacity.mscp || 0));
     const targetPremiumRe = isRetention ? 0 : (isFacultative ? Number(capacity.mpfp || 0) : Number(capacity.mpcp || 0));
     const targetCommission = isFacultative ? Number(capacity.mcfp || 0) : (isRetention ? 0 : Number(capacity.mccp || 0));
+    const targetTax = isFacultative ? Number(capacity.mifp || 0) : (isRetention ? 0 : Number(capacity.micp || 0));
     const currentCedant = Number(c.premiumCedant || 0);
     const currentRe = Number(c.premiumRe || 0);
     const currentSumCedant = Number(c.sumInsuredCedant || 0);
     const currentSumRe = Number(c.sumInsuredRe || 0);
     const currentCommission = Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0;
+    const currentTax = Number(c.tax || 0);
     finalCedant = money(targetPremiumCedant);
     finalRe = money(targetPremiumRe);
     // Las coberturas dependientes no participan en la suma tecnica del
@@ -740,12 +780,17 @@ for (let i = 0; i < base.length; i++) {
       finalSumCedant = money(currentSumCedant + Number(facultativeMovement.sumInsuredCedant || 0));
       finalSumRe = money(currentSumRe + Number(facultativeMovement.sumInsuredRe || 0));
       finalCommission = money(currentCommission + Number(facultativeMovement.premiumRe || 0) * commissionRate);
+      finalTax = money(currentTax + Number(facultativeMovement.premiumRe || 0) * taxRate);
     } else {
-      finalCommission = money(targetCommission);
+      // MSN-000213: la cesion final conserva las tasas vigentes. Los importes del
+      // contrato solo deciden en una linea que aun no tiene prima cedida (FAC nuevo).
+      finalCommission = vigentCommissionRate === null ? money(targetCommission) : money(finalRe * vigentCommissionRate);
+      finalTax = vigentTaxRate === null ? money(targetTax) : money(finalRe * vigentTaxRate);
     }
     cedant = money(finalCedant - currentCedant);
     re = money(finalRe - currentRe);
     commission = money(finalCommission - currentCommission);
+    tax = money(finalTax - currentTax);
     lineDv = money(cedant + re);
     linePv = lineDv;
     lineSv = counts
@@ -772,6 +817,7 @@ for (let i = 0; i < base.length; i++) {
     cedant = money(-Number(c.premiumCedant || 0));
     re = money(-Number(c.premiumRe || 0));
     commission = money(-(Number(c.comissionCedant == null ? c.participantCommission : c.comissionCedant) || 0));
+    tax = money(-Number(c.tax || 0));
     nonTechnical = money(lineDv - cedant - re);
   }
   grp.rows.push({
@@ -803,6 +849,7 @@ for (let i = 0; i < base.length; i++) {
     sumInsuredCedant: capacityAllocation ? finalSumCedant : undefined,
     sumInsuredRe: capacityAllocation ? finalSumRe : undefined,
     commission: capacityAllocation ? finalCommission : commission,
+    tax: capacityAllocation ? finalTax : tax,
     sumInsured: Number(c.sumInsured || 0), sumInsuredCounted: counts ? Number(c.sumInsured || 0) : 0,
     currency: txt(c.currency) || txt(policy.currency),
     basedOnCessionId: Number(c.id)
@@ -813,6 +860,7 @@ for (let i = 0; i < base.length; i++) {
   grp.totals.cedant = money(grp.totals.cedant + cedant);
   grp.totals.re = money(grp.totals.re + re);
   grp.totals.commission = money(grp.totals.commission + commission);
+  grp.totals.tax = money(grp.totals.tax + tax);
   grp.totals.nonTechnical = money(grp.totals.nonTechnical + nonTechnical);
   if (counts) {
     grp.totals.sumInsuredCounted = grp.totals.sumInsuredCounted + Number(c.sumInsured || 0);
@@ -837,7 +885,7 @@ for (let i = 0; i < base.length; i++) {
     grp.participants.push({
       cessionId: Number(c.id), coverageCode: code, contactId: Number(pt.contactId),
       lineId: txt(pt.lineId), split: split, edited: ov !== undefined, added: pt.isNew === true,
-      premium: money(re * split / 100), commission: money(commission * split / 100)
+      premium: money(re * split / 100), commission: money(commission * split / 100), tax: money(tax * split / 100)
     });
   }
   if (parts.length && Math.abs(splitSum - 100) > 0.01) {
@@ -888,7 +936,8 @@ if (useSuretyContractCapacity) {
           lineId: group.lineId,
           split: split,
           premium: money(Number(row.premiumRe || 0) * split / 100),
-          commission: money(Number(row.commission || 0) * split / 100)
+          commission: money(Number(row.commission || 0) * split / 100),
+          tax: money(Number(row.tax || 0) * split / 100)
         });
       });
     });

@@ -6,10 +6,13 @@
  * @email michael.delgado@axxis-systems.com
  * @created 2026-01-13
  * @name cmdContabilizacionPagoReclamoDTO
- * @version 1.1
+ * @version 1.2
  * @purpose Builds the accounting DTO for a claim payment for any line of business.
  * @param context.id ClaimPayment identifier.
  * @test: { id: 18 }
+ * @history 1.2 2026-11-19 MSN-000212 (AXX-10554): a request from view 48 can carry taxes, withholdings and deductions,
+ *   so its total is the net. monto (payment line and its bank counter-account) stays the total, i.e. the net; the
+ *   reinsurance share and the acceptants keep using the gross amount (reinsuranceBase), as before.
  */
 
 try {
@@ -19,7 +22,7 @@ try {
   const payment = loadEntity(
     'ClaimPayment',
     `id=${paymentId}`,
-    'claimId,total,payoutId,sourceAccountId,producer,parentId'
+    'claimId,total,grossAmount,payoutId,sourceAccountId,producer,parentId'
   );
   const isMergedPayment = getTrimmedString(payment && payment.producer).toUpperCase() === 'MERGED';
   // A regular payment keeps the existing single-reserve calculation.
@@ -38,7 +41,7 @@ try {
   const reinsuranceAmount = paymentContexts.reduce((total, item) => {
     return total + calculateProportionalReinsurance(
       sumCededReserve(item.cessions),
-      item.payment.total,
+      reinsuranceBase(item.payment),
       item.payout.reserved
     );
   }, 0);
@@ -72,7 +75,7 @@ try {
 
   const acceptants = mergeAcceptants(paymentContexts.map(item => getCededAcceptants(
     item.cessions,
-    item.payment.total,
+    reinsuranceBase(item.payment),
     item.payout.reserved,
     policy
   )));
@@ -164,7 +167,7 @@ function loadMergedPayments(parentId) {
   const payments = loadEntities(
     'ClaimPayment',
     `parentId=${getPositiveInteger(parentId)}`,
-    'id,claimId,total,payoutId,sourceAccountId,producer,parentId'
+    'id,claimId,total,grossAmount,payoutId,sourceAccountId,producer,parentId'
   );
 
   if (payments.length === 0) {
@@ -564,6 +567,12 @@ function getTrimmedString(value) {
 function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+// MSN-000212: the gross amount of the request (before taxes, withholdings and deductions); total when it has none.
+function reinsuranceBase(payment) {
+  const gross = Number(payment && payment.grossAmount);
+  return Number.isFinite(gross) && gross !== 0 ? gross : toNumber(payment && payment.total);
 }
 
 function toDecimal(value) {
