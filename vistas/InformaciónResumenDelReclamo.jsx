@@ -506,9 +506,14 @@
         const byCoverage = {};
         (claim.Payouts || []).filter((p) => p.reserveType !== 'EX')
           .forEach((p) => { byCoverage[p.lifeCoverageId] = (byCoverage[p.lifeCoverageId] || 0) + p.reserved; });
-        return Object.keys(byCoverage).filter((id) => byCoverage[id] > 0).map((id) => {
+        // MSN-000220: what an active order still owes stays set aside from the reserve balance; the rest is what a new order can
+        // use (the server refuses an order above it when it is created, edited or confirmed).
+        (props.orders || []).filter((o) => o.status === 'ACTIVE' && byCoverage[o.coverageId] !== undefined).forEach((o) => {
+          byCoverage[o.coverageId] -= Math.max((Number(o.approvedAmount) || 0) - (Number(o.settledAmount) || 0), 0);
+        });
+        return Object.keys(byCoverage).filter((id) => byCoverage[id] > 0.004).map((id) => {
           const coverage = (claim.Policy.Coverages || []).find((c) => c.id === +id);
-          return { id: +id, name: coverage ? coverage.name : id, available: byCoverage[id] };
+          return { id: +id, name: coverage ? coverage.name : id, available: roRound(byCoverage[id]) };
         });
       })();
       const onSearchProviders = (q) => {
@@ -1057,7 +1062,7 @@
               }) : <tr><td className="resumen-empty-row" colSpan="12">No hay órdenes de reparación registradas para este siniestro.</td></tr>}</tbody>
             </table>
           </div>
-          <RepairOrderRequest claim={props.claim} config={props.config} visible={requestVisible}
+          <RepairOrderRequest claim={props.claim} config={props.config} orders={data} visible={requestVisible}
             onCancel={() => setRequestVisible(false)} onCreated={() => { setRequestVisible(false); load(); }} onRefresh={load} />
           <RepairOrderDetail claim={props.claim} config={props.config} orderId={detailOrderId} visible={!!detailOrderId} orders={data}
             onClose={() => { setDetailOrderId(undefined); load(); }}
@@ -2502,7 +2507,8 @@
     const current = () => recovery.operation === operationId && recoveryClaimCurrent(claim);
     return Promise.all([
       repositoryRequest('RepoSalvageType', { operation: 'GET' }),
-      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue, include: ['Process', 'IncomeExpense'] })
+      // MSN-000219: the income movement and its cash income feed the "Pago" column of the recoveries table.
+      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue, include: ['Process', 'IncomeExpense', 'IncomeExpense.Transfer'] })
     ]).then((results) => {
       if (!current()) return false;
       const types = normalizeRecoveryTypes(results[0]);
@@ -7608,7 +7614,19 @@ END CATCH;`;
   const renderRecoveryField = (label, children, key) => (
     <div className="resumen-reserve-input" key={key}><label>{label}</label>{children}</div>
   );
-  const recoveryColumns = ['No.', 'Tipo', 'Cobertura', 'Fecha', 'Ingreso', 'Gastos', 'Neto', 'Proceso'];
+  const recoveryColumns = ['No.', 'Tipo', 'Cobertura', 'Fecha', 'Ingreso', 'Gastos', 'Neto', 'Proceso', 'Pago'];
+  // MSN-000219: a recovery collected in cash has its income movement in status 1 with the cash income; a reversed
+  // cash income returns it to pending.
+  const recoveryPayment = (row) => {
+    const movement = row.IncomeExpense;
+    if (!movement || Number(movement.status) !== 1) return 'Pendiente';
+    const income = movement.Transfer;
+    if (income && (Number(income.status) === 2 || income.reversalDate)) {
+      return 'Pendiente (ingreso de caja #' + movement.transferId + ' reversado)';
+    }
+    return 'Aplicado ' + firstValue(movement.currency, row.currency) + ' ' + formatMoneyInput(movement.amount)
+      + (movement.transferId ? ' — caja #' + movement.transferId : '');
+  };
   const recoveryValues = (row) => {
     const type = recovery.types.find((item) => Number(item.value) === Number(row.type));
     const coverage = currentClaimRef.current.Policy.Coverages.find((item) => Number(item.id) === Number(row.coverageId)) || {};
@@ -7617,7 +7635,7 @@ END CATCH;`;
       firstValue(coverage.name, coverage.description, coverage.code, 'Cobertura ' + row.coverageId),
       displayValue(formatDate(row.start)), row.currency + ' ' + formatMoneyInput(row.income),
       row.currency + ' ' + formatMoneyInput(row.expenses), row.currency + ' ' + formatMoneyInput(row.netIncome),
-      row.processId ? '#' + row.processId + (status ? ' — ' + status : '') : displayValue(status)];
+      row.processId ? '#' + row.processId + (status ? ' — ' + status : '') : displayValue(status), recoveryPayment(row)];
   };
   const expenseCoverageRows = coverageRows.map((row) => ({
     id: row.id,
@@ -9533,7 +9551,7 @@ END CATCH;`;
             {recoveryLoading ? <div><Spin size="small" /> Cargando recuperaciones...</div> : <div className="resumen-table-wrap"><table className="resumen-data-table">
               <thead><tr>{recoveryColumns.map((label) => <th key={label}>{label}</th>)}</tr></thead>
               <tbody>{recoveryRows.length ? recoveryRows.map((row) => <tr key={row.id}>{recoveryValues(row).map((value, index) => <td key={index}>{value}</td>)}</tr>)
-                : <tr><td className="resumen-empty-row" colSpan="8">Sin recuperaciones.</td></tr>}</tbody>
+                : <tr><td className="resumen-empty-row" colSpan="9">Sin recuperaciones.</td></tr>}</tbody>
             </table></div>}
             <Modal title="Nueva recuperación" visible={recoveryModalOpen} footer={null}
               wrapClassName="resumen-reserve-modal" closable={!recoverySaving} maskClosable={!recoverySaving}

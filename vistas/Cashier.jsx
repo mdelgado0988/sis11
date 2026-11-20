@@ -4420,7 +4420,14 @@
   }
 
   function getPremiumContactFormContext(form) {
-    const baseContext = { exe: exe };
+    // MSN-000219: the income type form also gets the chosen income type, a setter for the amount of the single
+    // payment line and the income currency (frmAplicacionRecuperacionCaja uses them for claim recoveries).
+    const baseContext = {
+      exe: exe,
+      incomeType: newIncomeTypeCode,
+      setIncomeAmount: setNewIncomeAmountFromForm,
+      getIncomeCurrency: () => getTrimmedString(newIncomeForm.getFieldValue('currency'))
+    };
     if (!collectionChargeVisible || !isPremiumContactForm(form)) return baseContext;
 
     const selectedRow = getSelectedCollectionRows()[0] || {};
@@ -5111,6 +5118,14 @@
     setNewIncomePayments(rows => rows.map(row => row.key === key
       ? { ...row, [field]: value }
       : row));
+  }
+
+  // MSN-000219: an income type form sets the amount of the single payment line; it stays editable. With several
+  // payment lines the cashier distributes it, so nothing changes.
+  function setNewIncomeAmountFromForm(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return;
+    setNewIncomePayments(rows => rows.length === 1 ? [{ ...rows[0], amount: amount.toFixed(2) }] : rows);
   }
 
   function addNewIncomePayment() {
@@ -12943,3 +12958,4 @@
       </div>
   );
 }
+

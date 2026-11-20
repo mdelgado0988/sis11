@@ -10,6 +10,9 @@
   *@Input: {repairOrderId}
   *@Output: { resultado }
   *@Changes: MSN-000215 - Versión inicial. Plantilla «Orden de Compra.docx», acción PDF de la orden en la vista de reclamo 48. Lo que el sistema no registra sale vacío o en cero.
+  *         MSN-000218 - Información de entrega (Entrega*: proveedor de la orden y notas de la orden) y bloque de firmas
+  *         (RealizadaPor = quien creó la orden, AutorizadaPor = quien la confirmó, FechaImpresion dd/mm/aaaa en hora de Panamá;
+  *         Firma* = firma de perfil uploaded/<email>.png de cada uno, encajada en 170x57 px, vacía si no la subió).
 */
 
 const repairOrderId = toValidNumber(context?.repairOrderId ?? context?.order?.id);
@@ -84,6 +87,21 @@ resultado.Deducible = money(deducible);
 resultado.PagoAseguradora = money(total - deducible);
 resultado.Proveedor = textValue(provider.code);
 resultado.Notas = textValue(order.notes);
+
+//Información de entrega: lo que SisOS guarda del proveedor de la orden, y las notas de la orden.
+const providerContact = getContact(provider.contactId);
+resultado.EntregaLugar = textValue(provider.name);
+resultado.EntregaDireccion = cleanText(provider.address) || uniqueJoin([provider.city, provider.state, provider.country], ", ");
+resultado.EntregaTelefono = uniqueJoin([cleanText(provider.phone) || cleanText(providerContact.phone), provider.cell], " / ");
+resultado.EntregaCorreo = cleanText(provider.email) || cleanText(providerContact.email);
+resultado.EntregaObservaciones = textValue(order.notes);
+
+//Firmas: quien creó la orden y quien la confirmó (vacío mientras es borrador), con su firma de perfil si la subió.
+resultado.RealizadaPor = userName(order.user);
+resultado.FechaImpresion = toFechaDMY(new Date().toISOString());
+resultado.AutorizadaPor = userName(order.confirmedBy);
+resultado.FirmaRealizadaPor = profileSignature(order.user);
+resultado.FirmaAutorizadaPor = profileSignature(order.confirmedBy);
 
 return resultado;
 
@@ -210,6 +228,90 @@ function esLineaItbms(line) {
   const category = textValue(line?.categoryCode || line?.category).toUpperCase();
   const description = textValue(line?.description).toUpperCase();
   return code === "ITBMS" || category === "IMPUESTOS" && /\bITBMS\b/.test(description);
+}
+
+function getContact(id) {
+  const contactId = toValidNumber(id);
+  if (!contactId) return {};
+  doCmd({ cmd: "GetContacts", data: { filter: `id = ${contactId}`, size: 1 } });
+  if (!GetContacts.ok) return {};
+  return (Array.isArray(GetContacts.outData) ? GetContacts.outData[0] : null) || {};
+}
+
+// Nombre del usuario (Usr.nombre) en mayúsculas, como en el formato; el correo si no se encuentra.
+function userName(email) {
+  const id = textValue(email);
+  if (!id) return "";
+  doCmd({ cmd: "GetUsers", data: { filter: `email = '${id.replace(/'/g, "''")}'` } });
+  const user = GetUsers.ok && Array.isArray(GetUsers.outData) ? GetUsers.outData[0] : null;
+  return (textValue(user?.nombre) || id).toUpperCase();
+}
+
+// Firma de perfil (Mi perfil › Firma digital = uploaded/<email>.png) como valor de un tag de imagen de la plantilla:
+// "<email>.png!ancho!alto" encajada en 170x57 px manteniendo la proporción; "" si el usuario no subió firma.
+function profileSignature(email) {
+  const id = textValue(email);
+  if (!id) return "";
+  const fileName = id + ".png";
+  doCmd({ cmd: "GetFile", data: { fileName: "uploaded/" + fileName, decodeString: false } });
+  const base64 = GetFile.ok ? GetFile.outData?.base64 : null;
+  if (!base64) return "";
+  const maxW = 170, maxH = 57;
+  const size = imageSize(base64) || { w: maxW, h: maxH };
+  const k = Math.min(1, maxW / size.w, maxH / size.h);
+  return fileName + "!" + Math.max(1, Math.round(size.w * k)) + "!" + Math.max(1, Math.round(size.h * k));
+}
+
+// Ancho y alto en px de un PNG o JPEG en base64 (un .png puede ser JPEG por dentro); null si no se reconoce.
+function imageSize(b64) {
+  let b = base64Bytes(b64, 64);
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) {
+    const w = ((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]) >>> 0;
+    const h = ((b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23]) >>> 0;
+    return w && h ? { w, h } : null;
+  }
+  if (b[0] === 0xFF && b[1] === 0xD8) {
+    b = base64Bytes(b64, 400000);
+    let i = 2;
+    while (i + 9 < b.length && b[i] === 0xFF) {
+      const m = b[i + 1];
+      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
+        const h = (b[i + 5] << 8) | b[i + 6], w = (b[i + 7] << 8) | b[i + 8];
+        return w && h ? { w, h } : null;
+      }
+      i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+    }
+  }
+  return null;
+}
+
+function base64Bytes(b64, maxChars) {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const s = String(b64 || "").replace(/^data:[^,]*,/, "").replace(/[^A-Za-z0-9+/]/g, "").slice(0, maxChars);
+  const out = [];
+  for (let i = 0; i + 3 < s.length; i += 4) {
+    const n = (abc.indexOf(s[i]) << 18) | (abc.indexOf(s[i + 1]) << 12) | (abc.indexOf(s[i + 2]) << 6) | abc.indexOf(s[i + 3]);
+    out.push((n >> 16) & 255, (n >> 8) & 255, n & 255);
+  }
+  return out;
+}
+
+// Texto sin los "null"/"undefined" que dejan las concatenaciones de dirección del proveedor.
+function cleanText(value) {
+  return textValue(value).replace(/\b(null|undefined)\b/gi, " ").replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "");
+}
+
+function uniqueJoin(values, separator) {
+  const seen = [];
+  values.map(cleanText).forEach(v => { if (v !== "" && seen.indexOf(v) < 0) seen.push(v); });
+  return seen.join(separator);
+}
+
+function toFechaDMY(value) {
+  const mdy = toFechaMDY(value);
+  if (!mdy) return "";
+  const parts = mdy.split("/");
+  return `${parts[1]}/${parts[0]}/${parts[2]}`;
 }
 
 function toFechaMDY(value) {
