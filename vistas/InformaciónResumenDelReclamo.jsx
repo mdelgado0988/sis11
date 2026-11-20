@@ -340,6 +340,30 @@
       });
     };
 
+    // MSN-000221: «A nombre de» and «Entregar en» of the purchase order document, typed per order in its detail. They live in the
+    // order notes as JSON {aNombreDe, entregarEn}, next to any other member (a free note is kept as «notas»): chain
+    // cmdActualizaEntregaOrdenCompra saves them in any status of the order and cmdDocumentoOrdenCompraDTO prints them. An empty
+    // value prints the automatic one: supplier name, and supplier name # claim number.
+    const RO_DELIVERY_MAX = 250;
+    const roDelivery = (notes) => {
+      const empty = { aNombreDe: '', entregarEn: '' };
+      const text = notes == null ? '' : String(notes).trim();
+      if (text.charAt(0) !== '{') return empty;
+      try {
+        const data = JSON.parse(text);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) return empty;
+        return { aNombreDe: data.aNombreDe == null ? '' : String(data.aNombreDe).trim(),
+          entregarEn: data.entregarEn == null ? '' : String(data.entregarEn).trim() };
+      } catch (failure) {
+        return empty;
+      }
+    };
+    const roDeliveryDefaults = (order, claim) => {
+      const provider = order && order.Provider && order.Provider.name ? String(order.Provider.name).trim() : '';
+      const claimCode = claim && claim.code ? String(claim.code).trim() : '';
+      return { aNombreDe: provider, entregarEn: [provider, claimCode].filter((value) => value !== '').join(' # ') };
+    };
+
     // ITBMS (MSN-000216, 2026-11-19): like the legacy quote screen («Aplica ITBM»), an order can add the 7% ITBMS to its total.
     // The tax travels as one more line with the catalog item ITBMS (category IMPUESTOS): the server totals every line, so the
     // quoted total, the approved amount and the purchase-order payment include it. The editor keeps that line out of the table,
@@ -681,6 +705,9 @@
       const [closeReason, setCloseReason] = React.useState();
       const [reissueCopy, setReissueCopy] = React.useState(true);
       const [documentGenerating, setDocumentGenerating] = React.useState(false);
+      const [deliveryVisible, setDeliveryVisible] = React.useState(false);
+      const [deliveryForm, setDeliveryForm] = React.useState({ aNombreDe: '', entregarEn: '' });
+      const [deliverySaving, setDeliverySaving] = React.useState(false);
       const subType = providerSubType(props.config);
       const load = (orderId) => {
         setLoading(true);
@@ -723,6 +750,28 @@
           else message.error(r.msg);
         }).catch((error) => message.error(error && error.message || 'No se pudo generar el documento de la orden de compra.'))
           .then(() => { setLoading(false); setDocumentGenerating(false); });
+      };
+      const openDelivery = () => {
+        setDeliveryForm(roDelivery(order.notes));
+        setDeliveryVisible(true);
+      };
+      const onSaveDelivery = () => {
+        if (deliverySaving || !order) return;
+        const orderId = order.id;
+        setDeliverySaving(true);
+        exe('ExeChain', { chain: 'cmdActualizaEntregaOrdenCompra', context: JSON.stringify({ repairOrderId: orderId,
+          aNombreDe: deliveryForm.aNombreDe || '', entregarEn: deliveryForm.entregarEn || '' }) }).then((r) => {
+          const outcome = r && r.ok === true && r.outData && typeof r.outData === 'object' ? r.outData : null;
+          if (!outcome || outcome.ok !== true || !outcome.outData) {
+            message.error(outcome && outcome.msg || r && r.msg || 'No se pudieron guardar los datos de entrega.');
+            return;
+          }
+          const saved = outcome.outData;
+          setOrder((current) => (current && current.id === orderId ? Object.assign({}, current, { notes: saved.notes }) : current));
+          setDeliveryVisible(false);
+          message.success(outcome.msg);
+        }).catch((error) => message.error(error && error.message || 'No se pudieron guardar los datos de entrega.'))
+          .then(() => setDeliverySaving(false));
       };
       const onAddSettlement = () => {
         if (!amount || !invoiceNumber || !invoiceDate) {
@@ -795,6 +844,8 @@
       const isDraft = order.status === 'DRAFT';
       const isActive = order.status === 'ACTIVE';
       const isCancelled = order.status === 'CANCELLED';
+      const delivery = roDelivery(order.notes);
+      const deliveryDefaults = roDeliveryDefaults(order, props.claim);
       const sameRequestOrders = (props.orders || []).filter((p) => p.id !== order.id && p.requestId === order.requestId && p.providerCode === order.providerCode);
       const successor = sameRequestOrders.filter((p) => p.id > order.id).sort((a, b) => a.id - b.id)[0];
       const predecessor = sameRequestOrders.filter((p) => p.id < order.id && p.status === 'CANCELLED').sort((a, b) => b.id - a.id)[0];
@@ -813,6 +864,10 @@
             <Descriptions.Item label="Monto liquidado">{money(order.settledAmount, order.currency)}</Descriptions.Item>
             <Descriptions.Item label="Saldo disponible">{order.approvedAmount == null ? '-' : <b>{money(order.balance, order.currency)}</b>}</Descriptions.Item>
             <Descriptions.Item label="Confirmada">{order.confirmedOn ? dateTime(order.confirmedOn) + ' (' + order.confirmedBy + ')' : '-'}</Descriptions.Item>
+            <Descriptions.Item label="A nombre de" span={2}>{delivery.aNombreDe
+              || <span style={{ color: 'gray' }}>{(deliveryDefaults.aNombreDe || '-') + ' (automático)'}</span>}</Descriptions.Item>
+            <Descriptions.Item label="Entregar en" span={2}>{delivery.entregarEn
+              || <span style={{ color: 'gray' }}>{(deliveryDefaults.entregarEn || '-') + ' (automático)'}</span>}</Descriptions.Item>
             {order.closeReason ? <Descriptions.Item label="Motivo de cierre">{order.closeReason}</Descriptions.Item> : null}
             {isCancelled && successor ? <Descriptions.Item label="Reemplazada por">RO-{successor.id}</Descriptions.Item> : null}
             {predecessor ? <Descriptions.Item label="Reemplaza a">RO-{predecessor.id} (cancelada)</Descriptions.Item> : null}
@@ -820,6 +875,7 @@
           <div className="resumen-repair-order-actions">
             <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={() => load(order.id)}>Recargar</Button>
             <Button size="small" type="primary" icon={<RoIcon name="pdf" />} loading={documentGenerating} disabled={documentGenerating} onClick={onPrint}>Imprimir orden de compra</Button>
+            <Button size="small" type="primary" icon={<RoIcon name="edit" />} onClick={openDelivery}>Datos de entrega</Button>
             {isDraft ? <Button size="small" type="primary" icon={<RoIcon name="save" />} onClick={onSaveDraft}>Guardar borrador</Button> : null}
             {isDraft ? <Popconfirm title="Al confirmar, la orden de reparación se activa y el monto aprobado queda fijo. ¿Continuar?"
               onConfirm={onConfirm} okText="Sí" cancelText="No">
@@ -883,6 +939,22 @@
             </div>
           </Modal>
           */}
+          <Modal title={'Datos de entrega de la orden de compra RO-' + order.id} visible={deliveryVisible}
+            onCancel={() => setDeliveryVisible(false)} onOk={onSaveDelivery} okText="Guardar" cancelText="Cancelar"
+            okButtonProps={{ loading: deliverySaving }}>
+            <p>Se imprimen en el encabezado del documento de la orden de compra y se pueden cambiar en cualquier momento.
+              Si un dato queda vacío, el documento usa el valor automático.</p>
+            <div style={{ marginBottom: 8 }}>
+              <div>A nombre de</div>
+              <Input value={deliveryForm.aNombreDe} maxLength={RO_DELIVERY_MAX} placeholder={deliveryDefaults.aNombreDe}
+                onChange={(e) => { const value = e.target.value; setDeliveryForm((current) => Object.assign({}, current, { aNombreDe: value })); }} />
+            </div>
+            <div>
+              <div>Entregar en</div>
+              <Input value={deliveryForm.entregarEn} maxLength={RO_DELIVERY_MAX} placeholder={deliveryDefaults.entregarEn}
+                onChange={(e) => { const value = e.target.value; setDeliveryForm((current) => Object.assign({}, current, { entregarEn: value })); }} />
+            </div>
+          </Modal>
           <Modal title={closeAction === 'CANCEL' ? 'Cancelar orden' : 'Cancelar saldo restante'} visible={!!closeAction}
             onCancel={() => setCloseAction(undefined)} onOk={onClose} okText="Aceptar" cancelText="Cancelar" okButtonProps={{ danger: true, loading: loading }}>
             <p>{closeAction === 'CANCEL'
@@ -2508,7 +2580,8 @@
     return Promise.all([
       repositoryRequest('RepoSalvageType', { operation: 'GET' }),
       // MSN-000219: the income movement and its cash income feed the "Pago" column of the recoveries table.
-      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue, include: ['Process', 'IncomeExpense', 'IncomeExpense.Transfer'] })
+      // MSN-000222: the buyer is the payer («Pagador») shown in the table.
+      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue, include: ['Process', 'IncomeExpense', 'IncomeExpense.Transfer', 'Buyer'] })
     ]).then((results) => {
       if (!current()) return false;
       const types = normalizeRecoveryTypes(results[0]);
@@ -3444,8 +3517,37 @@ END CATCH;`;
   const recoveryFormChanged = (field, value) => {
     if (!recovery.form || recovery.write) return;
     recovery.form[field] = value;
+    if (recovery.form.invalid) delete recovery.form.invalid[field];
     renderRecoveryForm((count) => count + 1);
   };
+  // MSN-000222: «Fecha» is a Panama calendar day, as the table shows it, whatever the browser's time zone. (The published SPA
+  // gives strings a format() method, so only a real Moment counts as a date here.)
+  const recoveryDateIso = (value) => moment.isMoment(value) && value.isValid()
+    ? moment.utc(value.format('YYYY-MM-DD'), 'YYYY-MM-DD').subtract(PANAMA_OFFSET_MINUTES, 'minutes').toISOString() : undefined;
+  // MSN-000222: «Pagador» is the recovery's buyer, the contact the cashier collects from. «Asegurado» takes the claim's
+  // insured and «Pagador» the policy payer (the two people of the claim summary); «Otros» searches any contact.
+  const RECOVERY_PAYER_KINDS = [{ value: 'ASEGURADO', label: 'Asegurado' }, { value: 'PAGADOR', label: 'Pagador' },
+    { value: 'OTROS', label: 'Otros' }];
+  const recoveryPayerContact = (claim, kind) => claimantOption(kind === 'ASEGURADO' ? claim && claim.Contact
+    : kind === 'PAGADOR' ? claim && claim.Policy && claim.Policy.Payer : null, false);
+  const recoveryPayerChanged = (kind) => {
+    const session = recovery.form;
+    if (!session || recovery.write || !RECOVERY_PAYER_KINDS.some((item) => item.value === kind)) return;
+    const contact = kind === 'OTROS' ? null : recoveryPayerContact(session.claim, kind);
+    session.payerKind = kind; session.contactVersion.buyerId += 1;
+    session.buyerId = contact ? contact.value : undefined; session.buyerOptions = contact ? [contact] : [];
+    if (session.invalid) delete session.invalid.buyerId;
+    renderRecoveryForm((count) => count + 1);
+  };
+  // MSN-000222: the fields marked yellow in the SIS.NET dialog (image.png) are required, and the currency the record needs.
+  const RECOVERY_REQUIRED = [{ field: 'start', label: 'Fecha' }, { field: 'coverageId', label: 'Cobertura' },
+    { field: 'type', label: 'Concepto' }, { field: 'buyerId', label: 'Pagador' }, { field: 'income', label: 'Monto' },
+    { field: 'currency', label: 'Moneda' }, { field: 'comments', label: 'Comentarios' }];
+  const recoveryMissingFields = (form) => RECOVERY_REQUIRED.filter((item) => {
+    const value = form && form[item.field];
+    if (item.field === 'income') return !(Number(parseMoneyInput(value)) > 0);
+    return value === null || value === undefined || String(value).trim() === '';
+  });
   const closeRecoveryModal = () => {
     if (recovery.write) return false;
     recovery.form = null; setRecoveryModalOpen(false); return true;
@@ -3476,8 +3578,11 @@ END CATCH;`;
       return Promise.resolve(false);
     }
     recovery.currencies = [];
-    recovery.form = { claim: claim, currenciesLoaded: false, buyerOptions: [], recovererOptions: [],
-      contactVersion: { buyerId: 0, recovererId: 0 } };
+    // MSN-000222: the dialog opens dated today, with the claim's insured as payer.
+    const insured = recoveryPayerContact(claim, 'ASEGURADO');
+    recovery.form = { claim: claim, currenciesLoaded: false, buyerOptions: insured ? [insured] : [], recovererOptions: [],
+      contactVersion: { buyerId: 0, recovererId: 0 }, payerKind: 'ASEGURADO', buyerId: insured ? insured.value : undefined,
+      start: recoveryDateIso(moment().utcOffset(PANAMA_OFFSET_MINUTES)), comments: '', invalid: {} };
     setRecoveryModalOpen(true); renderRecoveryForm((count) => count + 1);
     const session = recovery.form;
     setRecoveryError('');
@@ -3491,6 +3596,9 @@ END CATCH;`;
         seen[code] = true; return Object.assign({}, row, { code: code });
       });
       session.currenciesLoaded = true;
+      // MSN-000222: the currency starts as the policy's when it is enabled.
+      const policyCurrency = claim.Policy && typeof claim.Policy.currency === 'string' ? claim.Policy.currency.trim().toUpperCase() : '';
+      if (!session.currency && recovery.currencies.some((row) => row.code === policyCurrency)) session.currency = policyCurrency;
       renderRecoveryForm((count) => count + 1); return true;
     }).catch((caught) => {
       if (recoverySessionCurrent(session)) {
@@ -3537,7 +3645,7 @@ END CATCH;`;
       || rawCoverage === '' || typeof rawCoverage === 'boolean' || !Array.isArray(types)
       || !types.some((row) => Number(row.value) === type) || !coverageExists
       || !Array.isArray(currencies) || !currencies.some((row) => row && row.code === currency)) {
-      throw new Error('Tipo, cobertura o moneda de recuperación no válidos.');
+      throw new Error('Concepto, cobertura o moneda de recuperación no válidos.');
     }
     const amount = (value, label) => {
       if (value === '' || value === null || value === undefined) return 0;
@@ -3547,7 +3655,7 @@ END CATCH;`;
         || !Number.isSafeInteger(Math.round(rounded * 100))) throw new Error(label + ' no es válido.');
       return rounded;
     };
-    const income = amount(form.income, 'Ingreso'), expenses = amount(form.expenses, 'Gastos');
+    const income = amount(form.income, 'Monto'), expenses = amount(form.expenses, 'Gastos');
     if (form.Retentions && (!Array.isArray(form.Retentions) || form.Retentions.length)
       || form.Additions && (!Array.isArray(form.Additions) || form.Additions.length)) {
       throw new Error('Los ajustes no están habilitados en esta vista.');
@@ -3564,14 +3672,20 @@ END CATCH;`;
       const start = typeof form.start === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(form.start)
         ? new Date(form.start) : null;
       if (!start || !Number.isFinite(start.getTime()) || start.toISOString().slice(0, 19) !== form.start.slice(0, 19)) {
-        throw new Error('La fecha de inicio no es válida.');
+        throw new Error('La fecha no es válida.');
       }
       entity.start = start.toISOString();
     }
     const netIncome = roundMoney(income - expenses);
     if (!Number.isSafeInteger(Math.round(netIncome * 100))) throw new Error('El ingreso neto no es válido.');
+    // MSN-000222: payer kind and comments travel in the recovery's form values, in the native custom-form shape.
+    const comments = typeof form.comments === 'string' ? form.comments.trim() : '';
+    const payerKind = RECOVERY_PAYER_KINDS.some((item) => item.value === form.payerKind) ? form.payerKind : 'OTROS';
+    if (!entity.buyerId || !entity.start || !(income > 0) || !comments) throw new Error('Complete los campos requeridos.');
     return Object.assign(entity, { currency: currency, income: income, retentions: 0,
-      additions: 0, expenses: expenses, netIncome: netIncome });
+      additions: 0, expenses: expenses, netIncome: netIncome, jFormValues: JSON.stringify([
+        { type: 'radio-group', name: 'tipoPagador', label: 'Tipo de pagador', userData: [payerKind] },
+        { type: 'textarea', name: 'comentarios', label: 'Comentarios', userData: [comments] }]) });
   };
   const submitRecovery = (form) => {
     if (documents.saving) return Promise.resolve(false);
@@ -3585,6 +3699,12 @@ END CATCH;`;
         ? 'Debe reabrir el siniestro antes de registrar una recuperación.'
         : 'La recuperación ya no está disponible para registrar.');
       return Promise.resolve(false);
+    }
+    const missing = recoveryMissingFields(form);
+    form.invalid = missing.reduce((flags, item) => { flags[item.field] = true; return flags; }, {});
+    if (missing.length) {
+      setRecoveryError('Complete los campos requeridos: ' + missing.map((item) => item.label).join(', ') + '.');
+      renderRecoveryForm((count) => count + 1); return Promise.resolve(false);
     }
     let entity;
     try { entity = buildRecoveryEntity(claim, form, recovery.types, recovery.currencies); }
@@ -3616,6 +3736,69 @@ END CATCH;`;
         if (mountedRef.current) { setRecoverySaving(false); if (owner.created) recovery.form = null; }
       }
       return outcome;
+    });
+  };
+
+  // MSN-000222: «Anular» deletes a recovery while it has no applied payment (the «Pago» column is not «Aplicado») and the
+  // native process has not executed it. The database refuses to delete a recovery that still has its income movement, so
+  // a pending one (never applied, or reversed by the cashier) goes first; the recovery is read again just before.
+  const recoveryPaymentApplied = (row) => {
+    const movement = row && row.IncomeExpense;
+    if (!movement || Number(movement.status) !== 1) return false;
+    const income = movement.Transfer;
+    return !(income && (Number(income.status) === 2 || income.reversalDate));
+  };
+  const recoveryVoidIssue = (row) => {
+    if (!row || !Number.isSafeInteger(Number(row.id)) || Number(row.id) <= 0) return 'Recuperación no válida.';
+    if (String(row.entityState || '').trim().toUpperCase() === 'EXECUTED') {
+      return 'La recuperación fue ejecutada por el proceso nativo; no se puede anular desde esta vista.';
+    }
+    if (recoveryPaymentApplied(row)) return 'La recuperación tiene un pago aplicado; no se puede anular.';
+    const movement = row.IncomeExpense;
+    if (movement && (Number(movement.status) !== 0 || movement.transferId != null
+      || !Number.isSafeInteger(Number(movement.id)) || Number(movement.id) <= 0)) {
+      return 'El movimiento de ingreso de la recuperación no se puede eliminar desde esta vista.';
+    }
+    return '';
+  };
+  const voidRecovery = (row) => {
+    const claim = currentClaimRef.current;
+    const claimIdValue = claim && Number(claim.id), id = row && Number(row.id);
+    if (documents.saving || recovery.write || recovery.form || !claim || !recoveryClaimCurrent(claim)
+      || !Number.isSafeInteger(id) || id <= 0) return Promise.resolve(false);
+    if (!canEdit(claim)) { setRecoveryError('Debe reabrir el siniestro antes de anular una recuperación.'); return Promise.resolve(false); }
+    if (recoveryBlocked(claim)) { setRecoveryError('Esta configuración requiere el módulo nativo.'); return Promise.resolve(false); }
+    const owner = { claim: claim, voidId: id };
+    recovery.write = owner; setRecoverySaving(true); setRecoveryError('');
+    const current = () => recovery.write === owner && recoveryClaimCurrent(claim);
+    const written = (result, fallback) => {
+      if (!result || result.ok !== true) throw new Error(fallback + (result && result.msg ? ': ' + result.msg : '.'));
+    };
+    return repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue + ' AND id=' + id,
+      include: ['IncomeExpense', 'IncomeExpense.Transfer'] }, undefined, current).then((result) => {
+      if (!current()) return false;
+      const rows = recoveryData(result, 'Respuesta de recuperaciones').filter((item) => item
+        && Number(item.id) === id && Number(item.claimId) === claimIdValue);
+      if (rows.length !== 1) throw new Error('La recuperación ' + id + ' ya no existe en este siniestro.');
+      const fresh = rows[0], issue = recoveryVoidIssue(fresh);
+      if (issue) throw new Error(issue);
+      const movement = fresh.IncomeExpense;
+      return (movement ? repositoryRequest('RepoIncomeExpense', { operation: 'DELETE', entity: { id: Number(movement.id) } },
+        undefined, current).then((deleted) => written(deleted, 'No fue posible eliminar el movimiento pendiente de la recuperación'))
+        : Promise.resolve()).then(() => repositoryRequest('RepoSalvage', { operation: 'DELETE',
+        entity: { id: id, claimId: claimIdValue, entityState: fresh.entityState == null ? null : fresh.entityState } }, undefined, current))
+        .then((deleted) => {
+          written(deleted, 'No fue posible anular la recuperación');
+          if (A.message && typeof A.message.success === 'function') A.message.success('Recuperación ' + id + ' anulada');
+          return true;
+        });
+    }).catch((caught) => ({ error: caught && caught.message || 'No fue posible anular la recuperación.' })).then((outcome) => {
+      if (recovery.write === owner) { recovery.write = null; if (mountedRef.current) setRecoverySaving(false); }
+      if (!recoveryClaimCurrent(claim)) return false;
+      return loadRecoveries(claim).then(() => {
+        if (outcome && outcome.error && recoveryClaimCurrent(claim)) setRecoveryError(outcome.error);
+        return outcome === true;
+      });
     });
   };
 
@@ -7611,10 +7794,14 @@ END CATCH;`;
   const recoveryForm = recovery.form;
   const recoveryNet = recoveryForm ? roundMoney(Number(parseMoneyInput(recoveryForm.income) || 0)
     - Number(parseMoneyInput(recoveryForm.expenses) || 0)) : 0;
-  const renderRecoveryField = (label, children, key) => (
-    <div className="resumen-reserve-input" key={key}><label>{label}</label>{children}</div>
+  // MSN-000222: required fields carry the view's red asterisk and turn red when saving finds them empty.
+  const renderRecoveryField = (label, children, key, field, wide) => (
+    <div className={'resumen-reserve-input' + (wide ? ' resumen-payment-concept' : '')
+      + (field && recoveryForm && recoveryForm.invalid && recoveryForm.invalid[field] ? ' resumen-recovery-invalid' : '')} key={key}>
+      <label>{field ? requiredLabel(label) : label}</label>{children}</div>
   );
-  const recoveryColumns = ['No.', 'Tipo', 'Cobertura', 'Fecha', 'Ingreso', 'Gastos', 'Neto', 'Proceso', 'Pago'];
+  const recoveryColumns = ['No.', 'Fecha', 'Concepto', 'Cobertura', 'Pagador', 'Monto', 'Gastos', 'Neto', 'Comentarios', 'Proceso',
+    'Pago', 'Acciones'];
   // MSN-000219: a recovery collected in cash has its income movement in status 1 with the cash income; a reversed
   // cash income returns it to pending.
   const recoveryPayment = (row) => {
@@ -7627,15 +7814,34 @@ END CATCH;`;
     return 'Aplicado ' + firstValue(movement.currency, row.currency) + ' ' + formatMoneyInput(movement.amount)
       + (movement.transferId ? ' — caja #' + movement.transferId : '');
   };
+  const recoveryFormValue = (row, name) => {
+    let fields;
+    try { fields = JSON.parse(row && row.jFormValues || '[]'); } catch (error) { return ''; }
+    const entry = Array.isArray(fields) ? fields.find((item) => item && item.name === name) : null;
+    const value = entry && Array.isArray(entry.userData) ? entry.userData[0] : null;
+    return typeof value === 'string' ? value : '';
+  };
   const recoveryValues = (row) => {
     const type = recovery.types.find((item) => Number(item.value) === Number(row.type));
     const coverage = currentClaimRef.current.Policy.Coverages.find((item) => Number(item.id) === Number(row.coverageId)) || {};
     const status = firstValue(row.Process && row.Process.estado, row.Process && row.Process.entityState, row.entityState, null);
-    return [row.id, type ? type.label : 'Tipo ' + row.type,
+    const payerKind = RECOVERY_PAYER_KINDS.find((item) => item.value === recoveryFormValue(row, 'tipoPagador'));
+    const payer = row.buyerId ? firstValue(personName(row.Buyer), 'Contacto ' + row.buyerId) : null;
+    const comments = recoveryFormValue(row, 'comentarios');
+    const voidIssue = editable ? recoveryVoidIssue(row) : 'Debe reabrir el siniestro antes de anular una recuperación.';
+    const voidDisabled = !!voidIssue || recoverySaving || recoveryLoading;
+    return [row.id, displayValue(formatDate(row.start)), type ? type.label : 'Tipo ' + row.type,
       firstValue(coverage.name, coverage.description, coverage.code, 'Cobertura ' + row.coverageId),
-      displayValue(formatDate(row.start)), row.currency + ' ' + formatMoneyInput(row.income),
+      payer ? payer + (payerKind ? ' (' + payerKind.label + ')' : '') : EMPTY_VALUE, row.currency + ' ' + formatMoneyInput(row.income),
       row.currency + ' ' + formatMoneyInput(row.expenses), row.currency + ' ' + formatMoneyInput(row.netIncome),
-      row.processId ? '#' + row.processId + (status ? ' — ' + status : '') : displayValue(status), recoveryPayment(row)];
+      comments ? <A.Tooltip title={comments} placement="topLeft"><span className="resumen-recovery-comment">{comments}</span></A.Tooltip> : EMPTY_VALUE,
+      row.processId ? '#' + row.processId + (status ? ' — ' + status : '') : displayValue(status), recoveryPayment(row),
+      <A.Tooltip title={voidIssue || undefined} placement="topRight"><span className="resumen-recovery-action">
+        <Popconfirm title={'¿Anular la recuperación ' + row.id + '? Se eliminará y no se puede deshacer.'} okText="Anular"
+          cancelText="Cancelar" disabled={voidDisabled} onConfirm={() => voidRecovery(row)}>
+          <Button size="small" type="link" danger disabled={voidDisabled}
+            loading={!!(recovery.write && recovery.write.voidId === Number(row.id))}>Anular</Button>
+        </Popconfirm></span></A.Tooltip>];
   };
   const expenseCoverageRows = coverageRows.map((row) => ({
     id: row.id,
@@ -8758,6 +8964,8 @@ END CATCH;`;
       .resumen-shell .resumen-data-table .resumen-grid-amount-positive{color:#237804}
       .resumen-shell .resumen-data-table .resumen-grid-amount-negative{color:#cf1322}
       .resumen-shell .resumen-data-table .resumen-grid-amount-zero{color:#262626;font-weight:400}
+      .resumen-shell .resumen-data-table .resumen-recovery-comment{display:inline-block;max-width:240px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+      .resumen-shell .resumen-data-table .resumen-recovery-action{display:inline-block}
       .resumen-shell .resumen-empty-row{text-align:center!important;color:var(--rz-muted);padding:18px!important}
       .resumen-shell .resumen-repair-orders{display:flex;flex:1 1 auto;min-height:0;flex-direction:column;gap:7px}
       .resumen-shell .resumen-repair-orders .resumen-coverage-toolbar{justify-content:flex-start;margin:0}
@@ -8840,6 +9048,13 @@ END CATCH;`;
       .resumen-reserve-modal .resumen-reserve-input>.ant-input,.resumen-reserve-modal .resumen-reserve-input>.ant-select .ant-select-selector{border-color:#aebfd4!important;border-radius:5px}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input:hover,.resumen-reserve-modal .resumen-reserve-input>.ant-select:hover .ant-select-selector{border-color:#8da9c2!important}
       .resumen-reserve-modal .resumen-reserve-input>.ant-input:focus,.resumen-reserve-modal .resumen-reserve-input>.ant-select-focused .ant-select-selector{border-color:#1677ff!important;box-shadow:0 0 0 2px rgba(22,119,255,.12)!important}
+      .resumen-reserve-modal .resumen-recovery-payer{display:flex;flex-direction:column;gap:6px;min-width:0}
+      .resumen-reserve-modal .resumen-recovery-payer>.ant-select,.resumen-reserve-modal .resumen-recovery-payer>.ant-input{width:100%}
+      .resumen-reserve-modal .resumen-recovery-payer .ant-radio-group{display:flex;align-items:center;flex-wrap:wrap;gap:4px 16px}
+      .resumen-reserve-modal .resumen-recovery-payer .ant-radio-wrapper{margin-right:0;font-size:12px}
+      .resumen-reserve-modal .resumen-recovery-note{grid-column:1/-1;color:#60708a}
+      .resumen-reserve-modal .resumen-reserve-input.resumen-recovery-invalid>label{color:#cf1322}
+      .resumen-reserve-modal .resumen-reserve-input.resumen-recovery-invalid .ant-select .ant-select-selector,.resumen-reserve-modal .resumen-reserve-input.resumen-recovery-invalid .ant-picker,.resumen-reserve-modal .resumen-reserve-input.resumen-recovery-invalid .ant-input{border-color:#ff4d4f!important;box-shadow:0 0 0 2px rgba(255,77,79,.12)!important}
       .resumen-reserve-modal .resumen-purchase-order{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;gap:16px;padding:0;border:0;background:transparent}
       .resumen-reserve-modal .resumen-purchase-order>.ant-checkbox-wrapper{display:inline-flex;align-items:center;gap:6px;width:max-content;margin:0;color:#183153;font-size:12px;font-weight:600;line-height:18px;white-space:nowrap}
       .resumen-reserve-modal .resumen-purchase-order>.ant-select{width:100%;min-width:0}
@@ -9551,24 +9766,39 @@ END CATCH;`;
             {recoveryLoading ? <div><Spin size="small" /> Cargando recuperaciones...</div> : <div className="resumen-table-wrap"><table className="resumen-data-table">
               <thead><tr>{recoveryColumns.map((label) => <th key={label}>{label}</th>)}</tr></thead>
               <tbody>{recoveryRows.length ? recoveryRows.map((row) => <tr key={row.id}>{recoveryValues(row).map((value, index) => <td key={index}>{value}</td>)}</tr>)
-                : <tr><td className="resumen-empty-row" colSpan="9">Sin recuperaciones.</td></tr>}</tbody>
+                : <tr><td className="resumen-empty-row" colSpan={recoveryColumns.length}>Sin recuperaciones.</td></tr>}</tbody>
             </table></div>}
-            <Modal title="Nueva recuperación" visible={recoveryModalOpen} footer={null}
+            {/* MSN-000222: laid out like the SIS.NET recovery dialog (image.png); required fields keep this view's red asterisk. */}
+            <Modal title="Nueva recuperación" visible={recoveryModalOpen} footer={null} width={600}
               wrapClassName="resumen-reserve-modal" closable={!recoverySaving} maskClosable={!recoverySaving}
               keyboard={!recoverySaving} onCancel={closeRecoveryModal}>
-              {recoveryForm ? <div className="resumen-reserve-form">
-                {renderRecoveryField('Tipo', <Select size="small" value={recoveryForm.type} options={recovery.types} onChange={(value) => recoveryFormChanged('type', value)} />)}
-                {renderRecoveryField('Cobertura', <Select size="small" value={recoveryForm.coverageId} options={coverageRows.map((row) => ({ value: row.id, label: row.name }))} onChange={(value) => recoveryFormChanged('coverageId', value)} />)}
-                {['buyerId', 'recovererId'].map((field) => renderRecoveryField(field === 'buyerId' ? 'Comprador' : 'Recuperador', <Select size="small" showSearch allowClear filterOption={false} value={recoveryForm[field]} options={recoveryForm[field === 'buyerId' ? 'buyerOptions' : 'recovererOptions']} onSearch={(text) => searchRecoveryContacts(field, text)} onChange={(value) => recoveryFormChanged(field, value)} />, field))}
-                {renderRecoveryField('Inicio', <DatePicker size="small" format="DD/MM/YYYY" onChange={(value) => recoveryFormChanged('start', value && typeof value.clone === 'function' ? value.clone().startOf('day').toISOString() : undefined)} />)}
-                {renderRecoveryField('Moneda', <Select size="small" value={recoveryForm.currency} options={recovery.currencies.map((row) => ({ value: row.code, label: row.name || row.code }))} onChange={(value) => recoveryFormChanged('currency', value)} />)}
-                {['income', 'expenses'].map((field) => renderRecoveryField(field === 'income' ? 'Ingreso' : 'Gastos', <Input size="small" inputMode="decimal" value={formatMoneyInput(recoveryForm[field])} onChange={(event) => changeMoneyInput(event, (value) => recoveryFormChanged(field, value))} />, field))}
+              {recoveryForm ? <div className="resumen-reserve-form resumen-check-form">
+                <div className="resumen-check-section-title">Datos de la recuperación</div>
+                {renderRecoveryField('Fecha', <DatePicker size="small" format="DD/MM/YYYY" style={{ width: '100%' }}
+                  value={recoveryForm.start ? moment(recoveryForm.start).utcOffset(PANAMA_OFFSET_MINUTES) : null}
+                  onChange={(value) => recoveryFormChanged('start', recoveryDateIso(value))} />, 'start', 'start')}
+                {renderRecoveryField('Cobertura', <Select size="small" placeholder="Seleccione" value={recoveryForm.coverageId} options={coverageRows.map((row) => ({ value: row.id, label: row.name }))} onChange={(value) => recoveryFormChanged('coverageId', value)} />, 'coverageId', 'coverageId')}
+                {renderRecoveryField('Concepto', <Select size="small" placeholder="Seleccione" value={recoveryForm.type} options={recovery.types} onChange={(value) => recoveryFormChanged('type', value)} />, 'type', 'type')}
+                {renderRecoveryField('Pagador', <div className="resumen-recovery-payer">
+                  {recoveryForm.payerKind === 'OTROS' ? <Select size="small" showSearch allowClear filterOption={false} placeholder="Buscar contacto"
+                    value={recoveryForm.buyerId} options={recoveryForm.buyerOptions} onSearch={(text) => searchRecoveryContacts('buyerId', text)}
+                    onChange={(value) => recoveryFormChanged('buyerId', value)} />
+                    : <Input size="small" readOnly className="resumen-readonly-field" value={(recoveryForm.buyerOptions[0] || {}).label || ''}
+                      placeholder={recoveryForm.payerKind === 'PAGADOR' ? 'La póliza no tiene pagador disponible' : 'El siniestro no tiene asegurado disponible'} />}
+                  <A.Radio.Group value={recoveryForm.payerKind} options={RECOVERY_PAYER_KINDS} onChange={(event) => recoveryPayerChanged(event.target.value)} />
+                </div>, 'buyerId', 'buyerId')}
+                {renderRecoveryField('Monto', <Input size="small" inputMode="decimal" value={formatMoneyInput(recoveryForm.income)} onChange={(event) => changeMoneyInput(event, (value) => recoveryFormChanged('income', value))} />, 'income', 'income')}
+                {renderRecoveryField('Moneda', <Select size="small" placeholder="Seleccione" value={recoveryForm.currency} options={recovery.currencies.map((row) => ({ value: row.code, label: row.name || row.code }))} onChange={(value) => recoveryFormChanged('currency', value)} />, 'currency', 'currency')}
+                {renderRecoveryField('Comentarios', <TextArea rows={3} maxLength={500} value={recoveryForm.comments} onChange={(event) => recoveryFormChanged('comments', event.target.value)} />, 'comments', 'comments', true)}
+                <div className="resumen-check-section-title">Otros datos</div>
+                {renderRecoveryField('Recuperador', <Select size="small" showSearch allowClear filterOption={false} placeholder="Buscar contacto" value={recoveryForm.recovererId} options={recoveryForm.recovererOptions} onSearch={(text) => searchRecoveryContacts('recovererId', text)} onChange={(value) => recoveryFormChanged('recovererId', value)} />, 'recovererId')}
+                {renderRecoveryField('Gastos', <Input size="small" inputMode="decimal" value={formatMoneyInput(recoveryForm.expenses)} onChange={(event) => changeMoneyInput(event, (value) => recoveryFormChanged('expenses', value))} />, 'expenses')}
                 {['Retenciones', 'Adiciones'].map((label) => renderRecoveryField(label, <Input size="small" disabled value="0.00" />, label))}
-                {renderRecoveryField('Ingreso neto', <Input size="small" disabled value={formatMoneyInput(recoveryNet)} />)}
-                <small>Los ajustes distintos de cero requieren el módulo nativo.</small>
+                {renderRecoveryField('Ingreso neto', <Input size="small" disabled value={formatMoneyInput(recoveryNet)} />, 'netIncome')}
+                <small className="resumen-recovery-note">Los ajustes distintos de cero requieren el módulo nativo.</small>
                 {recoveryError ? <div className="resumen-reserve-error">{recoveryError}</div> : null}
                 <div className="resumen-reserve-actions"><Button size="small" disabled={recoverySaving} onClick={closeRecoveryModal}>Cancelar</Button>
-                  <Button size="small" type="primary" loading={recoverySaving} disabled={recoverySaving} onClick={() => submitRecovery(recoveryForm)}>Registrar</Button></div>
+                  <Button size="small" type="primary" loading={recoverySaving} disabled={recoverySaving} onClick={() => submitRecovery(recoveryForm)}>Guardar recuperación</Button></div>
               </div> : null}
             </Modal>
           </section>
