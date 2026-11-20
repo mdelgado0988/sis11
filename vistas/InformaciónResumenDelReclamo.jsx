@@ -4254,6 +4254,11 @@ END CATCH;`;
       setPaymentError(caughtError && caughtError.message ? caughtError.message : 'El pago no es válido.');
       return Promise.resolve(false);
     }
+    const customDeductiblePayment = (() => {
+      const coverage = normalizeCoverageRows(currentClaimRef.current)
+        .find((row) => Number(row.id) === Number(coverageId));
+      return coverage && Number(coverage.deductible) > 0;
+    })();
     const paymentSession = paymentCatalogRef.current;
     if (paymentSession && paymentCatalogCurrent(paymentSession) && paymentSession.purchaseOrdersEnabled
       && paymentSession.purchaseOrderMode && (!paymentSession.purchaseOrderIds || !paymentSession.purchaseOrderIds.length)) {
@@ -4277,7 +4282,9 @@ END CATCH;`;
       entity.jAffectedObjects = JSON.stringify(selected);
       const purchaseOrderAssociations = payoutAffectedObjectsWithPurchaseOrders(entity, paymentCatalogRef.current);
       if (purchaseOrderAssociations) entity.jAffectedObjects = purchaseOrderAssociations;
-      return repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity });
+      return customDeductiblePayment
+        ? exe('ExeChain', { chain: 'cmdCustomLifeCoveragePayout', context: JSON.stringify(entity) })
+        : repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity });
     })
       .then((result) => {
         const body = confirmedCommandResult(result, 'No fue posible crear la reserva de pago.');
@@ -4288,6 +4295,7 @@ END CATCH;`;
           const direct = result && result.outData && !Array.isArray(result.outData) ? result.outData : null;
           createdId = numericValue(direct && direct.id);
         }
+        if (createdId === null) createdId = numericValue(result && result.id);
         if (createdId === null) throw new Error('La reserva fue aceptada sin un identificador verificable.');
         if (!mountedRef.current || paymentOperationRef.current !== context.operationId
           || routeClaimId() !== context.claimId) return false;
@@ -8324,7 +8332,7 @@ END CATCH;`;
           <Button size="small" type="primary" title={config.selected ? nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || undefined : undefined}
             disabled={!editable || paymentSaving || !config.selected
             || !!nativePaymentGuidance(config.selected.paid, config.selected.status, config.key === 'expenses' ? 'EX' : 'IN') || config.selected.available <= 0}
-            onClick={config.openCheck}>Solicitud de cheque</Button>
+            onClick={() => config.openCheck(config.selected)}>Solicitud de cheque</Button>
           <Button size="small" className="resumen-payment-document-btn"
             disabled={documentMutationBlocked() || !config.selected || config.selected.checkRequestId == null}
             onClick={() => generatePaymentRequestDocument(config.selected.checkRequestId)}>Generar solicitud</Button>
