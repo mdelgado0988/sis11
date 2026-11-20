@@ -14,7 +14,7 @@
   - total y jDetail son los de DoClaimPayment: el monto bruto y su único movimiento de pago.
   - Sin paymentId se toma la última solicitud de ese reclamo y movimiento creada en los últimos 10 minutos.
  Output: { ok, msg, outData: { paymentId, grossAmount, taxes, retentions, deductions, total, lines, dryRun,
-   paymentTaxesApplied, documentGenerated, documentMsg } }
+   paymentTaxesApplied, documentGenerated, documentMsg, paymentOrderGenerated, paymentOrderMsg } }
  Rules:
   - Solo tipos TAX, RET y DED del catálogo, sin códigos repetidos, hasta 20 líneas.
   - Monto de la línea: el escrito por el usuario si el tipo es editable (ConfigProfile Payment.editableTaxTypes; por omisión
@@ -27,7 +27,11 @@
   - Debe correr en un contexto propio: el trigger es de tipo comando (actionType 0). En el contexto de DoClaimPayment la
     solicitud nueva ya está en seguimiento y el UPDATE falla.
   - Si el documento no se genera, los montos quedan aplicados: documentGenerated=false y documentMsg dicen por qué.
+  - Con generateDocument, después del documento genera la «Solicitud orden de pago No. <solicitud>» con cmdGenerateClaimDocument
+    (ifConfigured): sólo en los productos con ese documento en Documents[] (auto); en los demás no hace nada
+    (paymentOrderGenerated=false, paymentOrderMsg null). Si falla, los montos y el documento quedan: paymentOrderMsg dice por qué.
  History: 1.0 2026-11-19 MSN-000212 (AXX-10554). 1.1 2026-11-19: generateDocument; corre en el contexto propio del trigger.
+  1.2 2026-11-20 MSN-000224 (AXX-10790): orden de pago de la solicitud junto con su documento.
 */
 
 var ctx = typeof context === 'string' ? JSON.parse(context || '{}') : (context || {});
@@ -65,6 +69,20 @@ function loadRows(entity, fields, filter) {
     throw new Error('No se pudo leer ' + entity + (response && response.msg ? ': ' + response.msg : '.'));
   }
   return rowsOf(response.outData);
+}
+
+// MSN-000224: «Solicitud orden de pago No. <solicitud>» de la solicitud, en los productos que tienen ese documento.
+function generatePaymentOrder(claimId, paymentId) {
+  doCmd({ cmd: 'ExeChain', data: { chain: 'cmdGenerateClaimDocument', context: JSON.stringify({ claimId: claimId,
+    context: { paymentId: paymentId }, template: 'Solicitud Orden de Pago.docx', ifConfigured: true }) } });
+  var response = typeof ExeChain === 'undefined' ? null : ExeChain;
+  var out = response && response.outData && typeof response.outData === 'object' ? plain(response.outData) : null;
+  if (!response || response.ok === false || !out || out.ok !== true) {
+    var why = out && out.msg ? out.msg : (response && response.msg ? response.msg : 'sin respuesta');
+    return { generated: false, failed: true, msg: String(why).replace(/^@/, '') };
+  }
+  if (out.skipped === true) return { generated: false, failed: false, msg: null };
+  return { generated: true, failed: false, msg: out.msg ? String(out.msg) : null };
 }
 
 function detailPayoutIds(rawDetail) {
@@ -203,6 +221,10 @@ try {
     result.documentGenerated = !!GenerateClaimDoc && GenerateClaimDoc.ok === true;
     result.documentMsg = GenerateClaimDoc && GenerateClaimDoc.msg ? String(GenerateClaimDoc.msg) : null;
     if (!result.documentGenerated) msg += ' El documento de la solicitud no se generó' + (result.documentMsg ? ': ' + result.documentMsg : '.');
+    var order = generatePaymentOrder(claimId, paymentId);
+    result.paymentOrderGenerated = order.generated;
+    result.paymentOrderMsg = order.msg;
+    if (order.failed) msg += ' La orden de pago no se generó: ' + order.msg;
   }
   return { ok: true, msg: msg, outData: result };
 } catch (error) {

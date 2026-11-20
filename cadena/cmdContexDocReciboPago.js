@@ -6,7 +6,7 @@
  * @email support@axxis-systems.com
  * @created 2026/01/07
  * @name cmdContexDocReciboPago
- * @version 1.3
+ * @version 1.4
  * @purpose Builds the payment receipt document context for a claim payment.
  * @context Receives the claim identifier through _row.reclamo and, optionally,
  *          the payment request identifier through _row.solicitud.
@@ -15,6 +15,9 @@
  *          from the request alone.
  *          MSN-000212: retentions and deductions are formatted like the other amounts, and the request's
  *          deductions (taxType DED, e.g. «Cobro de deducible») are listed one by one in deductionLines.
+ *          MSN-000224: the same context also fills «Solicitud Orden de Pago.docx» (the «ORDEN DE PAGO» form):
+ *          new keys only (pagueseA, montoEnLetras, numeroReclamo, numeroPoliza, payment-method marks,
+ *          lineasDeduccion, totals, preparadoPor), so «Solcitud de Pago.docx» prints as before.
  * @output Returns the payment data enriched with document and user information.
  */
 
@@ -106,6 +109,8 @@ if (!documentProcessId) {
 doCmd({ "cmd": "GetCurrentUser"});
 const dataContex = RepoClaimPayment.outData[0];
 dataContex.usuario = GetCurrentUser.outData.nombre;
+// MSN-000224: the payee as the request has it, before an additional beneficiary replaces it below.
+const payeeName = String(dataContex.beneficiaryName ?? '').trim();
 const additionalBeneficiary = getAdditionalBeneficiary(dataContex, payment);
 if (additionalBeneficiary) {
   dataContex.beneficiaryName = additionalBeneficiary;
@@ -146,6 +151,7 @@ if (!isMerged && mergedChildConcept) {
   dataContex.reference = mergedChildConcept;
 }
 
+addPaymentOrderFields(dataContex, claim, payeeName, additionalBeneficiary, GetContacts.outData[0]);
 formatOutputAmounts(dataContex);
 const deductionLines = getDeductionLines(dataContex.Taxes);
 if (deductionLines.length > 0) {
@@ -396,4 +402,131 @@ function formatAmount(value) {
   const parts = fixed.split('.');
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return `${parts[0]}.${parts[1]}`;
+}
+
+/* =========================
+   MSN-000224: «Solicitud Orden de Pago.docx» («ORDEN DE PAGO»)
+========================= */
+
+// New keys only: the fields «Solcitud de Pago.docx» reads keep their values. Runs before formatOutputAmounts,
+// while the amounts are still numbers.
+function addPaymentOrderFields(output, claimRow, payeeName, additional, payeeContact) {
+  const taxes = roundMoney(output.taxes);
+  const deducted = roundMoney(Math.abs(Number(output.deductions) || 0) + Math.abs(Number(output.retentions) || 0));
+  const net = roundMoney(output.total);
+  const hasGross = output.grossAmount !== undefined && output.grossAmount !== null && output.grossAmount !== '';
+  const gross = hasGross ? roundMoney(output.grossAmount) : roundMoney(net + deducted - taxes);
+  const symbol = getCurrencySymbol(output.currency);
+  const method = String(output.paymentMethodCode || '').trim().toUpperCase();
+  const toAccount = ['TF', 'ACH', 'DEP'].includes(method);
+
+  output.pagueseA = getPaymentOrderPayee(payeeName, additional);
+  output.simboloMoneda = symbol;
+  output.montoEnLetras = amountInSpanishWords(net, getCurrencyName(output.currency));
+  output.numeroReclamo = String(claimRow && claimRow.code || '').trim();
+  output.numeroPoliza = getPolicyCode(Number(claimRow && claimRow.lifePolicyId || output.lifePolicyId));
+  output.marcaAcreditarCuenta = toAccount ? 'x' : ' ';
+  output.marcaChequeRegular = method === 'CH' ? 'x' : ' ';
+  // No payment method of the catalog is a manager's check.
+  output.marcaChequeGerencia = ' ';
+  output.cuentaAcreditar = toAccount ? String(payeeContact && payeeContact.bankAccount || '').trim() : '';
+  output.numeroCheque = method === 'CH' && output.checkNum ? String(output.checkNum) : '';
+  // Deductions and retentions, the amounts taken off the gross, in the order they were added.
+  output.lineasDeduccion = (Array.isArray(output.Taxes) ? output.Taxes : [])
+    .filter(tax => ['DED', 'RET'].includes(String(tax && tax.taxType || '').trim().toUpperCase()) && Number(tax.amount) !== 0)
+    .sort((left, right) => Number(left.id || 0) - Number(right.id || 0))
+    .map((tax, index) => ({
+      linea: index + 1,
+      codigo: String(tax.valueAddedCode || '').trim(),
+      descripcion: String(tax.taxName || tax.valueAddedCode || '').trim(),
+      monto: `${symbol} ${formatAmount(Math.abs(Number(tax.amount)))}`
+    }));
+  output.montoBruto = formatAmount(gross);
+  output.totalDeduccion = formatAmount(deducted);
+  output.tieneImpuesto = taxes !== 0;
+  output.totalImpuesto = formatAmount(taxes);
+  output.montoNeto = formatAmount(net);
+  output.preparadoPor = (getUserName(output.user) || String(output.usuario || '')).trim().toUpperCase();
+}
+
+function roundMoney(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
+}
+
+// The request's payee. An additional beneficiary written as «Y …» (e.g. «Y GLOBAL BANK CORP», the creditor) is added
+// to it; any other additional beneficiary replaces it, as in «Solcitud de Pago.docx».
+function getPaymentOrderPayee(name, additional) {
+  const payee = String(name || '').replace(/\s+/g, ' ').trim();
+  const extra = String(additional || '').replace(/\s+/g, ' ').trim();
+  if (!extra) return payee;
+  if (/^(y|e|&)\s/i.test(extra)) return payee ? `${payee} ${extra}` : extra.replace(/^(y|e|&)\s+/i, '');
+  return extra;
+}
+
+// The form is printed in Balboas (B/.), at par with the US dollar; any other currency prints its code.
+function getCurrencyName(code) {
+  const value = String(code || '').trim().toUpperCase();
+  return !value || value === 'USD' || value === 'PAB' ? 'Balboas' : value;
+}
+
+function getCurrencySymbol(code) {
+  const value = String(code || '').trim().toUpperCase();
+  return !value || value === 'USD' || value === 'PAB' ? 'B/.' : value;
+}
+
+function getPolicyCode(policyId) {
+  if (!Number.isInteger(policyId) || policyId <= 0) return '';
+  doCmd({ cmd: 'LoadEntity', data: { entity: 'LifePolicy', fields: 'id, code', filter: `id = ${policyId}` } });
+  const policy = typeof LoadEntity !== 'undefined' && LoadEntity && LoadEntity.outData;
+  return String(policy && policy.code || '').trim();
+}
+
+// Name of the user who created the request («PREPARADO»).
+function getUserName(email) {
+  const login = String(email || '').trim();
+  if (!login) return '';
+  doCmd({ cmd: 'LoadEntity', data: { entity: 'Usr', fields: 'email, nombre', filter: `email = '${login.replace(/'/g, "''")}'` } });
+  const user = typeof LoadEntity !== 'undefined' && LoadEntity && LoadEntity.outData;
+  return String(user && user.nombre || '').trim();
+}
+
+// «tres mil trescientos veintitrés y 95 / 100 Balboas»
+function amountInSpanishWords(value, currencyName) {
+  const cents = Math.round(Math.abs(Number(value) || 0) * 100);
+  const fraction = String(cents % 100).padStart(2, '0');
+  return `${numberToSpanishWords(Math.floor(cents / 100))} y ${fraction} / 100 ${currencyName}`;
+}
+
+function numberToSpanishWords(value) {
+  if (value === 0) return 'cero';
+  const millions = Math.floor(value / 1000000);
+  const thousands = Math.floor((value % 1000000) / 1000);
+  const rest = value % 1000;
+  const parts = [];
+  if (millions) parts.push(millions === 1 ? 'un millón' : `${shortenOne(numberToSpanishWords(millions))} millones`);
+  if (thousands) parts.push(thousands === 1 ? 'mil' : `${shortenOne(hundredsToSpanishWords(thousands))} mil`);
+  if (rest) parts.push(hundredsToSpanishWords(rest));
+  return parts.join(' ');
+}
+
+// 1 to 999.
+function hundredsToSpanishWords(value) {
+  const units = ['', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce', 'trece',
+    'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte', 'veintiuno', 'veintidós', 'veintitrés',
+    'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve'];
+  const tens = ['', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+  const hundreds = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos',
+    'ochocientos', 'novecientos'];
+  if (value === 100) return 'cien';
+  const rest = value % 100;
+  const words = [];
+  if (value >= 100) words.push(hundreds[Math.floor(value / 100)]);
+  if (rest) words.push(rest < 30 ? units[rest] : tens[Math.floor(rest / 10)] + (rest % 10 ? ` y ${units[rest % 10]}` : ''));
+  return words.join(' ');
+}
+
+// Before «mil» and «millones»: «veintiún mil», «treinta y un mil».
+function shortenOne(words) {
+  return words.replace(/veintiuno$/, 'veintiún').replace(/uno$/, 'un');
 }

@@ -1028,6 +1028,7 @@
       const [selectedRows, setSelectedRows] = React.useState([]);
       const [compareVisible, setCompareVisible] = React.useState(false);
       const [documentGenerating, setDocumentGenerating] = React.useState(false);
+      const [paymentGenerating, setPaymentGenerating] = React.useState(false);
       const load = () => {
         if (!props.claim) return;
         setLoading(true);
@@ -1078,15 +1079,30 @@
       };
       const toggleAll = (selected) => setSelectedRows(selected ? data.slice() : []);
       const allSelected = data.length > 0 && selectedRows.length === data.length;
+      const approvedSelected = selectedRows.length > 0 && selectedRows.every((row) => row && row.status === 'ACTIVE');
+      const generateSelectedPayment = () => {
+        if (paymentGenerating || !approvedSelected || typeof props.onGeneratePayment !== 'function') return;
+        setPaymentGenerating(true);
+        Promise.resolve(props.onGeneratePayment(selectedRows)).finally(() => setPaymentGenerating(false));
+      };
       return (
         <div className="resumen-repair-orders">
           {documentGenerating ? <div className="resumen-document-generation-mask resumen-repair-order-generation-mask" role="status" aria-live="polite">
             <div><A.Spin size="large" /><span>Generando documento de la orden de compra...</span></div>
           </div> : null}
+          {paymentGenerating ? <div className="resumen-document-generation-mask resumen-repair-order-generation-mask" role="status" aria-live="polite">
+            <div><A.Spin size="large" /><span>Generando y aprobando el pago de las órdenes...</span></div>
+          </div> : null}
           <div className="resumen-coverage-toolbar">
             <div className="resumen-reserve-actions">
               <Button size="small" type="primary" icon={<RoIcon name="plus" />} onClick={() => setRequestVisible(true)}>Nueva solicitud de orden de compra</Button>
               <Button size="small" type="primary" icon={<RoIcon name="compare" />} onClick={onCompare} disabled={selectedRows.length < 2}>Comparar</Button>
+              <Popconfirm title="¿Está seguro de generar el pago para las órdenes seleccionadas? Esta acción creará y aprobará el pago."
+                onConfirm={generateSelectedPayment} okText="Sí, generar" cancelText="Cancelar"
+                disabled={!approvedSelected || documentGenerating || paymentGenerating}>
+                <Button size="small" type="primary" icon={<RoIcon name="check" />} loading={paymentGenerating}
+                  disabled={!approvedSelected || documentGenerating || paymentGenerating}>Generar pago</Button>
+              </Popconfirm>
               <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={load}>Recargar</Button>
             </div>
           </div>
@@ -4312,6 +4328,88 @@ END CATCH;`;
       .then((outcome) => finishPaymentOperation(context, outcome));
   };
 
+  const createPaymentFromRepairOrders = (orders) => {
+    const claim = currentClaimRef.current;
+    const selectedOrders = Array.isArray(orders) ? orders.filter(Boolean) : [];
+    if (!claim || !canEdit(claim) || !selectedOrders.length) {
+      setPaymentError('Seleccione al menos una orden de compra aprobada.');
+      return Promise.resolve(false);
+    }
+    const claimId = Number(claim.id);
+    const coverageIds = Array.from(new Set(selectedOrders.map((order) => Number(order.coverageId))));
+    if (selectedOrders.some((order) => Number(order.claimId) !== claimId)
+      || coverageIds.length !== 1 || !Number.isSafeInteger(coverageIds[0]) || coverageIds[0] <= 0
+      || selectedOrders.some((order) => order.status !== 'ACTIVE')) {
+      setPaymentError('Seleccione únicamente órdenes aprobadas de la misma cobertura y siniestro.');
+      return Promise.resolve(false);
+    }
+    const coverageId = coverageIds[0];
+    const amounts = selectedOrders.map((order) => numericValue(order.approvedAmount != null ? order.approvedAmount : order.total));
+    if (amounts.some((amount) => amount === null || amount <= 0)) {
+      setPaymentError('Las órdenes seleccionadas no tienen un monto aprobado válido.');
+      return Promise.resolve(false);
+    }
+    const amount = roundMoney(amounts.reduce((total, value) => total + value, 0));
+    const available = paymentSpendingAvailable(claim, coverageId, 'IN');
+    if (!Number.isFinite(available) || amount > available) {
+      setPaymentError('El monto de las órdenes supera el saldo disponible de la reserva de la cobertura.');
+      return Promise.resolve(false);
+    }
+    let entity;
+    try {
+      entity = buildPaymentReserveEntity(claim, coverageId, amount,
+        'Pago generado por órdenes de compra: ' + selectedOrders.map((order) => 'RO-' + order.id).join(', '));
+      entity.jAffectedObjects = JSON.stringify(selectedOrders.map((order) => ({
+        key: 'RepairOrder_' + order.id,
+        associationType: 'REPAIR_ORDER',
+        repairOrderId: Number(order.id),
+        description: 'Orden de compra RO-' + Number(order.id),
+        provider: String(order.Provider && order.Provider.name || order.providerCode || ''),
+        totalQuoted: numericValue(order.approvedAmount != null ? order.approvedAmount : order.total) || 0,
+        coverageId: coverageId
+      })));
+    } catch (caughtError) {
+      setPaymentError(caughtError && caughtError.message ? caughtError.message : 'El pago generado por órdenes no es válido.');
+      return Promise.resolve(false);
+    }
+    const context = startPaymentOperation();
+    if (!context) return Promise.resolve(false);
+    let createdId = null;
+    return repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity })
+      .then((result) => {
+        const body = confirmedCommandResult(result, 'No fue posible crear el pago de las órdenes de compra.');
+        const rows = body && body.outData !== undefined ? responseRows(body, 'el pago de las órdenes')
+          : responseRows(result && result.outData, 'el pago de las órdenes');
+        createdId = numericValue(rows[0] && rows[0].id);
+        if (createdId === null) {
+          const direct = result && result.outData && !Array.isArray(result.outData) ? result.outData : null;
+          createdId = numericValue(direct && direct.id);
+        }
+        if (createdId === null) throw new Error('El pago fue aceptado sin un identificador verificable.');
+        return refreshFinancialData(claimId);
+      }).then(() => {
+        if (!createdId) return false;
+        finishPaymentOperation(context, true);
+        return approvePaymentMovement(createdId, 'IN');
+      }).then((approved) => {
+        if (!approved) return false;
+        setSelectedPaymentReserveId(createdId);
+        setActiveTab('payments');
+        openCheckRequest({ id: createdId, coverageId: coverageId, lifeCoverageId: coverageId,
+          paid: amount, payed: amount, status: 1, concept: entity.concept });
+        if (A.message && typeof A.message.success === 'function') {
+          A.message.success('Pago generado y aprobado. Complete la solicitud de cheque.');
+        }
+        return true;
+      }).catch((caughtError) => {
+        if (mountedRef.current && routeClaimId() === claimId) {
+          setPaymentError(caughtError && caughtError.message
+            ? caughtError.message : 'No fue posible generar el pago de las órdenes de compra.');
+        }
+        return false;
+      }).then((outcome) => finishPaymentOperation(context, outcome));
+  };
+
   const createExpenseReserve = (coverageId, amount, concept) => {
     let entity;
     try {
@@ -4586,8 +4684,9 @@ END CATCH;`;
     if (payoutId != null && requestedReserveType === 'IN') loadPaymentTaxCatalog(session);
     return Promise.resolve().then(() => {
       session.config = paymentConfig();
-      session.purchaseOrdersEnabled = requestedReserveType === 'IN' && !!(session.config.Main && session.config.Main.claimRepairOrdersTabVisible)
-        && !repairOrdersDisabled;
+      // Las órdenes de compra se seleccionan y convierten en pago desde su propia pestaña.
+      // El modal de Pagos conserva únicamente el flujo de pago directo.
+      session.purchaseOrdersEnabled = false;
       session.purchaseOrderMode = session.purchaseOrdersEnabled;
       if (payoutId != null) {
         try { nativeSettlementAmount(claim, (claim.Payouts || []).find((row) => Number(row.id) === Number(payoutId))); }
@@ -7851,13 +7950,23 @@ END CATCH;`;
   const beneficiaryOptions = paymentBeneficiaryOptions(currentClaimRef.current);
   const beneficiaryAccountOptions = paymentAccountOptions();
   const sourceAccountOptions = paymentSourceAccountOptions();
-  const openCheckRequest = () => {
-    if (!selectedPayment || nativePaymentGuidance(selectedPayment.paid, selectedPayment.status)) {
-      setPaymentError(selectedPayment ? nativePaymentGuidance(selectedPayment.paid, selectedPayment.status) || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
+  const openCheckRequest = (payoutIdOverride) => {
+    const overridePayment = payoutIdOverride && typeof payoutIdOverride === 'object' ? payoutIdOverride : null;
+    const targetId = overridePayment ? Number(overridePayment.id)
+      : payoutIdOverride == null ? selectedPaymentReserveId : Number(payoutIdOverride);
+    const targetPayment = overridePayment || (targetId == null ? selectedPayment
+      : paymentRows.find((row) => row.id === targetId)
+        || (currentClaimRef.current && Array.isArray(currentClaimRef.current.Payouts)
+          ? currentClaimRef.current.Payouts.find((row) => Number(row.id) === targetId) : null));
+    const targetPaid = targetPayment && (targetPayment.paid != null ? targetPayment.paid : targetPayment.payed);
+    if (!targetPayment || nativePaymentGuidance(targetPaid, targetPayment.status)) {
+      setPaymentError(targetPayment ? nativePaymentGuidance(targetPaid, targetPayment.status) || 'Seleccione otro movimiento aprobado para pago.' : 'Seleccione un movimiento aprobado para pago.');
       return;
     }
-    openPaymentCatalogs(selectedPayment.coverageId, selectedPayment.id, 'IN');
-    setPaymentReference(selectedPayment.concept || '');
+    setSelectedPaymentReserveId(targetPayment.id);
+    openPaymentCatalogs(targetPayment.coverageId != null ? targetPayment.coverageId : targetPayment.lifeCoverageId,
+      targetPayment.id, 'IN');
+    setPaymentReference(targetPayment.concept || '');
     setPaymentError('');
     setCheckRequestModalOpen(true);
   };
@@ -9806,7 +9915,8 @@ END CATCH;`;
         ) : activeTab === 'repairOrders' ? (
           <section className="resumen-repair-orders" aria-label="Órdenes de Reparación del siniestro">
             <SectionTitle>Órdenes de Reparación</SectionTitle>
-            <ClaimRepairOrdersTab claim={currentClaimRef.current} config={repairOrdersConfig} onChanged={refreshClaim} />
+            <ClaimRepairOrdersTab claim={currentClaimRef.current} config={repairOrdersConfig} onChanged={refreshClaim}
+              onGeneratePayment={createPaymentFromRepairOrders} />
           </section>
         ) : activeTab === 'documents' ? (
           <section className="resumen-documents" aria-label="Documentos del siniestro">
