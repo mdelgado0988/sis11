@@ -2010,9 +2010,9 @@
   };
 
   const roundMoney = (value) => Number(Number(value || 0).toFixed(2));
-  const valuationBalance = (reserves, payments, expenses, recoveries) => roundMoney(
+  const valuationBalance = (reserves, payments, expenses) => roundMoney(
     (numericValue(reserves) || 0) - (numericValue(payments) || 0)
-    - (numericValue(expenses) || 0) + (numericValue(recoveries) || 0)
+    - (numericValue(expenses) || 0)
   );
   const reserveSummary = (payouts, claimId) => {
     const summary = { payment: 0, expense: 0, total: 0 };
@@ -2593,7 +2593,7 @@
         const valuation = summary.valuation || {};
         return Object.assign({}, summary, { valuation: Object.assign({}, valuation, {
           recoveries: recoveries,
-          balance: valuationBalance(valuation.reserves, valuation.payments, valuation.expenses, recoveries)
+          balance: valuationBalance(valuation.reserves, valuation.payments, valuation.expenses)
         }) });
       });
       return true;
@@ -5251,7 +5251,7 @@ END CATCH;`;
         reserves: reserves,
         payments: payments,
         expenses: expenses,
-        balance: valuationBalance(reserves, payments, expenses, summary.valuation && summary.valuation.recoveries)
+        balance: valuationBalance(reserves, payments, expenses)
       })
     }));
   };
@@ -5306,7 +5306,7 @@ END CATCH;`;
         const valuation = summary.valuation || {};
         return Object.assign({}, summary, { valuation: Object.assign({}, valuation, {
           recoveries: recoveries,
-          balance: valuationBalance(valuation.reserves, valuation.payments, valuation.expenses, recoveries)
+          balance: valuationBalance(valuation.reserves, valuation.payments, valuation.expenses)
         }) });
       });
       return true;
@@ -7297,7 +7297,7 @@ END CATCH;`;
             payments: payments,
             recoveries: null,
             expenses: expenses,
-            balance: valuationBalance(reserves, payments, expenses, null)
+            balance: valuationBalance(reserves, payments, expenses)
           }
         });
         loadPolicySummaryLabels(claim, requestId);
@@ -9196,7 +9196,7 @@ END CATCH;`;
     expense: roundMoney(currentReserveSummary.expense - (numericValue(claimSummary.valuation.expenses) || 0)),
     recoveries: roundMoney(numericValue(claimSummary.valuation.recoveries) || 0),
     total: valuationBalance(claimSummary.valuation.reserves, claimSummary.valuation.payments,
-      claimSummary.valuation.expenses, claimSummary.valuation.recoveries)
+      claimSummary.valuation.expenses)
   };
   const paymentValuationDetail = paymentRows.reduce((summary, row) => {
     const paid = numericValue(row && row.paid) || 0;

@@ -13,6 +13,9 @@
   *         MSN-000218 - Información de entrega (Entrega*: proveedor de la orden y notas de la orden) y bloque de firmas
   *         (RealizadaPor = quien creó la orden, AutorizadaPor = quien la confirmó, FechaImpresion dd/mm/aaaa en hora de Panamá;
   *         Firma* = firma de perfil uploaded/<email>.png de cada uno, encajada en 170x57 px, vacía si no la subió).
+  *         MSN-000221 - ANombreDe y EntregarEn: los valores que el usuario guarda en la orden desde la vista 48 (cadena
+  *         cmdActualizaEntregaOrdenCompra, notas de la orden como JSON {aNombreDe, entregarEn}); vacíos = proveedor y
+  *         proveedor # reclamo, como antes. Notas y EntregaObservaciones = solo la nota libre de la orden.
 */
 
 const repairOrderId = toValidNumber(context?.repairOrderId ?? context?.order?.id);
@@ -32,10 +35,11 @@ const policyId = toValidNumber(order.lifePolicyId) || toValidNumber(claim.lifePo
 const policy = getPolicy(policyId);
 const oaUserData = getInsuredObject(policyId);
 
-//Encabezado
+//Encabezado: «A nombre de» y «Entregar en» digitados en la orden (vista 48); vacíos, los automáticos.
+const entrega = getEntrega(order.notes);
 resultado.Fecha = toFechaMDY(order.confirmedOn || order.created);
-resultado.ANombreDe = textValue(provider.name);
-resultado.EntregarEn = [textValue(provider.name), textValue(claim.code)].filter(v => v !== "").join(" # ");
+resultado.ANombreDe = entrega.aNombreDe || textValue(provider.name);
+resultado.EntregarEn = entrega.entregarEn || [textValue(provider.name), textValue(claim.code)].filter(v => v !== "").join(" # ");
 
 //Orden
 resultado.OrdenNo = "RO-" + order.id;
@@ -86,7 +90,7 @@ resultado.Total = money(total);
 resultado.Deducible = money(deducible);
 resultado.PagoAseguradora = money(total - deducible);
 resultado.Proveedor = textValue(provider.code);
-resultado.Notas = textValue(order.notes);
+resultado.Notas = entrega.notas;
 
 //Información de entrega: lo que SisOS guarda del proveedor de la orden, y las notas de la orden.
 const providerContact = getContact(provider.contactId);
@@ -94,7 +98,7 @@ resultado.EntregaLugar = textValue(provider.name);
 resultado.EntregaDireccion = cleanText(provider.address) || uniqueJoin([provider.city, provider.state, provider.country], ", ");
 resultado.EntregaTelefono = uniqueJoin([cleanText(provider.phone) || cleanText(providerContact.phone), provider.cell], " / ");
 resultado.EntregaCorreo = cleanText(provider.email) || cleanText(providerContact.email);
-resultado.EntregaObservaciones = textValue(order.notes);
+resultado.EntregaObservaciones = entrega.notas;
 
 //Firmas: quien creó la orden y quien la confirmó (vacío mientras es borrador), con su firma de perfil si la subió.
 resultado.RealizadaPor = userName(order.user);
@@ -115,6 +119,20 @@ function getOrder() {
     throw new Error(`@No existe la orden RO-${repairOrderId}.`);
   }
   return data;
+}
+
+//Notas de la orden: JSON {aNombreDe, entregarEn, notas?} guardado por cmdActualizaEntregaOrdenCompra, o una nota libre.
+function getEntrega(notes) {
+  const text = textValue(notes);
+  const libre = { aNombreDe: "", entregarEn: "", notas: text };
+  if (text.charAt(0) !== "{") return libre;
+  try {
+    const data = JSON.parse(text);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return libre;
+    return { aNombreDe: textValue(data.aNombreDe), entregarEn: textValue(data.entregarEn), notas: textValue(data.notas) };
+  } catch (error) {
+    return libre;
+  }
 }
 
 function getClaim(claimId) {

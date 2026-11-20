@@ -16,6 +16,7 @@
  */
 var me = this;
 var CHAIN_PENDIENTES = 'cmdRecuperacionesPendientesCaja';
+var recargarPendientes = null;
 
 function texto(valor) {
   return valor === undefined || valor === null ? '' : String(valor).trim();
@@ -95,11 +96,16 @@ function pintarBase($contenedor, titulo) {
   $caja.append($('<div>', { 'class': 'rec-caja-estado', style: 'color:#666;font-size:12px;margin-bottom:6px;' }));
   $caja.append($('<input>', {
     type: 'text',
+    'class': 'ant-input rec-caja-reclamo',
+    placeholder: 'Buscar por ID de reclamo',
+    style: 'margin-bottom:6px;'
+  }).attr('autocomplete', 'off'));
+  $caja.append($('<input>', {
+    type: 'text',
     'class': 'ant-input rec-caja-buscar',
     placeholder: 'Buscar por siniestro, póliza o comprador',
-    autocomplete: 'off',
     style: 'margin-bottom:6px;display:none;'
-  }));
+  }).attr('autocomplete', 'off'));
   var $tabla = $(
     '<table class="ant-table rec-caja-tabla" style="width:100%;display:none;">' +
     '<thead class="ant-table-thead"><tr>' +
@@ -162,6 +168,43 @@ function iniciar() {
   var tipoIngreso = texto(me && me.incomeType);
   var $caja = pintarBase($contenedor, 'Recuperaciones pendientes');
   var $estado = $caja.find('.rec-caja-estado');
+  var $reclamo = $caja.find('.rec-caja-reclamo').detach();
+  var $cliente = $('#clientePA');
+  var $clienteCampo = $cliente.closest('.form-group');
+  if (!$clienteCampo.length) $clienteCampo = $cliente.parent();
+  var $reclamoCampo = $('<div>', {
+    'class': 'rec-caja-reclamo-campo',
+    style: 'display:inline-block;vertical-align:top;width:48%;margin-left:12px;'
+  });
+  $reclamoCampo.append($('<label>', {
+    style: 'display:block;margin-bottom:4px;'
+  }).text('Reclamo'));
+  var $reclamoControl = $('<div>', { style: 'display:flex;gap:6px;width:100%;' });
+  var $buscarReclamo = $('<button>', {
+    type: 'button',
+    title: 'Buscar por reclamo',
+    'aria-label': 'Buscar por reclamo',
+    'class': 'rec-caja-buscar-trigger',
+    style: 'width:36px;min-width:36px;height:32px;cursor:pointer;'
+  }).text('🔍');
+  $reclamoControl.append($reclamo.css({ flex: '1 1 auto', width: 'auto', marginBottom: 0 }), $buscarReclamo);
+  $reclamoCampo.append($reclamoControl);
+  if ($clienteCampo.length) {
+    $clienteCampo.css({ display: 'inline-block', verticalAlign: 'top', width: '48%' });
+    $clienteCampo.after($reclamoCampo);
+  } else {
+    $cliente.after($reclamoCampo);
+  }
+  var $clienteControl = $('<div>', { style: 'display:flex;gap:6px;width:100%;' });
+  var $buscarCliente = $('<button>', {
+    type: 'button',
+    title: 'Buscar por cliente',
+    'aria-label': 'Buscar por cliente',
+    'class': 'rec-caja-buscar-trigger',
+    style: 'width:36px;min-width:36px;height:32px;cursor:pointer;'
+  }).text('🔍');
+  $cliente.wrap($clienteControl);
+  $cliente.after($buscarCliente);
   var guardada = leerGuardada();
   if (guardada && Number(guardada.buyerId) > 0) fijarCliente(guardada);
 
@@ -170,18 +213,77 @@ function iniciar() {
     return;
   }
 
-  $estado.text('Cargando recuperaciones pendientes…');
-  me.exe('ExeChain', { chain: CHAIN_PENDIENTES, context: JSON.stringify({ incomeType: tipoIngreso }) })
-    .then(function (resp) {
-      if (!resp || resp.ok === false) throw new Error(resp && resp.msg ? resp.msg : 'sin respuesta');
-      var salida = resp.outData && typeof resp.outData === 'object' ? resp.outData : {};
-      var filas = Array.isArray(salida.data) ? salida.data : [];
-      mostrar($caja, salida, filas, guardada);
-    })
-    .catch(function (error) {
-      $estado.text('No se pudieron cargar las recuperaciones pendientes (' + (error && error.message ? error.message : String(error)) +
-        '). Puede registrar el ingreso como siempre.');
+  function cargar(filtros) {
+    var contexto = { incomeType: tipoIngreso };
+    Object.keys(filtros || {}).forEach(function (clave) {
+      if (filtros[clave] !== undefined && filtros[clave] !== null && String(filtros[clave]).trim() !== '') {
+        contexto[clave] = filtros[clave];
+      }
     });
+    $estado.text('Cargando recuperaciones pendientes…');
+    me.exe('ExeChain', { chain: CHAIN_PENDIENTES, context: JSON.stringify(contexto) })
+      .then(function (resp) {
+        if (!resp || resp.ok === false) throw new Error(resp && resp.msg ? resp.msg : 'sin respuesta');
+        var salida = resp.outData && typeof resp.outData === 'object' ? resp.outData : {};
+        var filas = Array.isArray(salida.data) ? salida.data : [];
+        mostrar($caja, salida, filas, guardada);
+      })
+      .catch(function (error) {
+        $estado.text('No se pudieron cargar las recuperaciones pendientes (' + (error && error.message ? error.message : String(error)) +
+          '). Puede registrar el ingreso como siempre.');
+      });
+  }
+
+  recargarPendientes = function () {
+    var buyerId = texto($('#hiddenCodigoCliente').val());
+    var claimCode = texto($reclamo.val());
+    if (!buyerId && !claimCode) {
+      $estado.text('Busque un cliente o escriba un reclamo para consultar sus recuperaciones.');
+      $caja.find('.rec-caja-tabla').hide();
+      return;
+    }
+    if (/^\d+$/.test(claimCode)) {
+      cargar({ claimId: claimCode });
+    } else {
+      if (claimCode) {
+        $estado.text('Ingrese el ID numérico del reclamo.');
+        $caja.find('.rec-caja-tabla').hide();
+        return;
+      }
+      cargar({ buyerId: buyerId });
+    }
+  };
+
+  $buscarCliente.on('click', function () { recargarPendientes(); });
+  $buscarReclamo.on('click', function () { recargarPendientes(); });
+  $cliente.on('keydown', function (event) {
+    if (event.key === 'Enter' || event.which === 13) {
+      event.preventDefault();
+      recargarPendientes();
+    }
+  });
+  $reclamo.on('keydown', function (event) {
+    if (event.key === 'Enter' || event.which === 13) {
+      event.preventDefault();
+      recargarPendientes();
+    }
+  });
+
+  $reclamo.off('input').on('input', function () {
+    if (texto($(this).val())) {
+      $('#clientePA').val('').data('selectedItem', null).data('desdeComprador', false).prop('readonly', false).removeAttr('title');
+      $('#hiddenCodigoCliente').val('');
+    }
+    clearTimeout($caja.data('recCajaFiltroTimer'));
+    var timer = setTimeout(function () { recargarPendientes(); }, 350);
+    $caja.data('recCajaFiltroTimer', timer);
+  });
+
+  if (guardada) {
+    cargar({ salvageId: guardada.id });
+  } else {
+    $estado.text('Busque un cliente o escriba un reclamo para consultar sus recuperaciones.');
+  }
 }
 
 function mostrar($caja, salida, filas, guardada) {
@@ -318,7 +420,9 @@ function agregarAutocomplete(cantidadPorPagina) {
         $input.val(item.nombreCompleto || '');
         $inputCodigo.val(item.codigo || '');
         $input.data('selectedItem', item);
+        $('.rec-caja-reclamo').val('');
         $dropdown.remove();
+        if (typeof recargarPendientes === 'function') recargarPendientes();
       });
       $dropdown.append($item);
     });
