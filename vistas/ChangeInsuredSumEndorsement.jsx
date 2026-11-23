@@ -2187,6 +2187,7 @@
 
   function normalizeSuretyFinalCoverageSums(groups) {
     if (!usesSuretyContractCapacity()) return;
+    const scaledByCoverage = {};
     (groups || []).forEach(function (group) {
       // La cobertura principal es la referencia de capacidad de la linea.
       // Las filas dependientes pueden llegar con la suma bruta completa en
@@ -2216,6 +2217,9 @@
           const scale = finalSum / referenceFinalSum;
           row.sumInsuredCedant = money(referenceCedant * scale);
           row.sumInsuredRe = money(referenceReinsured * scale);
+          const scaledKey = String(row.coverageCode);
+          if (!scaledByCoverage[scaledKey]) scaledByCoverage[scaledKey] = { expectedSum: finalSum, rows: [] };
+          scaledByCoverage[scaledKey].rows.push(row);
         }
 
         const distributedSum = Math.abs(numberFrom(row, ['sumInsuredCedant']))
@@ -2225,6 +2229,34 @@
           row.proportionRe = placementProportion(numberFrom(row, ['sumInsuredRe']) / finalSum * 100);
         }
       });
+    });
+
+    // Cada linea se escala y redondea por separado: las partes de una
+    // dependiente pueden quedar un centavo por debajo o por encima de su suma
+    // final (5,072 = 167.06 + 1,503.54 + 3,401.39 = 5,071.99) y su colocacion
+    // no llega al 100%. Como en reconcileFacultativeFinalRounding, el residuo
+    // de redondeo se corrige sobre la porcion positiva mas grande. Una
+    // diferencia mayor que el redondeo no se toca: la validacion la reporta.
+    Object.keys(scaledByCoverage).forEach(function (key) {
+      const item = scaledByCoverage[key];
+      const assigned = money(item.rows.reduce(function (sum, row) {
+        return sum + numberFrom(row, ['sumInsuredCedant']) + numberFrom(row, ['sumInsuredRe']);
+      }, 0));
+      const residual = money(item.expectedSum - assigned);
+      if (!residual || Math.abs(residual) > 0.01 * item.rows.length + 0.000001) return;
+      const candidates = [];
+      item.rows.forEach(function (row) {
+        if (numberFrom(row, ['sumInsuredRe']) > 0) candidates.push({ row: row, field: 'sumInsuredRe' });
+        if (numberFrom(row, ['sumInsuredCedant']) > 0) candidates.push({ row: row, field: 'sumInsuredCedant' });
+      });
+      candidates.sort(function (a, b) {
+        return Number(b.row[b.field] || 0) - Number(a.row[a.field] || 0);
+      });
+      const target = candidates[0];
+      if (!target) return;
+      target.row[target.field] = money(Number(target.row[target.field] || 0) + residual);
+      target.row.proportionCed = placementProportion(numberFrom(target.row, ['sumInsuredCedant']) / item.expectedSum * 100);
+      target.row.proportionRe = placementProportion(numberFrom(target.row, ['sumInsuredRe']) / item.expectedSum * 100);
     });
   }
 

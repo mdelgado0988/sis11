@@ -10,6 +10,7 @@
   *@Input: {policyId}
   *@Output: [{ resultado }]
   *@Changes: MSN-000206 - ComentariosExtrasLineas: las Descripciones Extras del vehículo línea por línea, con sus espacios, para la oferta y la póliza.
+  *          MSN-000228 - Colisión (15) y Comprensivo (39) imprimen como Límite el de la cobertura (el valor del vehículo) cuando la opción LÍMITE del formulario no trae ese monto (plan IL), en la oferta y en la póliza.
 */
 
 const policyId = toValidNumber(context?.policyId);
@@ -179,7 +180,7 @@ resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : []
       ...catalogTexts,
       Codigo: code,
       Cobertura: name,
-      Limite: limiteSobat || getLimiteDesdeHiddenCobtar({ ...(findCoverage || {}), ...catalogTexts }, limit),
+      Limite: limiteSobat || getLimiteDesdeHiddenCobtar({ ...(findCoverage || {}), ...catalogTexts }, limit, code),
       Prima: esSobat && !(toNumeric(premium) > 0) ? "Incluida" : n(premium),
       Moneda: monedaDocumento,
       DeductibleCov: deductible,
@@ -380,7 +381,7 @@ function getCatalogTexts(coverageCode, values, configRows) {
   return result;
 }
 
-function getLimiteDesdeHiddenCobtar(coverage, fallbackLimit) {
+function getLimiteDesdeHiddenCobtar(coverage, fallbackLimit, coverageCode) {
   if (!coverage || typeof coverage !== "object") return formatearLimite(fallbackLimit);
 
   const key = Object.keys(coverage).find(name =>
@@ -400,9 +401,25 @@ function getLimiteDesdeHiddenCobtar(coverage, fallbackLimit) {
     String(name).trim().toUpperCase() === `${String(key).trim().toUpperCase()}TEXT`
   );
   const description = textKey ? String(coverage[textKey] ?? "").trim() : "";
+  if (opcionSinLimiteDelVehiculo(coverageCode, key, fallbackLimit, description || value)) return formatearLimite(fallbackLimit);
   if (description) return formatearTextoLimite(description);
 
   return numericValue !== null ? n(numericValue) : formatearTextoLimite(String(value).trim());
+}
+
+// MSN-000228: Colisión (15) y Comprensivo (39) cubren el vehículo; su límite es la suma de la cobertura (el valor del vehículo).
+// Si la opción de la lista LÍMITE elegida en el formulario no trae ese monto (IL ofrece en esas dos la lista de Gastos Médicos y
+// la tarifa no la usa), el límite impreso es el de la cobertura. Una SUMA tecleada y las demás coberturas no cambian.
+function opcionSinLimiteDelVehiculo(coverageCode, campo, limit, opcion) {
+  if (!["15", "39"].includes(vEqual(coverageCode)) || vEqual(campo) !== "LIMITE") return false;
+  const limite = toNumeric(limit);
+  if (limite === null || limite <= 0) return false;
+
+  const montos = String(opcion ?? "").match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
+  return !montos.some(monto => {
+    const valor = toNumeric(monto);
+    return valor !== null && Math.abs(valor - limite) < 0.005;
+  });
 }
 
 // SOBAT: el límite sale de tbLimiteCobertura (fila del producto o, si no hay, la fila "*") y la prima en cero dice "Incluida".

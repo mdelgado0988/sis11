@@ -11,6 +11,7 @@
  * @changes MSN-000160 - ramo 6: plantillas FormatoEndososAuto / FormatoEndososSinCoberturaAuto (el aumento de suma sigue con AdendoAumentoAUTO), dirección completa, ciudad y provincia del tomador, suma asegurada y descripciones extras del vehículo, tasa de impuesto de la póliza. Los demás ramos no cambian.
  * @changes MSN-000190 - fianzas (ramos 81-84): en el endoso de inclusión, «Límites de Responsabilidad» muestra el límite de la cobertura incluida (antes 0.00). Los demás ramos no cambian.
  * @changes MSN-000206 - ramo 6: Descripciones Extras línea por línea (Riesgo.ComentariosExtrasLineas), nombres con un solo espacio entre palabras y suma asegurada 0.00 cuando el vehículo no la tiene, como en la póliza. Los demás ramos no cambian.
+ * @changes MSN-000233 - ramo 6: el recuadro «Asegurado» de los endosos toma la dirección, el país, la provincia y la ciudad de la primera dirección del asegurado, como la oferta y la póliza (MSN-000231); antes, del tomador. Las partes iguales de la dirección no se repiten aunque cambien mayúsculas. Los demás ramos no cambian.
 */
 
 const changeId = context.changeId;
@@ -502,6 +503,15 @@ function isRamoTecnico96(policy) {
 
 function isAutoPolicy(policy) {
   return String(policy?.lob ?? '').trim() === '6';
+}
+
+// MSN-000233: primera dirección del asegurado de la póliza; si el asegurado es el tomador, la que ya trae la póliza.
+function direccionAseguradoAuto(insuredContactId, policy, holderAddress) {
+  const contactId = Number(insuredContactId || 0);
+  if (!(contactId > 0) || contactId === Number(policy?.holderId)) return holderAddress || {};
+  doCmd({ cmd: 'GetContacts', data: { operation: 'GET', include: ['Addresses'], filter: `id = ${contactId}` } });
+  const insured = GetContacts.ok && Array.isArray(GetContacts.outData) ? GetContacts.outData[0] : null;
+  return (insured && Array.isArray(insured.Addresses) && insured.Addresses[0]) || {};
 }
 
 function getTipoAsegurado(policy) {
@@ -1720,19 +1730,25 @@ function buildCustomForTemplate({ policy, row, change, coverages, primas, billDi
   }
 
   // MSN-000160: las plantillas de endoso de Automóvil imprimen la dirección completa, la ciudad y la provincia
-  // del tomador (antes: el corregimiento como provincia y una ciudad del riesgo que el vehículo no tiene), la suma
+  // (antes: el corregimiento como provincia y una ciudad del riesgo que el vehículo no tiene), la suma
   // asegurada con formato, las Descripciones Extras del vehículo y la tasa de impuesto de la póliza.
+  // MSN-000233: dirección, país, provincia y ciudad salen de la primera dirección del asegurado, como en la oferta y
+  // la póliza (MSN-000231); antes, del tomador. Las partes iguales no se repiten aunque cambien mayúsculas.
   if (isAutoPolicy(policy)) {
     const sameCode = (left, right) => String(left ?? '').trim() === String(right ?? '').trim();
-    const corregimientoAuto = addr.sector
-      ? (sectors.find(itm => Number(itm.id) === Number(addr.sector))?.name || '')
+    const addrAuto = direccionAseguradoAuto(insuredContactId, policy, addr);
+    const corregimientoAuto = addrAuto.sector
+      ? (sectors.find(itm => Number(itm.id) === Number(addrAuto.sector))?.name || '')
       : '';
-    const ciudadAuto = Municipios.find(itm => sameCode(itm.stateCode, addr.state) && sameCode(itm.code, addr.city))?.name || '';
-    custom.Address.Linea2 = [addr.address1, addr.address2, corregimientoAuto]
+    const ciudadAuto = Municipios.find(itm => sameCode(itm.stateCode, addrAuto.state) && sameCode(itm.code, addrAuto.city))?.name || '';
+    custom.Address.Linea2 = [addrAuto.address1, addrAuto.address2, corregimientoAuto]
       .map(value => String(value ?? '').trim())
-      .filter((value, index, list) => value && list.indexOf(value) === index)
+      .filter((value, index, list) => value && list.findIndex(other => other.toUpperCase() === value.toUpperCase()) === index)
       .join(', ');
-    custom.Address.NombreProvincia = procincias.find(itm => sameCode(itm.countryCode, addr.country) && sameCode(itm.code, addr.state))?.name || '';
+    custom.Address.NombrePais = addrAuto.country
+      ? (countries.find(itm => itm.code === addrAuto.country)?.name || String(addrAuto.country))
+      : 'No Tiene';
+    custom.Address.NombreProvincia = procincias.find(itm => sameCode(itm.countryCode, addrAuto.country) && sameCode(itm.code, addrAuto.state))?.name || '';
     custom.Address.NombreDistrito = ciudadAuto;
     custom.Address.NombreCiudad = ciudadAuto;
     const sumaVehiculo = String(riesgo.SumaAsegurada ?? '').trim();

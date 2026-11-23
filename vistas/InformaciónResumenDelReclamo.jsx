@@ -4430,6 +4430,7 @@ END CATCH;`;
     if (!context) return Promise.resolve(false);
     let createdId = null;
     const objectClaim = currentClaimRef.current;
+    const autoApprove = String(objectClaim && objectClaim.Policy && objectClaim.Policy.lob || '').trim() === '6';
     const selectedObjectId = financialObjects.selectedId;
     return readFinancialObjects(objectClaim, entity.lifeCoverageId).then((objects) => {
       if (!affectedCurrent(objectClaim) || paymentOperationRef.current !== context.operationId) throw new Error('El siniestro cambió. Recargue la información.');
@@ -4461,6 +4462,19 @@ END CATCH;`;
         return refreshFinancialData(context.claimId).then(() => {
           if (!mountedRef.current || paymentOperationRef.current !== context.operationId
             || routeClaimId() !== context.claimId) return false;
+          if (autoApprove) {
+            // Release the registration operation before starting the approval operation.
+            finishPaymentOperation(context, true);
+            return approvePaymentMovement(createdId, 'EX').then((approved) => {
+              if (approved && A.message && typeof A.message.success === 'function') {
+                A.message.success('Gasto registrado y aprobado');
+              }
+              if (!approved && A.message && typeof A.message.warning === 'function') {
+                A.message.warning('Gasto registrado; la aprobación automática falló. Puede aprobarlo manualmente.');
+              }
+              return true;
+            });
+          }
           if (A.message && typeof A.message.success === 'function') A.message.success('Reserva de gasto registrada');
           return true;
         });

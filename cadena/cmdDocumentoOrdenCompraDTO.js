@@ -16,11 +16,14 @@
   *         MSN-000221 - ANombreDe y EntregarEn: los valores que el usuario guarda en la orden desde la vista 48 (cadena
   *         cmdActualizaEntregaOrdenCompra, notas de la orden como JSON {aNombreDe, entregarEn}); vacíos = proveedor y
   *         proveedor # reclamo, como antes. Notas y EntregaObservaciones = solo la nota libre de la orden.
+  *         MSN-000234 - Afectado: Propietario del objeto afectado «Vehículo» (formulario 674) que el reclamo tiene en la
+  *         cobertura de la orden (vista 48); si son varios, separados por " / "; vacío si no hay (la plantilla oculta la etiqueta).
 */
 
 const repairOrderId = toValidNumber(context?.repairOrderId ?? context?.order?.id);
 const monedaDocumento = "B/.";
 const objectDefinitionCode = "DTAUT";
+const formulariosVehiculoAfectado = [674]; // Objeto afectado «Vehículo» (frmOAAutomovil)
 const estadosOrden = { DRAFT: "Borrador", ACTIVE: "Activa", LIQUIDATED: "Liquidada", CANCELLED: "Cancelada" };
 const resultado = {};
 
@@ -47,6 +50,8 @@ resultado.Estado = estadosOrden[order.status] || textValue(order.status);
 resultado.Reclamo = textValue(claim.code);
 resultado.Poliza = textValue(policy.code);
 resultado.Asegurado = getInsuredName(policy);
+//Afectado: propietario del vehículo afectado registrado en el reclamo para la cobertura de la orden.
+resultado.Afectado = getAfectado(claim, order.coverageId);
 
 //Vehículo
 resultado.Marca = getMarca(oaUserData.cmbMarca);
@@ -171,6 +176,30 @@ function getInsuredName(policyValue) {
   if (fromInsured) return fromInsured;
   const holder = policyValue?.Holder;
   return textValue(holder?.FullName) || contactName(holder);
+}
+
+//Objetos afectados del reclamo (vista 48): JSON en jCustomForms.ObjetosAfectados, cada uno con coverageId, formId y fields.
+function getAfectado(claimValue, coverageId) {
+  const cobertura = toValidNumber(coverageId);
+  if (!cobertura) return "";
+  const objetos = parseJsonValue(parseJsonValue(claimValue?.jCustomForms)?.ObjetosAfectados);
+  if (!Array.isArray(objetos)) return "";
+  const propietarios = [];
+  objetos.forEach(objeto => {
+    if (toValidNumber(objeto?.coverageId) !== cobertura) return;
+    if (formulariosVehiculoAfectado.indexOf(toValidNumber(objeto?.formId)) < 0) return;
+    const campo = (Array.isArray(objeto?.fields) ? objeto.fields : []).find(f => f?.name === "oaPropietario");
+    const valor = Array.isArray(campo?.userData) ? campo.userData.join(" ") : (campo?.userData ?? campo?.value);
+    const nombre = textValue(valor).replace(/\s+/g, " ");
+    if (nombre && propietarios.indexOf(nombre) < 0) propietarios.push(nombre);
+  });
+  return propietarios.join(" / ");
+}
+
+function parseJsonValue(value) {
+  if (value && typeof value === "object") return value;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  try { return JSON.parse(value); } catch (e) { return null; }
 }
 
 function contactName(contact) {
