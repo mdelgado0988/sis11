@@ -5,7 +5,7 @@
  * @author Noel Obando
  * @created 2025-12-26
  * @name cmdEmisionIncendioContext
- * @version 1.4
+ * @version 1.5
  * @purpose Builds accounting context data for fire issuance and endorsements.
  * @param context.id Policy, change or anniversary identifier.
  * @param context.tipo 0: issuance, 1: cancellation, 2: renewal, 3: insured sum change,
@@ -23,6 +23,13 @@
  *          que el Impuesto de Seguros, los endosos su parte de la diferencia de factura y la
  *          cancelacion su renglon menos el Auto vigente antes del endoso. impuestoPrimasIncendio
  *          queda sin el Auto y primaPorCobrar lo incluye. Sin renglon de Auto todo sale igual.
+ * @changes 1.5 (MSN-000247) Comision de los endosos (tipos 1, 3, 4, 5 y 6): la suma de las
+ *          comisiones que el sistema calculo para ese endoso (filas de Commission con su
+ *          changeId, sin error), no LifePolicy.commissions, que es la de la emision completa.
+ *          Un endoso que todavia no se ejecuto y no tiene filas (el alta de cobertura se
+ *          contabiliza al guardarse) se calcula como lo hara el contrato al ejecutarlo: por
+ *          cobertura que cambia, cmdGetCommission de la prima nueva menos la de la anterior.
+ *          Emision y renovacion siguen con LifePolicy.commissions.
  */
 
 const AUTO_TAX_NAME = 'IMPUESTO DE AUTO';
@@ -146,6 +153,7 @@ try {
     : '';
   const policyCode = String(policy.code || '');
   const cuentas = getCuentasContables(policy);
+  const comisiones = getCommissionAmount(policy, change, id, tipo);
 
   return [{
     ...cuentas,
@@ -158,8 +166,8 @@ try {
     cancellationTax: toDecimal(cancellationTax),
     nonCancellationTax: toDecimal(nonCancellationTax),
     daniosPorPagar: toDecimal(gastoPrimaIncendio),
-    commisiones: toDecimal(policy.commissions),
-    reservasPorPagar: toDecimal(policy.commissions),
+    commisiones: comisiones,
+    reservasPorPagar: comisiones,
     reaseguroCedido: toDecimal(reaseguroCedido),
     reaseguroComision: toDecimal(reaseguroComision),
     reaseguroPorPagar: toDecimal(reaseguroPorPagar),
@@ -178,6 +186,89 @@ try {
     ok: false,
     msg: getErrorMessage(error)
   };
+}
+
+/**
+ * MSN-000247: comision del movimiento. Emision y renovacion: LifePolicy.commissions.
+ * Endosos (tipos 1, 3, 4, 5 y 6): la suma de lo que el sistema calculo para ese endoso
+ * (Commission con su changeId y sin error). Sin filas: si el endoso ya se ejecuto, el sistema
+ * no calculo comision (0); si todavia no se ejecuto, se calcula como lo hara el contrato.
+ */
+function getCommissionAmount(policy, change, changeId, tipo) {
+  if (![1, 3, 4, 5, 6].includes(tipo)) {
+    return toDecimal(policy.commissions);
+  }
+
+  const booked = getChangeCommissions(changeId);
+  if (booked.rows > 0) {
+    return booked.total;
+  }
+
+  if (!change || toInteger(change.status, 0) === 1 || !toPositiveInteger(policy.comContractId)) {
+    return 0;
+  }
+
+  return getPendingChangeCommission(policy, change);
+}
+
+function getChangeCommissions(changeId) {
+  doCmd({
+    cmd: 'DoQuery',
+    data: {
+      sql: `SELECT COUNT(*) AS n, SUM(credit) AS total FROM Commission WHERE changeId=${changeId} AND err=0`
+    }
+  });
+
+  const response = typeof DoQuery === 'undefined' ? null : DoQuery;
+  if (!response || response.ok === false) {
+    throw new Error(`No fue posible leer las comisiones del endoso ${changeId}: ${response && response.msg ? response.msg : 'sin respuesta'}`);
+  }
+
+  const row = asArray(response.outData)[0] || {};
+  return {
+    rows: toInteger(Number(row.n), 0),
+    total: toDecimal(row.total)
+  };
+}
+
+/**
+ * Endoso sin ejecutar: lo mismo que haran las reglas del endoso del contrato al ejecutarlo,
+ * por cada cobertura cuya prima cambia: cmdGetCommission con la prima nueva menos
+ * cmdGetCommission con la prima anterior (jDetail.Coverages del endoso).
+ */
+function getPendingChangeCommission(policy, change) {
+  const detail = safeJson(change.jDetail, {});
+
+  return toDecimal(asArray(detail.Coverages).reduce((total, coverage) => {
+    if (!coverage || toNumber(coverage.premiumDif) === 0) {
+      return total;
+    }
+
+    const newCommission = getCoverageCommission(policy.id, coverage.code, coverage.newPremium);
+    const oldCommission = getCoverageCommission(policy.id, coverage.code, coverage.oldPremium);
+    return total + newCommission - oldCommission;
+  }, 0));
+}
+
+function getCoverageCommission(policyId, covCode, premium) {
+  if (toNumber(premium) === 0) {
+    return 0;
+  }
+
+  doCmd({
+    cmd: 'ExeChain',
+    data: {
+      chain: 'cmdGetCommission',
+      context: JSON.stringify({ id: policyId, covCode: String(covCode), premium: toNumber(premium) })
+    }
+  });
+
+  const response = typeof ExeChain === 'undefined' ? null : ExeChain;
+  if (!response || response.ok === false) {
+    throw new Error(`cmdGetCommission (${covCode}): ${response && response.msg ? response.msg : 'sin respuesta'}`);
+  }
+
+  return toNumber(response.outData);
 }
 
 /**

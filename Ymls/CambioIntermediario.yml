@@ -1,0 +1,26 @@
+scanCommand:
+  cmd: ExeChain
+  data:
+    chain: cmdComisionCambioIntermediario
+    context: "{mode:'context',changeId:_id}"
+uniqueKey: "'CI-' + _changeId"
+reference: _reference
+status: 1
+code: _code
+description: _description
+entity: "LifePolicy"
+entityId: _policyId
+Lines:
+# MSN-000249: diferencia neta de comisión del endoso de cambio de intermediario (líneas de cmdComisionCambioIntermediario)
+  - account: _cuentaComision
+    debit: '_commisiones > 0 ? _commisiones : 0'
+    credit: '_commisiones < 0 ? -_commisiones : 0'
+    comments: "'Honorarios de corredores de seguros - cambio de intermediario ' + _anioMes"
+    order: _lineNumber
+    condition: _commisiones != 0
+  - account: _cuentaReservasxPagar
+    debit: '_reservasPorPagar < 0 ? -_reservasPorPagar : 0'
+    credit: '_reservasPorPagar > 0 ? _reservasPorPagar : 0'
+    comments: "'Honorarios de corredores de seguros - cambio de intermediario ' + _anioMes"
+    order: _lineNumber
+    condition: _reservasPorPagar != 0

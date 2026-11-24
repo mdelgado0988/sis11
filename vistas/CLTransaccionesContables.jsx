@@ -1,7 +1,7 @@
 /**
  * @author aiden_mission_configurator
  * @created 2026-10-29
- * @name ClonTransaccionesContables
+ * @name CLTransaccionesContables
  * @version 1.1.0
  * @summary Clon de la vista nativa Contabilidad > Transacciones (#/accounting/tx): mismas pestanas,
  *          campos, acciones, reglas de habilitacion y comandos nativos que los componentes
@@ -145,8 +145,8 @@
     ".tx-shell .ant-table { color:#183153; font-size:12px; }",
     ".tx-shell .ant-table-thead > tr > th { padding:4px 6px; line-height:18px; background:#bfbfbf; color:#262626; border-bottom:1px solid #cbd1d8; font-weight:700; white-space:nowrap; }",
     ".tx-shell .ant-table-tbody > tr { cursor:pointer; }",
-    ".tx-shell .ant-table-tbody > tr > td { padding:1px 6px; line-height:16px; border-bottom:1px solid #b8c4d1; }",
-    ".tx-shell .ant-table-tbody > tr > td { white-space:nowrap; }",
+    ".tx-shell .ant-table-tbody > tr > td { padding:1px 6px; line-height:16px; border-bottom:1px solid #b8c4d1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
+    ".tx-grid .tx-grid-text-cell { display:block; width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
     ".tx-grid .ant-table-tbody .ant-btn-link { height:20px; padding:0 4px; line-height:18px; }",
     ".tx-grid .tx-description-cell { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }",
     ".tx-shell .ant-table-tbody > tr:hover > td { background:#b7d7ff; }",
@@ -3375,6 +3375,10 @@
           return <span><Badge status="error" />{t("Rejected")}</span>;
       }
     };
+    var renderGridText = function (value) {
+      var textValue = value === null || value === undefined ? "" : String(value);
+      return <Tooltip title={textValue}><span className="tx-grid-text-cell">{textValue}</span></Tooltip>;
+    };
     var handleMenuClick = function (e) {
       if (e.key === "audit") {
         setAuditAdjustment(true);
@@ -3435,22 +3439,23 @@
                 onRow={function (record) {
                   return { onClick: function () { toggleRowSelection(record); } };
                 }}>
-                <Table.Column title={t("ID")} dataIndex="id" align="center" />
+                <Table.Column title={t("ID")} dataIndex="id" width={65} align="center" />
                 <Table.Column title={t("Created")} dataIndex="date" width={150} render={formatPanamaDateTime} />
-                <Table.Column title={t("Code")} dataIndex="code" align="center" />
-                <Table.Column title={t("Ref")} dataIndex="reference" />
-                <Table.Column title={t("Unique Key")} dataIndex="uniqueKey" />
-                <Table.Column title={t("Operation")} dataIndex="operationCode" align="center" />
+                <Table.Column title={t("Code")} dataIndex="code" width={120} align="center" render={renderGridText} />
+                <Table.Column title={t("Ref")} dataIndex="reference" width={160} render={renderGridText} />
+                <Table.Column title={t("Unique Key")} dataIndex="uniqueKey" width={130} render={renderGridText} />
+                <Table.Column title={t("Operation")} dataIndex="operationCode" width={100} align="center" render={renderGridText} />
                 <Table.Column title={t("Description")} dataIndex="description" width={420} render={function (v) {
                   var textValue = v === null || v === undefined ? "" : String(v);
-                  return <Tooltip title={textValue}><span className="tx-description-cell">{textValue}</span></Tooltip>;
+                  return <Tooltip title={textValue}><span className="tx-grid-text-cell tx-description-cell">{textValue}</span></Tooltip>;
                 }} />
-                <Table.Column title={t("Amount")} dataIndex="amount" align="right" render={renderAmount} />
-                <Table.Column title={t("Status")} dataIndex="status" align="center" render={function (v) { return getStatusColumn(v); }} />
-                <Table.Column title={t("Manual")} dataIndex="manual" align="center" render={function (v) { return <Checkbox checked={v} />; }} />
+                <Table.Column title={t("Amount")} dataIndex="amount" width={100} align="right" render={renderAmount} />
+                <Table.Column title={t("Status")} dataIndex="status" width={120} align="center" render={function (v) { return getStatusColumn(v); }} />
+                <Table.Column title={t("Manual")} dataIndex="manual" width={70} align="center" render={function (v) { return <Checkbox checked={v} />; }} />
                 <Table.Column
                   title={t("Actions")}
                   key="actions"
+                  width={100}
                   render={function (v, r) {
                     return (
                       <div>

@@ -4,7 +4,7 @@
  * @author Noel Obando
  * @name cmdGetPremiumContext
  * @summary Obtiene el contexto para la plantilla contable de cobro de primas
- * @version 1.5
+ * @version 1.6
  * @created 2026-01-06
  * @changes 1.1 (MSN-000057) Resolves the accounts of every template line from the table
  *          CuentasCobroPrimasxLob: the column "<ramo>-<producto>" when it has a value for
@@ -27,6 +27,13 @@
  *          " Cuota <n> REF <payPlanId>"; la que ya tenia asiento con la referencia anterior (cobros
  *          previos a este cambio) la conserva, asi que reejecutar la plantilla sobre un cobro viejo
  *          crea solo los asientos que faltan. Las lineas se recorren por id de la asignacion.
+ * @changes 1.6 (MSN-000253) Comision del cobro: por cada cuota aplicada (parcial o total) devuelve
+ *          comision = prima neta cobrada (sin impuesto) x comision emitida / prima neta emitida de
+ *          la poliza. Comision emitida: LifePolicy.commissions mas la de sus endosos (Commission
+ *          con changeId, sin error), la misma que la emision y los endosos llevan a la reserva.
+ *          Prima neta emitida: la prima de las cuotas vigentes (no anuladas) de la poliza; la cuota
+ *          sin detalle de prima cuenta su monto sin impuesto. Sin comision emitida: 0 y la plantilla
+ *          CobroPrima no agrega lineas. Cuentas: renglones ComisionReserva y ComisionxPagar.
  */
 const { id } = context;
 const round2 = n =>
@@ -47,6 +54,7 @@ let impuestosDetalle = null;
 const participacionAuto = {};
 const referenciasPrevias = getReferenciasPrevias(id);
 const numerosCuota = getNumerosCuota(id);
+const proporcionComision = {};
 const basePosteada = {};
 
 const filas = InstallmentPremiums.map(premium => {
@@ -75,6 +83,7 @@ return filas.map(({ premium, poliza, tipoRiesgo, base }) => {
   let montoPrima = round2(premiumPayed == 0 ? (montoCobrado / ( 1 + tasaImpuesto)) : premiumPayed);
 
   montoPrima = montoPrima ? montoPrima : montoCobrado;
+  const comision = getComision(poliza, montoPrima);
 
   const taxAmount = round2(montoPrima * tasaImpuesto);
   const taxIncAmount = round2(montoPrima * impuestosPorDanios);
@@ -89,6 +98,7 @@ return filas.map(({ premium, poliza, tipoRiesgo, base }) => {
       impuesto: round2(taxAmount - impuestoAuto),
       impuestoAuto,
       primaxpagar: taxIncAmount,
+      comision,
       reference: getReferencia(base, premium),
       poliza,
       ...getCuentasContables(tablaCuentas, poliza),
@@ -125,6 +135,49 @@ function getNumerosCuota(id) {
   const numeros = {};
   (DoQuery?.outData ?? []).forEach(x => { numeros[x.payPlanId] = x.numberInYear; });
   return numeros;
+}
+
+/**
+ * MSN-000253: comision de la cuota aplicada = prima neta cobrada x (comision emitida / prima neta
+ * emitida). La proporcion se calcula una vez por poliza. Conserva el signo de la cuota.
+ */
+function getComision(poliza, primaCobrada) {
+  const lifePolicyId = Number(poliza?.id ?? 0);
+  if (!(lifePolicyId > 0)) return 0;
+  if (proporcionComision[lifePolicyId] === undefined) {
+    const emitida = getComisionEmitida(poliza);
+    const primaEmitida = Math.abs(emitida) > 0.005 ? getPrimaNetaEmitida(poliza) : 0;
+    proporcionComision[lifePolicyId] = Math.abs(primaEmitida) > 0.005 ? emitida / primaEmitida : 0;
+  }
+  return round2(Number(primaCobrada || 0) * proporcionComision[lifePolicyId]);
+}
+
+/** Comision de la emision mas la de los endosos (Commission con changeId, sin error). */
+function getComisionEmitida(poliza) {
+  doCmd({ cmd: 'DoQuery', data: { sql: `SELECT SUM(c.credit) total
+  FROM Commission c
+  WHERE c.lifePolicyId = ${ Number(poliza.id) } AND c.err = 0 AND c.changeId IS NOT NULL` } });
+  if (!DoQuery || DoQuery.ok === false) throw '@No fue posible leer las comisiones de la poliza ' + poliza.code;
+  const endosos = Number(((DoQuery.outData ?? [])[0] || {}).total ?? 0);
+  return round2(Number(poliza.commissions ?? 0) + endosos);
+}
+
+/**
+ * Prima neta de las cuotas vigentes (sin fecha de anulacion) de la poliza: su detalle de prima,
+ * o su monto sin impuesto cuando no lo tiene.
+ */
+function getPrimaNetaEmitida(poliza) {
+  doCmd({ cmd: 'DoQuery', data: { sql: `SELECT pp.id, pp.minimum, d.prima
+  FROM PayPlan pp
+  LEFT JOIN (SELECT payPlanId, SUM(amount) prima FROM PayPlanDetail WHERE detail LIKE 'Prima%' GROUP BY payPlanId) d ON d.payPlanId = pp.id
+  WHERE pp.lifePolicyId = ${ Number(poliza.id) } AND pp.cancellationDate IS NULL` } });
+  if (!DoQuery || DoQuery.ok === false) throw '@No fue posible leer las cuotas de la poliza ' + poliza.code;
+  const tasaRamo = ImpuestoSobrePrimasxRamo[String(poliza?.lob ?? '').trim()];
+  const tasa = tasaRamo === undefined ? ImpuestoSobrePrimas : tasaRamo;
+  return (DoQuery.outData ?? []).reduce((total, cuota) => {
+    const prima = Number(cuota.prima ?? 0);
+    return total + (Math.abs(prima) > 0.005 ? prima : Number(cuota.minimum ?? 0) / (1 + tasa));
+  }, 0);
 }
 
 function getTransfer(id) {
@@ -252,7 +305,9 @@ function getCuentasContables(rows, poliza) {
     cuentaDaniosxPagar: 'DaniosxPagar',
     cuentaDaniosxPagarCredito: 'DaniosxPagarCredito',
     cuentaImpuestoAuto: 'ImpuestoAuto',
-    cuentaImpuestoAutoCredito: 'ImpuestoAutoCredito'
+    cuentaImpuestoAutoCredito: 'ImpuestoAutoCredito',
+    cuentaComisionReserva: 'ComisionReserva',
+    cuentaComisionxPagar: 'ComisionxPagar'
   };
   const key = v => String(v == null ? '' : v).trim().toUpperCase();
   const header = rows[0].map(key);

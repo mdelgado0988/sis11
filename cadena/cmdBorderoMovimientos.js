@@ -302,6 +302,72 @@ base = base.replace("SUM(CASE WHEN d.bucket='CP'  THEN d.dSiRe ELSE 0 END) AS su
 base = base.replace("SUM(CASE WHEN d.bucket='EX'  THEN d.dSiRe ELSE 0 END) AS sumaExcedente", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='EX' THEN d.dSiRe ELSE 0 END) AS sumaExcedente");
 base = base.replace("SUM(CASE WHEN d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS sumaFacultativa", "SUM(CASE WHEN d.sumaIncluida=1 AND d.bucket='FAC' THEN d.dSiRe ELSE 0 END) AS sumaFacultativa");
 
+/* MSN-000251 - Coaseguro por movimiento. Suma Coaseguro y Prima Coaseguro son el cambio que el
+   movimiento causo en la parte cedida a los coaseguradores, con la reconstruccion de la pestana
+   Coaseguro de la vista 35 (cadena cmdCoaseguroMovimientos): CoCession a nivel de poliza (sin las
+   filas del cobro ni las de cobertura), endosos ejecutados, cada fila nueva aporta su diferencia
+   con la generacion anterior del mismo coasegurador y un reverso solo cuenta cuando el movimiento
+   deja al coasegurador sin fila nueva. Se une al movimiento del bordero por endoso (CHG), emision
+   (EMI:1) o aniversario (ANN). Suma Asegurada 100% = retenida + cedida + Suma Coaseguro; la prima
+   suscrita ya es el 100% y no cambia. Sin coaseguro las dos columnas valen 0. */
+var coaseguroCtes = "coRaw AS (\n"
+  + "  SELECT cc.id, cc.lifePolicyId, cc.contactId,\n"
+  + "         ISNULL(cc.sumInsuredCeded, 0) AS sic, ISNULL(cc.premiumCeded, 0) AS prc,\n"
+  + "         CASE WHEN ISNULL(cc.sumInsured, 0) < 0 OR ISNULL(cc.premium, 0) < 0\n"
+  + "                   OR ISNULL(cc.sumInsuredCeded, 0) < 0 OR ISNULL(cc.premiumCeded, 0) < 0 THEN 1 ELSE 0 END AS esRev,\n"
+  + "         CASE WHEN cc.changeId IS NOT NULL THEN 'CHG:' + CAST(cc.changeId AS varchar(20))\n"
+  + "              WHEN lpc.activeDate IS NULL OR cc.created <= DATEADD(minute, 10, lpc.activeDate) THEN 'EMI:1'\n"
+  + "              WHEN anLote.id IS NOT NULL THEN 'ANN:' + CAST(anLote.id AS varchar(20))\n"
+  + "              ELSE 'LOT:' + CONVERT(varchar(16), cc.created, 120) END AS movKey\n"
+  + "  FROM CoCession cc\n"
+  + "  INNER JOIN LifePolicy lpc ON lpc.id = cc.lifePolicyId\n"
+  + "  LEFT JOIN Change chc ON chc.id = cc.changeId\n"
+  + "  OUTER APPLY (SELECT TOP 1 anc.id FROM Anniversary anc\n"
+  + "               WHERE anc.lifePolicyId = cc.lifePolicyId AND ISNULL(anc.contractYear, 0) > 1\n"
+  + "                 AND anc.executionDate <= DATEADD(minute, 10, cc.created)\n"
+  + "               ORDER BY anc.executionDate DESC, anc.id DESC) anLote\n"
+  + "  WHERE cc.lifePolicyId IN (SELECT dl.lifePolicyId FROM dlt dl)\n"
+  + "    AND cc.parentCoCession IS NULL AND cc.allocationId IS NULL AND cc.lifeCoverageId IS NULL\n"
+  + "    AND (cc.changeId IS NULL OR chc.status = 1)\n"
+  + "),\n"
+  + "coEv AS (\n"
+  + "  SELECT r.id, r.lifePolicyId, r.contactId, r.movKey, r.sic, r.prc FROM coRaw r WHERE r.esRev = 0\n"
+  + "  UNION ALL\n"
+  + "  SELECT MIN(r.id), r.lifePolicyId, r.contactId, r.movKey, 0, 0\n"
+  + "  FROM coRaw r\n"
+  + "  WHERE r.esRev = 1\n"
+  + "    AND NOT EXISTS (SELECT 1 FROM coRaw n WHERE n.esRev = 0 AND n.lifePolicyId = r.lifePolicyId\n"
+  + "                      AND n.contactId = r.contactId AND n.movKey = r.movKey)\n"
+  + "  GROUP BY r.lifePolicyId, r.contactId, r.movKey\n"
+  + "),\n"
+  + "coDl AS (\n"
+  + "  SELECT e.lifePolicyId, e.movKey,\n"
+  + "         e.sic - LAG(e.sic, 1, 0) OVER (PARTITION BY e.lifePolicyId, e.contactId ORDER BY e.id) AS dSic,\n"
+  + "         e.prc - LAG(e.prc, 1, 0) OVER (PARTITION BY e.lifePolicyId, e.contactId ORDER BY e.id) AS dPrc\n"
+  + "  FROM coEv e\n"
+  + "),\n"
+  + "coMovim AS (\n"
+  + "  SELECT d.lifePolicyId, d.movKey, SUM(d.dSic) AS sumaCoaseguro, SUM(d.dPrc) AS primaCoaseguro\n"
+  + "  FROM coDl d GROUP BY d.lifePolicyId, d.movKey\n"
+  + ")";
+var coaseguroRes = "),\nres AS (\n  SELECT mv.*,";
+var coaseguroJoin = "FROM mv\n  INNER JOIN LifePolicy lp ON lp.id = mv.lifePolicyId";
+if (base.split(coaseguroRes).length !== 2 || base.split(coaseguroJoin).length !== 2) {
+  throw 'No se pudo preparar el coaseguro del bordero.';
+}
+base = base.replace(coaseguroRes,
+  "),\n" + coaseguroCtes + ",\nres AS (\n  SELECT mv.*,\n"
+  + "    ISNULL(coMovim.sumaCoaseguro, 0) AS sumaCoaseguro, ISNULL(coMovim.primaCoaseguro, 0) AS primaCoaseguro,");
+base = base.replace(coaseguroJoin,
+  coaseguroJoin + "\n  LEFT JOIN coMovim ON coMovim.lifePolicyId = mv.lifePolicyId AND coMovim.movKey = mv.movKey");
+var coaseguroSuma = "(r.sumaRetenida + r.sumaCedida) AS sumaAsegurada100,";
+var coaseguroPrima = "r.primaSuscrita100 AS primaSuscrita100,";
+if (tPage.indexOf(coaseguroSuma) < 0 || tPage.indexOf(coaseguroPrima) < 0) {
+  throw 'No se pudo preparar las columnas de coaseguro del bordero.';
+}
+tPage = tPage.replace(coaseguroSuma, "(r.sumaRetenida + r.sumaCedida + r.sumaCoaseguro) AS sumaAsegurada100, r.sumaCoaseguro,");
+tPage = tPage.replace(coaseguroPrima, coaseguroPrima + " r.primaCoaseguro,");
+
 function fechaPanamaSql(campo) {
   return "CAST(CAST(" + campo + " AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date)";
 }

@@ -1,0 +1,67 @@
+Rules: 
+   - name: Commission Payment 30% 
+     id: INI 
+     type: Commission_initial 
+     event: New_Payment 
+     condition: 1==1 
+     commissionAmount: /*block*/ doCmd({cmd:'ExeChain',data:{chain:'cmdGetCommission',context:'{id:'+_pol.id+',covCode:"'+_cov.code+'",rate:0.3, vsPayPlan:1}'}}); ExeChain.outData;
+     #commission: 0.3 
+     #commissionAmount: var typeOfProducer=JSON.parse(exe(LoadEntities,entity:'Contact',fields:'*',filter:"id=" + _pol.sellerId)[0].jCustomForms)["Additional Information"]; typeOfProducer = typeOfProducer?JSON.parse(typeOfProducer):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=="typeProducer"); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:""; (typeOfProducer == "KA"?0:1)*(_cov.premium/_pol.PayPlan.length)*0.3 
+     #coverage: Fire 
+   
+   - name: Commission Payment 30% (Commission Annual) 
+     id: INI 
+     type: Commission_initial 
+     event: New_Premium_Written 
+     condition: 1==1 && _isAnniversary==false 
+     commissionAmount: 0 
+     credit: /*block*/ doCmd({cmd:'ExeChain',data:{chain:'cmdGetCommission',context:'{id:'+_pol.id+',covCode:"'+_cov.code+'",rate:0.3, vsPayPlan:0}'}}); ExeChain.outData;
+     #credit: var typeOfProducer=JSON.parse(exe(LoadEntities,entity:'Contact',fields:'*',filter:"id=" + _pol.sellerId)[0].jCustomForms)["Additional Information"]; typeOfProducer = typeOfProducer?JSON.parse(typeOfProducer):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=="typeProducer"); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:""; (typeOfProducer == "KA"?0:1)*_cov.premium*0.30 
+     
+#Endorsement 
+   - name: Commission Endorsement Reverse (Commission Annual) 
+     id: CHG 
+     type: Commission_Change 
+     event: Policy_Change 
+     condition: _pol.active===true 
+     commissionAmount: 0 
+     credit: "/*block*/ doCmd({cmd:'ExeChain',data:{chain:'cmdGetCommission',context:JSON.stringify({id:_pol.id, covCode:String(_cov.code), premium:(_oldCov ? Number(_oldCov.premium || 0) : 0)})}}); ExeChain.outData * -1;"
+     #credit: var typeOfProducer=JSON.parse(exe(LoadEntities,entity:'Contact',fields:'*',filter:"id=" + _pol.sellerId)[0].jCustomForms)["Additional Information"]; typeOfProducer = typeOfProducer?JSON.parse(typeOfProducer):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=="typeProducer"); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:""; (typeOfProducer == "KA"?0:1)*_oldCov.premium*(-0.30) 
+     
+   - name: Commission Endorsement (Commission Annual) 
+     id: CHG 
+     type: Commission_Change 
+     event: Policy_Change 
+     condition: _pol.active===true 
+     commissionAmount: 0 
+     credit: "/*block*/ doCmd({cmd:'ExeChain',data:{chain:'cmdGetCommission',context:JSON.stringify({id:_pol.id, covCode:String(_cov.code), premium:Number(_cov.premium || 0)})}}); ExeChain.outData;"
+     #credit: var typeOfProducer=JSON.parse(exe(LoadEntities,entity:'Contact',fields:'*',filter:"id=" + _pol.sellerId)[0].jCustomForms)["Additional Information"]; typeOfProducer = typeOfProducer?JSON.parse(typeOfProducer):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=="typeProducer"); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:""; (typeOfProducer == "KA"?0:1)*_cov.premium*0.30 
+     
+   - name: Commission Cancellation Refund (Commission Annual) 
+     id: CXL 
+     type: Clawback_commission 
+     event: Policy_Change 
+     condition: "_pol.active===false && (_pol.Changes || []).some(c => c && c.Discriminator == 'CancellationChange' && c.status !== 1)" 
+     commissionAmount: 0 
+     #MSN-000247: % x refunded premium of each coverage (jDetail of the executing cancellation; surety: the refund the accounting entry uses) 
+     credit: "/*block*/ var ch = (_pol.Changes || []).filter(function (c) { return c && c.Discriminator == 'CancellationChange' && c.status !== 1; }).sort(function (a, b) { return b.id - a.id; })[0]; if (!ch) throw '@Commission Cancellation Refund: the executing cancellation is not in the policy changes'; var d = JSON.parse(ch.jDetail || '{}'); var c = (d.Coverages || []).find(function (x) { return String(x.code) == String(_cov.code); }); var surety = ['81', '82', '83', '84'].indexOf(String(_pol.lob || '').trim()) >= 0; var p = !c ? 0 : (surety && d.newCoverages != null && Number(d.newCoverages) < 0 ? Number(c.newPremium || 0) : Number(c.premiumDif || 0)); doCmd({cmd:'ExeChain',data:{chain:'cmdGetCommission',context:JSON.stringify({id:_pol.id, covCode:String(_cov.code), premium:p})}}); ExeChain.outData;"
+     
+#Renovation
+   - name: Commission Renewal 
+     id: REN 
+     type: Commission_renewal 
+     event: New_Premium_Written 
+     condition: _isAnniversary==true 
+     commissionAmount: 0 
+     credit: /*block*/ doCmd({cmd:'ExeChain',data:{chain:'cmdGetCommission',context:'{id:'+_pol.id+',covCode:"'+_cov.code+'",rate:0.2, vsPayPlan:0}'}}); ExeChain.outData;
+     #credit: var typeOfProducer=JSON.parse(exe(LoadEntities,entity:'Contact',fields:'*',filter:"id=" + _pol.sellerId)[0].jCustomForms)["Additional Information"]; typeOfProducer = typeOfProducer?JSON.parse(typeOfProducer):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=="typeProducer"); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:""; (typeOfProducer == "KA"?0:1)*_cov.premium*0.20 
+     
+#Cancellation 
+   - name: Clawback Commission
+     id: CLB 
+     type: Clawback_commission 
+     event: Policy_Cancellation 
+     condition: 1==1 #_pol.active==false 
+     commissionAmount: 0 
+     #credit: var typeOfProducer=JSON.parse(exe(LoadEntities,entity:'Contact',fields:'*',filter:"id=" + _pol.sellerId)[0].jCustomForms)["Additional Information"]; typeOfProducer = typeOfProducer?JSON.parse(typeOfProducer):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=="typeProducer"); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:""; (typeOfProducer == "KI"?0:1)*_cov.premium*0.30*-1 
+     credit: /*block*/ doCmd({cmd:"LoadEntities",data:{entity:"Contact", fields:'*', filter:"id=" + _pol.sellerId }}); var typeOfProducer=JSON.parse(LoadEntities.outData[0].jCustomForms); typeOfProducer = typeOfProducer['Additional Information']?JSON.parse(typeOfProducer['Additional Information']):[]; typeOfProducer = typeOfProducer.filter(x=>x.name=='typeProducer'); typeOfProducer = typeOfProducer.length > 0 && typeOfProducer[0].userData && typeOfProducer[0].userData.length > 0?typeOfProducer[0].userData[0]:typeOfProducer[0]; doCmd({cmd:"ExeChain",data:{chain:"cmdGetPremiunCancelationPolicyByCalcCommision",context:`{row:{policyId:${_pol.id}, code:'${_cov.code}'}}`}}); var coverage=ExeChain.outData; (typeOfProducer == 'KA'?0:1)*_cov.premium*0.30

@@ -201,12 +201,14 @@
     { t: 'Fecha Desde',               c: 'fDesde',      s: 'fDesde',              w: 105, tipo: 'fecha' },
     { t: 'Fecha Hasta',               c: 'fHasta',      s: 'fHasta',              w: 105, tipo: 'fecha' },
     { t: 'Suma Asegurada 100%',       c: 'sumaAsegurada100',    w: 150, tipo: 'num' },
+    { t: 'Suma Coaseguro',            c: 'sumaCoaseguro',       w: 135, tipo: 'num' },
     { t: 'Suma Retenida',             c: 'sumaRetenida',        w: 125, tipo: 'num' },
     { t: 'Suma Cedida',               c: 'sumaCedida',          w: 125, tipo: 'num' },
     { t: 'Suma Cuota Parte',          c: 'sumaCuotaParte',      w: 135, tipo: 'num' },
     { t: 'Suma Excedente',            c: 'sumaExcedente',       w: 135, tipo: 'num' },
     { t: 'Suma Facultativa',          c: 'sumaFacultativa',     w: 135, tipo: 'num' },
     { t: 'Prima Suscrita 100%',       c: 'primaSuscrita100',    w: 145, tipo: 'num' },
+    { t: 'Prima Coaseguro',           c: 'primaCoaseguro',      w: 135, tipo: 'num' },
     { t: 'Prima Retenida',            c: 'primaRetenida',       w: 125, tipo: 'num' },
     { t: 'Prima Cedida',              c: 'primaCedida',         w: 125, tipo: 'num' },
     { t: 'Suma Prima Cuota Parte',    c: 'primaCuotaParte',     w: 165, tipo: 'num' },
@@ -231,13 +233,15 @@
      nada: la grilla se desbordaba igual. 5.200 -> 4.680 px = -10,00% exacto, sin eliminar
      ni reordenar ninguna de las 34 columnas. */
   const ANCHO_TOTAL = COLUMNAS.reduce(function(a, c){ return a + c.w; }, 0);
+  /* MSN-000251 — «Suma Coaseguro» junto a «Suma Asegurada 100%» y «Prima Coaseguro» junto a
+     «Prima Suscrita 100%»: 36 columnas, cada grupo dos posiciones más adelante. */
   const COLUMNAS_GRUPADAS = COLUMNAS.slice(0, 12).concat([
-    { t: 'Suma', children: COLUMNAS.slice(12, 18) },
-    { t: 'Primas', children: COLUMNAS.slice(18, 25) },
-    { t: 'Comisión', children: COLUMNAS.slice(25, 29) },
-    { t: 'Impuesto', children: COLUMNAS.slice(29, 31) },
-    { t: 'Saldos', children: COLUMNAS.slice(31, 34) },
-    COLUMNAS[34]
+    { t: 'Suma', children: COLUMNAS.slice(12, 19) },
+    { t: 'Primas', children: COLUMNAS.slice(19, 27) },
+    { t: 'Comisión', children: COLUMNAS.slice(27, 31) },
+    { t: 'Impuesto', children: COLUMNAS.slice(31, 33) },
+    { t: 'Saldos', children: COLUMNAS.slice(33, 36) },
+    COLUMNAS[36]
   ]);
   const COLUMNAS_REASEGURADORES = [
     { t:'id', c:'id', w:75, tipo:'txt', fixed:'left' }, { t:'Reasegurador', c:'reasegurador', w:220, tipo:'ellipsis' },

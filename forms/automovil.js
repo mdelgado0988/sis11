@@ -228,11 +228,15 @@ function prepareTabContainer() {
           <a href="" data-target="#tabHome" data-toggle="tab" class="nav-link small text-uppercase active">Datos Generales</a>
         </li>
         <li class="nav-item">
+          <a href="" data-target="#tabRenovacion" data-toggle="tab" class="nav-link small text-uppercase">Datos Renovación</a>
+        </li>
+        <li class="nav-item">
           <a href="" data-target="#tabTarifas" data-toggle="tab" class="nav-link small text-uppercase">Tarifas</a>
         </li>
       </ul>
       <div class="tab-content">
         <div id="tabHome" class="tab-pane active" style="padding: 1em;"></div>
+        <div id="tabRenovacion" class="tab-pane" style="padding: 1em;"></div>
         <div id="tabTarifas" class="tab-pane" style="padding: 1em;"></div>
       </div>
     `;
@@ -251,11 +255,13 @@ function prepareTabContainer() {
 function moveFieldsToTabHome() {
   try {
     const $tabHome = $("#tabHome");
+    const $tabRenovacion = $("#tabRenovacion");
     if (!$tabHome.length) {
       return;
     }
 
     const movedRows = new Set();
+    const movedRowsRenovacion = new Set();
 
     $(".ptab").each(function () {
       const $row = $(this).closest(".row");
@@ -263,6 +269,17 @@ function moveFieldsToTabHome() {
       if ($row.length && !movedRows.has($row[0])) {
         movedRows.add($row[0]);
         $tabHome.append($row);
+      }
+    });
+
+    // Igual que en DT_RAMO_TECNICO: los campos marcados como rtab
+    // pertenecen exclusivamente a la pestaña Datos Renovación.
+    $(".rtab").each(function () {
+      const $row = $(this).closest(".row");
+
+      if ($row.length && !movedRowsRenovacion.has($row[0])) {
+        movedRowsRenovacion.add($row[0]);
+        $tabRenovacion.append($row);
       }
     });
   } catch (error) {

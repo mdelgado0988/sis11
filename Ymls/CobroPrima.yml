@@ -71,3 +71,18 @@ Lines:
     currency: _currency
     comments: "'Impuesto sobre cobro de la prima de la ' + (['81','82','83','84'].includes(String(_poliza.lob)) ? 'fianza' : 'póliza') + ' N°' + _poliza.code"
     order: _lineNumber
+### COBRO DE PRIMA - Asiento N°4 - COMISION DE CORREDORES SOBRE LA PRIMA COBRADA (MSN-000253)
+  -	account: _cuentaComisionReserva
+    debit: '_comision > 0 ? _comision : 0'
+    credit: '_comision < 0 ? -_comision : 0'
+    condition: _comision != 0
+    currency: _currency
+    comments: "'Reserva por pagar - honorarios a  corredores de seguros'"
+    order: _lineNumber
+  -	account: _cuentaComisionxPagar
+    debit: '_comision < 0 ? -_comision : 0'
+    credit: '_comision > 0 ? _comision : 0'
+    condition: _comision != 0
+    currency: _currency
+    comments: "'Honorarios por pagar a  corredores de seguros'"
+    order: _lineNumber
