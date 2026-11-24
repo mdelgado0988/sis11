@@ -4,7 +4,7 @@
  * @author Noel Obando
  * @name cmdGetPremiumContext
  * @summary Obtiene el contexto para la plantilla contable de cobro de primas
- * @version 1.4
+ * @version 1.5
  * @created 2026-01-06
  * @changes 1.1 (MSN-000057) Resolves the accounts of every template line from the table
  *          CuentasCobroPrimasxLob: the column "<ramo>-<producto>" when it has a value for
@@ -21,6 +21,12 @@
  *          cuota se reparte entre IVA (impuesto) e Impuesto de Auto (impuestoAuto) en la proporcion
  *          de los impuestos vigentes de la poliza (sus renglones TaxGenerated habilitados). Una
  *          poliza sin renglon "Impuesto de Auto" da impuestoAuto 0 y el asiento de siempre.
+ * @changes 1.5 (MSN-000248) Una referencia por cuota: con dos o mas cuotas de la misma poliza en
+ *          un cobro, todas llevaban la misma referencia y la plantilla CobroPrima solo grababa la
+ *          primera (las demas salian como repetidas). Ahora cada cuota de esa poliza lleva
+ *          " Cuota <n> REF <payPlanId>"; la que ya tenia asiento con la referencia anterior (cobros
+ *          previos a este cambio) la conserva, asi que reejecutar la plantilla sobre un cobro viejo
+ *          crea solo los asientos que faltan. Las lineas se recorren por id de la asignacion.
  */
 const { id } = context;
 const round2 = n =>
@@ -28,7 +34,8 @@ const round2 = n =>
 const ImpuestoSobrePrimas = 5/100, ImpuestosPorDanios = 2/100;
 const ImpuestoSobrePrimasxRamo = { '6': 6/100 };
 
-const InstallmentPremiums = getInstallmentPremiums(id);
+const InstallmentPremiums = JSON.parse(JSON.stringify(getInstallmentPremiums(id) || []))
+  .sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
 
 //GLOB-592: Michael Delgado. Leemos la prima bruta sin impuesto de la cuota para cálculos del pago (Debido a pagos parciales)
 const primasDetalle = getInstallmentDetails(id);
@@ -38,12 +45,21 @@ if(!InstallmentPremiums || InstallmentPremiums.length === 0) throw '@Detalle de 
 const tablaCuentas = getTablaCuentas();
 let impuestosDetalle = null;
 const participacionAuto = {};
+const referenciasPrevias = getReferenciasPrevias(id);
+const numerosCuota = getNumerosCuota(id);
+const basePosteada = {};
 
-return InstallmentPremiums.map( premium =>{
+const filas = InstallmentPremiums.map(premium => {
   const poliza = getPolicyInfo(premium);
   const tipoRiesgo = ['81', '82', '83', '84'].includes(String(poliza?.lob ?? '').trim())
     ? 'Fianza'
     : 'Poliza';
+  return { premium, poliza, tipoRiesgo, base: `TX-CobroPrimas#${ id } ${tipoRiesgo} #${ poliza.code }` };
+});
+const cuotasPorBase = {};
+filas.forEach(f => { cuotasPorBase[f.base] = (cuotasPorBase[f.base] || 0) + 1; });
+
+return filas.map(({ premium, poliza, tipoRiesgo, base }) => {
   const impuestosPorDanios = tipoRiesgo === 'Fianza' ? 0 : ImpuestosPorDanios;
 
   const primaDetalle = primasDetalle.find(x => x.payPlanId == premium.payPlanId);
@@ -73,11 +89,43 @@ return InstallmentPremiums.map( premium =>{
       impuesto: round2(taxAmount - impuestoAuto),
       impuestoAuto,
       primaxpagar: taxIncAmount,
-      reference: `TX-CobroPrimas#${ id } ${tipoRiesgo} #${ poliza.code }`,
+      reference: getReferencia(base, premium),
       poliza,
       ...getCuentasContables(tablaCuentas, poliza),
     }
 })
+
+/**
+ * MSN-000248: referencia del asiento de una cuota. Unica cuota de la poliza en el cobro: la de
+ * siempre. Varias: cada una con su numero de cuota y su payPlanId, salvo la que ya se contabilizo
+ * con la referencia anterior (la conserva y la plantilla la salta).
+ */
+function getReferencia(base, premium) {
+  if (cuotasPorBase[base] < 2) return base;
+  if (referenciasPrevias.includes(base) && !basePosteada[base]) {
+    basePosteada[base] = true;
+    return base;
+  }
+  const numero = numerosCuota[premium.payPlanId];
+  return `${ base }${ numero != null ? ' Cuota ' + numero : '' } REF ${ premium.payPlanId }`;
+}
+
+function getReferenciasPrevias(id) {
+  doCmd({ cmd: 'DoQuery', data: { sql: `SELECT t.reference
+  FROM [Transaction] t
+  WHERE t.templateCode = 'CobroPrima' AND t.entity = 'ALLOCATION' AND t.entityId = ${ Number(id) }` } });
+  return (DoQuery?.outData ?? []).map(x => String(x.reference));
+}
+
+function getNumerosCuota(id) {
+  doCmd({ cmd: 'DoQuery', data: { sql: `SELECT a.payPlanId, pp.numberInYear
+  FROM AllocationInstallment a
+  INNER JOIN PayPlan pp ON pp.id = a.payPlanId
+  WHERE a.allocationId = ${ Number(id) }` } });
+  const numeros = {};
+  (DoQuery?.outData ?? []).forEach(x => { numeros[x.payPlanId] = x.numberInYear; });
+  return numeros;
+}
 
 function getTransfer(id) {
   doCmd({cmd:'FilterTransfer',data:{ allocationId: id }});
@@ -93,7 +141,7 @@ function getInstallmentPremiums(id) {
   const Payment = getTransfer(id);
   if (Payment) return Payment?.Allocation?.InstallmentPremiums ?? [];
 
-  doCmd({ cmd: 'DoQuery', data: { sql: `SELECT a.payPlanId, a.lifePolicyId, a.moneyInAmount, a.compensationAmount, a.compensationType, a.currency
+  doCmd({ cmd: 'DoQuery', data: { sql: `SELECT a.id, a.payPlanId, a.lifePolicyId, a.moneyInAmount, a.compensationAmount, a.compensationType, a.currency
   FROM AllocationInstallment a
   WHERE a.allocationId = ${ Number(id) }` } });
   const lineas = DoQuery?.outData ?? [];

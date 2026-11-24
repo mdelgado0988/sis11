@@ -955,7 +955,7 @@ function renderTablaAgrupada(data, containerSelector) {
                 let $input;
 
                 if (type === 'number') {
-                    $input = $('<input>', { type: 'number' }).addClass('ant-input-custom');
+                    $input = $('<input>', { type: 'number', step: 'any' }).addClass('ant-input-custom');
                 } else if (type === 'select') {
                     $input = $('<select>').addClass('ant-select-custom');
                     let options = [];

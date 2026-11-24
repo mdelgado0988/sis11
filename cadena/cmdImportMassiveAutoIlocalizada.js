@@ -62,6 +62,18 @@ const CFG = {
     "header": "Cob_14_CTARIFA",
     "field": "cob14Ctarifa"
    }
+  },
+  "15": {
+   "Limite": {
+    "header": "mvalorOA",
+    "field": "mvalorOA"
+   }
+  },
+  "39": {
+   "Limite": {
+    "header": "mvalorOA",
+    "field": "mvalorOA"
+   }
   }
  },
  "columns": [

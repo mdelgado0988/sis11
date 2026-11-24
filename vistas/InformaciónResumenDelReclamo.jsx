@@ -2585,6 +2585,30 @@
       seen[id] = true; return row;
     });
   };
+  // MSN-000244: applied and pending amounts come from the signed cash receipts of each recovery, read by
+  // cmdRecuperacionesPendientesCaja in mode CLAIM. The recovery's IncomeExpense is only an aggregate projection and never
+  // feeds the «Pago» column nor «Anular».
+  const loadRecoveryLedger = (claimIdValue, salvageId, guard) => repositoryRequest('ExeChain', {
+    chain: 'cmdRecuperacionesPendientesCaja',
+    context: JSON.stringify(salvageId ? { mode: 'CLAIM', claimId: claimIdValue, salvageId: salvageId }
+      : { mode: 'CLAIM', claimId: claimIdValue })
+  }, undefined, guard).then((result) => {
+    const outData = result && result.ok === true ? result.outData : null;
+    const payload = Array.isArray(outData) ? outData[0] : outData;
+    if (!payload || typeof payload !== 'object' || payload.ok === false || !Array.isArray(payload.data)) {
+      throw new Error(payload && payload.msg || result && result.msg || 'Pagos de recuperaciones incompatibles.');
+    }
+    const ledger = {};
+    payload.data.forEach((row) => {
+      const id = row && Number(row.id), count = row && Number(row.paymentCount);
+      const paid = row && numericValue(row.paidAmount), pending = row && numericValue(row.pendingAmount);
+      if (!Number.isSafeInteger(id) || id <= 0 || Number(row.claimId) !== claimIdValue || ledger[id]
+        || (salvageId && id !== salvageId) || paid === null || pending === null
+        || !Number.isSafeInteger(count) || count < 0) throw new Error('Pagos de recuperaciones incompatibles.');
+      ledger[id] = { paid: roundMoney(paid), pending: roundMoney(pending), count: count };
+    });
+    return ledger;
+  });
   const loadRecoveries = (claim) => {
     const claimIdValue = claim && Number(claim.id);
     if (!Number.isSafeInteger(claimIdValue) || claimIdValue <= 0 || routeClaimId() !== claimIdValue) return Promise.resolve(false);
@@ -2595,15 +2619,20 @@
     const current = () => recovery.operation === operationId && recoveryClaimCurrent(claim);
     return Promise.all([
       repositoryRequest('RepoSalvageType', { operation: 'GET' }),
-      // MSN-000219: the income movement and its cash income feed the "Pago" column of the recoveries table.
-      // MSN-000222: the buyer is the payer («Pagador») shown in the table.
-      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue, include: ['Process', 'IncomeExpense', 'IncomeExpense.Transfer', 'Buyer'] })
+      // MSN-000222: the buyer is the payer («Pagador») shown in the table. MSN-000244: the income movement is only
+      // checked by «Anular»; the «Pago» column comes from the receipt ledger.
+      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue, include: ['Process', 'IncomeExpense', 'Buyer'] }),
+      loadRecoveryLedger(claimIdValue).then((ledger) => ({ ledger: ledger }),
+        (caught) => ({ error: caught && caught.message || 'sin respuesta' }))
     ]).then((results) => {
       if (!current()) return false;
       const types = normalizeRecoveryTypes(results[0]);
+      const ledger = results[2].ledger || null;
       const rows = normalizeRecoveryRows(claimIdValue, recoveryData(results[1], 'Respuesta de recuperaciones'),
-        claim.Policy && claim.Policy.Coverages, types);
+        claim.Policy && claim.Policy.Coverages, types)
+        .map((row) => Object.assign({}, row, { paymentLedger: ledger && ledger[Number(row.id)] || null }));
       recovery.types = types; recovery.typesLoaded = true; setRecoveryRows(rows);
+      if (!ledger) setRecoveryError('No fue posible leer los pagos de caja de las recuperaciones: ' + results[2].error);
       const recoveries = rows.length ? roundMoney(rows.reduce((sum, row) => sum + numericValue(row.netIncome), 0)) : null;
       setClaimSummary((summary) => {
         const valuation = summary.valuation || {};
@@ -3755,21 +3784,23 @@ END CATCH;`;
     });
   };
 
-  // MSN-000222: «Anular» deletes a recovery while it has no applied payment (the «Pago» column is not «Aplicado») and the
-  // native process has not executed it. The database refuses to delete a recovery that still has its income movement, so
-  // a pending one (never applied, or reversed by the cashier) goes first; the recovery is read again just before.
-  const recoveryPaymentApplied = (row) => {
-    const movement = row && row.IncomeExpense;
-    if (!movement || Number(movement.status) !== 1) return false;
-    const income = movement.Transfer;
-    return !(income && (Number(income.status) === 2 || income.reversalDate));
-  };
+  // MSN-000222: «Anular» deletes a recovery while it has no cash payment and the native process has not executed it. The
+  // database refuses to delete a recovery that still has its income movement, so a pending one goes first; the recovery is
+  // read again just before.
+  // MSN-000244: the payments are the signed cash receipts of the ledger (paymentLedger, from cmdRecuperacionesPendientesCaja).
+  // Any active linked receipt blocks «Anular» even when they net to zero (+100 and -100): reversing one of them would
+  // expose an amount again. Without the ledger nothing is voided.
   const recoveryVoidIssue = (row) => {
     if (!row || !Number.isSafeInteger(Number(row.id)) || Number(row.id) <= 0) return 'Recuperación no válida.';
     if (String(row.entityState || '').trim().toUpperCase() === 'EXECUTED') {
       return 'La recuperación fue ejecutada por el proceso nativo; no se puede anular desde esta vista.';
     }
-    if (recoveryPaymentApplied(row)) return 'La recuperación tiene un pago aplicado; no se puede anular.';
+    const ledger = row.paymentLedger;
+    if (!ledger) return 'No fue posible verificar los pagos de caja de la recuperación; no se puede anular.';
+    if (ledger.count > 0 || ledger.paid !== 0) {
+      return 'La recuperación tiene movimientos de caja vinculados (' + ledger.count + ', aplicado ' + row.currency + ' '
+        + formatMoneyInput(ledger.paid.toFixed(2)) + '); no se puede anular.';
+    }
     const movement = row.IncomeExpense;
     if (movement && (Number(movement.status) !== 0 || movement.transferId != null
       || !Number.isSafeInteger(Number(movement.id)) || Number(movement.id) <= 0)) {
@@ -3790,13 +3821,18 @@ END CATCH;`;
     const written = (result, fallback) => {
       if (!result || result.ok !== true) throw new Error(fallback + (result && result.msg ? ': ' + result.msg : '.'));
     };
-    return repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue + ' AND id=' + id,
-      include: ['IncomeExpense', 'IncomeExpense.Transfer'] }, undefined, current).then((result) => {
+    return Promise.all([
+      repositoryRequest('RepoSalvage', { operation: 'GET', filter: 'claimId=' + claimIdValue + ' AND id=' + id,
+        include: ['IncomeExpense'] }, undefined, current),
+      loadRecoveryLedger(claimIdValue, id, current).then((ledger) => ({ ledger: ledger }),
+        (caught) => ({ error: caught && caught.message || 'sin respuesta' }))
+    ]).then((results) => {
       if (!current()) return false;
-      const rows = recoveryData(result, 'Respuesta de recuperaciones').filter((item) => item
+      const rows = recoveryData(results[0], 'Respuesta de recuperaciones').filter((item) => item
         && Number(item.id) === id && Number(item.claimId) === claimIdValue);
       if (rows.length !== 1) throw new Error('La recuperación ' + id + ' ya no existe en este siniestro.');
-      const fresh = rows[0], issue = recoveryVoidIssue(fresh);
+      if (!results[1].ledger) throw new Error('No fue posible verificar los pagos de caja de la recuperación: ' + results[1].error);
+      const fresh = Object.assign({}, rows[0], { paymentLedger: results[1].ledger[id] || null }), issue = recoveryVoidIssue(fresh);
       if (issue) throw new Error(issue);
       const movement = fresh.IncomeExpense;
       return (movement ? repositoryRequest('RepoIncomeExpense', { operation: 'DELETE', entity: { id: Number(movement.id) } },
@@ -7923,17 +7959,17 @@ END CATCH;`;
   );
   const recoveryColumns = ['No.', 'Fecha', 'Concepto', 'Cobertura', 'Pagador', 'Monto', 'Gastos', 'Neto', 'Comentarios', 'Proceso',
     'Pago', 'Acciones'];
-  // MSN-000219: a recovery collected in cash has its income movement in status 1 with the cash income; a reversed
-  // cash income returns it to pending.
+  // MSN-000219 / MSN-000244: the cash payments of a recovery are the signed receipts of its ledger (paymentLedger); several
+  // partial receipts add up and a negative one or a reversal takes the amount back to pending.
   const recoveryPayment = (row) => {
-    const movement = row.IncomeExpense;
-    if (!movement || Number(movement.status) !== 1) return 'Pendiente';
-    const income = movement.Transfer;
-    if (income && (Number(income.status) === 2 || income.reversalDate)) {
-      return 'Pendiente (ingreso de caja #' + movement.transferId + ' reversado)';
-    }
-    return 'Aplicado ' + firstValue(movement.currency, row.currency) + ' ' + formatMoneyInput(movement.amount)
-      + (movement.transferId ? ' — caja #' + movement.transferId : '');
+    const ledger = row.paymentLedger;
+    if (!ledger) return 'Sin verificar';
+    const money = (value) => row.currency + ' ' + formatMoneyInput(value.toFixed(2));
+    const receipts = ledger.count + ' movimiento' + (ledger.count === 1 ? '' : 's') + ' de caja';
+    if (ledger.paid === 0) return 'Pendiente' + (ledger.pending > 0 ? ' ' + money(ledger.pending) : '')
+      + (ledger.count > 0 ? ' (' + receipts + ' netos en cero)' : '');
+    if (ledger.pending <= 0) return 'Cobrado ' + money(ledger.paid) + ' (' + receipts + ')';
+    return 'Parcial: aplicado ' + money(ledger.paid) + ', pendiente ' + money(ledger.pending) + ' (' + receipts + ')';
   };
   const recoveryFormValue = (row, name) => {
     let fields;
