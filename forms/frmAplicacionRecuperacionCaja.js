@@ -18,6 +18,10 @@
  * MSN-000245 / AXX-11419: búsqueda por cliente efectivo y nombre inmediato al consultar un reclamo.
  * MSN-000244 / AXX-11417: cobros parciales acumulados; «Incluir cobradas para reversión» permite elegir las cobradas.
  *   El cajero introduce el monto negativo; nunca se fuerza el signo ni se cambia el monto al reabrir.
+ * MSN-000255 / AXX-11570: el formulario registra en la caja (setIncomeAmountValidator) la validación del monto: una
+ *   recuperación totalmente aplicada sólo admite un negativo que no supere lo aplicado, y ningún monto sale del rango
+ *   entre -aplicado y el pendiente. La caja la corre al crear, guardar o editar el ingreso; la regla previa del cobro sigue
+ *   rechazando la ejecución.
  */
 var me = this;
 var CHAIN_PENDIENTES = 'cmdRecuperacionesPendientesCaja';
@@ -25,6 +29,8 @@ var recargarPendientes = null;
 var buscarClientePorNombre = null;
 var invalidarRecuperaciones = null;
 var recuperacionActiva = null;
+// Saldos (de la cadena) de la recuperación elegida; null si no se conocen.
+var saldoActivo = null;
 
 function texto(valor) {
   return valor === undefined || valor === null ? '' : String(valor).trim();
@@ -52,6 +58,38 @@ function saldo(rec, campo) {
 function cobrada(rec) {
   var pendiente = saldo(rec, 'pendingAmount');
   return pendiente !== null && pendiente <= 0;
+}
+
+function fijarSaldo(rec) {
+  var aplicado = saldo(rec, 'paidAmount');
+  var pendiente = saldo(rec, 'pendingAmount');
+  if (!rec || aplicado === null || pendiente === null) return null;
+  return { id: rec.id, claimCode: texto(rec.claimCode), moneda: texto(rec.currency), aplicado: aplicado, pendiente: pendiente };
+}
+
+// La caja la llama con el total del pago antes de crear, guardar o editar el ingreso: un texto lo rechaza.
+function validarMonto(monto) {
+  var s = saldoActivo;
+  var importe = Number(monto);
+  if (!s || !isFinite(importe)) return '';
+  var centavos = Math.round(importe * 100);
+  var aplicado = Math.round(s.aplicado * 100);
+  var pendiente = Math.round(s.pendiente * 100);
+  var base = 'la recuperación ' + s.id + ' del siniestro ' + s.claimCode;
+  var tope = aplicado > 0 ? ' Escriba un monto negativo de hasta ' + formatoMonto(-s.aplicado) + '.' : '';
+  if (pendiente <= 0 && centavos > 0) {
+    return 'No se puede registrar un cobro positivo: ' + base + ' está totalmente aplicada (' + s.moneda + ' ' +
+      formatoMonto(s.aplicado) + ') y sólo admite reversión.' + tope;
+  }
+  if (centavos < 0 && -centavos > aplicado) {
+    return 'La reversión de ' + s.moneda + ' ' + formatoMonto(importe) + ' supera lo aplicado en ' + base + ': aplicado ' +
+      s.moneda + ' ' + formatoMonto(s.aplicado) + '.' + tope;
+  }
+  if (centavos > pendiente) {
+    return 'El cobro de ' + s.moneda + ' ' + formatoMonto(importe) + ' supera el pendiente de ' + base + ': pendiente ' +
+      s.moneda + ' ' + formatoMonto(s.pendiente) + '.';
+  }
+  return '';
 }
 
 function leerGuardada() {
@@ -253,7 +291,10 @@ function notaSeleccion($caja, rec, montoCargado) {
       formatoMonto(rec.netIncome) + ', aplicado ' + formatoMonto(aplicado) + ', pendiente ' + formatoMonto(pendiente) + '.');
     if (montoCargado) partes.push(pendiente > 0 ? 'Su pendiente quedó como monto del pago; puede modificarlo.'
       : 'Está cobrada: escriba como monto el valor negativo que se reversa.');
-    partes.push(aplicado > 0
+    partes.push(pendiente <= 0 && aplicado > 0
+      ? 'Sólo admite reversión: el monto debe ser negativo, de hasta ' + formatoMonto(-aplicado) +
+        '; un monto positivo no se puede registrar.'
+      : aplicado > 0
       ? 'El monto debe ser distinto de cero, entre ' + formatoMonto(-aplicado) + ' y ' + formatoMonto(pendiente) +
         '; un monto negativo reversa parte de lo aplicado.'
       : 'El monto debe ser mayor que cero y no superar el pendiente.');
@@ -328,6 +369,7 @@ function iniciar() {
     $contenedor.prepend($filaBusqueda);
   }
   $filaBusqueda.append($clienteCampo, $reclamoCampo, $buscar);
+  if (typeof me.setIncomeAmountValidator === 'function') me.setIncomeAmountValidator(validarMonto);
   var guardada = leerGuardada();
   if (guardada && Number(guardada.buyerId) > 0) {
     fijarCliente({ clientId: guardada.buyerId, clientName: guardada.buyerName, buyerId: guardada.buyerId });
@@ -337,6 +379,7 @@ function iniciar() {
     consultaActual++;
     guardada = null;
     recuperacionActiva = null;
+    saldoActivo = null;
     liberarCliente(false);
     clearTimeout($caja.data('recCajaFiltroTimer'));
     $('#hiddenRecuperacion').val('');
@@ -479,6 +522,7 @@ function mostrar($caja, salida, filas, guardada) {
   }
   if (!guardada) {
     recuperacionActiva = null;
+    saldoActivo = null;
     $caja.find('.rec-caja-nota').empty();
     $caja.find('.rec-caja-quitar').hide();
   }
@@ -493,6 +537,9 @@ function mostrar($caja, salida, filas, guardada) {
   if (guardada) {
     var actual = visibles.filter(function (f) { return Number(f.id) === seleccionId; })[0] || guardada;
     recuperacionActiva = actual;
+    // Fuera de la lista (p. ej. al quitar «Incluir cobradas») conserva los saldos ya leídos de la misma recuperación.
+    if (!actual.noPendiente) saldoActivo = fijarSaldo(actual);
+    else if (!saldoActivo || Number(saldoActivo.id) !== seleccionId) saldoActivo = null;
     if (!actual.noPendiente) fijarCliente(actual);
     if (!actual.noPendiente && cobrada(actual)) $caja.find('.rec-caja-cobradas').prop('checked', true);
     notaSeleccion($caja, actual, false);
@@ -513,6 +560,7 @@ function mostrar($caja, salida, filas, guardada) {
     delete limpia.pendingAmount;
     delete limpia.paymentCount;
     recuperacionActiva = limpia;
+    saldoActivo = fijarSaldo(rec);
     $('#hiddenRecuperacion').val(JSON.stringify(limpia));
     fijarCliente(limpia);
     var montoCargado = false;
@@ -528,6 +576,7 @@ function mostrar($caja, salida, filas, guardada) {
   $caja.find('.rec-caja-quitar').off('click').on('click', function (evento) {
     evento.preventDefault();
     recuperacionActiva = null;
+    saldoActivo = null;
     $('#hiddenRecuperacion').val('');
     $caja.find('input[name="selRecuperacionCaja"]').prop('checked', false);
     liberarCliente(true);

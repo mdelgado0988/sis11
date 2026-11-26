@@ -741,7 +741,11 @@ function bloquearCamposPolizaEmitida() {
             '#cmbUsoAuto',
             '#cmbtipo',
             '#txtTransmision',
-            '#cmbCilindrosAuto'
+            '#cmbCilindrosAuto',
+            // MSN-000254: el cambio de puestos (pasajeros) se hace con el endoso de objeto asegurado.
+            '#txtPuestosAuto',
+            '#cmbRenovacion',
+            '#txtMotivoRenovacion'
         ].join(', '));
         $editable
             .prop('readonly', false)

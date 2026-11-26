@@ -1,0 +1,2059 @@
+﻿<?xml version="1.0"?>
+<doc>
+<assembly>
+<name>
+sis3.emision
+</name>
+</assembly>
+<members>
+<member name="T:sis3.My.Resources.Resources">
+<summary>
+  A strongly-typed resource class, for looking up localized strings, etc.
+</summary>
+</member>
+<member name="P:sis3.My.Resources.Resources.ResourceManager">
+<summary>
+  Returns the cached ResourceManager instance used by this class.
+</summary>
+</member>
+<member name="P:sis3.My.Resources.Resources.Culture">
+<summary>
+  Overrides the current thread's CurrentUICulture property for all
+  resource lookups using this strongly typed resource class.
+</summary>
+</member>
+<member name="T:sis3.Emision.Anulacion">
+ <summary>
+ Los Métodos de esta clase solo son utilizados si la facturación no esta contabilizada ni posee registros
+ Relacionados en los siguientes Módulos:
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Anulacion.Valida_Anulacion_Total">
+ <summary>
+ Valida_Anulacion_Total: Valida que se pueda anular totalmente una Póliza
+ </summary>
+ <returns>True: Se puede anular la emisión de la poliza, False: no se pude anular la Emisión, Xerror: Retorna la Causa del Rechazo de la solicitud</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Anulacion.Valida_Anulacion_Parcial">
+ <summary>
+ 
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Anulacion.Ejecutar(System.Int32,System.Int32,System.Int32,System.Int32,System.String)">
+ <summary>
+ Ejecutar (Sobrecarga): Anula totalmente la póliza.
+ </summary>
+ <param name="cpoliza"></param>
+ <param name="fanopol"></param>
+ <param name="fmespol"></param>
+ <returns>True: Si ejecuta ok, False: si falla, xError: Descripcion de la Falla en caso false</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Anulacion.Ejecutar(System.Int32)">
+ <summary>
+ Ejecutar (Sobrecarga): Anula la facturación Indicada.
+ </summary>
+ <param name="crecibo"></param>
+ <returns>True: Si ejecuta ok, False: si falla, xError: Descripcion de la Falla en caso false</returns>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.Cancelacion">
+ <summary>
+ Clase de Cancelación de póliza
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cancelacion.Cancela_Poliza(System.Int32,System.Int32,System.Int32,System.DateTime,System.Int32,sis3.Emision.Cancelacion.Tipo,System.Int32,System.String)">
+ <summary>
+ Realiza la cancelación de la póliza por recibo y al final actualiza la poliza
+ </summary>       
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cancelacion.Cancela_Recibo(System.Int32,System.Int32,System.Int32,System.DateTime,sis3.Emision.Cancelacion.Tipo,System.Int32)">
+ <summary>
+ Realiza la cancelación de la póliza del recibo que se esta pasando
+ </summary>       
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cancelacion.Cancela_Recibo_Nuevo(System.Int32,System.DateTime,sis3.Emision.Cancelacion.Tipo,System.Int32)">
+ <summary>
+ 
+ </summary>
+ <param name="crecibo">No. de recibo a cancelar</param>
+ <param name="fanulacion">Fecha efectiva en donde se realiza la cancelación</param>
+ <param name="Tipo">Clasificación para la aplicación de la prorrata</param>
+ <param name="cusuario">Código de usuario</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.bs.cargaMatriz">
+ <summary>
+ Carga Matriz Oferta
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.coaCedido.carga(System.Int32)">
+ <summary>
+ Asume q solo hay un reasegurador
+ </summary>
+ <param name="cproces"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.#ctor(System.Int32,System.Int32,sis3.Emision.Poliza@)">
+ <summary>
+ Crea nueva cobertura
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.#ctor(System.Int32,System.String,System.Int32,System.Char,System.Boolean)">
+ <summary>
+ Instancia y carga solamente el maestro general y maestro de camposIN en objeto i. 
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ccobertura"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.#ctor(System.Int32,System.Int32,System.Boolean,sis3.Emision.Poliza@,System.Int32)">
+ <summary>
+ carga
+ </summary>
+ <param name="cproces"></param>
+ <param name="ccobertura"></param>
+ <param name="EsOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.#ctor(System.Int32,System.Int32,System.String)">
+ <summary>
+ Instancia la cobertura para la simulacion de su tarificacion.
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.#ctor(System.Int32,System.Int32,System.Boolean,sis3.Emision.Poliza@,System.Boolean,System.String@)">
+ <summary>
+ Carga el maestro y configuración de las coberturas
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.damePNDmem(System.DateTime)">
+ <summary>
+ devuelve la PND de la cobertura cargada en memoria
+ </summary>
+ <param name="fcalculo"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.tarificame(System.Int32,System.Boolean,System.String@)">
+ <summary>
+  Método que realiza la tarificación y recalculos los valores  cargado su configuración del maestro de coberturas
+ </summary>
+ <param name="cendoso">Código del endoso</param>
+ <param name="isRen">Indica si es renovación</param>
+ <param name="xerr">Variable para encapsular error</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.valida_dependencia">
+ <summary>
+ Valida si está en la poliza la cobertura de la q depende
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.GetFindCobertura(System.Collections.Generic.List{sis3.Emision.Cobertura},System.Int32)">
+ <summary>
+ Retorna la cobertura existente dentro del listado
+ </summary>
+ <param name="lslcober">Colleción de coberturas</param>
+ <param name="ccober">Cobertura a buscar dentro de la colección</param>
+ <returns>instancia unica de la cobertura</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.ValidaDesplaza(System.Int32,System.Int32)">
+ <summary>
+ Valida si es un endoso para que desplace la fecha de la cobertura.
+ </summary>
+ <param name="cendoso">código del endoso</param>
+ <returns>boolean</returns>
+</member>
+<member name="M:sis3.Emision.Cobertura.dameVigencia(System.Int32,System.Int32)">
+ <summary>
+ Devuelve array con, fdesde-fhasta de la poliza
+ </summary>
+ <param name="cproces"></param>
+ <param name="orden_vigencia"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.Calcula_Maestro(System.Int32,System.Int32,System.String)">
+ <summary>
+ Carga la configuración de la cobertura o historico una vez emitida
+ </summary>
+ <param name="cramo">Código del ramo</param>
+ <param name="ccober">Código de la cobertura</param>
+ <param name="cplan">Código del plan</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.calculaAcumulado(System.Int32,System.Int32,System.Int32,System.Int32)">
+ <summary>
+ Pone los montos acumulados en las coberturas sumando el incremento positivo o negativo por efecto de los endosos
+ </summary>
+ <param name="cpoliza"></param>
+ <param name="fanopol"></param>
+ <param name="fmespol"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.Calcula_Impuesto(System.Int32)">
+ <summary>
+ Calcula los impuestos asociados a una cobertura
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.Calcula_Prorata(System.Boolean)">
+ <summary>
+  Calculo de la prorrata
+ </summary>
+ <param name="ispdn">Indica si es o no proporcional y realiza el  calculo o no de la prorrata </param>
+</member>
+<member name="M:sis3.Emision.Cobertura.PrimaCero">
+ <summary>
+ pone la prima en cero y calcula campos dependientes
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.Calcula_Montos">
+ <summary>
+ Pone en el objeto los montos salidos de la tarifa despues de tarificame()
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.Calcula_Cabecera(sis3.Emision.Poliza)">
+ <summary>
+ construye datos relativos a poliza del objeto. Se llama al instanciar cobertura
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.guarda">
+ <summary>
+ Guarda en Bd la Data almacenada
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.guarda(System.Int32,System.Int32,System.Boolean)">
+ <summary>
+ Guarda Cambios en BD
+ </summary>
+ <param name="cproces"></param>
+ <param name="ccobertura"></param>
+ <param name="EsOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.anula">
+ <summary>
+ Anula la presente cobertura. no guarda en BD
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.anulaDB">
+ <summary>
+ anula la persente cobertura guardando en BD
+ </summary> 
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.recalcula">
+ <summary>
+ Realiza el calculo de las cobertura
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.PrimaDiferencia">
+ <summary>
+ Devuelve la diferncia Tarifa.mprima * prorrata / 100 - pnd en la fingreso
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.dameVigenciaPorDevengar(System.DateTime,System.DateTime,System.DateTime)">
+ <summary>
+ devuelve % que resta por devengar de vigencia a la fecha de aplicacion- valor de 0 a 100
+ </summary>
+ <param name="fdesde"></param>
+ <param name="fhasta"></param>
+ <param name="fAplicacion"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.damePND(System.DateTime)">
+ <summary>
+ Devuelve prima no devengada total incluyendo endosos
+ </summary>
+ <param name="fCalculo"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.Calcula_Prima_Acumulada(System.Int32,System.Int32,System.Int32,System.String,System.Int32,System.Boolean)">
+ <summary>
+ Este método se usa exclusivamente en los endosos, para calcular la prima acumulada de una cobertura
+ tiene opción de incluir o no los endosos de recargos y descuentos, el cálculo lo hace a nivel de 
+ ofertas de coberturas ya que a nivel de ad no todos los endosos generan coberturas
+ </summary>
+ <param name="cpoliza"></param>
+ <param name="fanopol"></param>
+ <param name="fmespol"></param>
+ <param name="strCoberturas"></param>
+ <param name="cproces_en_curso"></param>
+ <param name="Excluir_Endosos_RecDesc"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.periodo.#ctor(System.Decimal,System.String,System.DateTime)">
+ <summary>
+ Convierte una cantidad de tiempo en dias,mes,años
+ </summary>
+ <param name="tiempo">cantidad de tiempo de entrada</param>
+ <param name="tipo">A:Años, M:Meses, D:Días</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.esObligatoria(System.String,System.String,System.Int32)">
+ <summary>
+ Indica si la cobertura es obilgatoria para el plan especificado.
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ccober"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.esPrincipal(System.String,System.String,System.Int32)">
+ <summary>
+ Indica si la cobertura es la principal para el plan especificado.
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ccober"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.TieneDatosEndoso(System.String,System.String,System.Int32)">
+ <summary>
+ Funcion para validar si la cobertura tiene activo el inidcador Datos Endosos 
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ccober"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.RealizaProrrata(System.String,System.String,System.Int32)">
+ <summary>
+ Funcion para validar si la cobertura tiene activo el inidcador Realizar Prorrata
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ccober"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cobertura.TienePrincipal(System.String,System.String)">
+ <summary>
+ Indica si el plan tiene alguna cobertura principal.
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Clonacion.Clona``1(``0)">
+ <summary>
+ Clona un objeto. Para poder usarse el objeto debe ser serializable. 
+ </summary>
+ <typeparam name="T"></typeparam>
+ <param name="obj"></param>
+ <returns></returns>
+ <remarks>07 dic 2010 - TM</remarks>
+</member>
+<member name="M:sis3.Emision.periodo_fianzas.#ctor(System.Decimal,System.String,System.DateTime,System.DateTime)">
+ <summary>
+ Convierte una cantidad de tiempo en dias,mes,aÃ±os
+ </summary>
+ <param name="tiempo">cantidad de tiempo de entrada</param>
+ <param name="tipo">A:AÃ±os, M:Meses, D:DÃ­as</param>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.Comision">
+ <summary>
+ calcula las comisiones asociadas a una cobertura
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Comision.dameTipoProductor(System.Int32)">
+ <summary>
+ Devuelve el tipo de productor
+ </summary>
+ <param name="cproductor"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Comision.dameProductores(System.Int32)">
+ <summary>
+ devuelve cdisprod de poliza
+ </summary>
+ <param name="cproces"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="F:sis3.Emision.Cuotas.Lista">
+ <summary>
+ Contiene la lista de cuotas asociadas a la instancia de la clase cuota
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="F:sis3.Emision.Cuotas._Referencia">
+ <summary>
+ se deben colocar los siguientes valores: _esoferta = true  --> cproces, _esoferta = false --> crecibo
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="F:sis3.Emision.Cuotas.Xerror">
+ <summary>
+ Contiene la descripcion de los errores de ejecución o validación
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.Cuotas.Cuota">
+ <summary>
+ Clase elemento Concepto Cuota
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.#ctor(System.Int32,System.Boolean,System.Boolean,System.Boolean)">
+ <summary>
+ Instancia la clase con referencia a datos
+ </summary>
+ <param name="Referencia">Código de Recibo u oferta</param>
+ <param name="esOferta">Indica si se esta trabajando conuna oferta o data administrativa</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.#ctor(System.Boolean)">
+ <summary>
+ Instancia la clase sin hacer referencia a datos.
+ </summary>
+ <param name="esOferta">Indica si se trabajará en el área Oferta o administrativa</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.Carga">
+ <summary>
+ Carga de la Base de datos valores que se asignan a colección llamada Lista
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.Guarda">
+ <summary>
+ Almacena Datos de la coleccion de cuotas (Objeto: CamposBD) almacenada en vencimientos
+ Escribe en el area especificada al momento de instanciar la clase
+ Esoferta = true: Escribe en ofrecfpago
+ Esoferta = false: Escribe en adrecfpago
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.Generar(sis3.Emision.Recibo,System.Int32)">
+ <summary>
+ Genera las cuotas según los datos de la colección de Vencimientos
+ en el área de Ofertas
+ </summary>
+ <param name="Recibo">Objeto de Tipo Emision.Recibo</param>
+ <param name="cusuario">Usuario que genera las Cuotas. No se toma del recibo ya que puede ser confirmada por otro usuario</param>
+ <returns>True: Generadas Correctamente, False: Falla al generar, xError contiene las desc de la falla</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.Validar(System.Decimal,System.DateTime)">
+ <summary>
+ Valida la Integridad de las Cuotas antes de Escribir a la BD
+ </summary>
+ <param name="mmontorec">Monto Total del Recibo</param>
+ <param name="fhasta">Fecha fin de la Facturación</param>
+ <returns>True: Cumple con los Requisitos</returns>
+ <remarks>False: No cumple con los requisitos, xError: Descripción de las Fallas</remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.Confirmar(System.Int32,System.Int32)">
+ <summary>
+ Pasa data dela Tabla ofrecfpago a la tabla adrecfpago usando como filtro Oferta_origen.
+ </summary>
+ <param name="Oferta_Origen">Oferta que contiene las cuotas</param>
+ <param name="Recibo_Destino">Recibo al que se le agregarán las cuotas</param>
+ <returns>True: Confirmación generada con éxito</returns>
+ <remarks>False: Falla al confirmar. xError: Descripción de la falla</remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.reversaNoPagado">
+ <summary>
+ reversa las cuotas no pagadas
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Cuotas.cuotasDameFechaSiguiente(System.DateTime,System.Int32)">
+ <summary>
+ devuelve siguiente fecha de cuota para q coincida en dia 
+ </summary>
+ <param name="fInicio"></param>
+ <param name="diasFrecuencia"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Documento.calcula(System.Int32)">
+ <summary>
+ Genera la ruta para imprimePDF
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Documento.Guarda">
+ <summary>
+ Guarda en repositorio el documento
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Documento.ObtenerPDF(System.Int32,System.String)">
+ <summary>
+ Obtine la lista de Documentos que se van a imprimir
+ </summary>
+ <param name="cprocess">No. de Oferta/Póliza</param>
+ <param name="ruta">Ruta de la Plantilla</param>
+ <returns>Listado de Documentos en Byte</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Documento.BuscaRep(System.Int32)">
+ <summary>
+ Carga los Reportes de oferta y póliza
+ </summary>
+ <param name="cproces">No. de Cproces</param>
+ <returns>Lista de Documentos</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Documento.GeneraReporte(System.String,System.String,System.Int32,System.Object,System.String)">
+ <summary>
+ Genera el Reporte con sus condiciones y filtros
+ </summary>
+ <param name="reporte">Nombre del Reporte</param>
+ <param name="filtro">Filtros del Reporte</param>
+ <param name="cproces">No. del cproces</param>
+ <param name="formulas">Formulas del Reporte</param>
+ <param name="ruta">Ruta del Reporte</param>
+ <returns>System.IO.Stream</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Documento.ReadFileT(System.String)">
+ <summary>
+ Lee los Byte del documento
+ </summary>
+ <param name="filePath">Ruta del Archivo</param>
+ <returns>Buffer del Documento en Byte</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Documento.SetDBLogonForReportSIS(CrystalDecisions.CrystalReports.Engine.ReportDocument@)">
+ <summary>
+ Validación del Reporte con los credenciales del servidor
+ </summary>
+ <param name="ss">ReportDocument a Validar</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Emision.Documento.Documento">
+ <summary>
+ Entidad Documento
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.aplica(sis3.Emision.diferencia)">
+ <summary>
+ confirmacion del endoso
+ </summary>
+ <param name="diferencia"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.emiteEndoso(sis3.Emision.Poliza)">
+ <summary>
+ Ejecuta el endoso con todos sus cambios.
+ </summary>
+ <param name="polModificada"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.dameEndoso(sis3.Emision.Poliza)">
+ <summary>
+ devuelve el numero de endoso en funcion del cambio realizado
+ </summary>
+ <param name="polModificada"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.dameEndoso(sis3.Emision.Cobertura)">
+ <summary>
+ devuelve el num de endoso en funcion del cambio realizado en las coberturas. Se llama desde wucCoberturas para marcar las coberturas endosadas
+ </summary>
+ <param name="cobModificada"></param>
+ <param name="poliza"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.dameVersion(sis3.Emision.Poliza)">
+ <summary>
+ Devuelva el numero de nueva version para el objeto modificado
+ </summary>
+ <param name="cobModificada"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.cargaMaestro(System.Int32,System.Int32)">
+ <summary>
+ Carga la configuración de los endosos que se pueden aplicar individual
+ </summary>
+ <param name="cramo">Código del Ramo</param>
+ <param name="cendoso">Código del endoso</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.dameTipoRecibo(System.Int32,System.Int32)">
+ <summary>
+ devuelve el tipo de recibo que genera un endoso
+ </summary>
+ <param name="cendoso"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Endoso.configura(sis3.Emision.Poliza@,sis3.Emision.Endoso.configNuevoEndoso@)">
+ <summary>
+ genera nueva entrada en adendosos
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.recibosEndosoColectivo">
+ <summary>
+ instanciado en endosos colectivos
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.EndosoColectivo.checkCoberturas(sis3.Emision.Poliza@)">
+ <summary>
+ si tiene coberturas con distintas vigencias
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.endosoBeneficiario.damebeneficiarios">
+ <summary>
+ para cargar grid
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.endosoCobertura.lineaCobertura">
+ <summary>
+ Entidad la linea cobertura AX
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.endosoCobertura.minFdesde">
+ <summary>
+ Devuelve la minima fdesde entre todas las coberturas
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.endosoCobertura.maxFhasta">
+ <summary>
+ Devuelve la maxima fhasta entre todas las coberturas
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.DatosEndoso.Guarda">
+ <summary>
+ Guarda Cambios en BD. Cobertura debe estar Cargada=true (cargada o validada)
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.DatosEndoso.Guarda(System.Int32,System.String,System.String,System.String,System.Boolean)">
+ <summary>
+ Guarda cambios en BD
+ </summary>
+ <param name="cproces"></param>
+ <param name="EsOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.TipoEndoso">
+ <summary>
+ Tipos de endosos
+ </summary>
+</member>
+<member name="M:sis3.Emision.Poliza.#ctor(System.Boolean,System.Boolean,System.Int32,System.String)">
+ <summary>
+ Constructor de Poliza/Oferta. Carga si se proporciona cproces
+ </summary>
+ <param name="EsOferta">True si se instancia una Oferta</param>
+ <param name="Nueva">True para asignar un nuevo cproces para nueva Oferta. Se incrementa contador cproces en 1.</param>
+ <param name="cproces">Si se está cargando, especificar cproces</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.coberturasQuita(System.Int32,System.Int32)">
+ <summary>
+ borra las coberturas de la oferta en el objeto y de la BD
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.coberturaInserta(sis3.Emision.Cobertura,System.Boolean)">
+ <summary>
+ Inserta en la lista de coberturas. Si existe, la quita antes.
+ </summary>
+ <param name="cobertura"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.coberturaQuita(System.Int32)">
+ <summary>
+ quita de la lista. No guarda en BD
+ </summary>
+ <param name="ccober"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.coberturaExiste(System.Int32,System.Boolean)">
+ <summary>
+ Devuelve True si existe la cobertura en la coleccion
+ </summary>
+ <param name="ccober"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameImpuesto(System.Decimal,System.Int32)">
+ <summary>
+ impuesto tecnico aplicado a prima de coberturas
+ </summary>
+ <param name="mbruto"></param>
+ <param name="cramo"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ponVersionBd(System.Int32,System.Int32,System.Int32,System.Int32)">
+ <summary>
+ usar la otra sobrecarga
+ </summary>
+ <param name="version"></param>
+ <param name="cpoliza"></param>
+ <param name="fanopol"></param>
+ <param name="fmespol"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ValEDSEspecial(System.Int32,System.String)">
+ <summary>
+ Función que indica si aplica la plantilla especial para este ramo y plan
+ </summary>
+ <param name="cramo">Código de ramo</param>
+ <param name="cplan">Código del plan</param>
+ <returns>integer</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.coberturaEliminaDB(System.Int32,System.Boolean)">
+ <summary>
+ Elimina de la oferta la cobertura. Guarda en BD
+ </summary>
+ <param name="ccober"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.CoberturaRefresca(System.Int32,System.Int32)">
+ <summary>
+ Lee desde BD cobertura, erfrescando datos
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.CoberturasPonEstaVigencia(System.DateTime,System.DateTime,System.Int32)">
+ <summary>
+ asigna la vigencia especificada a todas las coberturas
+ </summary>
+ <param name="fdesde"></param>
+ <param name="fhasta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.Nueva(sis3.Emision.Poliza.Cabecera,System.Boolean)">
+ <summary>
+ Crea nueva Oferta/poliza
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameqCuotas(System.Int32,System.Int32,System.String)">
+ <summary>
+ Devuelve cantidad de cuotas en funcion del plazo de pago y frecuencia
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.damePlazo(System.Int32,System.String)">
+ <summary>
+ Devuelve plazo en funcion de cuotas y frecuencia. (anios,meses)
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameTasaMaestra(System.Int32)">
+ <summary>
+ devuelve lista de tasas por cobertura de la poliza maestra (cober,tasa)
+ </summary>
+ <param name="cproces_mae"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.Tarifica(System.Int32,System.Boolean,System.Boolean,System.String@)">
+ <summary>
+ Tarifica cada cobertura y suma los montos en el recibo
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameImpuesto(System.Int32)">
+ <summary>
+ devuelve suma de impuestos porcentual configurado para el ramo en % (0..1)
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ReciboActualiza">
+ <summary>
+ Actualiza el recibo debido a los cambios en reaseguro
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.calculaReaseguro">
+ <summary>
+ Calcula el reaseguro de la poliza/endoso. Debe estar el objeto poliza cargado. 2011 TM
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameProrrata(System.DateTime,System.DateTime,System.DateTime,System.Int32)">
+ <summary>
+ devuelve prorrata dadas las fechas de calculo
+ </summary>
+ <param name="fcalculo"></param>
+ <param name="fdesde"></param>
+ <param name="fhasta"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameFactor(System.DateTime,System.DateTime,System.DateTime,System.DateTime)">
+ <summary>
+ devuelve factor de incremento de prima no devengada neta de periodo consumido a fecha de hoy.
+ </summary>
+ <param name="fdesde"></param>
+ <param name="fhasta"></param>
+ <param name="fdesde_endoso"></param>
+ <param name="fhasta_endoso"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.validaCoberturasObligatorias">
+ <summary>
+ Devuelve true si estan todas las cobs obligatorias en la coleccion
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.duplica(System.Boolean,System.Boolean,System.Boolean,System.String@)">
+ <summary>
+  Duplica la oferta actual asignandole otro cproces. devuelve nuevo cproces
+ </summary>
+ <param name="ponerPrimaCoberturasCero">Indica si pone las primas en 0</param>
+ <param name="copiarRecibo">Indica si tiene que copiar el recibo</param>
+ <param name="isRen">Indica si es de renovación</param>
+ <param name="xerr">Mensaje de error a el cliente</param>
+ <returns>Integer</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.copiaEdsAdicionales(System.Decimal,System.Decimal,System.Boolean,System.String@)">
+ <summary>
+ Metodo que copia los datos registrados de car para los registro adicionales asociados a cada cobertura
+ </summary>        
+</member>
+<member name="M:sis3.Emision.Poliza.minFdesde">
+ <summary>
+ Devuelve la minima fdesde entre todas las coberturas
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.maxFhasta">
+ <summary>
+ Devuelve la maxima fhasta entre todas las coberturas
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.Guarda(System.Boolean,System.Boolean)">
+ <summary>
+ Guardo todo en BD, incluyendo objetos asociados
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.anula(System.String,System.String,System.String)">
+ <summary>
+ Anula la poliza y su recibo, previo al cierre, antes de ser contabilizada
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ValidaEDSAdicionales(System.Int32,System.Int32,System.String,System.String@)">
+ <summary>
+   Valida si existe la cobertura con datos adicionales  Solo Ramo de CAR
+ </summary>         
+ <returns>boolena</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.cambiaModelo(System.String)">
+ <summary>
+ El objeto en memoria apunta a la tabla segun modelo 
+ </summary>
+ <param name="modelo"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameCertificado(System.String)">
+ <summary>
+ Devuelve siguiente numero de certificado disponible
+ </summary>
+ <param name="cnpoliza"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameCnpoliza(System.String,System.Int32)">
+ <summary>
+ devuelve cnpoliza para un certificado
+ </summary>
+ <param name="ccerti"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ConfirmaColectiva">
+ <summary>
+ confirma la oferta de poliza colectiva
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.cargainfo">
+ <summary>
+ carga el objeto de informacion general. Requerido para comparacion de endoso
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.cargaPol(System.Int32)">
+ <summary>
+ Carga únicamente los datos de la poliza/oferta. 
+ </summary>
+ <param name="cproces"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.TieneIntervalo(System.String,System.String)">
+ <summary>
+ Indicador escalonado para fechas en productos para CAR y similares
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.TieneDatosVariables(System.String,System.String)">
+ <summary>
+ Indicador pasar si un plan tiene datos Adiocionales
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.NuevoCproces(System.Int32)">
+ <summary>
+ Asigna Nuevo cproces
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameDT_Ramo(System.Int32)">
+ <summary>
+ José Rodríguez. AXXIS panama. (04/02/2010)
+ Retorna las tablas de datos técnicos para las areas administrativas y de ofertas
+ en función del ramo técnico proporcionado
+ dameTablaCerti_Ramo(0) = administrativa 
+ dameTablaCerti_Ramo(1) = Oferta
+ </summary>
+ <param name="cramo">Código de Ramo técnico --Requerido</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameDT_Ramointerno(System.Int32)">
+ <summary>
+ José Rodríguez. AXXIS panama. (04/02/2010)
+ Retorna las tablas de datos técnicos para las areas administrativas y de ofertas 
+ en función del ramo interno proporcionado
+ dameTablaCerti_Ramointerno(0) = administrativa 
+ dameTablaCerti_Ramointerno(1) = Oferta
+ </summary>
+ <param name="cramoint">Código de Ramo Interno --Requerido</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameFdesde(System.Int32)">
+ <summary>
+ devuelve inicio vigencia de poliza. fdesde
+ </summary>
+ <param name="cproces"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.DameCCONTADOR(System.Int16,System.String)">
+ <summary>
+ Devuelve el codigo de contador para el ramo
+ </summary>
+ <param name="wramo">Codigo de ramo</param>
+ <param name="descontador">Descripcion del contador que se necesita</param>
+ <returns>codigo contador</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameCproces(System.Int32,System.Int32,System.Int32,System.Boolean)">
+ <summary>
+ Devuelve el cproces de una renovacion
+ </summary>
+ <param name="cpoliza"></param>
+ <param name="fanopol"></param>
+ <param name="fmespol"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameCpoliza(System.Int32)">
+ <summary>
+ devuelve en un arreglo {rd!cendoso, rd!cpoliza, rd!fanopol, rd!fmespol}
+ </summary>
+ <param name="cproces"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameNombreRamo(System.Int32)">
+ <summary>
+ devuelve nombre del ramo
+ </summary>
+ <param name="cramo"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameNombrePlan(System.Int32,System.String)">
+ <summary>
+ 'devuelve nombre del plan
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ponEstadoOferta(System.Int32,System.Int32)">
+ <summary>
+ Pone estado a la oferta especificada
+ </summary>
+ <param name="cproces"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.ponCampo(System.String,System.String,System.Int32,System.Boolean)">
+ <summary>
+ Actualiza campo especificado de oferta o poliza
+ </summary>
+ <param name="campo"></param>
+ <param name="cproces"></param>
+ <param name="esOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.damePrimaDevengada(System.DateTime,System.DateTime,System.Decimal)">
+ <summary>
+ devuelve prima devengada
+ </summary>
+ <param name="fdesde"></param>
+ <param name="fhasta"></param>
+ <param name="mprima"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameCampoDB(System.Int32,System.String,System.String)">
+ <summary>
+ devuelve el valor del campo especificado de una poliza en adpolizas
+ </summary>
+ <param name="cproces"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.esEndoso">
+ <summary>
+ Devuelve true si es un endoso puro. Distinto a renovacion,inclusion cert,etc...
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameUltimaRenovacion(System.String)">
+ <summary>
+ devuelve ultima renovacion vigente dado un cnpoliza 8cpoliza,fanopol,fmespol)
+ </summary>
+ <param name="cnpoliza"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.dameCoberturas(System.Int32)">
+ <summary>
+ devuelve lista de coberturas vigente
+ </summary>
+ <param name="cproces"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.GetPrimaAcumPol(sis3.Emision.Poliza)">
+ <summary>
+ Funcion que retorna la prima acumulada emitida
+ </summary>
+ <param name="pol">Instancia de la poliza</param>
+ <returns>decimal</returns>
+ <remarks>Ruben Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.GetSAAcum(sis3.Emision.Poliza)">
+ <summary>
+  Funcion que retorna la suma asegurada acumulada registrada
+ </summary>
+ <param name="pol">Instancia de la poliza</param>
+ <returns>decimal</returns>
+ <remarks>Ruben Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Poliza.CargaCoberPrincipal(sis3.Emision.Poliza)">
+ <summary>
+ Carga los parametros de configuración de la póliza cuando se genero, para obtener la fecha de la cobertura principal o obligatoria
+ </summary>
+ <returns>datetime</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.poliza_mae.validaCondicionesCertificado(System.Int32,sis3.Emision.Poliza@)">
+ <summary>
+ Valida lo definido en el certificado con respecto a la poliza Maestra.
+ </summary>
+ <param name="paso"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.poliza_mae.carga(System.String)">
+ <summary>
+ carga última renovación de póliza Maestra especificada
+ </summary>
+ <param name="cnpoliza"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.poliza_mae.dameNumRecibos(sis3.Emision.idRenovacion,System.Int32,System.Int32)">
+ <summary>
+ devuelve el numero de recibos de un endoso colectivo
+ </summary>
+ <param name="reno"></param>
+ <param name="cendoso"></param>
+ <param name="qNumEndoso"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.GetListPolRen(System.Int32,System.Int32,System.String,System.String,System.Int32@,sis3.Emision.renovacion.lote.CamposDB,System.String@)">
+ <summary>
+ Función que carga la lista de pólizas para su renovación.
+ </summary>
+ <param name="start">Inicio</param>
+ <param name="limit">Limite</param>
+ <param name="sort">Campo a ordenar</param>
+ <param name="dir">Dirección de la consulta default "ASC"</param>
+ <param name="count">Total de Registros</param>
+ <param name="c">Instancia del lote</param>
+ <returns>lista de campos lote</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion._Condiciones.Carga(System.String,System.String)">
+ <summary>
+ Carga las condiciones del Plan
+ </summary>
+ <param name="cplan">Código de plan</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.ConfirmaLoteRen(System.Int32)">
+ <summary>
+ Confirmación del Lote generado 
+ </summary>
+ <param name="cusuario">usuario</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Agrega_Carga(System.Int32,sis3.Emision.renovacion.Proceso,System.Int32,sis3.Utilidades.robocop.infoProceso@)">
+ <summary>
+ Agrega un nuevo proceso de carga de lotes.
+ </summary>
+ <param name="cusuario">Código de Usuario</param>
+ <param name="Proceso">Instancia Proceso</param>
+ <param name="cloteren">No. de Lote</param>
+ <param name="Task">Instancia infoProceso</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Renovar(System.Collections.Generic.List{sis3.Emision.renovacion.lote.Detalle},System.Int32)">
+ <summary>
+ Genera las Ofertas Registradas en los lotes
+ </summary>
+ <param name="loteRen">Lista del lote a Renovar</param>
+ <param name="cusuario">Código de Usuario</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.GrabaError(sis3.Emision.renovacion.lote.Detalle@,System.String,System.Boolean)">
+ <summary>
+ Captura el error y lo guarda con sus códigos asignados de xerr
+ </summary>
+ <param name="polError">Objeto lote detalle</param>
+ <param name="xerr">Mensaje de error capturado</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Inserta(sis3.Emision.renovacion.lote.Detalle@,System.Boolean,System.String@)">
+ <summary>
+ Metodo de inserción de la póliza a renovar, se realizan varias validaciones antes de Agregarlas en el listado a renovar.
+ </summary>
+ <param name="det">Instancia del detalle del Lote</param>
+ <param name="isRen">Indicador para renovación</param>
+ <param name="xerr">Variable de error</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.ValidaCoberSobat(sis3.Emision.Poliza@)">
+ <summary>
+ Función que valida si debe o no agregar las coberturas SOBAT, para automovil
+ </summary>
+ <param name="reno">Instancia de la renovación</param>
+ <returns>boolean</returns>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.dameContratoVigente(System.Int32,System.String,System.Int32)">
+ <summary>
+ Devuelve del maestro maplancob el contrato actual configurado por si ha cambiado
+ </summary>            
+</member>
+<member name="M:sis3.Emision.renovacion.lote.checkReaseguro(System.Int32,System.DateTime,System.DateTime)">
+ <summary>
+ comprueba existencia y vigencia de contrato especificado
+ </summary>            
+</member>
+<member name="M:sis3.Emision.renovacion.lote.dameVarInPoliza_v(System.Int32,System.Int32,System.String,System.Decimal,System.Int32)">
+ <summary>
+ Carga la configuración de resultado de tarificación
+ </summary>
+ <param name="cproces">cproces</param>
+ <param name="ccober">Código ce cobertura</param>
+ <param name="variableIN">Variable a buscar</param>
+ <param name="valorDefault">Valor por default</param>
+ <param name="cendoso">Código del endoso</param>
+ <returns>Decimal</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.GetVarTarif(sis3.Emision.Cobertura,System.String,System.Int32,System.Int32)">
+ <summary>
+ Carga el resultado de la tarificación, si el código no esta busca emisión nueva
+ </summary>
+ <param name="cob">Instancia de la cobertura</param>
+ <param name="variableIN">Campo a buscar en el select</param>
+ <param name="cproces_V">Codigo de la póliza que esta vigente</param>
+ <param name="cendoso">Código del endoso</param>
+ <returns>Decimal</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.elimina(System.Int32,System.String@,System.Int32)">
+ <summary>
+ Elimina una oferta del lote a Renovar
+ </summary>
+ <param name="cproces">cproces</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.dameVencida(System.Int32)">
+ <summary>
+ devuelve cproces de la poliza vencida
+ </summary>
+ <param name="cproces"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.confirma(System.Int32,System.String,System.String@)">
+ <summary>
+ Confirma la Póliza y cambia el estatus de la misma de R
+ </summary>
+ <param name="cproces">cproces</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Valida_Estado_Poliza(System.String,System.Int32,System.Int32)">
+ <summary>
+ Validación de la póliza que esta vigente para renovar
+ </summary>
+ <param name="cnpoliza">Código de la póliza vigente</param>
+ <param name="fmes_v">Mes de la póliza vigente</param>
+ <param name="fanopol_v">Año de la póliza Vigente</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Guarda(System.String@)">
+ <summary>
+ Guarda y Actualiza el lote maestro
+ </summary>
+ <param name="xerror">Variable de error</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.GetEstatusLotes(System.Int32,System.String@,System.Int32)">
+ <summary>
+ Obtine el Estatus del lote si esta procesado o no
+ </summary>
+ <param name="nLote">No. de Lote</param>
+ <param name="xerr">Mensaje de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.GetSQLStatus(System.Int32)">
+ <summary>
+ Devuelve una consulta de tipo t-sql para realizar string.format
+ </summary>
+ <param name="code">Codigo de consulta</param>
+ <returns>string</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Estructura(System.Data.DataTable@)">
+ <summary>
+ Arma la Estructura de la tabla de procesos
+ </summary>
+ <param name="dt">datatable</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Emision.renovacion.lote.CamposDB">
+ <summary>
+ Entidad Renovación
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.guarda">
+ <summary>
+ Guarda/Actualiza el detalle de lote
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.ActulizaEstausErrorLote(System.Int32,System.Int32,System.String,System.Boolean)">
+ <summary>
+ Actualiza el estatus de la Póliza, si hay algun error en la confirmación del lote
+ </summary>
+ <param name="cloteren">Código del Lote</param>
+ <param name="cproces">Código de la póliza</param>
+ <param name="xerr">Mensaje de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.GetEstatusDetaLote(System.Int32,System.String@,System.Int32)">
+ <summary>
+ Obtine el estatus de detalle de los lotes generados para poder eliminar y valida sus estados
+ </summary>
+ <param name="nLote">Número de lote</param>
+ <param name="xerr">Variable de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.DelDetaLote(System.Int32,System.String@,System.Int32)">
+ <summary>
+ Elimina un lote de la lista
+ </summary>
+ <param name="nLote">Número de lote</param>
+ <param name="xerr">Variable de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.GetEstatusDetaConfirmar(System.Int32)">
+ <summary>
+ Validad el estatus del detalle del lote para confirmar
+ </summary>
+ <param name="nLote">Número de Lote</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.GetDetalleLote(sis3.Emision.renovacion.lote.Detalle.camposDB,System.Boolean)">
+ <summary>
+ Función que carga el detalle del lote
+ </summary>
+ <param name="c">Entidad Detalle lote</param>
+ <returns>datatable</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.renovacion.lote.Detalle.DelPolLoteErr(System.Int32,System.Int32,System.String@,System.Int32)">
+ <summary>
+ Elimina una póliza del lote
+ </summary>
+ <param name="nlote">Número de lote</param>
+ <param name="cproces">Número de póliza</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Emision.renovacion.lote.Detalle.camposDB">
+ <summary>
+ Entidad Detalle Renovacion
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Emision.renovacion.Proceso">
+ <summary>
+ Entidad Proceso 
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Auto.#ctor(System.Int32,System.Boolean)">
+ <summary>
+ Instancia y Carga el objeto Auto
+ </summary>
+ <param name="cproces"></param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Auto.Carga(System.Int32,System.Boolean)">
+ <summary>
+ Carga los registro 
+ </summary>
+ <param name="cproces">cproces</param>
+ <param name="EsOferta">indica si es póliza o oferta</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Auto.Guarda">
+ <summary>
+ Guarda Cambios en BD. Cobertura debe estar Cargada=true (cargada o validada)
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Auto.Guarda(System.Int32,System.Boolean)">
+ <summary>
+ Guarda cambios en BD
+ </summary>
+ <param name="cproces"></param>
+ <param name="EsOferta"></param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Persona.#ctor(sis3.Emision.Poliza@)">
+ <summary>
+ instancia y crea nuevo certificado
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Persona.#ctor(System.Int32,System.Boolean)">
+ <summary>
+ Instancia y Carga el objeto Persona
+ </summary>
+ <param name="cproces"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Persona.Eliminar">
+ <summary>
+ Guarda Cambios en BD. Cobertura debe estar Cargada=true (cargada o validada)
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Persona.Eliminar(System.Int32,System.Boolean)">
+ <summary>
+ Elimina info en BD
+ </summary>
+ <param name="cproces"></param>
+ <param name="EsOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Persona.Guarda">
+ <summary>
+ Guarda cambios en BD. Correjido.
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Persona.Valida">
+ <summary>
+ Funcion  Valida que retorna EsOferta = False o EsOferta = True
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Varios.#ctor(System.Int32,System.Boolean)">
+ <summary>
+ Instancia y Carga el objeto Varios
+ </summary>
+ <param name="cproces"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Varios.Guarda">
+ <summary>
+ Guarda Cambios en BD. Cobertura debe estar Cargada=true (cargada o validada)
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.Varios.Guarda(System.Int32,System.Boolean)">
+ <summary>
+ Guarda cambios en BD
+ </summary>
+ <param name="cproces"></param>
+ <param name="EsOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.DatosAdicionales.#ctor(System.Int32,System.Boolean)">
+ <summary>
+ Instancia y Carga el objeto Varios
+ </summary>
+ <param name="cproces"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.DatosAdicionales.Guarda">
+ <summary>
+ Guarda Cambios en BD. Cobertura debe estar Cargada=true (cargada o validada)
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Objetos.DatosAdicionales.Guarda(System.Int32,System.Boolean)">
+ <summary>
+ Guarda cambios en BD
+ </summary>
+ <param name="cproces"></param>
+ <param name="EsOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.Configuracion.Valida_Cuadre(System.Int32,System.Int32,System.String)">
+ <summary>
+ Funcion que valida si se aplica la verificación del cuadre de reaseguro
+ </summary>
+ <param name="cramo">Código del ramo</param>
+ <param name="cendoso">Código del Endoso</param>
+ <param name="cplan">Código del Plan</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="P:sis3.Emision.Reaseguro.dameContrato(System.Int32)">
+ <summary>
+ propiedad q devuelve el contrato especificado
+ </summary>
+ <param name="ccontrea"></param>
+ <value></value>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.#ctor(System.Int32,System.Int32)">
+ <summary>
+ Carga
+ </summary>
+ <param name="cproces"></param>
+ <param name="ccerti"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.calcula">
+ <summary>
+ incializa los valores en cero. Listo para la distribucion
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.ReciboActualiza(sis3.Emision.Recibo@)">
+ <summary>
+ Actualiza los campos del recibo relativos al reaseguro
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.carga(System.Int32,System.Int32)">
+ <summary>
+ Carga objeto c con contenidos de ofpolrea. Se mantiene por compatibilidad. Utilizar CargaRea()
+ </summary>
+ <param name="cproces"></param>
+ <param name="ccerti"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.eliminaFacultativo(System.Int32,System.Int32)">
+ <summary>
+ lo elimina del objeto en memoria
+ </summary>
+ <param name="creaseg"></param>
+ <param name="ccontrea"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.Facultativo_ok(System.Int32)">
+ <summary>
+ 'si tengo el 100% del facultativo asignado, coloco bandera reas_ok. Leo de BD
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.cargaRea(System.Int32,System.Int32,System.Boolean)">
+ <summary>
+ Carga contratos en la lista contratos.
+ </summary>
+ <param name="cproces"></param>
+ <param name="ccerti"></param>
+ <param name="esOferta"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.asignaRecibo(System.Int32)">
+ <summary>
+ Pone el recibo especificado a todos los elementos de la lista de contratos
+ </summary>
+ <param name="crecibo"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.guardaRea(System.Boolean)">
+ <summary>
+ Guarda o confirma el reaseguro
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.AnulaAdpolRea(System.Int32,System.Int32,System.Int32)">
+ <summary>
+ anula los contratos de reaseguro de adpolrea
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.cargaReaseguro(System.Int32)">
+ <summary>
+ carga los contratos asociados a un recibo. Carga lista Contratos.
+ </summary>
+ <param name="crecibo"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.calculaReaseguro(sis3.Emision.Poliza@)">
+ <summary>
+ Calcula la distribucion de reaseguro en OF. Teniendo en cuenta posibles endosos (mira acumulado).
+ </summary>
+ <param name="poliza"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.AnulaReaseguroPoliza(System.Int32,System.Int32,System.Int32,System.Int32,System.Int32)">
+ <summary>
+ Anula ultimo reaseguro vigente asociado a la renovacion de la poliza.
+ </summary>
+ <param name="cpoliza"></param>
+ <param name="fanopol"></param>
+ <param name="fmespol"></param>
+ <param name="cusuario"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.reset(System.Int32)">
+ <summary>
+ borra todos los registros de reaseguro en bd
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Reaseguro.eliminaFacultativo(System.Int32,System.Int32,System.Int32)">
+ <summary>
+ elimina reasegurador de facultativo para un contrato en bd
+ </summary>
+ <param name="ccontrea"></param>
+ <param name="creaseg"></param>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Emision.Reaseguro.montos">
+ <summary>
+ Entidad de Montos
+ </summary>
+</member>
+<member name="M:sis3.Emision.Recibo.#ctor(System.Int32,System.Boolean)">
+ <summary>
+ instancia y carga el recibo
+ </summary>
+ <param name="crecibo"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.generaCuotaEndoso">
+ <summary>
+ genera la cuota unica de endoso usando el recibo de instancia actual (Me)
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.calcula(sis3.Emision.Recibo.camposResumen,sis3.Emision.Poliza@,System.Boolean)">
+ <summary>
+ rellena todos los campos necesarios (objeto c) para recibo salidos de la tarificacion de la poliza
+ </summary>
+ <param name="montos">Montos de resumen del recibo</param>
+ <param name="infoPoliza">Entidad de la póliza</param>
+ <param name="calImpuesto">Parametro que indica si el impuesto le carga de la tabla de configuración para su calculo</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.Guarda(System.String@)">
+ <summary>
+  'guarda en BD cambios
+ </summary>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.dameCproces(System.Int32)">
+ <summary>
+  Devuelve el cproces asociado a un recibo
+ </summary>
+ <param name="crecibo"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.dameDiaCerrado(System.DateTime,System.Int32,System.Int32)">
+ <summary>
+ Devuelve si el día de esmision está cerrado
+ </summary>
+ <param name="fechaEmision"></param>
+ <param name="cramo"></param>
+ <param name="csucursal"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.dameCpoliza(System.Int32)">
+ <summary>
+ devuelve en una cadena cpoliza,fanopol,fmespol
+ </summary>
+ <param name="crecibo"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.guardaCampoDB(System.String,System.String,System.Boolean,System.Int32)">
+ <summary>
+ Guarda los cambios del campo especificado en BD
+ </summary>
+ <param name="columna"></param>
+ <param name="valor"></param>
+ <param name="esOferta"></param>
+ <param name="cusuario"></param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.cargaCampoDB(System.String,System.Int32,System.Boolean)">
+ <summary>
+ devuelve valor de campo de BD
+ </summary>
+ <param name="columna"></param>
+ <param name="ref"></param>
+ <param name="esOferta"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Emision.Recibo.camposResumen.aString">
+ <summary>
+ Pasa a un String el Objeto 
+ </summary>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="T:sis3.Carga_Masiva.Cobertura">
+ <summary>   
+ Entidad para los formatos de las variables de tarificación
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Carga_Masiva.Pregunta">
+ <summary>
+ Entidad para las preguntas
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Carga_Masiva.Beneficiario">
+ <summary>
+ Entidad para los Beneficiarios
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Carga_Masiva.Linea">
+ <summary>
+ Representa cada elemento de la coleccion grupo en la Carga_Masiva
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="T:sis3.Carga_Masiva.Respuestas">
+ <summary>
+ Representa las condiciones OP
+ </summary>
+</member>
+<member name="T:sis3.Carga_Masiva.Ayuda">
+ <summary>
+ Contiene todos los métodos requeridos para realizar la importación masiva de pólizas a colectivos
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Ayuda.GetHelpersPol(System.Int32,System.String)">
+ <summary>
+ Función que carga las referencias de los códigos
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Ayuda.GetHelpersV(System.Int32,System.String,System.String@)">
+ <summary>
+ Carga las referencias de los codigos Vida
+ </summary>
+ <param name="cramo">Codigo del ramo</param>
+ <param name="cplan">Codigo del plan</param>
+ <returns>boolean</returns>
+ <remarks>Ruben Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Ayuda.GetHelpersRiesgo(System.Int32,System.String,System.String@)">
+ <summary>
+ Carga las referencias de los codigos Riesgos
+ </summary>
+ <param name="cramo">Codigo del ramo</param>
+ <param name="cplan">Codigo del plan</param>
+ <returns>boolean</returns>
+ <remarks>Ruben Tamayo</remarks>
+</member>
+<member name="T:sis3.Carga_Masiva.Remesa">
+ <summary>
+ 
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Carga_Estructura(System.Int32,System.String)">
+ <summary>
+ Carga colección de coberturas y requisitos de emisión para un determinaldo producto
+ </summary>
+ <param name="cramo">Codigo de Ramo tecnico</param>
+ <param name="cplan">Codigo de Producto tecnico</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Genera_Endoso(sis3.Emision.Poliza)">
+ <summary>
+ Función para setear los valores del endoso
+ </summary>
+ <param name="Maestra"></param>
+ <returns>Integer</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Genera_Encabezado(System.Int32,System.String,System.Int32)">
+ <summary>
+ Genera los encabezados de la plantilla
+ </summary>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ctipo"></param>
+ <returns>datatable</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Carga_Referencias(System.Int32,System.String@)">
+ <summary>
+ Carga las referencias para validar
+ </summary>
+ <param name="xerror">Mensaje de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Valida_ServicioPol(System.Int32,sis3.Carga_Masiva.Linea,System.Int32,System.String@)">
+ <summary>
+ Valida datos en caso de ser asignados directamente desde servicio web
+ </summary>
+ <param name="ramoint">Categoria de emision interna</param>
+ <param name="linea">Entidad</param>
+ <param name="ctipoM">Tipo de carga</param>
+ <param name="xerror">Mensaje de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Valida_Servicio(System.Int32,System.Object,System.Int32,System.String@)">
+ <summary>
+ Valida datos en caso de ser asignados directamente desde servicio web
+ </summary>
+ <param name="ramoint">Categoria de emision interna</param>
+ <param name="linea">Entidad siniestro</param>
+ <param name="ctipoM">Tipo de carga</param>
+ <param name="xerror">Mensaje de error</param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Valida_VidaColectivo(System.Int32,sis3.Siniestros.Siniestro,System.Int32,System.String@)">
+ <summary>
+ Validaciones para Vida-Colectivo
+ </summary>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Valida_Riesgo(System.Int32,sis3.Siniestros.Siniestro,System.Int32,System.String@)">
+ <summary>
+ Validaciones para Riesgo Varios
+ </summary>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Valida_Beneficiarios(System.String@,System.Data.DataTable,System.Int32)">
+ <summary>
+ Valida el correcto ingreso de los datos de beneficiarios
+ </summary>
+ <param name="xerror">Cadena de texto con la descripción de los errores</param>
+ <param name="DT">DataTable con el contenido a cargar</param>
+ <param name="n_fila">Numero de fila que se analizará</param>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Inicializa_Poliza(sis3.Emision.Poliza@,sis3.Carga_Masiva.Linea,System.Int32,System.Int32)">
+ <summary>
+ Metodo que inicializa los valores a default para la cotización
+ </summary>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.Ofertar(System.String,System.Int32,System.Int32,System.Int32@)">
+ <summary>
+ Metodo que realiza lacreación de la cotización de la póliza
+ </summary>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.DameAbreviatura(System.Int32)">
+ <summary>
+ Función que retorna la Abreviatura del código del ramo
+ </summary>
+ <param name="cramo">Código del Ramo</param>
+ <returns>string</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.ProcesarR(System.Data.DataTable,System.Int32,System.String,System.Int32,System.String,System.Int32,System.Boolean)">
+ <summary>
+ Función que procesa la plantilla ya validada para procesar los registro
+ </summary>
+ <param name="rec"></param>
+ <param name="idProceso"></param>
+ <param name="cramo"></param>
+ <param name="cplan"></param>
+ <param name="ctipo"></param>
+ <returns>boolean</returns>
+ <remarks>Rubén Tamayo</remarks>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.GetCargas(System.Int32,System.Int32,System.Int32@,System.String@)">
+ <summary>
+ 
+ </summary>
+ <param name="start"></param>
+ <param name="limit"></param>
+ <param name="total"></param>
+ <param name="xerr"></param>
+ <returns></returns>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.GetCargaDetalle(System.Int32,System.Int32,System.Int32,System.Int32@,System.String@)">
+ <summary>
+ 
+ </summary>
+ <param name="idProceso"></param>
+ <param name="start"></param>
+ <param name="limit"></param>
+ <param name="total"></param>
+ <param name="xerr"></param>
+ <returns></returns>
+</member>
+<member name="M:sis3.Carga_Masiva.Remesa.AddDetalleCarga(System.Int32,System.String,System.Object,System.Int32,System.Decimal,System.String,System.Int32)">
+ <summary>
+ Agrega el detalle de la carga realizada masivamente
+ </summary>
+ <returns>boolean</returns>
+</member>
+<member name="T:sis3.Colectivo">
+ <summary>
+ Proporciona los métodos necesarios para la carga de colectivos
+ </summary>
+ <remarks>Allis Montenegro</remarks>
+</member>
+<member name="M:sis3.Colectivo.#ctor(System.String,System.String,System.String,System.String)">
+ <summary>
+ Inicializa las variables necesarias para generar/cargar el colectivo
+ </summary>
+ <param name="cpoliza">CPoliza de la póliza</param>
+ <param name="cplan">Plan de la Póliza</param>
+ <param name="cramo">Ramo de la Póliza</param>
+ <param name="cnpoliza">Número de Póliza</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.GenerarExcel">
+ <summary>
+ Para generar la plantilla Excel del Colectivo
+ </summary>
+ <returns>Arreglo de Bytes con el archivo excel</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.Grid_Polizas(System.String,System.String)">
+ <summary>
+ Para llenar Grid de Pólizas
+ </summary>
+ <param name="cramo">Ramo</param>
+ <param name="cplan">Plan</param>
+ <returns>Dataset Con polizas</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.Grid_Polizas(System.String)">
+ <summary>
+ Sobrecarga para llenar por número de póliza
+ </summary>
+ <param name="cnpoliza">Numero de Póliza</param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.ValidarExcel(System.Data.DataTable,System.Collections.ArrayList@,System.Boolean@,System.Data.DataTable@,System.String@,System.String@,System.String@)">
+ <summary>
+ Para validar el Excel de Colectivos
+ </summary>
+ <param name="ExcelRows">DataTable con los rows del Excel</param>
+ <param name="FilasMalas">Arreglo Arraylist para almacenar los indices de las filas que estan con errores</param>
+ <param name="continuar">Para decidir si continuar si no hay errores fatales</param>
+ <param name="BadRows">DataTable pasado por referencia para almacenar los rows que no cargaron</param>
+ <returns>Retorna string con los errores</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.NuevoCertificado(System.Data.DataRow,System.String,System.Double@,System.Double@)">
+ <summary>
+ Crea nuevo certificado y lo anexa a una poliza maestra
+ </summary>
+ <param name="row">Row del excel a cargar en adpoliza</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.NuevoRecibo(System.String,System.Double,System.Double,System.String)">
+ <summary>
+ Para generar el Recibo
+ </summary>
+ <param name="crecibo">Numero de Recibo</param>
+ <param name="msumaT">Suma Total del Recibo</param>
+ <param name="mprimaT">Prima Total del Recibo</param>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.DameCertificado(System.String)">
+ <summary>
+ Para traer el proximo certificado
+ </summary>
+ <param name="cnpoliza">Poliza Maestra</param>
+ <returns>El número del nuevo certificado</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.DamePolizaCertificado(System.String)">
+ <summary>
+ Trae la poliza sin el certificado
+ </summary>
+ <param name="cnpoliza">Poliza Maestra</param>
+ <returns>La poliza sin el certificado</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Colectivo.DameCantidadColumnas(System.String)">
+ <summary>
+ Para retornar la cantidad de columnas que deberia tener el Excel
+ </summary>
+ <param name="cnpoliza">El número de la póliza</param>
+ <returns>Cantidad de Columnas del Excel</returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Reaseguro.Cumulos.cumulosRea.Agrega_Definicion(System.Int32,System.String,System.String,System.String,System.String@)">
+ <summary>
+ Agrega una definición de cúmulo nueva
+ </summary>        
+ <returns>boolean</returns>
+</member>
+<member name="M:sis3.Reaseguro.Cumulos.cumulosRea.Actualiza_Definicion(System.Int32,System.Int32,System.String,System.String,System.String,System.Decimal,System.String@)">
+ <summary>
+  Actualiza una definición de cúmulo existente
+ </summary>        
+ <returns>boolean</returns>
+</member>
+<member name="M:sis3.Reaseguro.Cumulos.cumulosRea.Elimina_Definicion(System.Int32,System.String@)">
+ <summary>
+ Elimina una definición de cúmulo registrada
+ </summary>
+ <param name="id">Id de cúmulo</param>
+ <param name="xError">mensaje de error al cliente</param>
+ <returns>boolean</returns>
+</member>
+<member name="M:sis3.Reaseguro.Cumulos.cumulosRea.dameCumulo(System.Int32,System.Int32,System.Int32)">
+ <summary>
+ usada xa obtener cumulo usado en cierta accion/regla xa una ramo rea
+ </summary>
+ <param name="cramorea"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+<member name="M:sis3.Reaseguro.Cumulos.Operacion.dameConfig(System.Int32,System.Int32,System.Int32)">
+ <summary>
+ usada xa obtener lista de cumulos usados en cierta accion/regla xa una ramo rea
+ </summary>
+ <param name="cramorea"></param>
+ <returns></returns>
+ <remarks></remarks>
+</member>
+</members>
+</doc>

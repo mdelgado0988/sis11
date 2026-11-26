@@ -418,6 +418,7 @@
   const [newIncomeTransitContact, setNewIncomeTransitContact] = React.useState(null);
   const newIncomeFormRefs = React.useRef({});
   const newIncomeTypeFormRef = React.useRef(null);
+  const incomeAmountValidatorRef = React.useRef(null);
   const newIncomeDestinationSearchTimer = React.useRef(null);
   const reversalFormRef = React.useRef(null);
   const shellRef = React.useRef(null);
@@ -4426,7 +4427,12 @@
       exe: exe,
       incomeType: newIncomeTypeCode,
       setIncomeAmount: setNewIncomeAmountFromForm,
-      getIncomeCurrency: () => getTrimmedString(newIncomeForm.getFieldValue('currency'))
+      getIncomeCurrency: () => getTrimmedString(newIncomeForm.getFieldValue('currency')),
+      // MSN-000255: the form can register a check of the payment total (a fully applied claim recovery only takes a
+      // reversal); validateDynamicIncomeForms shows its message and stops Execute, Save and the edit of a draft.
+      setIncomeAmountValidator: validator => {
+        incomeAmountValidatorRef.current = typeof validator === 'function' ? { form: form, validate: validator } : null;
+      }
     };
     if (!collectionChargeVisible || !isPremiumContactForm(form)) return baseContext;
 
@@ -5193,6 +5199,20 @@
             message.error(t('Complete the required fields in the income type form.'));
             return false;
           }
+        }
+      }
+
+      const amountValidator = incomeAmountValidatorRef.current;
+      if (amountValidator && amountValidator.form === newIncomeTypeDynamicForm.form) {
+        let amountError = '';
+        try {
+          amountError = getTrimmedString(amountValidator.validate(getNewIncomeTotal()));
+        } catch (error) {
+          amountError = error && error.message ? error.message : String(error);
+        }
+        if (amountError) {
+          message.error(amountError, 8);
+          return false;
         }
       }
     }

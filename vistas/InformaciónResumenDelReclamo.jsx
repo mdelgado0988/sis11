@@ -9297,7 +9297,7 @@ END CATCH;`;
       .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(n+5):nth-child(-n+12){width:7.5%}
       .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(13){width:3%}
       .resumen-shell .resumen-coverage .resumen-coverage-table th:nth-child(2),.resumen-shell .resumen-coverage .resumen-coverage-table td:nth-child(2){overflow:hidden;text-overflow:ellipsis}
-      .resumen-shell .resumen-coverage .resumen-coverage-table-wrap{overflow:hidden}
+      .resumen-shell .resumen-coverage .resumen-coverage-table-wrap{overflow:auto}
        .resumen-shell .resumen-custom{display:flex;flex:1 1 auto;min-height:180px;flex-direction:column}
        .resumen-shell .resumen-custom-preload{display:none}
       .resumen-shell .resumen-affected{gap:7px}
