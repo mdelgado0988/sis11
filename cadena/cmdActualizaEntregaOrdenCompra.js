@@ -2,30 +2,31 @@
 //noreplace
 /**
  * Name: cmdActualizaEntregaOrdenCompra
- * Purpose: Guarda en una orden de reparación los dos datos del encabezado de su orden de compra que el usuario digita en la vista 48, «A nombre de» y «Entregar en». Quedan en la propia orden (notas, JSON {aNombreDe, entregarEn}) y se pueden cambiar en cualquier estado de la orden. cmdDocumentoOrdenCompraDTO los imprime; un dato vacío imprime el valor automático.
- * Author: AIDEN mission configurator (MSN-000221, AXX-10778)
+ * Purpose: Guarda en una orden de reparación los datos de su orden de compra que el usuario digita en la vista 48: «A nombre de» y «Entregar en» (encabezado del documento) y «Factura» (la factura que el proveedor presenta para el pago). Quedan en la propia orden (notas, JSON {aNombreDe, entregarEn, factura}) y se pueden cambiar en cualquier estado de la orden. cmdDocumentoOrdenCompraDTO imprime los dos primeros; un dato vacío imprime el valor automático.
+ * Author: AIDEN mission configurator (MSN-000221, AXX-10778; MSN-000273, AXX-11988)
  */
 /*
- Input (context): { repairOrderId, aNombreDe?, entregarEn?, dryRun? }
- Output: { ok, msg, outData: { repairOrderId, aNombreDe, entregarEn, notes, changed, dryRun } }: lo que queda guardado.
+ Input (context): { repairOrderId, aNombreDe?, entregarEn?, factura?, dryRun? }
+ Output: { ok, msg, outData: { repairOrderId, aNombreDe, entregarEn, factura, notes, changed, dryRun } }: lo que queda guardado.
  Rules:
   - repairOrderId entero positivo de una orden existente. Cualquier estado (borrador, activa, liquidada, cancelada): son datos
     del documento, no condiciones de la orden.
-  - Texto libre de una línea (un nombre o una dirección): saltos de línea, tabuladores y caracteres de control quedan como un
-    espacio, sin espacios al inicio ni al final, hasta 250 caracteres.
-  - Un dato vacío o null se borra (el documento vuelve al valor automático); un dato no enviado conserva lo guardado.
+  - Texto libre de una línea (un nombre, una dirección o un número de factura): saltos de línea, tabuladores y caracteres de
+    control quedan como un espacio, sin espacios al inicio ni al final, hasta 250 caracteres.
+  - Un dato vacío o null se borra (el documento vuelve al valor automático; la factura queda sin registrar); un dato no enviado
+    conserva lo guardado.
   - Las notas conservan cualquier otro miembro que ya tuvieran; un texto que no era JSON se conserva como el miembro «notas»,
-    y vuelve a quedar como texto cuando ya no hay datos de entrega.
+    y vuelve a quedar como texto cuando ya no hay datos de entrega ni factura.
   - Escribe solo la columna notes con SetField: RepoRepairOrder UPDATE solo edita borradores y vuelve a validar la orden.
     Relee la orden y compara lo guardado. Si dos personas guardan a la vez, queda lo último que se guardó.
  SQL justification: lecturas LoadEntities de una orden por id; una escritura SetField de una sola columna de esa orden con un
   literal N'...' cuyas comillas simples se duplican.
- History: 1.0 2026-11-20 MSN-000221 (AXX-10778), globaluat.
+ History: 1.0 2026-11-20 MSN-000221 (AXX-10778), globaluat. 1.1 2026-11-26 MSN-000273 (AXX-11988): «Factura».
 */
 
 var ctx = typeof context === 'string' ? JSON.parse(context || '{}') : (context || {});
 var maxLength = 250;
-var labels = { aNombreDe: 'A nombre de', entregarEn: 'Entregar en' };
+var labels = { aNombreDe: 'A nombre de', entregarEn: 'Entregar en', factura: 'Factura' };
 
 function fail(msg, extra) {
   return { ok: false, msg: msg, outData: extra || null };
@@ -84,7 +85,7 @@ try {
     }
     sent++;
   }
-  if (!sent) return fail('Indique «A nombre de» o «Entregar en».');
+  if (!sent) return fail('Indique «A nombre de», «Entregar en» o «Factura».');
 
   var before = loadOrder(repairOrderId);
   if (!before) return fail('No existe la orden RO-' + repairOrderId + '.');
@@ -98,8 +99,8 @@ try {
     : members.length === 1 && members[0] === 'notas' && typeof data.notas === 'string' ? data.notas : JSON.stringify(data);
   var previous = before.notes === null || before.notes === undefined ? null : String(before.notes);
   var result = { repairOrderId: repairOrderId, aNombreDe: cleanValue(data.aNombreDe), entregarEn: cleanValue(data.entregarEn),
-    notes: notes, changed: false, dryRun: dryRun };
-  if (notes === previous) return { ok: true, msg: 'Los datos de entrega de RO-' + repairOrderId + ' no cambiaron.', outData: result };
+    factura: cleanValue(data.factura), notes: notes, changed: false, dryRun: dryRun };
+  if (notes === previous) return { ok: true, msg: 'Los datos de entrega y la factura de RO-' + repairOrderId + ' no cambiaron.', outData: result };
   if (dryRun) return { ok: true, msg: 'Validación correcta (simulación): no se grabó nada.', outData: result };
 
   doCmd({ cmd: 'SetField', data: {
@@ -109,14 +110,14 @@ try {
     raw: true
   } });
   if (!SetField || SetField.ok === false) {
-    return fail('No se pudieron guardar los datos de entrega de RO-' + repairOrderId + (SetField && SetField.msg ? ': ' + SetField.msg : '.'));
+    return fail('No se pudieron guardar los datos de entrega y la factura de RO-' + repairOrderId + (SetField && SetField.msg ? ': ' + SetField.msg : '.'));
   }
 
   var after = loadOrder(repairOrderId);
   var saved = after && after.notes !== null && after.notes !== undefined ? String(after.notes) : null;
-  if (saved !== notes) return fail('El servidor no confirmó los datos de entrega de RO-' + repairOrderId + '.');
+  if (saved !== notes) return fail('El servidor no confirmó los datos de entrega y la factura de RO-' + repairOrderId + '.');
   result.changed = true;
-  return { ok: true, msg: 'Datos de entrega de RO-' + repairOrderId + ' guardados.', outData: result };
+  return { ok: true, msg: 'Datos de entrega y factura de RO-' + repairOrderId + ' guardados.', outData: result };
 } catch (error) {
   return fail(String(error && error.message ? error.message : error).replace(/^@/, ''));
 }

@@ -5,7 +5,7 @@
  * @author Noel Obando
  * @created 2025-12-26
  * @name cmdEmisionIncendioContext
- * @version 1.5
+ * @version 1.7
  * @purpose Builds accounting context data for fire issuance and endorsements.
  * @param context.id Policy, change or anniversary identifier.
  * @param context.tipo 0: issuance, 1: cancellation, 2: renewal, 3: insured sum change,
@@ -30,6 +30,13 @@
  *          contabiliza al guardarse) se calcula como lo hara el contrato al ejecutarlo: por
  *          cobertura que cambia, cmdGetCommission de la prima nueva menos la de la anterior.
  *          Emision y renovacion siguen con LifePolicy.commissions.
+ * @changes 1.6 (MSN-000270) Codigo del asiento de renovacion por ramo, como el de la emision:
+ *          incendio (ramo 1) sigue con RenovacionIncendio y los demas ramos, fianzas incluidas,
+ *          llevan el codigo generico Renovacion. Vale para la renovacion por version de poliza
+ *          (tipo 0 con policyVersion > 0) y para la de aniversario (tipo 2).
+ * @changes 1.7 (MSN-000271) Codigo del asiento de cancelacion por ramo, con la misma regla que la
+ *          renovacion: incendio (ramo 1) sigue con CancelacionIncendio y los demas ramos, fianzas
+ *          incluidas, llevan el codigo generico Cancelacion.
  */
 
 const AUTO_TAX_NAME = 'IMPUESTO DE AUTO';
@@ -65,7 +72,7 @@ try {
   const codes = {
     0: 'EmisionIncendio',
     1: 'CancelacionIncendio',
-    2: 'RenovacionIncendio',
+    2: 'Renovacion',
     3: 'EndosoSA',
     4: 'EndosoObjetoAsegurado',
     5: 'EndosoRecargo',
@@ -145,6 +152,10 @@ try {
     : title;
   const effectiveCode = effectiveTipo === 0
     ? getEmissionCode(policy.lob)
+    : effectiveTipo === 2
+    ? getRenewalCode(policy.lob)
+    : effectiveTipo === 1
+    ? getCancellationCode(policy.lob)
     : isLoadingChange
     ? (isLoadingDiscount ? 'EndosoDescuento' : 'EndosoRecargo')
     : codes[effectiveTipo];
@@ -719,6 +730,14 @@ function getEmissionCode(lob) {
   }
 
   return 'Emision';
+}
+
+function getRenewalCode(lob) {
+  return String(lob || '').trim() === '1' ? 'RenovacionIncendio' : 'Renovacion';
+}
+
+function getCancellationCode(lob) {
+  return String(lob || '').trim() === '1' ? 'CancelacionIncendio' : 'Cancelacion';
 }
 
 function getGastoPrima(policy, prima) {

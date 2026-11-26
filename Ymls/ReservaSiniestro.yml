@@ -1,0 +1,39 @@
+scanCommand:
+  cmd: ExeChain
+  data:
+    chain: cmdGetReserveContext
+    context: "{id:_id}"
+unique: _reference
+reference: _reference
+status: 1
+code: "'ReservaSiniestro'"
+description: _description
+entity: LifePolicy
+entityId: _Policy.id
+Lines:
+  ## Reserva
+  - account: exe(GetTable,table:'CuentasReservaReclamo',column:'Cuenta',row:'Variacion',getColumn:_Policy.lob)
+    debit: _increase ? _reserved:0
+    credit: _increase ? 0:_reserved
+    comments: "'Registra variación por ' + (_increase ? 'apertura o aumento' : 'cierre o disminución') + ' de reserva de siniestro' + (_ramo ? ' - ' + _ramo : '')"
+    order: _lineNumber
+    condition: _reserved != 0
+  - account: exe(GetTable,table:'CuentasReservaReclamo',column:'Cuenta',row:'Obligaciones',getColumn:_Policy.lob)
+    credit: _increase ? _reserved:0
+    debit: _increase ? 0:_reserved
+    comments: "'Registra variación por ' + (_increase ? 'apertura o aumento' : 'cierre o disminución') + ' de reserva de siniestro' + (_ramo ? ' - ' + _ramo : '')"
+    order: _lineNumber
+    condition: _reserved != 0
+  ## Reaseguro
+  - account: exe(GetTable,table:'CuentasReservaReclamo',column:'Cuenta',row:'VariacionRea',getColumn:_Policy.lob)
+    debit: _increase ? _ceded:0
+    credit: _increase ? 0:_ceded
+    comments: "'Registra variación por ' + (_increase ? 'apertura o aumento' : 'cierre o disminución') + ' de reserva de siniestro' + (_ramo ? ' - ' + _ramo : '')"
+    order: _lineNumber
+    condition: _ceded>0
+  - account: exe(GetTable,table:'CuentasReservaReclamo',column:'Cuenta',row:'ObligacionRea',getColumn:_Policy.lob)
+    credit: _increase ? _ceded:0
+    debit: _increase ? 0:_ceded
+    comments: "'Registra variación por ' + (_increase ? 'apertura o aumento' : 'cierre o disminución') + ' de reserva de siniestro' + (_ramo ? ' - ' + _ramo : '')"
+    order: _lineNumber
+    condition: _ceded>0

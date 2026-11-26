@@ -13,13 +13,14 @@
  * Output: { ok, msg }. ok false stops the command and the screen shows msg (Spanish, the language of the claim screens).
  * Rules:
  *  - Draft total = sum of round(qty x quotedPrice, 2), as the server prices the lines. A line without a quoted price takes its agreedPrice,
- *    or counts 0: the server resolves that price and the confirmation re-checks the stored total.
+ *    or counts 0: the server resolves that price and the confirmation re-checks the stored total. A line with a negative quoted price
+ *    is an adjustment (chain cmdAjustesOrdenCompra, MSN-000273) and subtracts, as it does from the saved total.
  *  - A request that is not an ADD, an UPDATE of a draft or the confirmation of a draft passes, and so does one without claim, coverage,
  *    lines or amount: the command's own validations answer it.
  *  - Equal to the available balance passes. A failure while reading refuses the operation (fails closed).
  * SQL justification: one or two parameterized read-only scalars (getScalar) per request: the order being confirmed or edited, and the
  *  reserve balance plus the outstanding balance of the active orders of one claim and coverage. No command is called, nothing is written.
- * History: 2026-11-19 v1 MSN-000220 (AXX-10617), globaluat.
+ * History: 2026-11-19 v1 MSN-000220 (AXX-10617), globaluat. 2026-11-26 v1.1 MSN-000273 (AXX-11988): adjustment lines subtract.
  */
 var comando = '';
 try {
@@ -119,6 +120,10 @@ function totalLineas(j) {
     var l = lineas[i] || {};
     var cantidad = numero(l.qty);
     var precio = numero(l.quotedPrice);
+    if (precio < 0) {
+      if (cantidad > 0) total += redondear(cantidad * precio);
+      continue;
+    }
     if (!(precio > 0)) precio = numero(l.agreedPrice);
     if (cantidad > 0 && precio > 0) total += redondear(cantidad * precio);
   }

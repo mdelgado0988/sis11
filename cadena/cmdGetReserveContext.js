@@ -6,9 +6,11 @@
  * @email noel.obando@axxis-systems.com
  * @created 2026-01-07
  * @name cmdGetReserveContext
- * @version 1.1
+ * @version 1.2
  * @purpose Builds the accounting context for claim reserve movements.
  * @param context.id LifeCoveragePayout identifier.
+ * @changes 1.2 (MSN-000271) Returns ramo: the name of the policy's line of business (catalog
+ *          LOB, without its code), for the concept of the ReservaSiniestro lines.
  */
 
 try {
@@ -34,6 +36,7 @@ try {
   const prefix = reserved > 0 ? 'Apertura/Aumento' : 'Cierre/Disminución';
   const claimCode = getTrimmedString(claim.code) || String(claim.id);
   const policyCode = getTrimmedString(policy.code);
+  const ramo = getNombreRamo(policy);
 
   return [{
     id: reserveId,
@@ -43,6 +46,7 @@ try {
     increase: reserved > 0,
     reference: `TX-${reserveId} Reserva Siniestro`,
     description: `${prefix} de reserva de siniestro Póliza #${policyCode} - Reclamo #${claimCode}`,
+    ramo: ramo,
     currency: getTrimmedString(policy.currency),
     Claim: claim,
     Policy: policy,
@@ -136,6 +140,33 @@ function findCoverage(coverages, coverageId) {
   return getRows(coverages).find(item => {
     return item && getPositiveInteger(item.id) === id;
   }) || null;
+}
+
+/**
+ * MSN-000271: nombre del ramo de la póliza (catálogo LOB, sin el código: "6 - Automóvil" → "Automóvil").
+ * Sin ramo o sin nombre devuelve '' y la plantilla omite el ramo del concepto.
+ */
+function getNombreRamo(policy) {
+  const lobCode = getTrimmedString(policy && policy.lob).replace(/'/g, "''");
+  if (!lobCode) {
+    return '';
+  }
+
+  doCmd({
+    cmd: 'RepoLob',
+    data: {
+      operation: 'GET',
+      filter: `code = '${lobCode}'`,
+      noTracking: true
+    }
+  });
+
+  const response = getCommandResult('RepoLob');
+  const ramo = response && response.ok !== false && Array.isArray(response.outData)
+    ? response.outData[0]
+    : null;
+
+  return getTrimmedString(ramo && ramo.name).replace(/^\s*[^-]+\s*-\s*/, '').trim();
 }
 
 function getCommandResult(commandName) {

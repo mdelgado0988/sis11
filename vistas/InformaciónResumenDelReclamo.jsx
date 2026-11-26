@@ -344,16 +344,19 @@
     // order notes as JSON {aNombreDe, entregarEn}, next to any other member (a free note is kept as «notas»): chain
     // cmdActualizaEntregaOrdenCompra saves them in any status of the order and cmdDocumentoOrdenCompraDTO prints them. An empty
     // value prints the automatic one: supplier name, and supplier name # claim number.
+    // MSN-000273: «Factura», the invoice the supplier presents for payment, is typed the same way and lives in the same notes
+    // ({..., factura}); it is shown in the order header and is not printed on the purchase order document.
     const RO_DELIVERY_MAX = 250;
     const roDelivery = (notes) => {
-      const empty = { aNombreDe: '', entregarEn: '' };
+      const empty = { aNombreDe: '', entregarEn: '', factura: '' };
       const text = notes == null ? '' : String(notes).trim();
       if (text.charAt(0) !== '{') return empty;
       try {
         const data = JSON.parse(text);
         if (!data || typeof data !== 'object' || Array.isArray(data)) return empty;
         return { aNombreDe: data.aNombreDe == null ? '' : String(data.aNombreDe).trim(),
-          entregarEn: data.entregarEn == null ? '' : String(data.entregarEn).trim() };
+          entregarEn: data.entregarEn == null ? '' : String(data.entregarEn).trim(),
+          factura: data.factura == null ? '' : String(data.factura).trim() };
       } catch (failure) {
         return empty;
       }
@@ -387,8 +390,11 @@
         taxRate: RO_TAX.rate, taxBase: base }]);
     };
     const roLinesToSave = (lines) => roWithTax(lines, (lines || []).some(roIsTaxLine)).filter((line) => !roIsTaxLine(line) || line.total > 0);
+    const roAdjustmentCount = (lines) => roItemLines(lines).filter((line) => Number(line.quotedPrice) < 0).length;
 
     // Editable quote lines: category -> article cascade of the provider subtype catalog, prices from GetRepairOrderPrice.
+    // MSN-000273: a negative quoted price makes the line an adjustment (origin AJUSTE) that lowers the sub-total, so the order can
+    // match the supplier's invoice. The server keeps those lines through the triggers of chain cmdAjustesOrdenCompra.
     const RepairLinesEditor = function RepairLinesEditor(props) {
       const [categories, setCategories] = React.useState([]);
       const [articles, setArticles] = React.useState({});
@@ -421,7 +427,7 @@
         return Object.assign({}, line, {
           overAgreed: line.agreedPrice != null && quotedPrice > line.agreedPrice,
           overPublic: line.publicPrice != null && quotedPrice > line.publicPrice,
-          total: Math.round(qty * quotedPrice * 100) / 100
+          total: roRound(qty * quotedPrice)
         });
       };
       const onAdd = () => emit(lines.concat([{ qty: 1 }]));
@@ -450,7 +456,8 @@
         });
       };
       const onQtyChange = (index, qty) => change(index, recompute(Object.assign({}, lines[index], { qty: qty })));
-      const onQuotedChange = (index, quotedPrice) => change(index, recompute(Object.assign({}, lines[index], { quotedPrice: quotedPrice, priceSource: 'MANUAL' })));
+      const onQuotedChange = (index, quotedPrice) => change(index, recompute(Object.assign({}, lines[index],
+        { quotedPrice: quotedPrice, priceSource: Number(quotedPrice) < 0 ? 'AJUSTE' : 'MANUAL' })));
       const subtotal = roSubtotal(lines);
       const taxLine = allLines.find(roIsTaxLine);
       const tax = taxLine ? roRound(taxLine.total) : 0;
@@ -476,7 +483,7 @@
             <Table.Column dataIndex="agreedPrice" title={<span className="resumen-repair-order-amount">Precio convenido</span>} render={(v) => <span className="resumen-repair-order-amount">{v == null ? '-' : money(v, currency)}</span>} />
             <Table.Column dataIndex="quotedPrice" title={<span className="resumen-repair-order-amount">Precio cotizado</span>} width={200} render={(v, r, index) => (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
-                {readOnly ? <span className="resumen-repair-order-amount">{money(v || 0, currency)}</span> : <InputNumber min={0} value={v} onChange={(value) => onQuotedChange(index, value)} style={{ width: 100 }} />}
+                {readOnly ? <span className="resumen-repair-order-amount">{money(v || 0, currency)}</span> : <InputNumber value={v} onChange={(value) => onQuotedChange(index, value)} style={{ width: 100 }} />}
                 {r.overPublic ? <Tooltip title="El precio cotizado supera el precio público"><Tag color="red" style={{ marginLeft: 5 }}>Sobre público</Tag></Tooltip>
                   : r.overAgreed ? <Tooltip title="El precio cotizado supera el precio convenido"><Tag color="orange" style={{ marginLeft: 5 }}>Sobre convenido</Tag></Tooltip>
                   : null}
@@ -706,16 +713,20 @@
       const [reissueCopy, setReissueCopy] = React.useState(true);
       const [documentGenerating, setDocumentGenerating] = React.useState(false);
       const [deliveryVisible, setDeliveryVisible] = React.useState(false);
-      const [deliveryForm, setDeliveryForm] = React.useState({ aNombreDe: '', entregarEn: '' });
+      const [deliveryForm, setDeliveryForm] = React.useState({ aNombreDe: '', entregarEn: '', factura: '' });
       const [deliverySaving, setDeliverySaving] = React.useState(false);
       const subType = providerSubType(props.config);
-      const load = (orderId) => {
+      const load = (orderId, expectedAdjustments) => {
         setLoading(true);
         exe('RepoRepairOrder', { operation: 'GET', filter: 'id=' + orderId, include: ['Provider'] }).then((r) => {
           setLoading(false);
           if (r.ok && r.outData.length > 0) {
+            const stored = r.outData[0].jLines ? JSON.parse(r.outData[0].jLines) : [];
             setOrder(r.outData[0]);
-            setLines(r.outData[0].jLines ? JSON.parse(r.outData[0].jLines) : []);
+            setLines(stored);
+            if (expectedAdjustments > 0 && roAdjustmentCount(stored) < expectedAdjustments) {
+              message.error('La orden RO-' + orderId + ' quedó guardada sin sus ajustes en negativo. Revise el detalle y vuelva a guardar el borrador.');
+            }
           } else message.error(r.msg);
         });
         exe('GetRepairOrderSettlements', { repairOrderId: orderId }).then((r) => {
@@ -726,21 +737,23 @@
       React.useEffect(() => {
         if (props.visible && props.orderId) load(props.orderId);
       }, [props.visible, props.orderId]);
-      const changed = () => {
-        load(props.orderId);
+      const changed = (expectedAdjustments) => {
+        load(props.orderId, expectedAdjustments);
         if (props.onChanged) props.onChanged();
       };
-      const run = (cmd, data, after) => {
+      const run = (cmd, data, after, expectedAdjustments) => {
         setLoading(true);
         exe(cmd, data).then((r) => {
           setLoading(false);
-          if (r.ok) { after(r); changed(); }
+          if (r.ok) { after(r); changed(expectedAdjustments); }
           else message.error(r.msg);
         });
       };
-      const onSaveDraft = () => run('RepoRepairOrder',
-        { operation: 'UPDATE', entity: Object.assign({}, order, { jLines: JSON.stringify(roLinesToSave(lines)), Provider: undefined }) },
-        (r) => message.success(r.msg));
+      const onSaveDraft = () => {
+        const toSave = roLinesToSave(lines);
+        run('RepoRepairOrder', { operation: 'UPDATE', entity: Object.assign({}, order, { jLines: JSON.stringify(toSave), Provider: undefined }) },
+          (r) => message.success(r.msg), roAdjustmentCount(toSave));
+      };
       const onConfirm = () => run('ConfirmRepairOrder', { repairOrderId: order.id }, (r) => message.success(r.msg));
       const onPrint = () => {
         if (documentGenerating || !order) return;
@@ -760,17 +773,17 @@
         const orderId = order.id;
         setDeliverySaving(true);
         exe('ExeChain', { chain: 'cmdActualizaEntregaOrdenCompra', context: JSON.stringify({ repairOrderId: orderId,
-          aNombreDe: deliveryForm.aNombreDe || '', entregarEn: deliveryForm.entregarEn || '' }) }).then((r) => {
+          aNombreDe: deliveryForm.aNombreDe || '', entregarEn: deliveryForm.entregarEn || '', factura: deliveryForm.factura || '' }) }).then((r) => {
           const outcome = r && r.ok === true && r.outData && typeof r.outData === 'object' ? r.outData : null;
           if (!outcome || outcome.ok !== true || !outcome.outData) {
-            message.error(outcome && outcome.msg || r && r.msg || 'No se pudieron guardar los datos de entrega.');
+            message.error(outcome && outcome.msg || r && r.msg || 'No se pudieron guardar los datos de entrega y la factura.');
             return;
           }
           const saved = outcome.outData;
           setOrder((current) => (current && current.id === orderId ? Object.assign({}, current, { notes: saved.notes }) : current));
           setDeliveryVisible(false);
           message.success(outcome.msg);
-        }).catch((error) => message.error(error && error.message || 'No se pudieron guardar los datos de entrega.'))
+        }).catch((error) => message.error(error && error.message || 'No se pudieron guardar los datos de entrega y la factura.'))
           .then(() => setDeliverySaving(false));
       };
       const onAddSettlement = () => {
@@ -868,6 +881,8 @@
               || <span style={{ color: 'gray' }}>{(deliveryDefaults.aNombreDe || '-') + ' (automático)'}</span>}</Descriptions.Item>
             <Descriptions.Item label="Entregar en" span={2}>{delivery.entregarEn
               || <span style={{ color: 'gray' }}>{(deliveryDefaults.entregarEn || '-') + ' (automático)'}</span>}</Descriptions.Item>
+            <Descriptions.Item label="Factura" span={4}>{delivery.factura
+              || <span style={{ color: 'gray' }}>Sin registrar</span>}</Descriptions.Item>
             {order.closeReason ? <Descriptions.Item label="Motivo de cierre">{order.closeReason}</Descriptions.Item> : null}
             {isCancelled && successor ? <Descriptions.Item label="Reemplazada por">RO-{successor.id}</Descriptions.Item> : null}
             {predecessor ? <Descriptions.Item label="Reemplaza a">RO-{predecessor.id} (cancelada)</Descriptions.Item> : null}
@@ -875,7 +890,7 @@
           <div className="resumen-repair-order-actions">
             <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={() => load(order.id)}>Recargar</Button>
             <Button size="small" type="primary" icon={<RoIcon name="pdf" />} loading={documentGenerating} disabled={documentGenerating} onClick={onPrint}>Imprimir orden de compra</Button>
-            <Button size="small" type="primary" icon={<RoIcon name="edit" />} onClick={openDelivery}>Datos de entrega</Button>
+            <Button size="small" type="primary" icon={<RoIcon name="edit" />} onClick={openDelivery}>Datos de entrega y factura</Button>
             {isDraft ? <Button size="small" type="primary" icon={<RoIcon name="save" />} onClick={onSaveDraft}>Guardar borrador</Button> : null}
             {isDraft ? <Popconfirm title="Al confirmar, la orden de reparación se activa y el monto aprobado queda fijo. ¿Continuar?"
               onConfirm={onConfirm} okText="Sí" cancelText="No">
@@ -939,20 +954,26 @@
             </div>
           </Modal>
           */}
-          <Modal title={'Datos de entrega de la orden de compra RO-' + order.id} visible={deliveryVisible}
+          <Modal title={'Datos de entrega y factura de la orden de compra RO-' + order.id} visible={deliveryVisible}
             onCancel={() => setDeliveryVisible(false)} onOk={onSaveDelivery} okText="Guardar" cancelText="Cancelar"
             okButtonProps={{ loading: deliverySaving }}>
-            <p>Se imprimen en el encabezado del documento de la orden de compra y se pueden cambiar en cualquier momento.
-              Si un dato queda vacío, el documento usa el valor automático.</p>
+            <p>«A nombre de» y «Entregar en» se imprimen en el encabezado del documento de la orden de compra; si un dato queda vacío,
+              el documento usa el valor automático. «Factura» es la factura que el proveedor presenta para el pago. Todos se pueden
+              cambiar en cualquier momento.</p>
             <div style={{ marginBottom: 8 }}>
               <div>A nombre de</div>
               <Input value={deliveryForm.aNombreDe} maxLength={RO_DELIVERY_MAX} placeholder={deliveryDefaults.aNombreDe}
                 onChange={(e) => { const value = e.target.value; setDeliveryForm((current) => Object.assign({}, current, { aNombreDe: value })); }} />
             </div>
-            <div>
+            <div style={{ marginBottom: 8 }}>
               <div>Entregar en</div>
               <Input value={deliveryForm.entregarEn} maxLength={RO_DELIVERY_MAX} placeholder={deliveryDefaults.entregarEn}
                 onChange={(e) => { const value = e.target.value; setDeliveryForm((current) => Object.assign({}, current, { entregarEn: value })); }} />
+            </div>
+            <div>
+              <div>Factura</div>
+              <Input value={deliveryForm.factura} maxLength={RO_DELIVERY_MAX} placeholder="Número de la factura del proveedor"
+                onChange={(e) => { const value = e.target.value; setDeliveryForm((current) => Object.assign({}, current, { factura: value })); }} />
             </div>
           </Modal>
           <Modal title={closeAction === 'CANCEL' ? 'Cancelar orden' : 'Cancelar saldo restante'} visible={!!closeAction}
