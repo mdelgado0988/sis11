@@ -11,6 +11,9 @@
   *@Output: [{ resultado }]
   *@Changes: MSN-000206 - ComentariosExtrasLineas: las Descripciones Extras del vehículo línea por línea, con sus espacios, para la oferta y la póliza.
   *          MSN-000228 - Colisión (15) y Comprensivo (39) imprimen como Límite el de la cobertura (el valor del vehículo) cuando la opción LÍMITE del formulario no trae ese monto (plan IL), en la oferta y en la póliza.
+  *          MSN-000232 - Deducible: el deducible numérico se imprime con separador de miles y dos decimales (1200 -> 1,200.00), como Límites y Prima, en la oferta y en la póliza.
+  *          MSN-000231 - Recuadro «Asegurado» de la oferta y la póliza: Direccion, Telefono, Celular, Fax, Correo, Email, Pais, Provincia y Ciudad salen del asegurado principal (antes, del tomador), con la dirección completa (Barriada/Ubicación + Corregimiento, AXX-2418). Tenedor e Identificacion (firma) siguen siendo del tomador.
+  *          MSN-000276 - Cuadro de coberturas de la oferta y la póliza: Incendio y/o Rayo y Robo o Hurto Total van inmediatamente después de Colisión. Un límite de texto que ya trae separador de miles (10,000.00) se imprime igual (antes salía 10.00,0.00).
 */
 
 const policyId = toValidNumber(context?.policyId);
@@ -76,19 +79,20 @@ const anioFin = dateFin.getUTCFullYear();
 
 //Datos del pagador
 resultado.Tenedor = getNombreCompleto(holder);
-const addressHolder = Array.isArray(holder?.Addresses) && holder.Addresses.length > 0 ? holder.Addresses[0] : null;
-resultado.Direccion = `${addressHolder?.address1 ?? ""} ${addressHolder?.address2 ?? ""}`.trim();
-resultado.Telefono = holder.phone ?? "";
+//MSN-000231: estos campos sólo los imprime el recuadro «Asegurado» de la oferta y la póliza: salen del asegurado principal. Tenedor e Identificacion (firma) siguen siendo del tomador.
+const addressRecuadro = Array.isArray(insured?.Addresses) && insured.Addresses.length > 0 ? insured.Addresses[0] : null;
+resultado.Direccion = axxDireccionCompleta(addressRecuadro);
+resultado.Telefono = insured.phone ?? "";
 
 //return holder.Phones
-resultado.Celular = findByType(holder?.Phones, celPhoneType)?.num ?? "";
-resultado.Fax = findByType(holder?.Phones, faxPhoneType)?.num ?? "";
-resultado.Correo = holder.email ?? "";
-resultado.Email = holder.email ?? "";
+resultado.Celular = findByType(insured?.Phones, celPhoneType)?.num ?? "";
+resultado.Fax = findByType(insured?.Phones, faxPhoneType)?.num ?? "";
+resultado.Correo = insured.email ?? "";
+resultado.Email = insured.email ?? "";
 resultado.Identificacion = holder.isPerson == true ? holder.cnp : holder.nif;
-resultado.Pais = getCatalogValue("RepoCountryCatalog", `code = '${escapeSql(holder?.Addresses?.[0]?.country ?? "")}'`, "name") ?? "";
-resultado.Provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${escapeSql(holder?.Addresses?.[0]?.country ?? "")}' AND code = '${escapeSql(holder?.Addresses?.[0]?.state ?? "")}'`, "name") ?? "";
-resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${escapeSql(holder?.Addresses?.[0]?.state ?? "")}' AND code = '${escapeSql(holder?.Addresses?.[0]?.city ?? "")}'`, "name") ?? "";
+resultado.Pais = getCatalogValue("RepoCountryCatalog", `code = '${escapeSql(addressRecuadro?.country ?? "")}'`, "name") ?? "";
+resultado.Provincia = getCatalogValue("RepoStateCatalog", `countryCode = '${escapeSql(addressRecuadro?.country ?? "")}' AND code = '${escapeSql(addressRecuadro?.state ?? "")}'`, "name") ?? "";
+resultado.Ciudad = getCatalogValue("RepoCityCatalog", `stateCode = '${escapeSql(addressRecuadro?.state ?? "")}' AND code = '${escapeSql(addressRecuadro?.city ?? "")}'`, "name") ?? "";
 
 //Datos del asegurado
 const fnacimiento = toPanamaDate(insured?.birth);
@@ -184,7 +188,7 @@ resultado.Coberturas = (Array.isArray(policy?.Coverages) ? policy.Coverages : []
       Prima: esSobat && !(toNumeric(premium) > 0) ? "Incluida" : n(premium),
       Moneda: monedaDocumento,
       DeductibleCov: deductible,
-      Deducible: deductible,
+      Deducible: formatearDeducible(deductible),
       Evento: limites.find(x => vEqual(x.Producto) == vEqual(policy.productCode) && vEqual(x.Cobertura) == vEqual(code))?.Limite ?? "",
       Porcentaje: findCoverage && findCoverage.Porcentaje ? findCoverage.Porcentaje : 0,
       //findCoverage
@@ -316,6 +320,25 @@ function getCatalogValue(catalogName, filter, fieldName) {
   }
   return catalogResult?.outData?.[0]?.[fieldName] ?? "";
 }
+//AXX-2418 (GLOBUAT-268): dirección completa del contacto en los documentos (Barriada, Ubicación y Corregimiento), sin perder ni sustituir componentes. Repuesta en la 794 por MSN-000231, igual que en la 760.
+function axxDireccionCompleta(addr, extras) {
+  var a = addr || {};
+  var partes = [a.address1, a.address2, axxNombreCorregimiento(a.sector)].concat(extras || []);
+  var salida = [];
+  partes.forEach(function (p) {
+    var v = String(p == null ? "" : p).trim();
+    var repetido = salida.some(function (x) { return x.toUpperCase() == v.toUpperCase(); });
+    if (v && !repetido) salida.push(v);
+  });
+  return salida.join(", ");
+}
+function axxNombreCorregimiento(sector) {
+  var id = Number(sector || 0);
+  if (!(id > 0)) return "";
+  doCmd({cmd:"RepoSectorCatalog",data:{operation:"GET",filter:"id=" + id,size:1}});
+  var fila = RepoSectorCatalog && RepoSectorCatalog.outData && RepoSectorCatalog.outData[0];
+  return fila && fila.name ? String(fila.name) : "";
+}
 
 function getTableValue(tableName, column, row, fieldName) {
   doCmd({"cmd":"GetTable","data":{"table":tableName,"column": column,"row": row,"getColumn": fieldName}});  
@@ -446,6 +469,8 @@ function ordenCoberturaAuto(nombre) {
     "GASTOS MEDICOS",
     "COMPRENSIVO",
     "COLISION",
+    "INCENDIO Y/O RAYO",
+    "ROBO O HURTO TOTAL",
     "ENDOSO GLOBAL SUPER",
     "ENDOSO ASISTENCIA VIAL",
     "ENDOSO MAS GLOBAL",
@@ -469,6 +494,12 @@ function formatearLimite(value) {
   return n(numericValue);
 }
 
+// MSN-000232: el deducible numérico sale con separador de miles y dos decimales (1200 -> 1,200.00); un texto sale igual.
+function formatearDeducible(value) {
+  const numericValue = toNumeric(value);
+  return numericValue === null ? value : n(numericValue);
+}
+
 function toNumeric(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (value === null || value === undefined || String(value).trim() === "") return null;
@@ -484,7 +515,8 @@ function formatearTextoLimite(value) {
   const text = String(value ?? "").trim();
   if (!text) return text;
 
-  return text.replace(/(?<![\w.])-?\d+(?:[.,]\d+)?(?![\w.])/g, token => {
+  // MSN-000276: un número que ya trae separador de miles (10,000.00) es UN solo número; antes se partía en 10 y 000.00.
+  return text.replace(/(?<![\w.,])-?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\w.]|,\d)|(?<![\w.,])-?\d+(?:[.,]\d+)?(?![\w.]|,\d)/g, token => {
     const numericValue = toNumeric(token);
     return numericValue === null ? token : n(numericValue);
   });
