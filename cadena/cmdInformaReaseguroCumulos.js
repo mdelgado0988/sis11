@@ -33,11 +33,18 @@ var codigo = parseInt(entrada.criterio, 10);
 var criterio = CRITERIOS[codigo];
 if (!criterio) throw new Error('@Elija un criterio de cúmulo (1 a 10).');
 var agrupaRamo = !(entrada.agrupaRamo === false || String(entrada.agrupaRamo) === 'false');
+var paginarPolizas = codigo === 10 && num(entrada.pagina) > 0 && num(entrada.tamanoPagina) > 0;
+var paginaSolicitada = Math.max(1, Math.floor(num(entrada.pagina)) || 1);
+var tamanoSolicitado = Math.max(1, Math.floor(num(entrada.tamanoPagina)) || 50);
 function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
 function r2(v) { return Math.round(num(v) * 100) / 100; }
 function txt(v) { return v === null || v === undefined ? '' : String(v).trim(); }
 
-doCmd({ cmd: 'ExeChain', data: { chain: 'cmdInformaReaseguroPolizasVigentes', context: JSON.stringify({ fecha: entrada.fecha, tipoRamo: entrada.tipoRamo, ramos: entrada.ramos }) } });
+doCmd({ cmd: 'ExeChain', data: { chain: 'cmdInformaReaseguroPolizasVigentes', context: JSON.stringify({
+  fecha: entrada.fecha, tipoRamo: entrada.tipoRamo, ramos: entrada.ramos,
+  pagina: paginarPolizas ? paginaSolicitada : 0,
+  tamanoPagina: paginarPolizas ? tamanoSolicitado : 0
+}) } });
 if (!ExeChain.ok) throw new Error('@' + String(ExeChain.msg || 'No se pudieron leer las pólizas vigentes.').replace(/^@/, ''));
 var base = ExeChain.outData || {};
 var polizas = base.filas || [];
@@ -82,6 +89,9 @@ return {
   criterio: { codigo: codigo, nombre: criterio.nombre },
   agrupaRamo: agrupaRamo,
   filas: filas,
+  total: paginarPolizas ? Number(base.total || 0) : filas.length,
+  pagina: paginarPolizas ? paginaSolicitada : 0,
+  tamanoPagina: paginarPolizas ? tamanoSolicitado : filas.length,
   totales: totales,
   trazabilidad: { polizasVigentes: polizas.length, grupos: filas.length, origen: base.trazabilidad }
 };

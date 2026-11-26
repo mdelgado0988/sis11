@@ -2,7 +2,7 @@
 //noreplace
 /**
 Name: cmdInformaReaseguroPolizasVigentes
-Purpose: Pólizas vigentes a una fecha de cálculo para el informe de reaseguro (vista InformeReaseguro, pestaña Pólizas Vigentes). Las sumas y primas retenidas, cedidas, facultativas y Cat son la acumulación de las diferencias de cada movimiento del borderó (cmdBorderoMovimientos) hasta la fecha; la prima suscrita 100% es la acumulación de las diferencias facturadas como las arma PolicyBilling. Solo lectura. Es la base de cmdInformaReaseguroCumulos y cmdInformaReaseguroPerfilCartera.
+Purpose: Pólizas vigentes a una fecha de cálculo para el informe de reaseguro (vista InformeReaseguro, pestaña Pólizas Vigentes). Las sumas y primas retenidas, cedidas, facultativas y Cat se calculan con el reaseguro vigente de la póliza y su configuración dinámica; la prima suscrita 100% y la vigencia se toman directamente de LifePolicy. Solo lectura. Es la base de cmdInformaReaseguroCumulos y cmdInformaReaseguroPerfilCartera.
 Author: aiden_mission_configurator (MSN-000265 / AXX-11812)
 */
 /*
@@ -11,14 +11,11 @@ Salida: { fecha, tipoRamo, ramos, filas:[...], totales:{...}, coberturas:[{clave
 
 Reglas:
  - Vigente a la fecha D (regla del formulario original: fdesde <= D <= fhasta y no cancelada): emitida (activeDate <= D),
-   inicio de la vigencia original <= D <= fin de la póliza, sin endoso de cancelación ejecutado hasta D y sin fecha de
+   inicio de la póliza <= D <= fin de la póliza, sin endoso de cancelación ejecutado hasta D y sin fecha de
    inactivación hasta D. Todas las fechas se comparan en hora de Panamá, como el borderó.
- - Reaseguro: suma por póliza de las filas de cmdBorderoMovimientos con fecha de emisión del movimiento <= D (desde 1901-01-01).
-   Suma cedida y prima cedida del informe = contratos (el borderó incluye la facultativa en la cedida; aquí se separa).
- - Prima suscrita 100%: recibo base de la vigencia en curso (foto de la renovación ejecutada, si no la de emisión, si no la de
-   la póliza) más la diferencia facturada de cada endoso ejecutado en esa vigencia hasta D (BillDiff.coverages), igual que
-   PolicyBilling.
- - Póliza vigente sin movimientos de borderó: suma asegurada 100% de la póliza, reparto en cero y conCesion = false.
+ - Reaseguro: suma por póliza de las cesiones vigentes, filtrada por las coberturas configuradas en cfgCoberturaProductoRea... para el ramo y producto.
+ - Prima suscrita 100%: valor de LifePolicy.coverages, sin consultar renovaciones ni endosos ejecutados.
+ - Póliza vigente sin cesión vigente: suma asegurada 100% de la póliza, reparto en cero y conCesion = false.
  - Fecha cobertura principal: mayor fin de las coberturas básicas, si no de todas, si no fin de la póliza.
  - Rango: límite superior del rango Automático (cfgInformeReaseguroRangos) del ramo o tipo de fianza; si no, el general.
 
@@ -39,6 +36,69 @@ for (var ri = 0; ri < ramosEntrada.length; ri++) {
 if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('@La fecha de cálculo es obligatoria (YYYY-MM-DD).');
 if (!ramos.length) throw new Error('@Seleccione al menos un ramo.');
 
+function normCfg(v) { return String(v === null || v === undefined ? '' : v).trim().toUpperCase(); }
+function sqlCfg(v) { return String(v === null || v === undefined ? '' : v).split("'").join("''"); }
+var cfgCoberturaReaseguro = [
+  { lob: 96, name: 'cfgCoberturaProductoReaTecnicos' },
+  { lob: 20, name: 'cfgCoberturaProductoReaVidaColectivo' },
+  { lob: 31, name: 'cfgCoberturaProductoReaVida' },
+  { lob: 71, name: 'cfgCoberturaProductoReaVidaIndividual' },
+  { lob: 52, name: 'cfgCoberturaProductoReaRiesgosVarios' },
+  { lob: 1, name: 'cfgCoberturaProductoRea' },
+  { lob: 6, name: 'cfgCoberturaProductoReaAuto' },
+  { lob: 81, name: 'cfgCoberturaProductoReaFianza' },
+  { lob: 82, name: 'cfgCoberturaProductoReaFianza' },
+  { lob: 83, name: 'cfgCoberturaProductoReaFianza' },
+  { lob: 84, name: 'cfgCoberturaProductoReaFianza' }
+];
+var cfgCoberturaActiva = cfgCoberturaReaseguro.filter(function (cfg) { return ramos.indexOf(String(cfg.lob)) >= 0; });
+var cfgNames = [];
+for (var cni = 0; cni < cfgCoberturaActiva.length; cni++) {
+  if (cfgNames.indexOf(cfgCoberturaActiva[cni].name) < 0) cfgNames.push(cfgCoberturaActiva[cni].name);
+}
+var cfgSqlNames = cfgNames.map(function (name) { return "'" + sqlCfg(name) + "'"; }).join(',');
+if (cfgSqlNames) doCmd({ cmd: 'DoQuery', data: { sql: 'SELECT [name] AS configName, [data] AS configData FROM [Table] WHERE [name] IN (' + cfgSqlNames + ')', timeout: 60 } });
+if (cfgSqlNames && !DoQuery.ok) throw new Error('@No se pudo leer la configuración de coberturas de reaseguro: ' + DoQuery.msg);
+var configByName = {};
+var configRecords = DoQuery.outData || [];
+for (var cri = 0; cri < configRecords.length; cri++) {
+  var configRecord = configRecords[cri] || {};
+  var configName = configRecord.configName || configRecord.ConfigName || configRecord.name || configRecord.Name;
+  var configData = configRecord.configData || configRecord.ConfigData || configRecord.data || configRecord.Data;
+  if (configName) configByName[String(configName)] = configData;
+}
+var coveragesThatSum = {};
+for (var cmi = 0; cmi < cfgCoberturaActiva.length; cmi++) {
+  var cfgMap = cfgCoberturaActiva[cmi];
+  if (!Object.prototype.hasOwnProperty.call(configByName, cfgMap.name)) throw '@No se encontró la configuración ' + cfgMap.name + ' en [Table].';
+  var cfgRows = configByName[cfgMap.name] || [];
+  if (typeof cfgRows === 'string') {
+    try { cfgRows = JSON.parse(cfgRows); } catch (e) { throw '@La configuración ' + cfgMap.name + ' no contiene JSON válido.'; }
+  }
+  if (!Array.isArray(cfgRows) || !cfgRows.length) throw '@La configuración ' + cfgMap.name + ' no tiene el formato esperado.';
+  var cfgHeaders = cfgRows[0] || [];
+  function cfgIndex(name, fallback) {
+    for (var hi = 0; hi < cfgHeaders.length; hi++) if (normCfg(cfgHeaders[hi]) === normCfg(name)) return hi;
+    return fallback;
+  }
+  var ixLob = cfgIndex('lobCode', 0), ixProduct = cfgIndex('productCode', 1), ixCoverage = cfgIndex('coverageCode', 3), ixIncluded = cfgIndex('isCoverage', 5);
+  for (var cri2 = 1; cri2 < cfgRows.length; cri2++) {
+    var cfgRow = cfgRows[cri2] || [];
+    if (normCfg(cfgRow[ixLob]) !== normCfg(cfgMap.lob) || normCfg(cfgRow[ixIncluded]) !== 'SI') continue;
+    var cfgKey = [normCfg(cfgMap.lob), normCfg(cfgRow[ixProduct]), normCfg(cfgRow[ixCoverage])].join('|');
+    if (cfgKey !== '||') coveragesThatSum[cfgKey] = true;
+  }
+}
+var sumCoverageParts = [];
+for (var coverageKey in coveragesThatSum) {
+  if (!Object.prototype.hasOwnProperty.call(coveragesThatSum, coverageKey)) continue;
+  var coverageParts = coverageKey.split('|');
+  sumCoverageParts.push("(UPPER(LTRIM(RTRIM(ISNULL(c.LoB,''))))='" + sqlCfg(coverageParts[0]) + "'"
+    + " AND UPPER(LTRIM(RTRIM(ISNULL(p.productCode,''))))='" + sqlCfg(coverageParts[1]) + "'"
+    + " AND UPPER(LTRIM(RTRIM(ISNULL(c.coverageCode,''))))='" + sqlCfg(coverageParts[2]) + "')");
+}
+var sumCoveragePredicate = sumCoverageParts.length ? '(' + sumCoverageParts.join(' OR ') + ')' : '1=0';
+
 function pan(campo) {
   return "CAST(CAST(" + campo + " AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'SA Pacific Standard Time' AS date)";
 }
@@ -52,88 +112,76 @@ function filasDe(lista) {
   return out;
 }
 
-/* 1. Reaseguro vigente: distribución actual de Cession por póliza.
-   No se consulta el borderó: este informe es de pólizas vigentes, no de movimientos. */
+/* 1. Pólizas vigentes a la fecha y sus datos descriptivos. */
 var lobIn = ramos.map(function (x) { return "'" + x + "'"; }).join(',');
-var reaseguroSql = "SELECT c.lifePolicyId AS id, COUNT(*) AS movimientos,\n"
-  + "  SUM(ISNULL(c.sumInsuredCedant, 0)) AS sumaRetenida,\n"
-  + "  SUM(ISNULL(c.sumInsuredRe, 0)) AS sumaCedidaTotal,\n"
-  + "  SUM(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(c.lineId, '')))) LIKE 'FAC%' THEN ISNULL(c.sumInsuredRe, 0) ELSE 0 END) AS sumaFacultativa,\n"
-  + "  SUM(ISNULL(c.premiumCedant, 0)) AS primaRetenida,\n"
-  + "  SUM(ISNULL(c.premiumRe, 0)) AS primaCedidaTotal,\n"
-  + "  SUM(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(c.lineId, '')))) LIKE 'FAC%' THEN ISNULL(c.premiumRe, 0) ELSE 0 END) AS primaFacultativa,\n"
-  + "  SUM(ISNULL(c.nonTechnicalPremium, 0)) AS primaCat,\n"
-  + "  SUM(ISNULL(c.sumInsuredCedant, 0) + ISNULL(c.sumInsuredRe, 0)) AS sumaAsegurada100\n"
-  + "FROM Cession c INNER JOIN LifePolicy p ON p.id = c.lifePolicyId\n"
-  + "WHERE p.lob IN (" + lobIn + ") AND ISNULL(c.overwritten, 0) = 0\n"
-  + "GROUP BY c.lifePolicyId";
-doCmd({ cmd: 'DoQuery', data: { sql: reaseguroSql, timeout: 60 } });
-if (!DoQuery.ok) throw new Error('@No se pudo leer el reaseguro vigente: ' + DoQuery.msg);
-var cesionesVigentes = filasDe(DoQuery.outData);
-var acum = {};
-for (var ci = 0; ci < cesionesVigentes.length; ci++) {
-  var cession = cesionesVigentes[ci];
-  acum[String(cession.id)] = {
-    movimientos: num(cession.movimientos),
-    sumaAsegurada100: num(cession.sumaAsegurada100),
-    sumaCoaseguro: 0,
-    sumaRetenida: num(cession.sumaRetenida),
-    sumaCedidaTotal: num(cession.sumaCedidaTotal),
-    sumaFacultativa: num(cession.sumaFacultativa),
-    primaRetenida: num(cession.primaRetenida),
-    primaCedidaTotal: num(cession.primaCedidaTotal),
-    primaFacultativa: num(cession.primaFacultativa),
-    primaCat: num(cession.primaCat),
-    primaCoaseguro: 0
-  };
-}
-
 /* 2. Pólizas vigentes a la fecha y sus datos descriptivos. */
+var usaDetalleRamo = tipoRamo === 'FIANZAS' || tipoRamo === 'INCENDIO';
+var camposObjeto = tipoRamo === 'FIANZAS'
+  ? ['nombre', 'secuestrante', 'desc_objeto_afianzado', 'desc_garantia', 'valor_garantia', 'ivigenciaf']
+  : (tipoRamo === 'INCENDIO'
+    ? ['cmbPais', 'cmbProvincia', 'cmbMunicipio', 'cmbSector', 'txtBarriadas', 'cmbBarriadas', 'txtEdificios', 'cmbEdificios', 'cmbZonaCresta', 'cmbUsoBien', 'cmbTipoObjeto', 'calleoavenida', 'direccionexacta']
+    : []);
+var camposObjetoSql = camposObjeto.length ? camposObjeto.map(function (name) { return "'" + sqlCfg(name) + "'"; }).join(',') : "''";
+var esIncendio = tipoRamo === 'INCENDIO';
+var tablaCtesSql = "tbl AS (SELECT t.name, t.data FROM [Table] t WHERE t.name IN ('cfgGrupoEconomico'))\n"
+  + ",tGrupo AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'cfgGrupoEconomico')\n";
+var catalogJoinsSql = '';
+var ubicacionSql = "  cp.provincia AS provincia, cp.distrito AS distrito, cp.corregimiento AS corregimiento,\n"
+  + "  cp.barriadaTexto AS barriada, cp.edificioTexto AS edificio, cp.zonaCresta AS zonaCresta, cp.usoBien AS usoBien,\n";
+if (esIncendio) {
+  tablaCtesSql = "tbl AS (SELECT t.name, t.data FROM [Table] t WHERE t.name IN ('cfgGrupoEconomico','ZonaCresta','TablaUsoBien','Barriadas','Edificios')),\n"
+    + "tGrupo AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'cfgGrupoEconomico'),\n"
+    + "tZona AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'ZonaCresta'),\n"
+    + "tUso AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'TablaUsoBien'),\n"
+    + "tBarr AS (SELECT x.c0, x.c3 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c3 nvarchar(400) '$[3]') x WHERE tbl.name = 'Barriadas'),\n"
+    + "tEdif AS (SELECT x.c3, x.c4, x.c5 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c3 nvarchar(50) '$[3]', c4 nvarchar(50) '$[4]', c5 nvarchar(400) '$[5]') x WHERE tbl.name = 'Edificios')\n";
+  ubicacionSql = "  ISNULL(st.name, cp.provincia) AS provincia, ISNULL(ci.name, cp.distrito) AS distrito, ISNULL(se.name, cp.corregimiento) AS corregimiento,\n"
+    + "  COALESCE(NULLIF(LTRIM(RTRIM(cp.barriadaTexto)), ''), tBarr.c3) AS barriada,\n"
+    + "  COALESCE(NULLIF(LTRIM(RTRIM(cp.edificioTexto)), ''), tEdif.c5) AS edificio,\n"
+    + "  COALESCE(tZona.c1, tZona2.c1) AS zonaCresta, tUso.c1 AS usoBien,\n";
+  catalogJoinsSql = "OUTER APPLY (SELECT TOP 1 s.name, s.riskZone FROM StateCatalog s WHERE s.[code] = cp.provincia AND s.countryCode = ISNULL(cp.pais, '591')) st\n"
+    + "OUTER APPLY (SELECT TOP 1 c.name FROM CityCatalog c WHERE c.[code] = cp.distrito) ci\n"
+    + "OUTER APPLY (SELECT TOP 1 s2.name FROM SectorCatalog s2 WHERE s2.[code] = cp.corregimiento) se\n"
+    + "OUTER APPLY (SELECT TOP 1 b.c3 FROM tBarr b WHERE b.c0 = cp.barriadaId AND ISNULL(cp.barriadaId, '0') <> '0') tBarr\n"
+    + "OUTER APPLY (SELECT TOP 1 e.c5 FROM tEdif e WHERE e.c4 = cp.edificioId AND e.c3 = cp.corregimiento AND ISNULL(cp.edificioId, '0') <> '0') tEdif\n"
+    + "LEFT JOIN tZona ON tZona.c0 = cp.zonaCresta\n"
+    + "LEFT JOIN tZona tZona2 ON tZona2.c0 = st.riskZone AND tZona.c0 IS NULL\n"
+    + "LEFT JOIN tUso ON tUso.c0 = cp.usoBien\n";
+}
+var objetoCtesSql = usaDetalleRamo
+  ? "obj AS (\n"
+    + "  SELECT pol.id, o.jValues FROM pol\n"
+    + "  OUTER APPLY (SELECT TOP 1 io.jValues FROM InsuredObject io WHERE io.lifePolicyId = pol.id AND ISJSON(io.jValues) = 1\n"
+    + "               AND io.jValues LIKE '%userData%' ORDER BY CASE WHEN io.jValues LIKE '%cmbProvincia%' OR io.jValues LIKE '%suma_afianzada%' THEN 0 ELSE 1 END, io.id) o\n"
+    + "),\n"
+  : "obj AS (SELECT pol.id, CAST(NULL AS nvarchar(max)) AS jValues FROM pol WHERE 1=0),\n";
+var paginaSolicitada = Math.max(1, Math.floor(num(entrada.pagina)) || 1);
+var tamanoSolicitado = Math.max(1, Math.floor(num(entrada.tamanoPagina)) || 50);
+var paginarSql = num(entrada.pagina) > 0 && num(entrada.tamanoPagina) > 0;
+var polPageSql = paginarSql
+  ? "pol AS (SELECT * FROM polBase ORDER BY lob, [code], id OFFSET " + ((paginaSolicitada - 1) * tamanoSolicitado) + " ROWS FETCH NEXT " + tamanoSolicitado + " ROWS ONLY),\n"
+  : "pol AS (SELECT * FROM polBase),\n";
 var sql = "DECLARE @d date = '" + fecha + "';\n"
-  + "WITH pol AS (\n"
+  + "DECLARE @dNext date = DATEADD(day, 1, @d);\n"
+  + "DECLARE @utcFrom datetime2 = CONVERT(datetime2, ((CAST(@d AS datetime2) AT TIME ZONE 'SA Pacific Standard Time') AT TIME ZONE 'UTC'));\n"
+  + "DECLARE @utcNext datetime2 = CONVERT(datetime2, ((CAST(@dNext AS datetime2) AT TIME ZONE 'SA Pacific Standard Time') AT TIME ZONE 'UTC'));\n"
+  + "WITH polBase AS (\n"
   + "  SELECT p.id, p.[code], p.lob, p.productCode, p.holderId, p.insuredSum, p.currency, p.[start], p.[end], p.activeDate,\n"
-  + "         p.coverages AS primaPoliza, COALESCE(a1.[start], p.[start]) AS inicio, a1.jSnapshot AS foto1\n"
+  + "         p.coverages AS primaPoliza, p.[start] AS inicio\n"
   + "  FROM LifePolicy p\n"
-  + "  OUTER APPLY (SELECT TOP 1 a.[start], a.jSnapshot FROM Anniversary a WHERE a.lifePolicyId = p.id AND a.contractYear = 1 ORDER BY a.id) a1\n"
   + "  WHERE p.lob IN (" + lobIn + ") AND p.activeDate IS NOT NULL\n"
-  + "    AND " + pan('p.activeDate') + " <= @d\n"
-  + "    AND " + pan('COALESCE(a1.[start], p.[start])') + " <= @d AND " + pan('p.[end]') + " >= @d\n"
-  + "    AND (p.inactiveDate IS NULL OR " + pan('p.inactiveDate') + " > @d)\n"
+  + "    AND p.activeDate < @utcNext\n"
+  + "    AND p.[start] < @utcNext AND p.[end] >= @utcFrom\n"
+  + "    AND (p.inactiveDate IS NULL OR p.inactiveDate >= @utcNext)\n"
   + "    AND NOT EXISTS (SELECT 1 FROM Change cx WHERE cx.lifePolicyId = p.id AND cx.status = 1\n"
-  + "                    AND cx.Discriminator = 'CancellationChange' AND " + pan('cx.executionDate') + " <= @d)\n"
+  + "                    AND cx.Discriminator = 'CancellationChange' AND cx.executionDate < @utcNext)\n"
   + "),\n"
-  + "ren AS (\n"
-  + "  SELECT pol.id, r.[start] AS rInicio, r.executionDate AS rEjecucion, r.jSnapshot AS rFoto, r.premium AS rPrima\n"
-  + "  FROM pol CROSS APPLY (SELECT TOP 1 a.[start], a.executionDate, a.jSnapshot, a.premium FROM Anniversary a\n"
-  + "                        WHERE a.lifePolicyId = pol.id AND a.contractYear > 1 AND a.executionDate IS NOT NULL\n"
-  + "                          AND " + pan('a.[start]') + " <= @d AND " + pan('a.executionDate') + " <= @d\n"
-  + "                        ORDER BY a.[start] DESC, a.id DESC) r\n"
-  + "),\n"
-  + "sig AS (\n"
-  + "  SELECT pol.id, MIN(a.[start]) AS sInicio FROM pol\n"
-  + "  JOIN Anniversary a ON a.lifePolicyId = pol.id AND a.contractYear > 1 AND a.executionDate IS NOT NULL AND " + pan('a.[start]') + " > @d\n"
-  + "  GROUP BY pol.id\n"
-  + "),\n"
-  + "dif AS (\n"
-  + "  SELECT ch.lifePolicyId, SUM(ISNULL(bd.coverages, 0)) AS difPrima, COUNT(*) AS endosos\n"
-  + "  FROM Change ch JOIN pol ON pol.id = ch.lifePolicyId\n"
-  + "  LEFT JOIN ren ON ren.id = ch.lifePolicyId\n"
-  + "  LEFT JOIN BillDiff bd ON bd.changeId = ch.id\n"
-  + "  WHERE ch.status = 1 AND ch.Discriminator <> 'CancellationChange' AND " + pan('ch.executionDate') + " <= @d\n"
-  + "    AND (ren.rEjecucion IS NULL OR ch.executionDate >= ren.rEjecucion)\n"
-  + "  GROUP BY ch.lifePolicyId\n"
-  + "),\n"
-  + "obj AS (\n"
-  + "  SELECT pol.id, o.jValues FROM pol\n"
-  + "  OUTER APPLY (SELECT TOP 1 io.jValues FROM InsuredObject io WHERE io.lifePolicyId = pol.id AND ISJSON(io.jValues) = 1\n"
-  + "               AND io.jValues LIKE '%userData%' ORDER BY CASE WHEN io.jValues LIKE '%cmbProvincia%' OR io.jValues LIKE '%suma_afianzada%' THEN 0 ELSE 1 END, io.id) o\n"
-  + "),\n"
+  + polPageSql
+  + objetoCtesSql
   + "campo AS (\n"
   + "  SELECT obj.id, f.nm, MAX(f.v) AS v\n"
   + "  FROM obj CROSS APPLY OPENJSON(obj.jValues) WITH (nm nvarchar(100) '$.name', v nvarchar(4000) '$.userData[0]') f\n"
-  + "  WHERE f.nm IN ('nombre','secuestrante','desc_objeto_afianzado','desc_garantia','valor_garantia','ivigenciaf',\n"
-  + "                 'cmbPais','cmbProvincia','cmbMunicipio','cmbSector','txtBarriadas','cmbBarriadas','txtEdificios','cmbEdificios',\n"
-  + "                 'cmbZonaCresta','cmbUsoBien','cmbTipoObjeto','calleoavenida','direccionexacta')\n"
+  + "  WHERE f.nm IN (" + camposObjetoSql + ")\n"
   + "  GROUP BY obj.id, f.nm\n"
   + "),\n"
   + "cp AS (\n"
@@ -167,51 +215,32 @@ var sql = "DECLARE @d date = '" + fecha + "';\n"
   + "  WHERE fld.fname = 'grupoEconomico' AND ISNULL(fld.ud, '') <> ''\n"
   + "  GROUP BY pol.id\n"
   + "),\n"
-  + "tbl AS (SELECT t.name, t.data FROM [Table] t WHERE t.name IN ('cfgGrupoEconomico','ZonaCresta','TablaUsoBien','Barriadas','Edificios')),\n"
-  + "tGrupo AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'cfgGrupoEconomico'),\n"
-  + "tZona AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'ZonaCresta'),\n"
-  + "tUso AS (SELECT x.c0, x.c1 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c1 nvarchar(400) '$[1]') x WHERE tbl.name = 'TablaUsoBien'),\n"
-  + "tBarr AS (SELECT x.c0, x.c3 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c0 nvarchar(50) '$[0]', c3 nvarchar(400) '$[3]') x WHERE tbl.name = 'Barriadas'),\n"
-  + "tEdif AS (SELECT x.c3, x.c4, x.c5 FROM tbl CROSS APPLY OPENJSON(tbl.data) WITH (c3 nvarchar(50) '$[3]', c4 nvarchar(50) '$[4]', c5 nvarchar(400) '$[5]') x WHERE tbl.name = 'Edificios')\n"
-  + "SELECT (\n"
+  + tablaCtesSql
+  + "SELECT (SELECT COUNT(*) FROM polBase) AS total, (\n"
   + "SELECT pol.id, pol.[code] AS poliza, pol.lob, l.name AS ramo, pol.productCode AS planCodigo, pr.name AS [plan], pol.currency AS moneda,\n"
   + "  " + pan('pol.activeDate') + " AS fechaEmision,\n"
-  + "  " + pan('COALESCE(ren.rInicio, pol.inicio)') + " AS fechaInicial,\n"
-  + "  " + pan('COALESCE(sig.sInicio, pol.[end])') + " AS fechaFinal,\n"
+  + "  " + pan('pol.inicio') + " AS fechaInicial,\n"
+  + "  " + pan('pol.[end]') + " AS fechaFinal,\n"
   + "  " + pan("COALESCE((SELECT MAX(lc.[end]) FROM LifeCoverage lc WHERE lc.lifePolicyId = pol.id AND lc.basic = 1), (SELECT MAX(lc.[end]) FROM LifeCoverage lc WHERE lc.lifePolicyId = pol.id), pol.[end])") + " AS fechaCobPrincipal,\n"
-  + "  DATEDIFF(day, " + pan('COALESCE(ren.rInicio, pol.inicio)') + ", " + pan('COALESCE(sig.sInicio, pol.[end])') + ") AS vigenciaDias,\n"
+  + "  DATEDIFF(day, " + pan('pol.inicio') + ", " + pan('pol.[end]') + ") AS vigenciaDias,\n"
   + "  pol.insuredSum AS sumaPoliza, pol.holderId,\n"
   + "  LTRIM(RTRIM(ISNULL(hc.name,'') + ' ' + ISNULL(hc.surname1,'') + ' ' + ISNULL(hc.surname2,''))) AS cliente,\n"
   + "  (SELECT TOP 1 lc.[code] FROM LifeCoverage lc WHERE lc.lifePolicyId = pol.id ORDER BY CASE WHEN lc.basic = 1 THEN 0 ELSE 1 END, lc.id) AS cobPrincipalCodigo,\n"
   + "  (SELECT TOP 1 lc.name FROM LifeCoverage lc WHERE lc.lifePolicyId = pol.id ORDER BY CASE WHEN lc.basic = 1 THEN 0 ELSE 1 END, lc.id) AS cobPrincipal,\n"
-  + "  CASE WHEN ren.id IS NOT NULL THEN COALESCE(TRY_CAST(JSON_VALUE(ren.rFoto,'$.coverages') AS decimal(18,2)), TRY_CAST(JSON_VALUE(ren.rFoto,'$.Bill.coverages') AS decimal(18,2)), ren.rPrima)\n"
-  + "       ELSE COALESCE(CASE WHEN ISJSON(pol.foto1) = 1 THEN TRY_CAST(JSON_VALUE(pol.foto1,'$.coverages') AS decimal(18,2)) END,\n"
-  + "                     CASE WHEN ISJSON(pol.foto1) = 1 THEN TRY_CAST(JSON_VALUE(pol.foto1,'$.Bill.coverages') AS decimal(18,2)) END, pol.primaPoliza) END AS primaBase,\n"
-  + "  ISNULL(dif.difPrima, 0) AS primaEndosos, ISNULL(dif.endosos, 0) AS endosos,\n"
+  + "  pol.primaPoliza AS primaBase,\n"
+  + "  0 AS primaEndosos, 0 AS endosos,\n"
   + "  cp.aFavorDe, cp.secuestrante, cp.objetoAfianzado, cp.descripcionGarantia, cp.valorGarantia, cp.ivigencia,\n"
-  + "  ISNULL(st.name, cp.provincia) AS provincia, ISNULL(ci.name, cp.distrito) AS distrito, ISNULL(se.name, cp.corregimiento) AS corregimiento,\n"
-  + "  COALESCE(NULLIF(LTRIM(RTRIM(cp.barriadaTexto)), ''), tBarr.c3) AS barriada,\n"
-  + "  COALESCE(NULLIF(LTRIM(RTRIM(cp.edificioTexto)), ''), tEdif.c5) AS edificio,\n"
-  + "  COALESCE(tZona.c1, tZona2.c1) AS zonaCresta, tUso.c1 AS usoBien, cp.tipoObjeto, cp.calle, cp.direccion,\n"
+  + ubicacionSql
+  + "  cp.tipoObjeto, cp.calle, cp.direccion,\n"
   + "  tGrupo.c1 AS grupoEconomico\n"
   + "FROM pol\n"
   + "LEFT JOIN Lob l ON l.[code] = pol.lob\n"
   + "LEFT JOIN Product pr ON pr.[code] = pol.productCode\n"
   + "LEFT JOIN Contact hc ON hc.id = pol.holderId\n"
-  + "LEFT JOIN ren ON ren.id = pol.id\n"
-  + "LEFT JOIN sig ON sig.id = pol.id\n"
-  + "LEFT JOIN dif ON dif.lifePolicyId = pol.id\n"
   + "LEFT JOIN cp ON cp.id = pol.id\n"
   + "LEFT JOIN grp ON grp.id = pol.id\n"
   + "LEFT JOIN tGrupo ON tGrupo.c0 = grp.grupoId\n"
-  + "OUTER APPLY (SELECT TOP 1 s.name, s.riskZone FROM StateCatalog s WHERE s.[code] = cp.provincia AND s.countryCode = ISNULL(cp.pais, '591')) st\n"
-  + "OUTER APPLY (SELECT TOP 1 c.name FROM CityCatalog c WHERE c.[code] = cp.distrito) ci\n"
-  + "OUTER APPLY (SELECT TOP 1 s2.name FROM SectorCatalog s2 WHERE s2.[code] = cp.corregimiento) se\n"
-  + "OUTER APPLY (SELECT TOP 1 b.c3 FROM tBarr b WHERE b.c0 = cp.barriadaId AND ISNULL(cp.barriadaId, '0') <> '0') tBarr\n"
-  + "OUTER APPLY (SELECT TOP 1 e.c5 FROM tEdif e WHERE e.c4 = cp.edificioId AND e.c3 = cp.corregimiento AND ISNULL(cp.edificioId, '0') <> '0') tEdif\n"
-  + "LEFT JOIN tZona ON tZona.c0 = cp.zonaCresta\n"
-  + "LEFT JOIN tZona tZona2 ON tZona2.c0 = st.riskZone AND tZona.c0 IS NULL\n"
-  + "LEFT JOIN tUso ON tUso.c0 = cp.usoBien\n"
+  + catalogJoinsSql
   + "ORDER BY pol.lob, pol.[code], pol.id\n"
   + "FOR JSON PATH, INCLUDE_NULL_VALUES) AS j";
 
@@ -219,8 +248,48 @@ doCmd({ cmd: 'DoQuery', data: { sql: sql, timeout: 110 } });
 if (!DoQuery.ok) throw new Error('@No se pudieron leer las pólizas vigentes: ' + DoQuery.msg);
 var bruto = DoQuery.outData && DoQuery.outData.length ? DoQuery.outData[0].j : null;
 var polizas = bruto ? JSON.parse(bruto) : [];
+var totalPolizas = Number(DoQuery.outData && DoQuery.outData.length ? DoQuery.outData[0].total : 0) || 0;
 
-/* 3. Rangos automáticos del perfil, para la columna Rango. */
+/* 3. Reaseguro vigente: solo se consulta para las pólizas ya filtradas como vigentes. */
+var cesionesVigentes = [];
+var acum = {};
+var idsPolizas = polizas.map(function (p) { return Number(p.id); }).filter(function (id) { return id > 0; });
+for (var cb = 0; cb < idsPolizas.length; cb += 900) {
+  var lotePolizas = idsPolizas.slice(cb, cb + 900).join(',');
+  var reaseguroSql = "SELECT c.lifePolicyId AS id, COUNT(*) AS movimientos,\n"
+    + "  SUM(CASE WHEN " + sumCoveragePredicate + " THEN ISNULL(c.sumInsuredCedant, 0) ELSE 0 END) AS sumaRetenida,\n"
+    + "  SUM(CASE WHEN " + sumCoveragePredicate + " THEN ISNULL(c.sumInsuredRe, 0) ELSE 0 END) AS sumaCedidaTotal,\n"
+    + "  SUM(CASE WHEN " + sumCoveragePredicate + " AND UPPER(LTRIM(RTRIM(ISNULL(c.lineId, '')))) LIKE 'FAC%' THEN ISNULL(c.sumInsuredRe, 0) ELSE 0 END) AS sumaFacultativa,\n"
+    + "  SUM(ISNULL(c.premiumCedant, 0)) AS primaRetenida,\n"
+    + "  SUM(ISNULL(c.premiumRe, 0)) AS primaCedidaTotal,\n"
+    + "  SUM(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(c.lineId, '')))) LIKE 'FAC%' THEN ISNULL(c.premiumRe, 0) ELSE 0 END) AS primaFacultativa,\n"
+    + "  SUM(ISNULL(c.nonTechnicalPremium, 0)) AS primaCat,\n"
+    + "  SUM(CASE WHEN " + sumCoveragePredicate + " THEN ISNULL(c.sumInsuredCedant, 0) + ISNULL(c.sumInsuredRe, 0) ELSE 0 END) AS sumaAsegurada100\n"
+    + "FROM Cession c INNER JOIN LifePolicy p ON p.id = c.lifePolicyId\n"
+    + "WHERE c.lifePolicyId IN (" + lotePolizas + ") AND ISNULL(c.overwritten, 0) = 0\n"
+    + "GROUP BY c.lifePolicyId";
+  doCmd({ cmd: 'DoQuery', data: { sql: reaseguroSql, timeout: 60 } });
+  if (!DoQuery.ok) throw new Error('@No se pudo leer el reaseguro vigente: ' + DoQuery.msg);
+  cesionesVigentes = cesionesVigentes.concat(filasDe(DoQuery.outData));
+}
+for (var ci = 0; ci < cesionesVigentes.length; ci++) {
+  var cession = cesionesVigentes[ci];
+  acum[String(cession.id)] = {
+    movimientos: num(cession.movimientos),
+    sumaAsegurada100: num(cession.sumaAsegurada100),
+    sumaCoaseguro: 0,
+    sumaRetenida: num(cession.sumaRetenida),
+    sumaCedidaTotal: num(cession.sumaCedidaTotal),
+    sumaFacultativa: num(cession.sumaFacultativa),
+    primaRetenida: num(cession.primaRetenida),
+    primaCedidaTotal: num(cession.primaCedidaTotal),
+    primaFacultativa: num(cession.primaFacultativa),
+    primaCat: num(cession.primaCat),
+    primaCoaseguro: 0
+  };
+}
+
+/* 4. Rangos automáticos del perfil, para la columna Rango. */
 var rangos = [];
 doCmd({ cmd: 'GetFullTable', data: { table: 'cfgInformeReaseguroRangos' } });
 if (GetFullTable.ok && GetFullTable.outData && GetFullTable.outData.length > 1) {
@@ -293,7 +362,7 @@ for (var pi = 0; pi < polizas.length; pi++) {
     sumaCedida: ac ? r2(ac.sumaCedidaTotal - ac.sumaFacultativa) : 0,
     sumaFacultativa: ac ? r2(ac.sumaFacultativa) : 0,
     sumaCoaseguro: ac ? r2(ac.sumaCoaseguro) : 0,
-    primaSuscrita100: r2(num(p.primaBase) + num(p.primaEndosos)),
+    primaSuscrita100: r2(num(p.primaBase)),
     primaRetenida: ac ? r2(ac.primaRetenida) : 0,
     primaCedida: ac ? r2(ac.primaCedidaTotal - ac.primaFacultativa) : 0,
     primaFacultativa: ac ? r2(ac.primaFacultativa) : 0,
@@ -316,17 +385,25 @@ for (var pi = 0; pi < polizas.length; pi++) {
 }
 CAMPOS_TOTAL.forEach(function (c) { totales[c] = r2(totales[c]); });
 
+var totalFilas = paginarSql ? totalPolizas : filas.length;
+var pagina = paginarSql ? paginaSolicitada : 0;
+var tamanoPagina = paginarSql ? tamanoSolicitado : totalFilas;
+var filasSalida = filas;
+
 return {
   fecha: fecha,
   tipoRamo: tipoRamo,
   ramos: ramos,
-  filas: filas,
+  filas: filasSalida,
+  total: totalFilas,
+  pagina: pagina,
+  tamanoPagina: tamanoPagina,
   totales: totales,
   coberturas: coberturas,
   trazabilidad: {
-    polizasVigentes: filas.length,
+    polizasVigentes: totalFilas,
     polizasConCesion: conCesion,
-    polizasSinCesion: filas.length - conCesion,
+    polizasSinCesion: totalFilas - conCesion,
     cesionesVigentes: cesionesVigentes.length,
     polizasConReaseguroVigente: Object.keys(acum).length,
     polizasConDescuadrePrima: conDescuadre
@@ -334,6 +411,6 @@ return {
   criterio: {
     vigencia: 'emitida a la fecha, inicio de la vigencia original <= fecha <= fin de la póliza, sin cancelación ejecutada ni inactivación hasta la fecha (hora de Panamá)',
     reaseguro: 'distribución vigente de Cession por póliza, filtrada con overwritten=0; cedida = contratos, facultativa aparte',
-    primaSuscrita: 'recibo base de la vigencia en curso + diferencias facturadas de los endosos ejecutados en la vigencia hasta la fecha (PolicyBilling)'
+    primaSuscrita: 'prima vigente de la renovacion ejecutada, del snapshot de emision o de la poliza'
   }
 };

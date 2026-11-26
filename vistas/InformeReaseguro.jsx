@@ -6,11 +6,11 @@
    * Toda la lógica vive en comandos nuevos, uno por consulta:
    *   cmdInformaReaseguroCatalogos, cmdInformaReaseguroPolizasVigentes, cmdInformaReaseguroCumulos,
    *   cmdInformaReaseguroPerfilCartera, cmdInformaReaseguroRangos y cmdInformaReaseguroExportar.
-   * Reaseguro: diferencias acumuladas del borderó (cmdBorderoMovimientos) hasta la fecha de cálculo.
-   * Prima suscrita: diferencias facturadas acumuladas, como PolicyBilling.
+   * Reaseguro: cesiones vigentes de la póliza, filtradas por la configuración dinámica del ramo y producto.
+   * Prima suscrita: prima base de LifePolicy, sin consultar renovaciones ni endosos ejecutados.
    */
   const { useState, useEffect } = React;
-  const { Table, Select, Button, DatePicker, Space, Tabs, Tag, Tooltip, Empty, Checkbox, InputNumber, Alert, Spin, message } = A;
+  const { Table, Select, Button, DatePicker, Space, Tabs, Tag, Tooltip, Empty, Checkbox, InputNumber, Alert, Spin, Modal, message } = A;
 
   const CSS = [
     '.ir-view{padding:8px 12px;color:#262626}',
@@ -26,6 +26,7 @@
     '.ir-grid .ant-table-tbody>tr:hover>td{background:#f5f9ff!important}',
     '.ir-grid .ant-table-summary td{font-weight:700;background:#e8edf3;font-size:12px;padding:5px 6px;border-color:#8f9aa7!important}',
     '.ir-grid .ant-table-body{overflow-y:scroll!important}',
+    '.ir-grid .ant-table-content{overflow-x:scroll!important}',
     '.ir-grid .ant-pagination{margin:8px 0 2px}',
     '.ir-neg{color:#cf1322}',
     '.ir-rangos{padding:10px 12px;border:1px solid #8f9aa7;border-radius:4px;background:#f8fafc}',
@@ -212,12 +213,21 @@
       return { fecha: fechaCalculo.format('YYYY-MM-DD'), tipoRamo: tipoRamo, ramos: ramosSel.slice() };
     }
 
+    function normalizarFilas(out, clave){
+      return (out.filas || []).map(function(f, i){
+        const x = Object.assign({ clave: clave === 'vigentes' ? f.id : i }, f);
+        if (clave === 'vigentes') x.cesionTexto = f.conCesion ? 'Con cesión' : 'Sin cesión';
+        if (clave === 'perfil' && f.sinRango) { x.limiteInferior = 'Sin rango'; x.limiteSuperior = ''; }
+        return x;
+      });
+    }
+
     async function calcular(){
       const base = filtrosBase();
       if (!base) return;
       let cadena, ctx;
-      if (tab === 'vigentes') { cadena = 'cmdInformaReaseguroPolizasVigentes'; ctx = Object.assign({ conCoberturas: conCoberturas }, base); }
-      else if (tab === 'cumulos') { cadena = 'cmdInformaReaseguroCumulos'; ctx = Object.assign({ criterio: criterio, agrupaRamo: agrupaCumulo }, base); }
+      if (tab === 'vigentes') { cadena = 'cmdInformaReaseguroPolizasVigentes'; ctx = Object.assign({ conCoberturas: conCoberturas, pagina: 1, tamanoPagina: 50 }, base); }
+      else if (tab === 'cumulos') { cadena = 'cmdInformaReaseguroCumulos'; ctx = Object.assign({ criterio: criterio, agrupaRamo: agrupaCumulo }, criterio === 10 ? { pagina: 1, tamanoPagina: 50 } : {}, base); }
       else { cadena = 'cmdInformaReaseguroPerfilCartera'; ctx = Object.assign({ tipoRango: tipoRango, agrupaRamo: agrupaPerfil }, base); }
       setCargando(true);
       const t0 = Date.now();
@@ -225,14 +235,24 @@
       setCargando(false);
       if (!res || !res.ok) { message.error(mensajeDeError(res, 'No se pudo calcular el informe.')); return; }
       const out = res.outData || {};
-      const filas = (out.filas || []).map(function(f, i){
-        const x = Object.assign({ clave: tab === 'vigentes' ? f.id : i }, f);
-        if (tab === 'vigentes') x.cesionTexto = f.conCesion ? 'Con cesión' : 'Sin cesión';
-        if (tab === 'perfil' && f.sinRango) { x.limiteInferior = 'Sin rango'; x.limiteSuperior = ''; }
-        return x;
-      });
+      const filas = normalizarFilas(out, tab);
       const nuevo = Object.assign({}, resultados);
       nuevo[tab] = Object.assign({}, out, { filas: filas, segundos: Math.round((Date.now() - t0) / 100) / 10, ctx: ctx });
+      setResultados(nuevo);
+    }
+
+    async function cargarPagina(clave, pagina, tamanoPagina){
+      const actual = resultados[clave];
+      const esCumuloPorPoliza = clave === 'cumulos' && actual && actual.criterio && Number(actual.criterio.codigo) === 10;
+      if ((clave !== 'vigentes' && !esCumuloPorPoliza) || !actual || !actual.ctx) return;
+      const ctx = Object.assign({}, actual.ctx, { pagina: pagina, tamanoPagina: tamanoPagina });
+      setCargando(true);
+      const res = await correr(clave === 'vigentes' ? 'cmdInformaReaseguroPolizasVigentes' : 'cmdInformaReaseguroCumulos', ctx);
+      setCargando(false);
+      if (!res || !res.ok) { message.error(mensajeDeError(res, 'No se pudo cargar la página del informe.')); return; }
+      const out = res.outData || {};
+      const nuevo = Object.assign({}, resultados);
+      nuevo[clave] = Object.assign({}, actual, out, { filas: normalizarFilas(out, clave), ctx: ctx });
       setResultados(nuevo);
     }
 
@@ -252,15 +272,28 @@
     }
     async function exportar(){
       const r = resultados[tab];
-      if (!r || !r.filas.length) { message.info('Primero calcule el informe.'); return; }
-      const defs = definicionesDe(r, tab);
-      const titulos = { vigentes: 'Pólizas Vigentes', cumulos: 'Cúmulos', perfil: 'Perfil de Cartera' };
-      const filas = r.filas.map(function(f){ const x = {}; defs.forEach(function(d){ x[d.k] = f[d.k]; }); return x; });
+      if (!r || !(r.total || r.filas.length)) { message.info('Primero calcule el informe.'); return; }
       setExportando(true);
+      let exportData = r;
+      const exportaCumuloPorPolizaCompleto = tab === 'cumulos' && r.criterio && Number(r.criterio.codigo) === 10 && r.pagina > 0 && r.ctx;
+      if (tab === 'vigentes' && r.pagina > 0 && r.ctx) {
+        const fullRes = await correr('cmdInformaReaseguroPolizasVigentes', Object.assign({}, r.ctx, { pagina: 0, tamanoPagina: 0, exportarCompleto: true }));
+        if (!fullRes || !fullRes.ok) { setExportando(false); message.error(mensajeDeError(fullRes, 'No se pudo preparar el resultado completo para exportar.')); return; }
+        const fullOut = fullRes.outData || {};
+        exportData = Object.assign({}, fullOut, { filas: normalizarFilas(fullOut, tab), ctx: r.ctx });
+      } else if (exportaCumuloPorPolizaCompleto) {
+        const fullRes = await correr('cmdInformaReaseguroCumulos', Object.assign({}, r.ctx, { pagina: 0, tamanoPagina: 0, exportarCompleto: true }));
+        if (!fullRes || !fullRes.ok) { setExportando(false); message.error(mensajeDeError(fullRes, 'No se pudo preparar el resultado completo para exportar.')); return; }
+        const fullOut = fullRes.outData || {};
+        exportData = Object.assign({}, fullOut, { filas: normalizarFilas(fullOut, tab), ctx: r.ctx });
+      }
+      const defs = definicionesDe(exportData, tab);
+      const titulos = { vigentes: 'Pólizas Vigentes', cumulos: 'Cúmulos', perfil: 'Perfil de Cartera' };
+      const filas = exportData.filas.map(function(f){ const x = {}; defs.forEach(function(d){ x[d.k] = f[d.k]; }); return x; });
       const res = await correr('cmdInformaReaseguroExportar', {
-        titulo: 'Informe de Reaseguro - ' + titulos[tab], filtros: filtrosTexto(r, tab), hoja: titulos[tab],
-        archivo: 'InformeReaseguro-' + titulos[tab].replace(/[^A-Za-z]/g, '') + '-' + r.fecha,
-        columnas: defs.map(function(d){ return { titulo: d.t, campo: d.k, tipo: d.tipo }; }), filas: filas, totales: r.totales
+        titulo: 'Informe de Reaseguro - ' + titulos[tab], filtros: filtrosTexto(exportData, tab), hoja: titulos[tab],
+        archivo: 'InformeReaseguro-' + titulos[tab].replace(/[^A-Za-z]/g, '') + '-' + exportData.fecha,
+        columnas: defs.map(function(d){ return { titulo: d.t, campo: d.k, tipo: d.tipo }; }), filas: filas, totales: exportData.totales
       });
       setExportando(false);
       if (!res || !res.ok || !res.outData || !res.outData.base64) { message.error(mensajeDeError(res, 'No se pudo exportar el informe.')); return; }
@@ -340,7 +373,9 @@
       const r = resultados[clave];
       if (cargando) return <div style={{ padding: 24 }}><Spin /> Calculando...</div>;
       if (!r) return <Empty description='Elija los filtros y presione Calcular.' />;
-      if (!r.filas.length) return <Empty description='No hay pólizas vigentes a la fecha para los ramos elegidos.' />;
+      const paginaRemota = clave === 'vigentes' || (clave === 'cumulos' && r.criterio && Number(r.criterio.codigo) === 10);
+      const totalFilas = paginaRemota && r.total !== undefined ? r.total : r.filas.length;
+      if (!totalFilas) return <Empty description='No hay pólizas vigentes a la fecha para los ramos elegidos.' />;
       const defs = definicionesDe(r, clave);
       const columnas = columnasAntd(defs);
       const tz = r.trazabilidad || {};
@@ -351,14 +386,16 @@
       if (num(tz.polizasSinRango) > 0) avisos.push(num(tz.polizasSinRango) + ' pólizas con suma en un hueco entre rangos (fila Sin rango).');
       return <div>
         <div className='ir-info'>
-          { (clave === 'vigentes' ? r.filas.length + ' pólizas vigentes' : r.filas.length + ' filas · ' + num(r.totales && r.totales.cantidad) + ' pólizas') +
+          { (clave === 'vigentes' ? totalFilas + ' pólizas vigentes' : (paginaRemota ? totalFilas : r.filas.length) + ' filas · ' + num(r.totales && r.totales.cantidad) + ' pólizas') +
             ' · fecha de cálculo ' + fecha(r.fecha) + ' · ' + r.segundos + ' s' }
         </div>
         { avisos.length ? <Alert type='info' showIcon style={{ marginBottom: 6, fontSize: 12 }} message={ avisos.join(' ') } /> : null }
-        <div className='ir-grid'>
+          <div className='ir-grid'>
           <Table size='small' rowKey='clave' dataSource={ r.filas } columns={ columnas } bordered
-            scroll={{ x: anchoDe(defs), y: alto }}
-            pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'], size: 'small',
+            scroll={{ x: anchoDe(defs), y: clave === 'perfil' ? Math.max(220, alto - 30) : alto }}
+            pagination={{ current: paginaRemota && r.pagina ? r.pagina : undefined, pageSize: paginaRemota && r.tamanoPagina ? r.tamanoPagina : undefined,
+              total: paginaRemota && r.total !== undefined ? r.total : undefined, onChange: paginaRemota ? function(p, s){ cargarPagina(clave, p, s); } : undefined,
+              defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'], size: 'small',
               showTotal: function(t){ return t + ' filas'; } }} />
         </div>
       </div>;
@@ -427,6 +464,12 @@
 
     return <div className='ir-view'>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
+      <Modal visible={ exportando } footer={ null } closable={ false } maskClosable={ false } centered width={ 280 }>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '12px 0' }}>
+          <Spin size='large' />
+          <span>{'Exportando informe...'}</span>
+        </div>
+      </Modal>
       <div className='ir-title'>Informe de Reaseguro</div>
       <Tabs className='ir-tabs' activeKey={ tab } onChange={ setTab } items={ [
         { key: 'vigentes', label: 'Pólizas Vigentes', children: <div>{ barra() }{ informe('vigentes') }</div> },

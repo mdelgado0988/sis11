@@ -999,6 +999,12 @@
             border: 1px solid #8f9aa7 !important;
             border-radius: 2px;
           }
+          .configurador-producto-view .ant-table-body {
+            overflow-y: scroll !important;
+          }
+          .configurador-producto-view .ant-table-content {
+            overflow-x: scroll !important;
+          }
           .configurador-producto-view .ant-table {
             border: 0 !important;
           }
@@ -1166,6 +1172,14 @@
           }
           .configurador-producto-catalog-modal .ant-table-container {
             border: 1px solid #8f9aa7 !important;
+          }
+          .configurador-producto-formula-modal .ant-table-body,
+          .configurador-producto-catalog-modal .ant-table-body {
+            overflow-y: scroll !important;
+          }
+          .configurador-producto-formula-modal .ant-table-content,
+          .configurador-producto-catalog-modal .ant-table-content {
+            overflow-x: scroll !important;
           }
           .configurador-producto-catalog-modal .ant-table-thead > tr > th,
           .configurador-producto-catalog-modal .ant-table-tbody > tr > td {
