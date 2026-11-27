@@ -6,13 +6,17 @@
  * @email michael.delgado@axxis-systems.com
  * @created 2026-01-13
  * @name cmdContabilizacionPagoReclamoDTO
- * @version 1.2
+ * @version 1.3
  * @purpose Builds the accounting DTO for a claim payment for any line of business.
  * @param context.id ClaimPayment identifier.
  * @test: { id: 18 }
  * @history 1.2 2026-11-19 MSN-000212 (AXX-10554): a request from view 48 can carry taxes, withholdings and deductions,
  *   so its total is the net. monto (payment line and its bank counter-account) stays the total, i.e. the net; the
  *   reinsurance share and the acceptants keep using the gross amount (reinsuranceBase), as before.
+ * @history 1.3 2026-11-27 MSN-000286 (AXX-12162): returns cuentaPago, the account of the payment line. The product's
+ *   account comes first (table CuentasReservaReclamo, row Pago, column '<line>-<product>', e.g. '52-FRAUDE'); an empty
+ *   cell or a missing column falls back to the line's account as before (table CuentasEmisionGeneral, row PagoReclamo
+ *   or GastoReclamo, column of the line). Template PagoReclamo reads _cuentaPago.
  */
 
 try {
@@ -96,6 +100,7 @@ try {
   const codigoPago = tipoPago === 'GastoReclamo'
     ? 'GastosSiniestros'
     : 'PagosSiniestros';
+  const cuentaPago = getCuentaPago(policy, tipoPago);
   const mergedPaymentDetail = isMergedPayment
     ? ` Solicitudes fusionadas: ${paymentItems.map(item => {
       return `#${getPositiveInteger(item && item.id)} (${toNumber(item && item.total).toFixed(2)})`;
@@ -115,6 +120,7 @@ try {
     unique: `TX-R#${payment.claimId}-S#${paymentId}`,
     ramo: getTrimmedString(lob.name),
     tipoPago: tipoPago,
+    cuentaPago: cuentaPago,
     id: paymentId
   }];
 } catch (error) {
@@ -445,6 +451,60 @@ function loadCessionParts(cessionIds) {
   }
 
   return getRows(response.outData);
+}
+
+/**
+ * MSN-000286: the account of the payment line. The product's account (CuentasReservaReclamo, row Pago,
+ * column '<line>-<product>') wins when its cell has a value; otherwise the line's account, the same
+ * lookup the template did before (CuentasEmisionGeneral, row PagoReclamo or GastoReclamo, column of the line).
+ */
+function getCuentaPago(policy, tipoPago) {
+  const lob = getTrimmedString(policy && policy.lob);
+  const product = getTrimmedString(policy && policy.productCode);
+
+  const productAccount = lob && product
+    ? getAccountTableCell(loadAccountTable('CuentasReservaReclamo'), 'Pago', `${lob}-${product}`)
+    : '';
+  if (productAccount) {
+    return productAccount;
+  }
+
+  return getAccountTableCell(loadAccountTable('CuentasEmisionGeneral'), tipoPago, lob);
+}
+
+function loadAccountTable(tableName) {
+  doCmd({
+    cmd: 'GetFullTable',
+    data: {
+      table: tableName
+    }
+  });
+
+  const response = typeof GetFullTable === 'undefined' ? null : GetFullTable;
+  if (!response || response.ok === false || !response.outData) {
+    throw new Error(response && response.msg
+      ? response.msg
+      : `No fue posible recuperar la tabla de cuentas ${tableName}`);
+  }
+
+  return getRows(JSON.parse(JSON.stringify(response.outData)));
+}
+
+// Rows are keyed by their "Cuenta" column; the header row names the other columns.
+function getAccountTableCell(rows, rowKey, columnKey) {
+  const header = getRows(rows[0]).map(normalizeKey);
+  const keyIndex = header.indexOf('CUENTA');
+  const columnIndex = header.indexOf(normalizeKey(columnKey));
+  if (keyIndex < 0 || columnIndex < 0) {
+    return '';
+  }
+
+  const row = rows.slice(1).find(item => normalizeKey(getRows(item)[keyIndex]) === normalizeKey(rowKey));
+  return row ? getTrimmedString(row[columnIndex]) : '';
+}
+
+function normalizeKey(value) {
+  return getTrimmedString(value).toUpperCase();
 }
 
 function loadReinsuranceAccountRules() {

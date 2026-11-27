@@ -1170,7 +1170,7 @@
                   rowKey="fileName"
                   tableLayout="fixed"
                   scroll={{ x: 970, y: tableScrollY }}
-                  pagination={{ pageSize: 15, showSizeChanger: false }}
+                  pagination={{ pageSize: 50, showSizeChanger: false }}
                   style={{ '--bi-grid-body-height': tableScrollY + 'px' }}
                   locale={area ? undefined : { emptyText: t('Seleccione un \u00e1rea para ver sus reportes') }}>
             <A.Table.Column

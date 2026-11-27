@@ -389,12 +389,14 @@
         publicPrice: null, agreedPrice: null, priceSource: 'MANUAL', overAgreed: false, overPublic: false, total: tax,
         taxRate: RO_TAX.rate, taxBase: base }]);
     };
-    const roLinesToSave = (lines) => roWithTax(lines, (lines || []).some(roIsTaxLine)).filter((line) => !roIsTaxLine(line) || line.total > 0);
-    const roAdjustmentCount = (lines) => roItemLines(lines).filter((line) => Number(line.quotedPrice) < 0).length;
+    const roLinesToSave = (lines) => roWithTax(lines, (lines || []).some(roIsTaxLine))
+      .filter((line) => !roIsTaxLine(line) || line.total > 0)
+      .filter((line) => roIsTaxLine(line) || Number(line.quotedPrice) >= 0);
+    const roAdjustmentCount = () => 0;
 
     // Editable quote lines: category -> article cascade of the provider subtype catalog, prices from GetRepairOrderPrice.
-    // MSN-000273: a negative quoted price makes the line an adjustment (origin AJUSTE) that lowers the sub-total, so the order can
-    // match the supplier's invoice. The server keeps those lines through the triggers of chain cmdAjustesOrdenCompra.
+    // Los precios cotizados de las órdenes son importes no negativos; los ajustes
+    // negativos ya no forman parte del detalle editable ni se guardan en la orden.
     const RepairLinesEditor = function RepairLinesEditor(props) {
       const [categories, setCategories] = React.useState([]);
       const [articles, setArticles] = React.useState({});
@@ -456,8 +458,11 @@
         });
       };
       const onQtyChange = (index, qty) => change(index, recompute(Object.assign({}, lines[index], { qty: qty })));
-      const onQuotedChange = (index, quotedPrice) => change(index, recompute(Object.assign({}, lines[index],
-        { quotedPrice: quotedPrice, priceSource: Number(quotedPrice) < 0 ? 'AJUSTE' : 'MANUAL' })));
+      const onQuotedChange = (index, quotedPrice) => {
+        if (quotedPrice != null && Number(quotedPrice) < 0) return;
+        change(index, recompute(Object.assign({}, lines[index],
+          { quotedPrice: quotedPrice, priceSource: 'MANUAL' })));
+      };
       const subtotal = roSubtotal(lines);
       const taxLine = allLines.find(roIsTaxLine);
       const tax = taxLine ? roRound(taxLine.total) : 0;
@@ -483,7 +488,7 @@
             <Table.Column dataIndex="agreedPrice" title={<span className="resumen-repair-order-amount">Precio convenido</span>} render={(v) => <span className="resumen-repair-order-amount">{v == null ? '-' : money(v, currency)}</span>} />
             <Table.Column dataIndex="quotedPrice" title={<span className="resumen-repair-order-amount">Precio cotizado</span>} width={200} render={(v, r, index) => (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
-                {readOnly ? <span className="resumen-repair-order-amount">{money(v || 0, currency)}</span> : <InputNumber value={v} onChange={(value) => onQuotedChange(index, value)} style={{ width: 100 }} />}
+                {readOnly ? <span className="resumen-repair-order-amount">{money(v || 0, currency)}</span> : <InputNumber min={0} value={v} onChange={(value) => onQuotedChange(index, value)} style={{ width: 100 }} />}
                 {r.overPublic ? <Tooltip title="El precio cotizado supera el precio público"><Tag color="red" style={{ marginLeft: 5 }}>Sobre público</Tag></Tooltip>
                   : r.overAgreed ? <Tooltip title="El precio cotizado supera el precio convenido"><Tag color="orange" style={{ marginLeft: 5 }}>Sobre convenido</Tag></Tooltip>
                   : null}
@@ -1050,6 +1055,9 @@
       const [compareVisible, setCompareVisible] = React.useState(false);
       const [documentGenerating, setDocumentGenerating] = React.useState(false);
       const [paymentGenerating, setPaymentGenerating] = React.useState(false);
+      const [paymentAmountVisible, setPaymentAmountVisible] = React.useState(false);
+      const [paymentInvoiceAmount, setPaymentInvoiceAmount] = React.useState(null);
+      const [paymentAmountError, setPaymentAmountError] = React.useState('');
       const load = () => {
         if (!props.claim) return;
         setLoading(true);
@@ -1092,19 +1100,81 @@
         const coverage = props.claim && props.claim.Policy && (props.claim.Policy.Coverages || []).find((c) => c.id === coverageId);
         return coverage ? coverage.name : coverageId;
       };
+      // A payment generated from several orders stores one association per order.
+      // Allocate that payment proportionally by the amount recorded in each association;
+      // reversals carry the same associations and therefore reduce the paid amount too.
+      const orderPaidAmount = (orderId) => {
+        const claim = props.claim;
+        if (!claim) return 0;
+        const payouts = claim && Array.isArray(claim.Payouts) ? claim.Payouts : [];
+        const targetId = Number(orderId);
+        return roundMoney(payouts.reduce((sum, payout) => {
+          if (!payout || Number(payout.claimId) !== Number(claim.id)
+            || String(payout.reserveType || '').trim().toUpperCase() !== 'IN') return sum;
+          const associations = affectedObjectEntries(payout.jAffectedObjects)
+            .filter((entry) => Number(entry && entry.repairOrderId) > 0);
+          const target = associations.find((entry) => Number(entry.repairOrderId) === targetId);
+          if (!target) return sum;
+          const amount = numericValue(payout.payed);
+          if (amount === null) return sum;
+          const totalAssociated = associations.reduce((total, entry) => {
+            const value = numericValue(entry.totalQuoted);
+            return total + (value !== null && value > 0 ? value : 0);
+          }, 0);
+          const targetAmount = numericValue(target.totalQuoted);
+          const allocation = associations.length > 1 && totalAssociated > 0 && targetAmount !== null
+            ? amount * targetAmount / totalAssociated : amount;
+          return sum + allocation;
+        }, 0));
+      };
+      const displayedOrders = data.map((record) => {
+        const paid = orderPaidAmount(record.id);
+        const approved = numericValue(record.approvedAmount);
+        return Object.assign({}, record, {
+          settledAmount: paid,
+          balance: approved === null ? record.balance : roundMoney(approved - paid)
+        });
+      });
+      const orderAmount = (value, currency, inverted) => {
+        const amount = numericValue(value);
+        const tone = amount !== null && amount > 0
+          ? inverted ? 'resumen-grid-amount-negative' : 'resumen-grid-amount-positive'
+          : amount !== null && amount < 0
+            ? inverted ? 'resumen-grid-amount-positive' : 'resumen-grid-amount-negative'
+            : 'resumen-grid-amount-zero';
+        return <span className={tone}>{money(value, currency)}</span>;
+      };
       const isSelected = (record) => selectedRows.some((item) => item.id === record.id);
       const toggleSelected = (record, selected) => {
         setSelectedRows((current) => selected
           ? current.some((item) => item.id === record.id) ? current : current.concat(record)
           : current.filter((item) => item.id !== record.id));
       };
-      const toggleAll = (selected) => setSelectedRows(selected ? data.slice() : []);
-      const allSelected = data.length > 0 && selectedRows.length === data.length;
+      const toggleAll = (selected) => setSelectedRows(selected ? displayedOrders.slice() : []);
+      const allSelected = displayedOrders.length > 0 && selectedRows.length === displayedOrders.length;
       const approvedSelected = selectedRows.length > 0 && selectedRows.every((row) => row && row.status === 'ACTIVE');
+      const selectedOrderAmount = () => roundMoney(selectedRows.reduce((sum, row) => {
+        const value = numericValue(row && (row.approvedAmount != null ? row.approvedAmount : row.total));
+        return sum + (value === null ? 0 : value);
+      }, 0));
+      const openPaymentAmountModal = () => {
+        if (paymentGenerating || !approvedSelected || typeof props.onGeneratePayment !== 'function') return;
+        setPaymentInvoiceAmount(selectedOrderAmount());
+        setPaymentAmountError('');
+        setPaymentAmountVisible(true);
+      };
       const generateSelectedPayment = () => {
+        const amount = numericValue(paymentInvoiceAmount);
+        if (amount === null || amount <= 0) {
+          setPaymentAmountError('Indique un monto de factura mayor que cero.');
+          return;
+        }
         if (paymentGenerating || !approvedSelected || typeof props.onGeneratePayment !== 'function') return;
         setPaymentGenerating(true);
-        Promise.resolve(props.onGeneratePayment(selectedRows)).finally(() => setPaymentGenerating(false));
+        Promise.resolve(props.onGeneratePayment(selectedRows, amount)).then((success) => {
+          if (success) setPaymentAmountVisible(false);
+          return success;
+        }).finally(() => setPaymentGenerating(false));
       };
       return (
         <div className="resumen-repair-orders">
@@ -1118,15 +1188,25 @@
             <div className="resumen-reserve-actions">
               <Button size="small" type="primary" icon={<RoIcon name="plus" />} onClick={() => setRequestVisible(true)}>Nueva solicitud de orden de compra</Button>
               <Button size="small" type="primary" icon={<RoIcon name="compare" />} onClick={onCompare} disabled={selectedRows.length < 2}>Comparar</Button>
-              <Popconfirm title="¿Está seguro de generar el pago para las órdenes seleccionadas? Esta acción creará y aprobará el pago."
-                onConfirm={generateSelectedPayment} okText="Sí, generar" cancelText="Cancelar"
-                disabled={!approvedSelected || documentGenerating || paymentGenerating}>
-                <Button size="small" type="primary" icon={<RoIcon name="check" />} loading={paymentGenerating}
-                  disabled={!approvedSelected || documentGenerating || paymentGenerating}>Generar pago</Button>
-              </Popconfirm>
+              <Button size="small" type="primary" icon={<RoIcon name="check" />} loading={paymentGenerating}
+                disabled={!approvedSelected || documentGenerating || paymentGenerating} onClick={openPaymentAmountModal}>Generar pago</Button>
               <Button size="small" type="primary" icon={<RoIcon name="reload" />} onClick={load}>Recargar</Button>
             </div>
           </div>
+          <Modal title="Generar pago de órdenes de compra" visible={paymentAmountVisible}
+            onCancel={() => { if (!paymentGenerating) setPaymentAmountVisible(false); }}
+            onOk={generateSelectedPayment} okText="Sí, generar y aprobar" cancelText="Cancelar"
+            closable={!paymentGenerating} maskClosable={!paymentGenerating}
+            okButtonProps={{ loading: paymentGenerating }}>
+            <p>Ingrese el monto de la factura. Por defecto se muestra la suma de las órdenes seleccionadas.</p>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ marginBottom: 5 }}>Monto de la factura</div>
+              <InputNumber min={0} precision={2} value={paymentInvoiceAmount} style={{ width: '100%' }}
+                disabled={paymentGenerating} onChange={(value) => { setPaymentInvoiceAmount(value); setPaymentAmountError(''); }} />
+            </div>
+            {paymentAmountError ? <Alert type="error" showIcon message={paymentAmountError} /> : null}
+            <Alert type="warning" showIcon message="¿Está seguro de aplicar este pago? El pago y la solicitud de cheque se registrarán exactamente por el monto digitado." />
+          </Modal>
           <div className="resumen-table-wrap resumen-repair-orders-table-wrap">
             <table className="resumen-data-table resumen-repair-orders-table">
               <thead><tr>
@@ -1134,10 +1214,10 @@
                   onChange={(event) => toggleAll(event.target.checked)} aria-label="Seleccionar todas las órdenes" /></th>
                 <th className="resumen-repair-orders-id">Id</th><th className="resumen-repair-orders-request">Solicitud</th><th className="resumen-repair-orders-provider">Proveedor</th>
                 <th className="resumen-repair-orders-coverage">Cobertura</th><th className="resumen-repair-orders-status">Estado</th><th className="resumen-cell-number">Total cotizado</th>
-                <th className="resumen-cell-number">Aprobado</th><th className="resumen-cell-number">Liquidado</th><th className="resumen-cell-number">Saldo</th>
+                <th className="resumen-cell-number">Aprobado</th><th className="resumen-cell-number">Pagado</th><th className="resumen-cell-number">Saldo</th>
                 <th className="resumen-repair-orders-created">Creada</th><th className="resumen-repair-orders-actions">Acciones</th>
               </tr></thead>
-              <tbody>{data.length ? data.map((record) => {
+              <tbody>{displayedOrders.length ? displayedOrders.map((record) => {
                 const selected = isSelected(record);
                 const provider = record.Provider && record.Provider.name || record.providerCode || '-';
                 const coverage = coverageName(record.coverageId);
@@ -1152,10 +1232,10 @@
                   <td className="resumen-repair-orders-provider"><Tooltip title={provider}><span className="resumen-cell-ellipsis">{provider}</span></Tooltip></td>
                   <td className="resumen-repair-orders-coverage"><Tooltip title={coverage}><span className="resumen-cell-ellipsis">{coverage}</span></Tooltip></td>
                   <td className="resumen-repair-orders-status">{statusTag(record.status)}</td>
-                  <td className="resumen-cell-number">{money(record.total, record.currency)}</td>
-                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : money(record.approvedAmount, record.currency)}</td>
-                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : money(record.settledAmount, record.currency)}</td>
-                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : money(record.balance, record.currency)}</td>
+                  <td className="resumen-cell-number">{orderAmount(record.total, record.currency)}</td>
+                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : orderAmount(record.approvedAmount, record.currency)}</td>
+                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : orderAmount(record.settledAmount, record.currency, true)}</td>
+                  <td className="resumen-cell-number">{record.approvedAmount == null ? '-' : orderAmount(record.balance, record.currency)}</td>
                   <td className="resumen-repair-orders-created">{dateTime(record.created)}</td>
                   <td className="resumen-repair-orders-actions"><div className="resumen-repair-orders-action-list">
                     <Button type="link" icon={<RoIcon name="edit" />} aria-label={'Abrir RO-' + record.id}
@@ -1171,9 +1251,9 @@
               }) : <tr><td className="resumen-empty-row" colSpan="12">No hay órdenes de reparación registradas para este siniestro.</td></tr>}</tbody>
             </table>
           </div>
-          <RepairOrderRequest claim={props.claim} config={props.config} orders={data} visible={requestVisible}
+          <RepairOrderRequest claim={props.claim} config={props.config} orders={displayedOrders} visible={requestVisible}
             onCancel={() => setRequestVisible(false)} onCreated={() => { setRequestVisible(false); load(); }} onRefresh={load} />
-          <RepairOrderDetail claim={props.claim} config={props.config} orderId={detailOrderId} visible={!!detailOrderId} orders={data}
+          <RepairOrderDetail claim={props.claim} config={props.config} orderId={detailOrderId} visible={!!detailOrderId} orders={displayedOrders}
             onClose={() => { setDetailOrderId(undefined); load(); }}
             onOpenOrder={(orderId) => { setDetailOrderId(orderId); load(); }}
             onChanged={() => (props.onChanged ? props.onChanged() : undefined)} />
@@ -2002,9 +2082,12 @@
     return Number.isFinite(number) ? number : null;
   };
   const isReserveMovement = (row) => numericValue(row && row.payed) === 0;
-  const parseMoneyInput = (value) => {
+  const parseMoneyInput = (value, allowNegative) => {
     const text = String(value == null ? '' : value);
-    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d{0,2})?$/.test(text)) return null;
+    const pattern = allowNegative
+      ? /^-?(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d{0,2})?$/
+      : /^(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d{0,2})?$/;
+    if (!pattern.test(text)) return null;
     return text.replace(/,/g, '');
   };
   const formatMoneyInput = (value) => {
@@ -2012,10 +2095,10 @@
     const parts = text.split('.');
     return parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (parts.length > 1 ? '.' + parts[1] : '');
   };
-  const changeMoneyInput = (event, change) => {
+  const changeMoneyInput = (event, change, allowNegative) => {
     const inputType = event.nativeEvent && event.nativeEvent.inputType;
     const editing = ['insertText', 'deleteContentBackward', 'deleteContentForward', 'deleteByCut'].indexOf(inputType) !== -1;
-    const value = parseMoneyInput(editing ? event.target.value.replace(/,/g, '') : event.target.value);
+    const value = parseMoneyInput(editing ? event.target.value.replace(/,/g, '') : event.target.value, allowNegative);
     if (value === null) return;
     const input = event.target;
     const offset = input.value.slice(0, input.selectionStart).replace(/,/g, '').length;
@@ -2136,7 +2219,7 @@
     }).filter(Boolean);
   };
 
-  const buildReserveEntity = (claim, coverageId, direction, bucket, amount, concept) => {
+  const buildReserveEntity = (claim, coverageId, direction, bucket, amount, concept, allowNegative) => {
     if (!claim || !canEdit(claim)) throw new Error('El siniestro no permite registrar reservas.');
     const policyId = Number(claim.lifePolicyId || (claim.Policy && claim.Policy.id));
     const requestedClaimId = Number(claim.id);
@@ -2151,7 +2234,9 @@
     }
     if (bucket !== 'IN' && bucket !== 'EX') throw new Error('El tipo de reserva no es válido.');
     const numericAmount = numericValue(amount);
-    if (numericAmount === null || numericAmount <= 0) throw new Error('El monto debe ser mayor que cero.');
+    if (numericAmount === null || numericAmount === 0 || !allowNegative && numericAmount < 0) {
+      throw new Error(allowNegative ? 'El monto no puede ser cero.' : 'El monto debe ser mayor que cero.');
+    }
     const cleanConcept = String(concept || '').trim();
     if (!cleanConcept) throw new Error('El concepto es obligatorio.');
     if (direction === 'DECREASE') {
@@ -3965,7 +4050,7 @@ END CATCH;`;
     return Number.isFinite(rounded) ? rounded : null;
   };
   const buildFinancialPaymentEntity = (claim, coverageId, amount, concept, bucket) => {
-    const entity = buildReserveEntity(claim, coverageId, 'INCREASE', bucket, amount, concept);
+    const entity = buildReserveEntity(claim, coverageId, 'INCREASE', bucket, amount, concept, bucket === 'IN');
     const coverage = normalizeCoverageRows(claim).find((row) => row.id === Number(coverageId));
     if (!coverage) throw new Error('La cobertura seleccionada no pertenece al siniestro.');
     const available = paymentSpendingAvailable(claim, coverageId, bucket);
@@ -4393,7 +4478,7 @@ END CATCH;`;
       .then((outcome) => finishPaymentOperation(context, outcome));
   };
 
-  const createPaymentFromRepairOrders = (orders) => {
+  const createPaymentFromRepairOrders = (orders, invoiceAmount) => {
     const claim = currentClaimRef.current;
     const selectedOrders = Array.isArray(orders) ? orders.filter(Boolean) : [];
     if (!claim || !canEdit(claim) || !selectedOrders.length) {
@@ -4414,13 +4499,20 @@ END CATCH;`;
       setPaymentError('Las órdenes seleccionadas no tienen un monto aprobado válido.');
       return Promise.resolve(false);
     }
-    const amount = roundMoney(amounts.reduce((total, value) => total + value, 0));
+    const requestedAmount = numericValue(invoiceAmount);
+    if (requestedAmount === null || requestedAmount <= 0) {
+      setPaymentError('El monto de la factura debe ser mayor que cero.');
+      return Promise.resolve(false);
+    }
+    const amount = roundMoney(requestedAmount);
     const available = paymentSpendingAvailable(claim, coverageId, 'IN');
     if (!Number.isFinite(available) || amount > available) {
       setPaymentError('El monto de las órdenes supera el saldo disponible de la reserva de la cobertura.');
       return Promise.resolve(false);
     }
     let entity;
+    const coverage = normalizeCoverageRows(claim).find((row) => Number(row.id) === Number(coverageId));
+    const customDeductiblePayment = !!(coverage && Number(coverage.deductible) > 0);
     try {
       entity = buildPaymentReserveEntity(claim, coverageId, amount,
         'Pago generado por órdenes de compra: ' + selectedOrders.map((order) => 'RO-' + order.id).join(', '));
@@ -4440,8 +4532,10 @@ END CATCH;`;
     const context = startPaymentOperation();
     if (!context) return Promise.resolve(false);
     let createdId = null;
-    return repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity })
-      .then((result) => {
+    const creation = customDeductiblePayment
+      ? exe('ExeChain', { chain: 'cmdCustomLifeCoveragePayout', context: JSON.stringify(entity) })
+      : repositoryRequest('RepoLifeCoveragePayout', { operation: 'ADD', entity: entity });
+    return creation.then((result) => {
         const body = confirmedCommandResult(result, 'No fue posible crear el pago de las órdenes de compra.');
         const rows = body && body.outData !== undefined ? responseRows(body, 'el pago de las órdenes')
           : responseRows(result && result.outData, 'el pago de las órdenes');
@@ -4450,6 +4544,7 @@ END CATCH;`;
           const direct = result && result.outData && !Array.isArray(result.outData) ? result.outData : null;
           createdId = numericValue(direct && direct.id);
         }
+        if (createdId === null) createdId = numericValue(result && result.id);
         if (createdId === null) throw new Error('El pago fue aceptado sin un identificador verificable.');
         return refreshFinancialData(claimId);
       }).then(() => {
@@ -5054,6 +5149,21 @@ END CATCH;`;
     if (Number(status) !== 1) return 'Este movimiento no está disponible para solicitar un cheque.';
     return '';
   };
+  const claimPaymentHistoryNet = (claim, coverageId, history) => {
+    const rows = Array.isArray(history) ? history : [];
+    let total = rows.reduce((sum, row) => sum + Number(row.grossAmount), 0);
+    const requestPayoutIds = new Set(rows.map((row) => Number(row.payoutId)));
+    const payouts = Array.isArray(claim && claim.Payouts) ? claim.Payouts : [];
+    payouts.forEach((row) => {
+      if (!row || Number(row.lifeCoverageId) !== Number(coverageId) || Number(row.status) !== 2
+        || !(Number(row.payed) < 0) || requestPayoutIds.has(Number(row.id))) return;
+      const reversalId = numericValue(row.reversalOfId);
+      const match = String(row.concept || '').match(/reversi[oó]n del movimiento\s*#(\d+)/i);
+      const originalId = reversalId !== null ? reversalId : match ? Number(match[1]) : null;
+      if (originalId !== null && requestPayoutIds.has(originalId)) total += Number(row.payed);
+    });
+    return roundMoney(total);
+  };
   const nativeSettlementQuote = (claim, payout, beneficiaryType, beneficiary, contactId) => {
     if (!payout || !(claim.Payouts || []).some((row) => row === payout)
       || (claim.Payouts || []).filter((row) => Number(row.id) === Number(payout.id)).length !== 1) throw new Error('El movimiento seleccionado no está disponible. Refresque la vista.');
@@ -5078,9 +5188,10 @@ END CATCH;`;
       throw new Error('El historial de pagos no tiene importe o movimiento verificable; revise la vista nativa.');
     }
     const coverageAvailable = roundMoney(movements.reduce((sum, row) => sum + Number(row.payed), 0)
-      - history.reduce((sum, row) => sum + Number(row.grossAmount), 0));
+      - claimPaymentHistoryNet(claim, payout.lifeCoverageId, history));
     const linkedPayments = history.filter((row) => Number(row.payoutId) === Number(payout.id));
-    const rowAvailable = roundMoney(Number(payout.payed) - linkedPayments.reduce((sum, row) => sum + Number(row.grossAmount), 0));
+    const rowAvailable = roundMoney(Number(payout.payed)
+      - claimPaymentHistoryNet(claim, payout.lifeCoverageId, linkedPayments));
     let proposed = coverageAvailable;
     if (beneficiaryType === 'BEN') {
       const share = numericValue(beneficiary && beneficiary.percentage);
@@ -8500,7 +8611,7 @@ END CATCH;`;
           </div> : null}
           <div className="resumen-reserve-input"><label>Monto</label><Input size="small" inputMode="decimal"
             disabled={!editable || paymentSaving} value={formatMoneyInput(config.amount)}
-            onChange={(event) => changeMoneyInput(event, config.setAmount)} /></div>
+            onChange={(event) => changeMoneyInput(event, config.setAmount, config.key === 'payments')} /></div>
           <div className="resumen-reserve-input resumen-payment-concept">
             <label>Concepto</label>
             <TextArea rows={3} maxLength={250}
@@ -8538,7 +8649,7 @@ END CATCH;`;
         </div> : null}
       </Modal> : null}
       <Modal title={config.checkTitle} visible={config.checkOpen} footer={null} destroyOnClose
-        maskClosable={!paymentSaving} closable={!paymentSaving} wrapClassName="resumen-reserve-modal"
+        maskClosable={false} keyboard={false} closable={!paymentSaving} wrapClassName="resumen-reserve-modal"
         onCancel={() => closeCheckModal(config)}>
         <div className="resumen-reserve-form resumen-check-form">
           <div className="resumen-check-section-title">Beneficiario</div>

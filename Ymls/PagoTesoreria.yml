@@ -1,0 +1,21 @@
+scanCommand:
+  cmd: ExeChain
+  data:
+    chain: cmdContabilizaPagoTesoreriaDTO
+    context: "{ id: _id }"
+uniqueKey: _unique
+reference: _referencia
+status: 1
+code: _code
+description: _description
+entity: "ClaimPayment"
+entityId: _id
+Lines:
+#Lineas de la tabla cfgTransaccionesTesoreria del tipo de pago, resueltas por cmdContabilizaPagoTesoreriaDTO (MSN-000285)
+  - account: _item.cuenta
+    debit: _item.debe
+    credit: _item.haber
+    comments: "_item.descripcion != '' ? _item.descripcion : _description"
+    order: _item.linea
+    map: _lineas
+    mapCondition: _item.debe != 0 || _item.haber != 0

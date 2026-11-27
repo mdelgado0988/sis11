@@ -2913,6 +2913,12 @@
         var selected = data.find(function (p) { return p.code == props.value; });
         if (props.onSelect) props.onSelect(selected);
       }, [props.triggerSelect, data]);
+      useEffect(function () {
+        //Defaults loaded from configuration are also required to belong to the catalog.
+        if (props.value && data.length && !data.find(function (p) { return p.code == props.value; })) {
+          if (props.onChange) props.onChange(undefined);
+        }
+      }, [props.value, data]);
       var load = function () {
         setLoading(true);
         exe("RepoPaymentTypeCatalog", { operation: "GET" }).then(function (r) {
@@ -2924,8 +2930,23 @@
       var onSelect = function (v, opt) {
         if (props.onSelect) props.onSelect(opt.props.record);
       };
+      var onChange = function (v) {
+        // A searchable Select must still keep only values from the catalog.
+        // Typing filters the options; it must never become a free-form value.
+        var selected = data.find(function (p) { return p.code == v; });
+        if (v && !selected) {
+          if (props.onChange) props.onChange(undefined);
+          return;
+        }
+        if (props.onChange) props.onChange(v);
+      };
+      var filterOption = function (input, option) {
+        var record = option && option.props && option.props.record;
+        var text = record ? String(t(record.name) || "") + " " + String(record.code || "") : "";
+        return text.toLowerCase().indexOf(String(input || "").toLowerCase()) >= 0;
+      };
       return (
-        <Select value={props.value} onChange={function (v) { props.onChange(v); }} onSelect={onSelect} loading={loading} style={Object.assign({ width: "100%" }, props.style)} placeholder={t("Please select...")} disabled={props.disabled} allowClear>
+        <Select value={props.value} onChange={onChange} onSelect={onSelect} loading={loading} showSearch optionFilterProp="children" filterOption={filterOption} style={Object.assign({ width: "100%" }, props.style)} placeholder={t("Please select...")} disabled={props.disabled} allowClear>
           {data.map(function (p) { return <Select.Option value={p.code} key={p.code} record={p}>{t(p.name)}</Select.Option>; })}
         </Select>
       );
@@ -2972,6 +2993,8 @@
       var taxes = detail.filter(function (p) { return p.taxType === props.taxType; }) || [];
       var otherTaxes = detail.filter(function (p) { return p.taxType !== props.taxType; }) || [];
       var grossAmount = props.grossAmount || 0;
+      //MSN-000272: a 0%-rate line of a type outside Payment.editableTaxTypes (5 "Retencion de ITBMS") takes a typed amount, kept when the gross changes
+      var isTypedLine = function (p) { return editableTaxTypes.indexOf(p.taxType) < 0 && Number(p.rate) === 0; };
       useEffect(function () {
         getConfigProfile().then(function (profile) {
           setEditableTaxTypes(safeGet(["Payment", "editableTaxTypes"], profile, ["DED", "RETSALV", "ADDSALV"]));
@@ -2979,7 +3002,7 @@
       }, []);
       useEffect(function () {
         if (props.grossAmount && taxes.length > 0 && taxes.some(function (p) { return p.grossAmount !== props.grossAmount; })) {
-          var newTaxes = taxes.map(function (p) { return Object.assign({}, p, { grossAmount: props.grossAmount, amount: roundMoney(p.rate * props.grossAmount, props.currency) }); });
+          var newTaxes = taxes.map(function (p) { return Object.assign({}, p, { grossAmount: props.grossAmount, amount: isTypedLine(p) ? p.amount : roundMoney(p.rate * props.grossAmount, props.currency) }); });
           var newTotal = newTaxes.reduce(function (p, c) { return p + c.amount; }, 0);
           props.onChange(newTotal);
           props.onDetailChange(otherTaxes.concat(newTaxes));
@@ -3029,7 +3052,7 @@
               <Table.Column title={t("Code")} dataIndex="valueAddedCode" />
               <Table.Column title={t("Name")} dataIndex="taxName" />
               <Table.Column title={t("Rate")} dataIndex="rate" />
-              <Table.Column title={t("Amount")} dataIndex="amount" render={function (v, r) { return editableTaxTypes.indexOf(r.taxType) >= 0 ? <InputNumber value={v} onChange={function (value) { onChangeAmount(r, value); }} /> : v; }} />
+              <Table.Column title={t("Amount")} dataIndex="amount" render={function (v, r) { return editableTaxTypes.indexOf(r.taxType) >= 0 || isTypedLine(r) ? <InputNumber value={v} onChange={function (value) { onChangeAmount(r, value); }} /> : v; }} />
               <Table.Column title={t("Actions")} key="actions" render={function (v, r) {
                 return (
                   <div>

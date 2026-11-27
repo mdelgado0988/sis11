@@ -11,12 +11,24 @@
  *   CuentaTipoPagoSolicitud). Si la fila no trae CuentaHabe, el Haber es la cuenta contable de la cuenta origen de la
  *   solicitud y, si no tiene, la de la tabla CuentaOrigenAutomatica (IdCuenta, CodigoCuenta, CuentaContable).
  *   Devuelve tipoPago para el texto de las líneas.
+ * @version 1.2 (2026-11-26, AXX-11903 / MSN-000272) Retención de ITBMS tecleada en la vista 82 (línea RET código 5):
+ *   devuelve itbmsRetenido (suma de las líneas RET código 5 de la solicitud y, si es una solicitud unificada, de sus
+ *   hijas), montoDebe = total + itbmsRetenido y cuentaItbmsRetenido (280.02.01.15.01.00.00.00.000, validada en el
+ *   catálogo cuando hay ITBMS). Sin ITBMS, montoDebe = total y el asiento no cambia.
+ * @version 1.3 (2026-11-27, AXX-12159 / MSN-000285) Los tipos de pago con líneas en la tabla cfgTransaccionesTesoreria
+ *   se contabilizan con la plantilla PagoTesoreria: para ellos esta cadena ejecuta ExeTransactionTemplate
+ *   PagoTesoreria con la solicitud (la plantilla no repite un asiento ya generado) y devuelve [], así
+ *   PagoSolicitudManual no genera un segundo asiento. Si PagoTesoreria falla, la cadena lanza su mensaje.
  */
 
 /********************** Utilitarios ************************/
 
 function texto(valor) {
   return valor === null || valor === undefined ? "" : String(valor).trim();
+}
+
+function redondear(valor) {
+  return Math.round(((Number(valor) || 0) + Number.EPSILON) * 100) / 100;
 }
 
 function leerTabla(nombre) {
@@ -96,6 +108,25 @@ const tipoPagoCode = payment.paymentType ?? "0";
 
 if(tipoPagoCode == "0" || tipoPagoCode == "")
   throw "Solicitud no posee un tipo de pago válido";
+
+/********************** Tipos de pago de la plantilla PagoTesoreria ************************/
+
+const transaccionesTesoreria = leerTabla("cfgTransaccionesTesoreria") || [];
+if (transaccionesTesoreria.some(f => texto(f.IdTransaccion) == texto(tipoPagoCode))) {
+  log(`El tipo de pago ${tipoPagoCode} se contabiliza con la plantilla PagoTesoreria (tabla cfgTransaccionesTesoreria)`);
+  doCmd({
+    cmd: "ExeTransactionTemplate",
+    data: {
+      code: "PagoTesoreria",
+      scanContext: { id: id }
+    }
+  });
+  const asiento = typeof ExeTransactionTemplate === "undefined" ? null : ExeTransactionTemplate;
+  if (!asiento || asiento.ok === false)
+    throw `La plantilla PagoTesoreria no generó el asiento de la solicitud ${id}: ${asiento ? asiento.msg : "sin respuesta"}`;
+  log(`Solicitud ${id}: ${asiento.msg}`);
+  return [];
+}
 
 /********************** Datos del tipo de pago ************************/
 
@@ -193,12 +224,59 @@ const notaCuentaOrigen = cuentaOrigenAutomatica
   ? ` (cuenta origen automática${cuentaOrigenAutomaticaId ? " " + cuentaOrigenAutomaticaId : ""})`
   : "";
 
+/********************** Retención de ITBMS ************************/
+
+log('Recuperando retención de ITBMS');
+
+const CUENTA_ITBMS_RETENIDO = "280.02.01.15.01.00.00.00.000";
+
+doCmd({
+  cmd: "RepoClaimPayment",
+  data: {
+    operation: "GET",
+    filter: `id=${Number(id)} OR parentId=${Number(id)}`,
+    include: ["Taxes"]
+  }
+});
+
+if(!RepoClaimPayment || RepoClaimPayment.ok === false)
+  throw "No se pudieron leer las retenciones de la solicitud";
+
+let itbmsRetenido = 0;
+const solicitudes = Array.isArray(RepoClaimPayment.outData) ? RepoClaimPayment.outData : [];
+for (let i = 0; i < solicitudes.length; i++) {
+  const lineas = Array.isArray(solicitudes[i].Taxes) ? solicitudes[i].Taxes : [];
+  for (let j = 0; j < lineas.length; j++)
+    if(texto(lineas[j].valueAddedCode) == "5" && texto(lineas[j].taxType) == "RET")
+      itbmsRetenido += Number(lineas[j].amount) || 0;
+}
+itbmsRetenido = redondear(itbmsRetenido);
+
+const montoDebe = redondear(Number(payment.total) + itbmsRetenido);
+
+if(itbmsRetenido != 0) {
+  doCmd({
+    cmd: "LoadEntity",
+    data: {
+      entity: "CatalogAccount",
+      filter: `code='${CUENTA_ITBMS_RETENIDO}'`,
+      fields: "code"
+    }
+  });
+
+  if(!LoadEntity.outData)
+    throw `La cuenta contable ${CUENTA_ITBMS_RETENIDO} de la retención de ITBMS no existe en el catálogo de cuentas`;
+}
+
 /********************** Retornando DTO ************************/
 
 log('Retornando DTO');
 
 return [{ 
   monto: payment.total,
+  montoDebe: montoDebe,
+  itbmsRetenido: itbmsRetenido,
+  cuentaItbmsRetenido: CUENTA_ITBMS_RETENIDO,
   cuentaBancaria: cuentaBancaria,
   cuentaDebe: cuentaDebe,
   cuentaHabe: cuentaHabe,

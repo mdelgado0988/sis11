@@ -2,7 +2,10 @@
  * @author aiden_mission_configurator
  * @created 2026-11-09
  * @name CLPlantillasDeTransacciones
- * @version 1.0.0
+ * @version 1.1.0 (2026-11-27, MSN-000285 / AXX-12159, globaluat) Plantilla PagoTesoreria: el catalogo de variables
+ *          incluye cmdContabilizaPagoTesoreriaDTO y "View Accounts" abre la tabla cfgTransaccionesTesoreria con las
+ *          variables de monto sugeridas en VariableDebito/VariableCredito, la lista de variables de la Descripcion,
+ *          un buscador de filas y la validacion de variables antes de guardar.
  * @summary Replica de la vista nativa Contabilidad > Plantillas (#/accounting/templates): pestanas "Lista de
  *          plantillas" y "Plantilla de transacciones", los mismos campos, botones, comandos y mensajes que la
  *          pantalla nativa del front 11.3.47.
@@ -511,6 +514,37 @@
             ["_cuentaDaniosxPagarCredito", "Cuenta de cr\u00e9dito de da\u00f1os por pagar.", "Cuenta contable de la l\u00ednea de cr\u00e9dito de da\u00f1os por pagar.", "account: _cuentaDaniosxPagarCredito"],
             ["_reference", "Referencia del cobro.", "Referencia del asiento; evita duplicados.", "reference: _reference"],
             ["_poliza", "P\u00f3liza completa (code, ...).", "Leer datos de la p\u00f3liza con punto.", "comments: _poliza.code"]
+          ])
+        },
+        cmdContabilizaPagoTesoreriaDTO: {
+          template: "PagoTesoreria", trigger: "Vista 82 CLPagos al ejecutar la solicitud (sin disparador), scanContext {id}; l\u00edneas de la tabla cfgTransaccionesTesoreria",
+          tableVariables: {
+            amountColumns: ["VariableDebito", "VariableCredito"],
+            amounts: ["MontoCheque", "MontoPago"],
+            textColumns: ["Descripcion"],
+            text: ["NumeroSolicitud", "MontoCheque", "MontoPago", "Beneficiario", "Concepto", "NumeroReclamo", "CodigoAsegurado", "CodigoTipoPago", "TipoPago", "Moneda"]
+          },
+          fields: entries([
+            ["_id", "Id de la solicitud de pago.", "Identificar la solicitud.", "entityId: _id"],
+            ["_lineas", "L\u00edneas de cfgTransaccionesTesoreria del tipo de pago, ya resueltas (linea, cuenta, debe, haber, descripcion).", "Crear una l\u00ednea por fila con map.", "map: _lineas"],
+            ["_NumeroSolicitud", "Id de la solicitud ({NumeroSolicitud} en la tabla).", "Armar comentarios.", "comments: \"'Solicitud ' + _NumeroSolicitud\""],
+            ["_MontoCheque", "Monto neto del cheque o transferencia (total de la solicitud).", "Importe en VariableDebito o VariableCredito de la tabla.", "debit: _MontoCheque"],
+            ["_MontoPago", "Monto bruto del pago (el neto si la solicitud no tiene bruto).", "Importe en VariableDebito o VariableCredito de la tabla.", "credit: _MontoPago"],
+            ["_Beneficiario", "Nombre completo del beneficiario.", "Descripci\u00f3n de la l\u00ednea ({Beneficiario}).", "comments: _Beneficiario"],
+            ["_Concepto", "Concepto de la solicitud.", "Descripci\u00f3n de la l\u00ednea ({Concepto}).", "comments: _Concepto"],
+            ["_NumeroReclamo", "C\u00f3digo del reclamo de la solicitud (vac\u00edo si no tiene).", "Descripci\u00f3n de la l\u00ednea ({NumeroReclamo}).", "comments: _NumeroReclamo"],
+            ["_CodigoAsegurado", "Id del contratante de la p\u00f3liza de la solicitud (vac\u00edo si no tiene).", "Descripci\u00f3n de la l\u00ednea ({CodigoAsegurado}).", "comments: _CodigoAsegurado"],
+            ["_CodigoTipoPago", "C\u00f3digo del tipo de pago (IdTransaccion de la tabla).", "Armar comentarios.", "comments: _CodigoTipoPago"],
+            ["_TipoPago", "Nombre del tipo de pago.", "Armar comentarios.", "comments: _TipoPago"],
+            ["_Moneda", "Moneda de la solicitud.", "Elegir la cuenta por moneda.", "getColumn:_Moneda"],
+            ["_tipoPagoCode", "C\u00f3digo del tipo de pago (igual que en cmdContabilizacionSolicitudDTO).", "Armar comentarios.", "comments: _tipoPagoCode"],
+            ["_tipoPago", "Nombre del tipo de pago (igual que en cmdContabilizacionSolicitudDTO).", "Armar comentarios.", "comments: _tipoPago"],
+            ["_totalDebe", "Suma de los d\u00e9bitos de las l\u00edneas.", "Control del cuadre.", "condition: _totalDebe != 0"],
+            ["_totalHaber", "Suma de los cr\u00e9ditos de las l\u00edneas.", "Control del cuadre.", "condition: _totalHaber != 0"],
+            ["_referencia", "Texto Pago Tesorer\u00eda Solicitud # <id>.", "Referencia del asiento.", "reference: _referencia"],
+            ["_unique", "Clave TX-PT#<id>.", "Clave para uniqueKey; evita duplicados.", "uniqueKey: _unique"],
+            ["_code", "C\u00f3digo del asiento (PagoTesoreria).", "C\u00f3digo del asiento.", "code: _code"],
+            ["_description", "Texto Pago de Solicitud <id> <tipo de pago>.", "Descripci\u00f3n del asiento.", "description: _description"]
           ])
         }
       },
@@ -2007,9 +2041,25 @@
     ".tpl-grid{border:1px solid #aebdcd;border-radius:8px;overflow:hidden;background:#fff}",
     ".tpl-grid .ant-table-tbody > tr > td{padding:4px 6px}",
     ".tpl-account-actions{display:flex;gap:8px;margin-bottom:8px}",
+    ".tpl-account-selector{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 8px;background:#f5f7fa;border:1px solid #d9e1ea;border-radius:6px}",
+    ".tpl-account-selector-label{flex:0 0 auto;color:#4a5a6a;font-size:12px;font-weight:600}",
+    ".tpl-account-hint{margin-bottom:8px;color:#4a5a6a;font-size:12px}",
     ".tpl-account-table{border:1px solid #aebdcd;border-radius:6px;overflow:hidden}",
-    ".tpl-account-table .ant-table-thead > tr > th{padding:4px 6px;line-height:18px;background:#bfbfbf}",
-    ".tpl-account-table .ant-table-tbody > tr > td{padding:3px 6px;border-bottom:1px solid #b8c4d1}",
+    ".tpl-account-table .ant-table-thead > tr > th{height:30px;padding:0 6px !important;line-height:30px;vertical-align:middle;background:#bfbfbf}",
+    ".tpl-account-table .ant-table-tbody > tr{height:30px !important}",
+    ".tpl-account-table .ant-table-tbody > tr > td{height:30px !important;padding:0 6px !important;line-height:0 !important;font-size:0;vertical-align:middle;border-bottom:1px solid #b8c4d1}",
+    ".tpl-account-table .ant-table-body{padding-top:0 !important}",
+    ".tpl-account-table .ant-table-body > table{margin-top:0 !important}",
+    ".tpl-account-table .ant-table-tbody:before{display:none !important;content:none !important}",
+    ".tpl-account-table .ant-table-tbody > tr > td .ant-input-sm, .tpl-account-table .ant-table-tbody > tr > td .ant-input{display:block;width:100% !important;height:28px !important;min-height:28px;margin:0 !important;padding:1px 7px;line-height:24px;box-sizing:border-box}",
+    ".tpl-account-table .ant-table-tbody > tr > td .ant-select{display:block;width:100% !important;height:28px !important;line-height:28px}",
+    ".tpl-account-table .ant-table-tbody > tr > td .ant-select-selector{width:100% !important;height:28px !important;line-height:26px !important}",
+    ".tpl-account-table .ant-input, .tpl-account-table .ant-select:not(.ant-select-customize-input) .ant-select-selector, .tpl-account-selector .ant-select:not(.ant-select-customize-input) .ant-select-selector{border-color:#8c9db3;border-radius:4px}",
+    ".tpl-account-table .ant-input:hover, .tpl-account-table .ant-input:focus, .tpl-account-table .ant-select:not(.ant-select-disabled):hover .ant-select-selector, .tpl-account-table .ant-select-focused .ant-select-selector, .tpl-account-selector .ant-select:not(.ant-select-disabled):hover .ant-select-selector, .tpl-account-selector .ant-select-focused .ant-select-selector{border-color:#1890ff}",
+    ".tpl-account-table .ant-table-body{overflow-y:scroll !important;scrollbar-width:auto;scrollbar-gutter:stable}",
+    ".tpl-account-table .ant-table-body::-webkit-scrollbar{width:12px;height:12px}",
+    ".tpl-account-table .ant-table-body::-webkit-scrollbar-track{background:#f1f1f1}",
+    ".tpl-account-table .ant-table-body::-webkit-scrollbar-thumb{background:#9aa7b5;border-radius:6px;border:2px solid #f1f1f1}",
     ".tpl-warn-box{margin:4px 0;padding:6px 10px;border:1px solid #f1d9ab;border-radius:6px;background:#fdf3e3;color:#9a5b12}",
     ".tpl-var-group{margin-bottom:12px}",
     ".tpl-var-name{font-family:monospace;font-weight:600;white-space:nowrap}",
@@ -2390,6 +2440,7 @@
     var s16 = useState(false), accountsSaving = s16[0], setAccountsSaving = s16[1];
     var s17 = useState(null), accountsTable = s17[0], setAccountsTable = s17[1];
     var s18 = useState(null), accountsTableId = s18[0], setAccountsTableId = s18[1];
+    var s19 = useState(null), selectedTransactionKey = s19[0], setSelectedTransactionKey = s19[1];
     var savedConfig = useRef(null);
     var checkCtx = useRef({ accounts: {}, auxTypes: null, costCenters: null });
 
@@ -2647,9 +2698,35 @@
       // PagoReclamo is configured in the YAML through the PagoReclamo row
       // of the general accounts table.
       cmdContabilizacionPagoReclamoDTO: "CuentasEmisionGeneral",
-      cmdGetReserveContext: "CuentasReservaReclamo"
+      cmdGetReserveContext: "CuentasReservaReclamo",
+      // PagoTesoreria (MSN-000285): one row per accounting line of each payment type.
+      cmdContabilizaPagoTesoreriaDTO: "cfgTransaccionesTesoreria"
     };
     var accountTableName = accountTableByChain[chain] || null;
+    var tableVariables = chain && TPL.CATALOG.chains[chain] && TPL.CATALOG.chains[chain].tableVariables ? TPL.CATALOG.chains[chain].tableVariables : null;
+    var cellText = function (value) { return value === undefined || value === null ? "" : String(value).trim(); };
+    var tableVariableErrors = function (table) {
+      if (!tableVariables || !table || !table.length) return [];
+      var headers = table[0].map(cellText);
+      var fixedAmount = /^-?\d+(\.\d+)?$/;
+      var errors = [];
+      table.slice(1).forEach(function (row, i) {
+        var label = "Fila " + (i + 1) + (cellText(row[0]) ? " (" + cellText(row[0]) + ")" : "");
+        tableVariables.amountColumns.forEach(function (column) {
+          var value = cellText(row[headers.indexOf(column)]);
+          if (headers.indexOf(column) >= 0 && value && !fixedAmount.test(value) && tableVariables.amounts.indexOf(value) < 0)
+            errors.push(label + ", " + column + ": \"" + value + "\" no es " + tableVariables.amounts.join(" ni ") + " ni un monto fijo");
+        });
+        tableVariables.textColumns.forEach(function (column) {
+          if (headers.indexOf(column) < 0) return;
+          (cellText(row[headers.indexOf(column)]).match(/\{(\w+)\}/g) || []).forEach(function (mark) {
+            var name = mark.slice(1, -1);
+            if (tableVariables.text.indexOf(name) < 0) errors.push(label + ", " + column + ": {" + name + "} no es una variable de la plantilla");
+          });
+        });
+      });
+      return errors;
+    };
     var loadAccountsTable = function () {
       if (!accountTableName) return;
       setAccountsLoading(true);
@@ -2667,6 +2744,7 @@
         }
         setAccountsTable(rows.map(function (row) { return Array.isArray(row) ? row.slice() : []; }));
         setAccountsTableId(tableId);
+        setSelectedTransactionKey(null);
         setAccountsModalOpen(true);
       }).catch(function () {
         message.error(t("The account table could not be loaded"));
@@ -2681,10 +2759,55 @@
         return next;
       });
     };
+    var accountHeaders = accountsTable && accountsTable.length ? accountsTable[0] : [];
+    var accountHeaderIndex = function (name) {
+      var expected = String(name).trim().toLowerCase();
+      for (var i = 0; i < accountHeaders.length; i++) {
+        if (cellText(accountHeaders[i]).toLowerCase() === expected) return i;
+      }
+      return -1;
+    };
+    var transactionIdIndex = accountHeaderIndex("IdTransaccion");
+    var transactionNameIndex = accountHeaderIndex("NombreTransaccion");
+    var transactionKeyForRow = function (row) {
+      var id = transactionIdIndex >= 0 ? cellText(row[transactionIdIndex]) : "";
+      var name = transactionNameIndex >= 0 ? cellText(row[transactionNameIndex]) : "";
+      return id + "::" + name;
+    };
+    var transactionOptions = [];
+    if (accountsTable && accountsTable.length) {
+      accountsTable.slice(1).forEach(function (row) {
+        var key = transactionKeyForRow(row);
+        if (transactionOptions.some(function (item) { return item.value === key; })) return;
+        var id = transactionIdIndex >= 0 ? cellText(row[transactionIdIndex]) : "";
+        var name = transactionNameIndex >= 0 ? cellText(row[transactionNameIndex]) : "";
+        transactionOptions.push({ value: key, label: name || (id ? "Transacción " + id : "Transacción") , search: (id + " " + name).toLowerCase() });
+      });
+    }
+    useEffect(function () {
+      var exists = transactionOptions.some(function (item) { return item.value === selectedTransactionKey; });
+      if (!exists && selectedTransactionKey !== null) setSelectedTransactionKey(null);
+    }, [accountsTable]);
     var addAccountRow = function () {
+      if (!selectedTransactionKey) {
+        message.warning("Seleccioná una transacción antes de agregar una línea");
+        return;
+      }
       setAccountsTable(function (current) {
         if (!current || !current.length) return current;
-        return current.concat([current[0].map(function () { return ""; })]);
+        var headers = current[0];
+        var idIndex = headers.map(cellText).map(function (value) { return value.toLowerCase(); }).indexOf("idtransaccion");
+        var nameIndex = headers.map(cellText).map(function (value) { return value.toLowerCase(); }).indexOf("nombretransaccion");
+        var source = current.slice(1).filter(function (row) { return transactionKeyForRow(row) === selectedTransactionKey; })[0];
+        if (!source) return current;
+        var newRow = headers.map(function () { return ""; });
+        if (idIndex >= 0) newRow[idIndex] = source[idIndex];
+        if (nameIndex >= 0) newRow[nameIndex] = source[nameIndex];
+        var lastIndex = -1;
+        current.slice(1).forEach(function (row, index) {
+          if (transactionKeyForRow(row) === selectedTransactionKey) lastIndex = index + 1;
+        });
+        return current.slice(0, lastIndex + 1).concat([newRow], current.slice(lastIndex + 1));
       });
     };
     var deleteAccountRow = function (rowIndex) {
@@ -2695,6 +2818,15 @@
     };
     var saveAccountsTable = function () {
       if (!accountsTable || accountsTableId === null || accountsTableId === undefined || !accountTableName) return;
+      var variableErrors = tableVariableErrors(accountsTable);
+      if (variableErrors.length) {
+        Modal.error({
+          title: "La tabla no se guard\u00f3: revis\u00e1 las variables",
+          width: 640,
+          content: <div>{variableErrors.slice(0, 15).map(function (e, i) { return <div key={i}>{e}</div>; })}{variableErrors.length > 15 ? <div>{"... y " + (variableErrors.length - 15) + " m\u00e1s"}</div> : null}</div>
+        });
+        return;
+      }
       setAccountsSaving(true);
       exe("AddOrUpdateTable", { id: accountsTableId, name: accountTableName, data: JSON.stringify(accountsTable) }).then(function (r) {
         if (r && r.ok) message.success(t("Account table saved successfully"));
@@ -2704,19 +2836,38 @@
       }).then(function () { setAccountsSaving(false); });
     };
     var accountColumns = accountsTable && accountsTable.length ? accountsTable[0].map(function (header, columnIndex) {
+      if (columnIndex === transactionIdIndex || columnIndex === transactionNameIndex) return null;
+      var headerKey = cellText(header).toLowerCase();
+      var columnWidth = headerKey === "linea" ? 70
+        : headerKey === "variabledebito" || headerKey === "variablecredito" ? 150
+          : headerKey === "cuentacontable" ? 220
+            : headerKey === "descripcion" ? 360
+              : 150;
       return {
         title: String(header === undefined || header === null ? "" : header),
         key: "account-column-" + columnIndex,
         dataIndex: "c" + columnIndex,
+        width: columnWidth,
         render: function (value, record) {
-          return <Input size="small" value={value === undefined || value === null ? "" : String(value)} onChange={function (e) { updateAccountCell(record.rowIndex, columnIndex, e.target.value); }} />;
+          var text = value === undefined || value === null ? "" : String(value);
+          var setCell = function (v) { updateAccountCell(record.rowIndex, columnIndex, v); };
+          if (tableVariables && A.AutoComplete && tableVariables.amountColumns.indexOf(cellText(header)) >= 0) {
+            var AmountInput = A.AutoComplete;
+            return <AmountInput size="small" style={{ width: 150 }} value={text} onChange={setCell}
+              options={tableVariables.amounts.map(function (v) { return { value: v }; })}
+              filterOption={function (input, option) { return String(option.value).toLowerCase().indexOf(String(input).toLowerCase()) >= 0; }} />;
+          }
+          return <Input size="small" value={text} onChange={function (e) { setCell(e.target.value); }} />;
         }
       };
-    }) : [];
+    }).filter(function (item) { return !!item; }) : [];
     var accountRows = accountsTable ? accountsTable.slice(1).map(function (row, rowIndex) {
       var item = { key: "account-row-" + rowIndex, rowIndex: rowIndex + 1 };
       (accountsTable[0] || []).forEach(function (header, columnIndex) { item["c" + columnIndex] = row[columnIndex]; });
       return item;
+    }).filter(function (item) {
+      var row = accountsTable[item.rowIndex];
+      return selectedTransactionKey !== null && transactionKeyForRow(row) === selectedTransactionKey;
     }) : [];
     accountColumns.push({
       title: t("Actions"),
@@ -2788,8 +2939,8 @@
           onCancel={function () { setAccountsModalOpen(false); }}
         >
           <div className="tpl-account-actions">
-            <Button className="tx-action" icon={<Ico type="file" />} onClick={addAccountRow}>
-              {t("Add row")}
+            <Button className="tx-action" icon={<Ico type="file" />} onClick={addAccountRow} disabled={!selectedTransactionKey}>
+              {"Agregar línea"}
             </Button>
             <Button type="primary" className="tx-action" icon={<Ico type="save" />} onClick={saveAccountsTable} loading={accountsSaving}>
               {t("Save")}
@@ -2798,8 +2949,30 @@
               {t("Close")}
             </Button>
           </div>
+          <div className="tpl-account-selector">
+            <span className="tpl-account-selector-label">{"Transacción"}</span>
+            <Select
+              showSearch
+              allowClear
+              value={selectedTransactionKey || undefined}
+              placeholder={"Buscar por nombre o ID"}
+              style={{ flex: 1, minWidth: 280 }}
+              optionFilterProp="label"
+              filterOption={function (input, option) { return String(option.props.label || "").toLowerCase().indexOf(String(input || "").toLowerCase()) >= 0; }}
+              onChange={function (value) { setSelectedTransactionKey(value || null); }}
+            >
+              {transactionOptions.map(function (item) {
+                return <Select.Option key={item.value} value={item.value} label={item.search}>{item.label}</Select.Option>;
+              })}
+            </Select>
+          </div>
+          {tableVariables ? (
+            <div className="tpl-account-hint">
+              {"D\u00e9bito y cr\u00e9dito: " + tableVariables.amounts.join(", ") + " o un monto fijo (se contabiliza tal cual). Descripci\u00f3n: texto con variables entre llaves: " + tableVariables.text.map(function (v) { return "{" + v + "}"; }).join(" ")}
+            </div>
+          ) : null}
           <div className="tpl-account-table">
-            <Table size="small" bordered rowKey="key" columns={accountColumns} dataSource={accountRows} pagination={false} scroll={{ x: "max-content", y: 520 }} />
+            <Table size="small" bordered tableLayout="fixed" rowKey="key" columns={accountColumns} dataSource={accountRows} pagination={false} scroll={{ x: 1050, y: 520 }} />
           </div>
         </Modal>
 

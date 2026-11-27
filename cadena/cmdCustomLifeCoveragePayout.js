@@ -29,7 +29,7 @@ try {
   if (!claimId || !policyId || !coverageId) {
     return fail('claimId, lifePolicyId y lifeCoverageId son obligatorios.');
   }
-  if (amount === null || amount <= 0) return fail('El monto del pago debe ser mayor que cero.');
+  if (amount === null || amount === 0) return fail('El monto del pago no puede ser cero.');
   if (!concept) return fail('El concepto del pago es obligatorio.');
 
   const claim = loadOne('Claim', 'id,lifePolicyId', 'id = ' + claimId);
@@ -72,10 +72,10 @@ try {
   if (!period.ok) return period;
 
   const balances = loadBalances(claimId, coverageId);
-  if (amount > balances.coverageBalance) {
+  if (amount > 0 && amount > balances.coverageBalance) {
     return fail('El monto supera el saldo reservado disponible de la cobertura. Disponible: ' + formatMoney(balances.coverageBalance) + '.');
   }
-  if (amount > balances.claimBalance) {
+  if (amount > 0 && amount > balances.claimBalance) {
     return fail('El monto supera el saldo disponible del reclamo. Disponible: ' + formatMoney(balances.claimBalance) + '.');
   }
 
@@ -84,7 +84,7 @@ try {
     + 'VALUES (' + coverageId + ', GETUTCDATE(), ' + sqlText(currentUser()) + ', '
     + sqlNumber(-amount) + ', ' + sqlNumber(amount) + ', ' + sqlText(concept) + ', '
     + claimId + ', ' + policyId + ', 0, 0, 0, ' + sqlText('IN') + ', NULL, NULL, '
-    + (entity.jAffectedObjects == null ? 'NULL' : sqlText(entity.jAffectedObjects)) + ', ' + sqlNumber(amount) + ', ' + sqlText(currency) + '); '
+    + (entity.jAffectedObjects == null ? 'NULL' : sqlText(entity.jAffectedObjects)) + ', ' + sqlNumber(Math.abs(amount)) + ', ' + sqlText(currency) + '); '
     + 'SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;';
 
   doCmd({ cmd: 'DoQuery', data: { sql: sql } });

@@ -6,11 +6,16 @@
  * @email noel.obando@axxis-systems.com
  * @created 2026-01-07
  * @name cmdGetReserveContext
- * @version 1.2
+ * @version 1.3
  * @purpose Builds the accounting context for claim reserve movements.
  * @param context.id LifeCoveragePayout identifier.
  * @changes 1.2 (MSN-000271) Returns ramo: the name of the policy's line of business (catalog
  *          LOB, without its code), for the concept of the ReservaSiniestro lines.
+ * @changes 1.3 (MSN-000283) Resolves the account of every ReservaSiniestro line from the table
+ *          CuentasReservaReclamo, as cmdEmisionIncendioContext does for issuance: the column
+ *          "<ramo>-<producto>" when it has a value for the line, otherwise the column of the
+ *          ramo. Returned as cuentaVariacion, cuentaObligaciones, cuentaVariacionRea and
+ *          cuentaObligacionRea.
  */
 
 try {
@@ -37,8 +42,10 @@ try {
   const claimCode = getTrimmedString(claim.code) || String(claim.id);
   const policyCode = getTrimmedString(policy.code);
   const ramo = getNombreRamo(policy);
+  const cuentas = getCuentasContables(policy);
 
   return [{
+    ...cuentas,
     id: reserveId,
     reserved: Math.abs(reserved),
     payed: Math.abs(payed),
@@ -167,6 +174,55 @@ function getNombreRamo(policy) {
     : null;
 
   return getTrimmedString(ramo && ramo.name).replace(/^\s*[^-]+\s*-\s*/, '').trim();
+}
+
+/**
+ * MSN-000283: resolves the account of each ReservaSiniestro line from CuentasReservaReclamo.
+ * Rows are the template lines (column "Cuenta"); columns are the ramo code ("52") or a
+ * product of that ramo ("52-FRAUDE"). A product cell with a value wins; an empty or missing
+ * product cell falls back to the ramo column.
+ */
+function getCuentasContables(policy) {
+  const tableName = 'CuentasReservaReclamo';
+  const lines = {
+    cuentaVariacion: 'Variacion',
+    cuentaObligaciones: 'Obligaciones',
+    cuentaVariacionRea: 'VariacionRea',
+    cuentaObligacionRea: 'ObligacionRea'
+  };
+
+  doCmd({
+    cmd: 'GetFullTable',
+    data: { table: tableName }
+  });
+
+  const response = getCommandResult('GetFullTable');
+  const rows = response && response.ok !== false && response.outData
+    ? JSON.parse(JSON.stringify(response.outData))
+    : [];
+  if (!Array.isArray(rows) || rows.length < 2) {
+    throw new Error(`No se encontró la tabla de cuentas ${tableName}`);
+  }
+
+  const header = getRows(rows[0]).map(normalizeKey);
+  const lob = getTrimmedString(policy && policy.lob);
+  const product = getTrimmedString(policy && (policy.productCode || (policy.Product && policy.Product.code)));
+  const lobIndex = lob ? header.indexOf(normalizeKey(lob)) : -1;
+  const productIndex = lob && product ? header.indexOf(normalizeKey(`${lob}-${product}`)) : -1;
+
+  const result = {};
+  Object.keys(lines).forEach(field => {
+    const row = rows.find(item => Array.isArray(item) && normalizeKey(item[0]) === normalizeKey(lines[field]));
+    const productAccount = row && productIndex > 0 ? getTrimmedString(row[productIndex]) : '';
+    const lobAccount = row && lobIndex > 0 ? getTrimmedString(row[lobIndex]) : '';
+    result[field] = productAccount || lobAccount;
+  });
+
+  return result;
+}
+
+function normalizeKey(value) {
+  return getTrimmedString(value).toUpperCase();
 }
 
 function getCommandResult(commandName) {
